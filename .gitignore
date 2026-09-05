@@ -1,0 +1,40 @@
+# Planning docs — not committed
+.planning/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+target/
+src-tauri/target/
+
+# Tauri
+src-tauri/Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Misc
+*.msi
+*.exe
+!src-tauri/icons/
