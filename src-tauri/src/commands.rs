@@ -22,12 +22,7 @@ pub fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
 
 /// Set the default audio device for a process.
 #[tauri::command]
-pub fn set_route(
-    device_id: String,
-    pid: u32,
-    role: String,
-    config: State<'_, RouteConfig>,
-) -> Result<(), String> {
+pub fn set_route(device_id: String, pid: u32, role: String) -> Result<(), String> {
     info!("cmd: set_route device={device_id} pid={pid} role={role}");
 
     let role = match role.as_str() {
@@ -37,11 +32,7 @@ pub fn set_route(
         _ => audio::Role::All,
     };
 
-    audio::routing::set_process_default_device(&device_id, pid, role)?;
-
-    // Persist route if we have the exe name from caller.
-    // (Caller passes exe_name separately for memory feature.)
-    Ok(())
+    audio::routing::set_process_default_device(&device_id, pid, role)
 }
 
 /// Set route and remember it for the exe.
@@ -71,8 +62,8 @@ pub fn set_route_remember(
 
 /// Get all remembered routes.
 #[tauri::command]
-pub fn get_remembered_routes(config: State<'_, RouteConfig>) -> Result<Vec<(String, String)>, String> {
-    Ok(config.get_all_routes())
+pub fn get_remembered_routes(config: State<'_, RouteConfig>) -> Vec<(String, String)> {
+    config.get_all_routes()
 }
 
 /// Clear a remembered route.

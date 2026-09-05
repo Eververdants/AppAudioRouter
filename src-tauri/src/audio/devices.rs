@@ -1,26 +1,22 @@
 //! Render device enumeration via IMMDeviceEnumerator.
 
-use std::mem;
-
-use log::{info, warn};
+use log::info;
+use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, DEVICE_STATE_ACTIVE, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator,
 };
-use windows::Win32::Media::Audio::Endpoints::AUDIO_ENDPOINT_ROLE;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
-use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
-use windows::Win32::System::Variant::PROPVARIANT;
-use windows::Win32::Foundation::PWSTR;
-use windows::core::GUID;
+use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
 
 use crate::audio::AudioDevice;
 
 // PKEY_Device_FriendlyName
 const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
-    fmtid: GUID::from_values(0xa45c254e, 0xdf1c, 0x4efd, [0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0]),
+    fmtid: windows::core::GUID::from_values(
+        0xa45c254e, 0xdf1c, 0x4efd, [0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0],
+    ),
     pid: 14,
 };
 
@@ -28,12 +24,14 @@ const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
 pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
     // SAFETY: COM initialization is thread-local and balanced with CoUninitialize.
     unsafe {
-        CoInitializeEx(None, COINIT_MULTITHREADED)
-            .map_err(|e| format!("CoInitializeEx failed: {e}"))?;
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        if hr.is_err() {
+            return Err(format!("CoInitializeEx failed: 0x{:08X}", hr.0));
+        }
     }
 
     let result = (|| -> Result<Vec<AudioDevice>, String> {
-        // SAFETY: CLSID_MMDeviceEnumerator is a known COM CLSID.
+        // SAFETY: CoCreateInstance with known CLSID.
         let enumerator: IMMDeviceEnumerator = unsafe {
             CoCreateInstance(&IMMDeviceEnumerator::IID, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}"))?
@@ -62,7 +60,7 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
             let id_pwstr = unsafe {
                 device.GetId().map_err(|e| format!("GetId({i}) failed: {e}"))?
             };
-            let id = pwstr_to_string(&id_pwstr);
+            let id = pwstr_to_string(id_pwstr.as_ptr());
             unsafe {
                 windows::Win32::System::Com::CoTaskMemFree(Some(id_pwstr.as_ptr() as *const _));
             }
@@ -75,26 +73,15 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
             };
 
             // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT.
-            let friendly: PROPVARIANT = unsafe {
+            let friendly = unsafe {
                 props
                     .GetValue(&PKEY_DEVICE_FRIENDLY_NAME)
                     .map_err(|e| format!("GetValue(FriendlyName) for {id} failed: {e}"))?
             };
 
-            let name = if friendly.Anonymous.Anonymous.vt
-                == windows::Win32::System::Variant::VT_LPWSTR.0 as u16
-            {
-                // SAFETY: We just verified the variant type.
-                let pwstr_ptr = unsafe { friendly.Anonymous.Anonymous.Anonymous.pwszVal };
-                pwstr_to_string(&pwstr_ptr)
-            } else {
-                id.clone()
-            };
-
-            unsafe {
-                windows::Win32::System::Variant::PropVariantClear(&mut (&friendly as *const _ as *mut _))
-                    .ok();
-            }
+            // Extract the string from the PROPVARIANT.
+            // friendly is windows_core::PROPVARIANT which has Drop impl (auto-clears).
+            let name = extract_friendly_name(&friendly, &id);
 
             info!("render device: {name} [{id}]");
             devices.push(AudioDevice { id, name });
@@ -111,20 +98,36 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
     result
 }
 
+/// Extract the friendly name string from a PROPVARIANT.
+fn extract_friendly_name(var: &windows::core::PROPVARIANT, fallback: &str) -> String {
+    // Access the inner imp type via as_raw().
+    // SAFETY: Accessing union field requires unsafe.
+    let inner = var.as_raw();
+    let vt = unsafe { inner.Anonymous.Anonymous.vt };
+    const VT_LPWSTR: u16 = 31; // VARENUM::VT_LPWSTR
+    if vt == VT_LPWSTR {
+        // SAFETY: We verified the type; pwszVal is valid.
+        let pwstr_ptr = unsafe { inner.Anonymous.Anonymous.Anonymous.pwszVal };
+        pwstr_to_string(pwstr_ptr)
+    } else {
+        fallback.to_string()
+    }
+}
+
 /// Convert a PWSTR (wide string pointer) to a Rust String.
-fn pwstr_to_string(pwstr: &PWSTR) -> String {
+fn pwstr_to_string(pwstr: *const u16) -> String {
     if pwstr.is_null() {
         return String::new();
     }
     // SAFETY: pwstr is a valid NUL-terminated wide string from COM.
     unsafe {
         let mut len = 0;
-        let mut ptr = pwstr.0;
+        let mut ptr = pwstr;
         while *ptr != 0 {
             len += 1;
             ptr = ptr.add(1);
         }
-        let slice = std::slice::from_raw_parts(pwstr.0, len);
+        let slice = std::slice::from_raw_parts(pwstr, len);
         String::from_utf16_lossy(slice)
     }
 }
