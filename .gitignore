@@ -12,6 +12,12 @@ src-tauri/target/
 
 # Tauri
 src-tauri/Cargo.lock
+src-tauri/gen/schemas/
+src-tauri/target/
+
+# TS build info
+.tsbuild/
+tsconfig.tsbuildinfo
 
 # IDE
 .vscode/
