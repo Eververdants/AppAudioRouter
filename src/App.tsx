@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
+import appIcon from '@/assets/app-icon.png';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
+import { LanguageToggle } from '@/components/LanguageToggle';
 import { LogPanel } from '@/components/LogPanel';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useTheme } from '@/hooks/useTheme';
@@ -26,17 +28,20 @@ export default function App() {
         className="flex items-center justify-between border-b border-border px-6 py-3"
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93L4.93 19.07" />
-            </svg>
-          </div>
+          <img
+            src={appIcon}
+            alt="App Audio Router"
+            className="h-8 w-8 rounded-lg"
+          />
           <h1 className="text-sm font-semibold">App Audio Router</h1>
           <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent">
             v2.0
           </span>
         </div>
-        <ThemeToggle theme={theme} onToggle={toggle} />
+        <div className="flex items-center gap-2">
+          <LanguageToggle />
+          <ThemeToggle theme={theme} onToggle={toggle} />
+        </div>
       </motion.header>
 
       {/* Main content */}

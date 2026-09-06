@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import i18next from 'i18next';
 import type { AudioDevice, AudioSession, LogEntry } from '@/lib/types';
+import { currentLanguage } from '@/i18n';
 import * as api from '@/lib/invoke';
 
 interface RouterState {
@@ -39,9 +41,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     try {
       const devices = await api.listDevices();
       set({ devices });
-      get().addLog(`设备列表已刷新 (${devices.length} 项)`, 'info');
+      get().addLog(i18next.t('log.deviceRefreshed', { n: devices.length }), 'info');
     } catch (e) {
-      get().addLog(`设备刷新失败: ${e}`, 'error');
+      get().addLog(i18next.t('log.deviceRefreshFailed', { error: String(e) }), 'error');
     }
   },
 
@@ -49,9 +51,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     try {
       const sessions = await api.listSessions();
       set({ sessions });
-      get().addLog(`进程列表已刷新 (${sessions.length} 项)`, 'info');
+      get().addLog(i18next.t('log.sessionsRefreshed', { n: sessions.length }), 'info');
     } catch (e) {
-      get().addLog(`进程刷新失败: ${e}`, 'error');
+      get().addLog(i18next.t('log.sessionsRefreshFailed', { error: String(e) }), 'error');
     }
   },
 
@@ -63,34 +65,37 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   applyRoute: async () => {
     const { selectedPid, selectedDeviceId, role, autoRemember, sessions } = get();
     if (!selectedPid || !selectedDeviceId) {
-      get().addLog('请选择进程和设备', 'error');
+      get().addLog(i18next.t('log.selectProcessAndDevice'), 'error');
       return;
     }
     const session = sessions.find((s) => s.pid === selectedPid);
     if (!session) {
-      get().addLog('所选进程已不存在', 'error');
+      get().addLog(i18next.t('log.processGone'), 'error');
       return;
     }
+    const device = get().devices.find((d) => d.id === selectedDeviceId);
+    const deviceName = device?.name ?? selectedDeviceId;
     try {
       if (autoRemember) {
         await api.setRouteRemember(selectedDeviceId, selectedPid, role, session.exe_name);
-        const device = get().devices.find((d) => d.id === selectedDeviceId);
         get().addLog(
-          `已将 ${session.exe_name} 路由到 ${device?.name ?? selectedDeviceId}（已记忆）`,
+          i18next.t('log.routedRemembered', { process: session.exe_name, device: deviceName }),
           'success',
         );
       } else {
         await api.setRoute(selectedDeviceId, selectedPid, role);
-        const device = get().devices.find((d) => d.id === selectedDeviceId);
-        get().addLog(`已将 ${session.exe_name} 路由到 ${device?.name ?? selectedDeviceId}`, 'success');
+        get().addLog(
+          i18next.t('log.routed', { process: session.exe_name, device: deviceName }),
+          'success',
+        );
       }
     } catch (e) {
-      get().addLog(`路由失败: ${e}`, 'error');
+      get().addLog(i18next.t('log.routeFailed', { error: String(e) }), 'error');
     }
   },
 
   addLog: (message, level = 'info') => {
-    const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const ts = new Date().toLocaleTimeString(currentLanguage(), { hour12: false });
     set((s) => ({
       logs: [...s.logs, { id: ++logId, timestamp: ts, message, level }].slice(-200),
     }));

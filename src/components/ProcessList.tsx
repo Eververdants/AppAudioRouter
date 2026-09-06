@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { useRouterStore } from '@/stores/routerStore';
 
 const container = {
@@ -15,17 +16,18 @@ const item = {
 };
 
 export function ProcessList() {
+  const { t } = useTranslation();
   const { sessions, selectedPid, selectProcess, refreshSessions } = useRouterStore();
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-bg-secondary p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text-primary">进程列表</h2>
+        <h2 className="text-sm font-semibold text-text-primary">{t('processList.title')}</h2>
         <button
           onClick={refreshSessions}
           className="rounded-md px-2 py-1 text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-accent"
         >
-          刷新
+          {t('processList.refresh')}
         </button>
       </div>
 
@@ -37,8 +39,9 @@ export function ProcessList() {
       >
         {sessions.length === 0 ? (
           <p className="py-8 text-center text-xs text-text-muted">
-            未检测到有音频会话的进程<br />
-            <span className="text-[10px]">让目标程序发出声音后刷新</span>
+            {t('processList.empty')}
+            <br />
+            <span className="text-[10px]">{t('processList.emptyHint')}</span>
           </p>
         ) : (
           sessions.map((session) => (

@@ -1,0 +1,36 @@
+{
+  "processList": {
+    "title": "Processes",
+    "refresh": "Refresh",
+    "empty": "No processes with audio sessions found",
+    "emptyHint": "Play sound in the target app, then refresh"
+  },
+  "router": {
+    "selectProcess": "Select a process",
+    "routeTo": "Route to this device"
+  },
+  "logPanel": {
+    "title": "Logs",
+    "autoRemember": "Auto-remember"
+  },
+  "theme": {
+    "toLight": "Switch to light theme",
+    "toDark": "Switch to dark theme"
+  },
+  "language": {
+    "label": "Language",
+    "chinese": "中文",
+    "english": "English"
+  },
+  "log": {
+    "deviceRefreshed": "Device list refreshed ({{n}})",
+    "deviceRefreshFailed": "Device refresh failed: {{error}}",
+    "sessionsRefreshed": "Session list refreshed ({{n}})",
+    "sessionsRefreshFailed": "Session refresh failed: {{error}}",
+    "selectProcessAndDevice": "Select a process and a device first",
+    "processGone": "Selected process no longer exists",
+    "routed": "Routed {{process}} to {{device}}",
+    "routedRemembered": "Routed {{process}} to {{device}} (remembered)",
+    "routeFailed": "Routing failed: {{error}}"
+  }
+}

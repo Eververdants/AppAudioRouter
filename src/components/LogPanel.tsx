@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { useRouterStore } from '@/stores/routerStore';
 
 export function LogPanel() {
+  const { t } = useTranslation();
   const logs = useRouterStore((s) => s.logs);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
@@ -15,7 +17,7 @@ export function LogPanel() {
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-bg-secondary p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text-primary">日志</h2>
+        <h2 className="text-sm font-semibold text-text-primary">{t('logPanel.title')}</h2>
         <label className="flex cursor-pointer items-center gap-2 text-xs text-text-muted">
           <input
             type="checkbox"
@@ -23,7 +25,7 @@ export function LogPanel() {
             onChange={toggleAutoRemember}
             className="h-3.5 w-3.5 rounded border-border accent-accent"
           />
-          自动记忆
+          {t('logPanel.autoRemember')}
         </label>
       </div>
 

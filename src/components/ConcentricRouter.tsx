@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -8,6 +9,7 @@ import { useRouterStore } from '@/stores/routerStore';
  * - Outer ring: selectable devices
  */
 export function ConcentricRouter() {
+  const { t } = useTranslation();
   const { devices, sessions, selectedPid, selectedDeviceId, selectDevice, applyRoute } =
     useRouterStore();
 
@@ -72,7 +74,7 @@ export function ConcentricRouter() {
         transition={{ duration: 60, repeat: Infinity, ease: 'linear' }}
       />
       <motion.div
-        className="pointer-events-none absolute h-[200px] w-[200px] rounded-full border border-border/60"
+        className="border-border/60 pointer-events-none absolute h-[200px] w-[200px] rounded-full border"
         animate={{ rotate: -360 }}
         transition={{ duration: 45, repeat: Infinity, ease: 'linear' }}
       />
@@ -93,7 +95,14 @@ export function ConcentricRouter() {
               exit={{ opacity: 0, y: -10 }}
               className="flex flex-col items-center gap-1 px-3 text-center"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
               <span className="text-xs font-semibold leading-tight">
@@ -110,11 +119,18 @@ export function ConcentricRouter() {
               exit={{ opacity: 0 }}
               className="flex flex-col items-center gap-1 text-center text-white/80"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 16v-4M12 8h.01" />
               </svg>
-              <span className="text-[10px]">选择进程</span>
+              <span className="text-[10px]">{t('router.selectProcess')}</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -128,7 +144,7 @@ export function ConcentricRouter() {
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
       >
-        路由到此设备
+        {t('router.routeTo')}
       </motion.button>
     </div>
   );

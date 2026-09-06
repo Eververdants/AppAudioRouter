@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '@/hooks/useTheme';
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export function ThemeToggle({ theme, onToggle }: Props) {
+  const { t } = useTranslation();
   const isDark = theme === 'dark';
 
   return (
@@ -15,7 +17,7 @@ export function ThemeToggle({ theme, onToggle }: Props) {
       className={`relative flex h-9 w-16 items-center rounded-full border border-border bg-bg-secondary p-1 transition-colors hover:bg-bg-tertiary ${
         isDark ? 'justify-end' : 'justify-start'
       }`}
-      aria-label={isDark ? '切换到亮色主题' : '切换到暗色主题'}
+      aria-label={isDark ? t('theme.toLight') : t('theme.toDark')}
     >
       <motion.div
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-glow"
@@ -23,11 +25,25 @@ export function ThemeToggle({ theme, onToggle }: Props) {
         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
       >
         {isDark ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
           </svg>
         ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <circle cx="12" cy="12" r="5" />
             <line x1="12" y1="1" x2="12" y2="3" />
             <line x1="12" y1="21" x2="12" y2="23" />

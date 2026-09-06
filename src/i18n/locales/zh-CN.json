@@ -1,0 +1,36 @@
+{
+  "processList": {
+    "title": "进程列表",
+    "refresh": "刷新",
+    "empty": "未检测到有音频会话的进程",
+    "emptyHint": "让目标程序发出声音后刷新"
+  },
+  "router": {
+    "selectProcess": "选择进程",
+    "routeTo": "路由到此设备"
+  },
+  "logPanel": {
+    "title": "日志",
+    "autoRemember": "自动记忆"
+  },
+  "theme": {
+    "toLight": "切换到亮色主题",
+    "toDark": "切换到暗色主题"
+  },
+  "language": {
+    "label": "语言",
+    "chinese": "中文",
+    "english": "English"
+  },
+  "log": {
+    "deviceRefreshed": "设备列表已刷新（{{n}} 项）",
+    "deviceRefreshFailed": "设备刷新失败：{{error}}",
+    "sessionsRefreshed": "进程列表已刷新（{{n}} 项）",
+    "sessionsRefreshFailed": "进程刷新失败：{{error}}",
+    "selectProcessAndDevice": "请先选择进程和设备",
+    "processGone": "所选进程已不存在",
+    "routed": "已将 {{process}} 路由到 {{device}}",
+    "routedRemembered": "已将 {{process}} 路由到 {{device}}（已记忆）",
+    "routeFailed": "路由失败：{{error}}"
+  }
+}
