@@ -5,13 +5,16 @@
     "empty": "未检测到有音频会话的进程",
     "emptyHint": "让目标程序发出声音后刷新"
   },
+  "header": {
+    "autoRemember": "自动记忆"
+  },
   "router": {
     "selectProcess": "选择进程",
-    "routeTo": "路由到此设备"
+    "selectDevice": "选择设备",
+    "clickToRoute": "点击路由"
   },
   "logPanel": {
-    "title": "日志",
-    "autoRemember": "自动记忆"
+    "title": "日志"
   },
   "theme": {
     "toLight": "切换到亮色主题",

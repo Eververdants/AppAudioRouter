@@ -6,8 +6,6 @@ import { useRouterStore } from '@/stores/routerStore';
 export function LogPanel() {
   const { t } = useTranslation();
   const logs = useRouterStore((s) => s.logs);
-  const autoRemember = useRouterStore((s) => s.autoRemember);
-  const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -16,18 +14,7 @@ export function LogPanel() {
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-bg-secondary p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text-primary">{t('logPanel.title')}</h2>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-text-muted">
-          <input
-            type="checkbox"
-            checked={autoRemember}
-            onChange={toggleAutoRemember}
-            className="h-3.5 w-3.5 rounded border-border accent-accent"
-          />
-          {t('logPanel.autoRemember')}
-        </label>
-      </div>
+      <h2 className="mb-3 text-sm font-semibold text-text-primary">{t('logPanel.title')}</h2>
 
       <div className="flex-1 overflow-y-auto font-mono text-[11px]">
         <AnimatePresence initial={false}>

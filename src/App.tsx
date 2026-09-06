@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import appIcon from '@/assets/app-icon.png';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
@@ -10,9 +11,12 @@ import { useTheme } from '@/hooks/useTheme';
 import { useRouterStore } from '@/stores/routerStore';
 
 export default function App() {
+  const { t } = useTranslation();
   const { theme, toggle } = useTheme();
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
+  const autoRemember = useRouterStore((s) => s.autoRemember);
+  const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
 
   useEffect(() => {
     refreshDevices();
@@ -28,17 +32,24 @@ export default function App() {
         className="flex items-center justify-between border-b border-border px-6 py-3"
       >
         <div className="flex items-center gap-3">
-          <img
-            src={appIcon}
-            alt="App Audio Router"
-            className="h-8 w-8 rounded-lg"
-          />
+          <img src={appIcon} alt="App Audio Router" className="h-8 w-8 rounded-lg" />
           <h1 className="text-sm font-semibold">App Audio Router</h1>
           <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent">
             v2.0
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {/* Auto-remember lives here so it stays reachable when the log
+              panel is hidden on narrow windows. */}
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={autoRemember}
+              onChange={toggleAutoRemember}
+              className="h-3.5 w-3.5 rounded border-border accent-accent"
+            />
+            {t('header.autoRemember')}
+          </label>
           <LanguageToggle />
           <ThemeToggle theme={theme} onToggle={toggle} />
         </div>
@@ -46,12 +57,12 @@ export default function App() {
 
       {/* Main content */}
       <div className="flex flex-1 gap-4 overflow-hidden p-4">
-        {/* Left panel: process list */}
+        {/* Left panel: process list (narrower below lg to leave room for the router) */}
         <motion.aside
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.1 }}
-          className="w-64 flex-shrink-0"
+          className="w-52 flex-shrink-0 lg:w-64"
         >
           <ProcessList />
         </motion.aside>
@@ -66,12 +77,12 @@ export default function App() {
           <ConcentricRouter />
         </motion.main>
 
-        {/* Right panel: log */}
+        {/* Right panel: log (hidden below lg to keep the router usable) */}
         <motion.aside
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.15 }}
-          className="w-72 flex-shrink-0"
+          className="hidden w-72 flex-shrink-0 lg:block"
         >
           <LogPanel />
         </motion.aside>

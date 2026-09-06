@@ -5,13 +5,16 @@
     "empty": "No processes with audio sessions found",
     "emptyHint": "Play sound in the target app, then refresh"
   },
+  "header": {
+    "autoRemember": "Auto-remember"
+  },
   "router": {
     "selectProcess": "Select a process",
-    "routeTo": "Route to this device"
+    "selectDevice": "Select a device",
+    "clickToRoute": "Click to route"
   },
   "logPanel": {
-    "title": "Logs",
-    "autoRemember": "Auto-remember"
+    "title": "Logs"
   },
   "theme": {
     "toLight": "Switch to light theme",
