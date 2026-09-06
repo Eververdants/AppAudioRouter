@@ -23,6 +23,7 @@ fn main() {
             commands::list_devices,
             commands::list_sessions,
             commands::set_route,
+            commands::set_default_device,
             commands::set_route_remember,
             commands::get_remembered_routes,
             commands::clear_route,

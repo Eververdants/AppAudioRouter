@@ -1,13 +1,11 @@
 //! Render device enumeration via IMMDeviceEnumerator.
 
 use log::info;
-use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, DEVICE_STATE_ACTIVE, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator,
+    MMDeviceEnumerator,
 };
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
-};
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
 
 use crate::audio::AudioDevice;
@@ -22,18 +20,12 @@ const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
 
 /// Enumerate all active render (playback) devices.
 pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
-    // SAFETY: COM initialization is thread-local and balanced with CoUninitialize.
-    unsafe {
-        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if hr.is_err() {
-            return Err(format!("CoInitializeEx failed: 0x{:08X}", hr.0));
-        }
-    }
+    let com_owned = crate::audio::init_com()?;
 
     let result = (|| -> Result<Vec<AudioDevice>, String> {
-        // SAFETY: CoCreateInstance with known CLSID.
+        // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
         let enumerator: IMMDeviceEnumerator = unsafe {
-            CoCreateInstance(&IMMDeviceEnumerator::IID, None, CLSCTX_ALL)
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}"))?
         };
 
@@ -90,10 +82,7 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
         Ok(devices)
     })();
 
-    // SAFETY: Balances CoInitializeEx at start.
-    unsafe {
-        CoUninitialize();
-    }
+    crate::audio::uninit_com(com_owned);
 
     result
 }

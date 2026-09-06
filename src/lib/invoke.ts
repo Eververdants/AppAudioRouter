@@ -28,6 +28,13 @@ export async function setRouteRemember(
   await invoke('set_route_remember', { deviceId, pid, role, exeName });
 }
 
+export async function setDefaultDevice(
+  deviceId: string,
+  role: string,
+): Promise<void> {
+  await invoke('set_default_device', { deviceId, role });
+}
+
 export async function getRememberedRoutes(): Promise<[string, string][]> {
   return invoke<[string, string][]>('get_remembered_routes');
 }

@@ -1,118 +1,143 @@
 //! Audio session enumeration via IAudioSessionManager2.
+//!
+//! Sessions are collected from **every active render device**, not just the
+//! default one — apps already routed to a non-default device must stay visible
+//! for re-routing.
 
 use log::info;
 use windows::core::{Interface, PWSTR};
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
-    IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
+    eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
+    IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator,
+    MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
 use crate::audio::AudioSession;
 
-/// Enumerate all active audio sessions (processes with audio).
+/// Enumerate all active audio sessions (processes with audio), across all
+/// active render devices.
 pub fn enumerate_sessions() -> Result<Vec<AudioSession>, String> {
-    // SAFETY: COM init balanced with CoUninitialize.
-    unsafe {
-        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if hr.is_err() {
-            return Err(format!("CoInitializeEx failed: 0x{:08X}", hr.0));
-        }
-    }
+    let com_owned = crate::audio::init_com()?;
 
     let result = (|| -> Result<Vec<AudioSession>, String> {
-        // SAFETY: Create IMMDeviceEnumerator.
+        // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
         let enumerator: IMMDeviceEnumerator = unsafe {
-            CoCreateInstance(
-                &IMMDeviceEnumerator::IID,
-                None,
-                CLSCTX_ALL,
-            )
-            .map_err(|e| format!("CoCreateInstance failed: {e}"))?
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("CoCreateInstance failed: {e}"))?
         };
 
-        // SAFETY: GetDefaultAudioEndpoint with eRender/eConsole.
-        let device: IMMDevice = unsafe {
+        // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
+        let devices: IMMDeviceCollection = unsafe {
             enumerator
-                .GetDefaultAudioEndpoint(eRender, eConsole)
-                .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e}"))?
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                .map_err(|e| format!("EnumAudioEndpoints failed: {e}"))?
         };
-
-        // SAFETY: Activate IAudioSessionManager2.
-        let session_manager: IAudioSessionManager2 = unsafe {
-            device
-                .Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
-                .map_err(|e| format!("Activate(IAudioSessionManager2) failed: {e}"))?
-        };
-
-        // SAFETY: GetSessionEnumerator.
-        let session_enum: IAudioSessionEnumerator = unsafe {
-            session_manager
-                .GetSessionEnumerator()
-                .map_err(|e| format!("GetSessionEnumerator failed: {e}"))?
-        };
-
-        let count = unsafe {
-            session_enum
+        let device_count = unsafe {
+            devices
                 .GetCount()
                 .map_err(|e| format!("GetCount failed: {e}"))?
         };
 
-        let mut sessions = Vec::with_capacity(count as usize);
+        let mut sessions: Vec<AudioSession> = Vec::new();
+        let mut seen_pids = std::collections::HashSet::new();
 
-        for i in 0..count {
-            // SAFETY: i in [0, count).
-            let session_control: IAudioSessionControl = unsafe {
-                session_enum
-                    .GetSession(i)
-                    .map_err(|e| format!("GetSession({i}) failed: {e}"))?
+        for d in 0..device_count {
+            // SAFETY: d in [0, device_count).
+            let device: IMMDevice = unsafe {
+                devices
+                    .Item(d)
+                    .map_err(|e| format!("Item({d}) failed: {e}"))?
             };
 
-            // SAFETY: cast to IAudioSessionControl2.
-            let session2: IAudioSessionControl2 = session_control
-                .cast::<IAudioSessionControl2>()
-                .map_err(|e| format!("cast(IAudioSessionControl2) failed: {e}"))?;
-
-            let pid = unsafe {
-                session2
-                    .GetProcessId()
-                    .map_err(|e| format!("GetProcessId({i}) failed: {e}"))?
-            };
-
-            if pid == 0 {
-                continue;
-            }
-
-            // SAFETY: GetDisplayName returns a PWSTR we must free.
-            let display_pwstr = unsafe {
-                session2
-                    .GetDisplayName()
-                    .map_err(|e| format!("GetDisplayName({i}) failed: {e}"))?
-            };
-            let display_name = pwstr_to_string(&display_pwstr);
-            unsafe {
-                windows::Win32::System::Com::CoTaskMemFree(Some(display_pwstr.0 as *const _));
-            }
-
-            let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
-
-            info!("session: {exe_name} (PID {pid}) display={display_name}");
-            sessions.push(AudioSession {
-                pid,
-                exe_name,
-                display_name,
-            });
+            collect_device_sessions(&device, &mut sessions, &mut seen_pids)?;
         }
 
         Ok(sessions)
     })();
 
-    // SAFETY: Balances CoInitializeEx.
-    unsafe {
-        CoUninitialize();
-    }
+    crate::audio::uninit_com(com_owned);
 
     result
+}
+
+/// Collect the sessions of one render device into `sessions`.
+fn collect_device_sessions(
+    device: &IMMDevice,
+    sessions: &mut Vec<AudioSession>,
+    seen_pids: &mut std::collections::HashSet<u32>,
+) -> Result<(), String> {
+    // SAFETY: Activate IAudioSessionManager2 on an active render device.
+    let session_manager: IAudioSessionManager2 = unsafe {
+        device
+            .Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
+            .map_err(|e| format!("Activate(IAudioSessionManager2) failed: {e}"))?
+    };
+
+    // SAFETY: GetSessionEnumerator on an active session manager.
+    let session_enum: IAudioSessionEnumerator = unsafe {
+        session_manager
+            .GetSessionEnumerator()
+            .map_err(|e| format!("GetSessionEnumerator failed: {e}"))?
+    };
+
+    let count = unsafe {
+        session_enum
+            .GetCount()
+            .map_err(|e| format!("GetCount failed: {e}"))?
+    };
+
+    for i in 0..count {
+        // SAFETY: i in [0, count).
+        let session_control: IAudioSessionControl = unsafe {
+            session_enum
+                .GetSession(i)
+                .map_err(|e| format!("GetSession({i}) failed: {e}"))?
+        };
+
+        // SAFETY: cast to IAudioSessionControl2.
+        let session2: IAudioSessionControl2 = session_control
+            .cast::<IAudioSessionControl2>()
+            .map_err(|e| format!("cast(IAudioSessionControl2) failed: {e}"))?;
+
+        let pid = unsafe {
+            session2
+                .GetProcessId()
+                .map_err(|e| format!("GetProcessId({i}) failed: {e}"))?
+        };
+
+        if pid == 0 {
+            continue;
+        }
+
+        // One process can own sessions on several devices; the router is
+        // per-process, so list each PID once.
+        if !seen_pids.insert(pid) {
+            continue;
+        }
+
+        // SAFETY: GetDisplayName returns a PWSTR we must free.
+        let display_pwstr = unsafe {
+            session2
+                .GetDisplayName()
+                .map_err(|e| format!("GetDisplayName({i}) failed: {e}"))?
+        };
+        let display_name = pwstr_to_string(&display_pwstr);
+        unsafe {
+            windows::Win32::System::Com::CoTaskMemFree(Some(display_pwstr.0 as *const _));
+        }
+
+        let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
+
+        info!("session: {exe_name} (PID {pid}) display={display_name}");
+        sessions.push(AudioSession {
+            pid,
+            exe_name,
+            display_name,
+        });
+    }
+
+    Ok(())
 }
 
 /// Get the executable name for a PID.

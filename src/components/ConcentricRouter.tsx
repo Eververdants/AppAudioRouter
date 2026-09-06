@@ -31,15 +31,13 @@ export function ConcentricRouter() {
               const isActive = device.id === selectedDeviceId;
 
               return (
-                <motion.button
+                // Outer div carries the position animation: framer-motion
+                // writes x/y into an inline transform, which would override
+                // the button's own -translate-1/2 centering classes.
+                <motion.div
                   key={device.id}
                   initial={{ opacity: 0, scale: 0 }}
-                  animate={{
-                    opacity: 1,
-                    scale: 1,
-                    x,
-                    y,
-                  }}
+                  animate={{ opacity: 1, scale: 1, x, y }}
                   exit={{ opacity: 0, scale: 0 }}
                   transition={{
                     type: 'spring',
@@ -47,16 +45,20 @@ export function ConcentricRouter() {
                     damping: 20,
                     delay: i * 0.04,
                   }}
-                  onClick={() => selectDevice(device.id)}
-                  className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border px-3 py-2 text-xs font-medium transition-colors ${
-                    isActive
-                      ? 'border-accent bg-accent text-white shadow-glow'
-                      : 'border-border bg-bg-secondary text-text-secondary hover:border-accent hover:text-accent'
-                  }`}
-                  title={device.name}
+                  className="absolute left-1/2 top-1/2"
                 >
-                  {device.name.length > 12 ? device.name.slice(0, 12) + '...' : device.name}
-                </motion.button>
+                  <button
+                    onClick={() => selectDevice(device.id)}
+                    className={`-translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border px-3 py-2 text-xs font-medium transition-colors ${
+                      isActive
+                        ? 'border-accent bg-accent text-white shadow-glow'
+                        : 'border-border bg-bg-secondary text-text-secondary hover:border-accent hover:text-accent'
+                    }`}
+                    title={device.name}
+                  >
+                    {device.name.length > 12 ? device.name.slice(0, 12) + '...' : device.name}
+                  </button>
+                </motion.div>
               );
             })}
           </AnimatePresence>

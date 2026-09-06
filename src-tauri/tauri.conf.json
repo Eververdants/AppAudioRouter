@@ -41,10 +41,7 @@
   },
   "plugins": {
     "shell": {
-      "scope": []
-    },
-    "store": {
-      "path": "app-audio-router.json"
+      "open": false
     }
   }
 }

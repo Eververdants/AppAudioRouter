@@ -25,14 +25,25 @@ pub fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
 pub fn set_route(device_id: String, pid: u32, role: String) -> Result<(), String> {
     info!("cmd: set_route device={device_id} pid={pid} role={role}");
 
-    let role = match role.as_str() {
+    let role = parse_role(&role);
+
+    audio::routing::set_process_default_device(&device_id, pid, role)
+}
+
+/// Set the system-wide default render device.
+#[tauri::command]
+pub fn set_default_device(device_id: String, role: String) -> Result<(), String> {
+    info!("cmd: set_default_device device={device_id} role={role}");
+    audio::routing::set_default_device(&device_id, parse_role(&role))
+}
+
+fn parse_role(role: &str) -> audio::Role {
+    match role {
         "console" => audio::Role::Console,
         "multimedia" => audio::Role::Multimedia,
         "communications" => audio::Role::Communications,
         _ => audio::Role::All,
-    };
-
-    audio::routing::set_process_default_device(&device_id, pid, role)
+    }
 }
 
 /// Set route and remember it for the exe.
@@ -46,12 +57,7 @@ pub fn set_route_remember(
 ) -> Result<(), String> {
     info!("cmd: set_route_remember device={device_id} pid={pid} exe={exe_name}");
 
-    let role = match role.as_str() {
-        "console" => audio::Role::Console,
-        "multimedia" => audio::Role::Multimedia,
-        "communications" => audio::Role::Communications,
-        _ => audio::Role::All,
-    };
+    let role = parse_role(&role);
 
     audio::routing::set_process_default_device(&device_id, pid, role)?;
 
