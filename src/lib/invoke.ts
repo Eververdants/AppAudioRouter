@@ -11,11 +11,7 @@ export async function listSessions(): Promise<AudioSession[]> {
   return invoke<AudioSession[]>('list_sessions');
 }
 
-export async function setRoute(
-  deviceId: string,
-  pid: number,
-  role: string,
-): Promise<void> {
+export async function setRoute(deviceId: string, pid: number, role: string): Promise<void> {
   await invoke('set_route', { deviceId, pid, role });
 }
 
@@ -28,10 +24,7 @@ export async function setRouteRemember(
   await invoke('set_route_remember', { deviceId, pid, role, exeName });
 }
 
-export async function setDefaultDevice(
-  deviceId: string,
-  role: string,
-): Promise<void> {
+export async function setDefaultDevice(deviceId: string, role: string): Promise<void> {
   await invoke('set_default_device', { deviceId, role });
 }
 
