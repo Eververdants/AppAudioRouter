@@ -12,14 +12,15 @@ export function ThemeToggle({ theme, onToggle }: Props) {
   return (
     <button
       onClick={onToggle}
-      className="relative flex h-9 w-16 items-center rounded-full border border-border bg-bg-secondary p-1 transition-colors hover:bg-bg-tertiary"
+      className={`relative flex h-9 w-16 items-center rounded-full border border-border bg-bg-secondary p-1 transition-colors hover:bg-bg-tertiary ${
+        isDark ? 'justify-end' : 'justify-start'
+      }`}
       aria-label={isDark ? '切换到亮色主题' : '切换到暗色主题'}
     >
       <motion.div
-        className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-white shadow-glow"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-glow"
         layout
         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-        style={{ marginLeft: isDark ? '100%' : 0, transform: isDark ? 'translateX(-100%)' : 'translateX(0)' }}
       >
         {isDark ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
