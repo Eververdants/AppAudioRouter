@@ -1,6 +1,9 @@
 # Planning docs — not committed
 .planning/
 
+# Local agent workspace metadata
+.workbuddy/
+
 # Dependencies
 node_modules/
 .pnpm-store/
