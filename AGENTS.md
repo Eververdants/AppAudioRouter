@@ -20,7 +20,7 @@ Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript 
 |------|------|
 | 桌面框架 | Tauri v2 |
 | 前端 | React 19 + TypeScript (strict) |
-| 样式 | TailwindCSS v4 (utility-first, CSS variables) |
+| 样式 | TailwindCSS v3 (utility-first, CSS variables) |
 | 动画 | Motion (`framer-motion`) |
 | 构建 | Vite v6 |
 | 包管理 | pnpm |
@@ -48,20 +48,28 @@ AppAudioRouter/
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
-│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件
+│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（含设备列表）
 │   │   ├── ProcessList.tsx
-│   │   ├── DeviceList.tsx
 │   │   ├── LogPanel.tsx
-│   │   └── ThemeToggle.tsx
+│   │   ├── ThemeToggle.tsx
+│   │   ├── LanguageToggle.tsx
+│   │   └── TitleBar.tsx    # 自定义标题栏（无边框窗口）
 │   ├── hooks/              # 自定义 hooks
-│   │   ├── useDevices.ts
-│   │   ├── useProcesses.ts
-│   │   └── useTheme.ts
+│   │   ├── useTheme.ts
+│   │   ├── useLanguage.ts
+│   │   └── useFitScale.ts  # 适配缩放（同心圆舞台）
 │   ├── stores/             # 状态管理
-│   │   └── routerStore.ts
+│   │   └── routerStore.ts  # Zustand store
+│   ├── i18n/               # 国际化
+│   │   ├── index.ts
+│   │   ├── i18next.d.ts
+│   │   └── locales/
+│   │       ├── en.json
+│   │       └── zh-CN.json
 │   ├── lib/                # 工具函数
 │   │   ├── invoke.ts       # Tauri invoke 封装
-│   │   └── types.ts        # 共享类型定义
+│   │   ├── types.ts        # 共享类型定义
+│   │   └── window.ts       # 窗口控制（懒加载 Tauri API）
 │   └── styles/
 │       └── index.css       # Tailwind 入口 + CSS variables
 ├── .github/workflows/      # CI/CD
@@ -85,7 +93,7 @@ AppAudioRouter/
 4. **Hooks 规则**：遵守 Rules of Hooks，不在条件/循环中调用
 5. **命名**：
    - 组件：`PascalCase` (`ProcessList.tsx`)
-   - Hooks：`use` 前缀 (`useDevices.ts`)
+   - Hooks：`use` 前缀 (`useTheme.ts`)
    - 工具函数：`camelCase`
    - 常量：`SCREAMING_SNAKE_CASE`
    - 类型/接口：`PascalCase`，**不**加 `I` 前缀
@@ -123,9 +131,9 @@ AppAudioRouter/
 
 ## 状态管理
 
-- 前端使用轻量 store（Zustand 或 React Context + useReducer）
-- 路由记忆配置由 Rust 端持久化（`tauri-plugin-store` 或本地 JSON）
-- 设备列表、进程列表由前端 hook 管理，支持手动刷新 + 自动轮询
+- 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
+- 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`）
+- 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
 
 ---
 
@@ -138,16 +146,34 @@ AppAudioRouter/
 
 ```css
 :root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f5f5f7;
-  --text-primary: #1a1a1a;
+  --bg-primary: #fafafa;
+  --bg-secondary: #f3f3f5;
+  --bg-tertiary: #e8e8ec;
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-muted: #71717a;
   --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-muted: rgba(99, 102, 241, 0.12);
+  --accent-glow: rgba(99, 102, 241, 0.35);
+  --border: #e4e4e7;
+  --success: #10b981;
+  --error: #ef4444;
 }
 .dark {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #15151d;
-  --text-primary: #f0f0f5;
+  --bg-primary: #09090b;
+  --bg-secondary: #18181b;
+  --bg-tertiary: #27272a;
+  --text-primary: #fafafa;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
   --accent: #818cf8;
+  --accent-hover: #6366f1;
+  --accent-muted: rgba(129, 140, 248, 0.14);
+  --accent-glow: rgba(129, 140, 248, 0.3);
+  --border: #27272a;
+  --success: #34d399;
+  --error: #f87171;
 }
 ```
 
