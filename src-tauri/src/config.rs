@@ -71,12 +71,6 @@ impl RouteConfig {
             .collect()
     }
 
-    /// Get the device_id for an exe, if remembered.
-    #[allow(dead_code)]
-    pub fn get_route(&self, exe_name: &str) -> Option<String> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.map.routes.get(exe_name).cloned()
-    }
 }
 
 impl RouteConfigInner {

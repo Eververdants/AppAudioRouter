@@ -13,30 +13,31 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
+use crate::audio::AudioError;
 use crate::audio::AudioSession;
 
 /// Enumerate all active audio sessions (processes with audio), across all
 /// active render devices.
-pub fn enumerate_sessions() -> Result<Vec<AudioSession>, String> {
+pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
     let com_owned = crate::audio::init_com()?;
 
-    let result = (|| -> Result<Vec<AudioSession>, String> {
+    let result = (|| -> Result<Vec<AudioSession>, AudioError> {
         // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
         let enumerator: IMMDeviceEnumerator = unsafe {
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                .map_err(|e| format!("CoCreateInstance failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("CoCreateInstance failed: {e}")))?
         };
 
         // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
         let devices: IMMDeviceCollection = unsafe {
             enumerator
                 .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-                .map_err(|e| format!("EnumAudioEndpoints failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints failed: {e}")))?
         };
         let device_count = unsafe {
             devices
                 .GetCount()
-                .map_err(|e| format!("GetCount failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
         };
 
         let mut sessions: Vec<AudioSession> = Vec::new();
@@ -47,7 +48,7 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, String> {
             let device: IMMDevice = unsafe {
                 devices
                     .Item(d)
-                    .map_err(|e| format!("Item({d}) failed: {e}"))?
+                    .map_err(|e| AudioError::Api(format!("Item({d}) failed: {e}")))?
             };
 
             collect_device_sessions(&device, &mut sessions, &mut seen_pids)?;
@@ -66,25 +67,25 @@ fn collect_device_sessions(
     device: &IMMDevice,
     sessions: &mut Vec<AudioSession>,
     seen_pids: &mut std::collections::HashSet<u32>,
-) -> Result<(), String> {
+) -> Result<(), AudioError> {
     // SAFETY: Activate IAudioSessionManager2 on an active render device.
     let session_manager: IAudioSessionManager2 = unsafe {
         device
             .Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
-            .map_err(|e| format!("Activate(IAudioSessionManager2) failed: {e}"))?
+            .map_err(|e| AudioError::Api(format!("Activate(IAudioSessionManager2) failed: {e}")))?
     };
 
     // SAFETY: GetSessionEnumerator on an active session manager.
     let session_enum: IAudioSessionEnumerator = unsafe {
         session_manager
             .GetSessionEnumerator()
-            .map_err(|e| format!("GetSessionEnumerator failed: {e}"))?
+            .map_err(|e| AudioError::Api(format!("GetSessionEnumerator failed: {e}")))?
     };
 
     let count = unsafe {
         session_enum
             .GetCount()
-            .map_err(|e| format!("GetCount failed: {e}"))?
+            .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
     };
 
     for i in 0..count {
@@ -92,18 +93,18 @@ fn collect_device_sessions(
         let session_control: IAudioSessionControl = unsafe {
             session_enum
                 .GetSession(i)
-                .map_err(|e| format!("GetSession({i}) failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("GetSession({i}) failed: {e}")))?
         };
 
         // SAFETY: cast to IAudioSessionControl2.
         let session2: IAudioSessionControl2 = session_control
             .cast::<IAudioSessionControl2>()
-            .map_err(|e| format!("cast(IAudioSessionControl2) failed: {e}"))?;
+            .map_err(|e| AudioError::Api(format!("cast(IAudioSessionControl2) failed: {e}")))?;
 
         let pid = unsafe {
             session2
                 .GetProcessId()
-                .map_err(|e| format!("GetProcessId({i}) failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("GetProcessId({i}) failed: {e}")))?
         };
 
         if pid == 0 {
@@ -120,7 +121,7 @@ fn collect_device_sessions(
         let display_pwstr = unsafe {
             session2
                 .GetDisplayName()
-                .map_err(|e| format!("GetDisplayName({i}) failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("GetDisplayName({i}) failed: {e}")))?
         };
         let display_name = pwstr_to_string(&display_pwstr);
         unsafe {

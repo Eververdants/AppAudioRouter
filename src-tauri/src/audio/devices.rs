@@ -9,6 +9,7 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
 
 use crate::audio::AudioDevice;
+use crate::audio::AudioError;
 
 // PKEY_Device_FriendlyName
 const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
@@ -19,24 +20,24 @@ const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
 };
 
 /// Enumerate all active render (playback) devices.
-pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
+pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
     let com_owned = crate::audio::init_com()?;
 
-    let result = (|| -> Result<Vec<AudioDevice>, String> {
+    let result = (|| -> Result<Vec<AudioDevice>, AudioError> {
         // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
         let enumerator: IMMDeviceEnumerator = unsafe {
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                .map_err(|e| format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}")))?
         };
 
         // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
         let collection: IMMDeviceCollection = unsafe {
             enumerator
                 .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-                .map_err(|e| format!("EnumAudioEndpoints failed: {e}"))?
+                .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints failed: {e}")))?
         };
 
-        let count = unsafe { collection.GetCount().map_err(|e| format!("GetCount failed: {e}"))? };
+        let count = unsafe { collection.GetCount().map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))? };
 
         let mut devices = Vec::with_capacity(count as usize);
 
@@ -45,12 +46,12 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
             let device: IMMDevice = unsafe {
                 collection
                     .Item(i)
-                    .map_err(|e| format!("Item({i}) failed: {e}"))?
+                    .map_err(|e| AudioError::Api(format!("Item({i}) failed: {e}")))?
             };
 
             // SAFETY: GetId returns a PWSTR we must free with CoTaskMemFree.
             let id_pwstr = unsafe {
-                device.GetId().map_err(|e| format!("GetId({i}) failed: {e}"))?
+                device.GetId().map_err(|e| AudioError::Api(format!("GetId({i}) failed: {e}")))?
             };
             let id = pwstr_to_string(id_pwstr.as_ptr());
             unsafe {
@@ -61,14 +62,14 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, String> {
             let props: IPropertyStore = unsafe {
                 device
                     .OpenPropertyStore(windows::Win32::System::Com::STGM_READ)
-                    .map_err(|e| format!("OpenPropertyStore({id}) failed: {e}"))?
+                    .map_err(|e| AudioError::Api(format!("OpenPropertyStore({id}) failed: {e}")))?
             };
 
             // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT.
             let friendly = unsafe {
                 props
                     .GetValue(&PKEY_DEVICE_FRIENDLY_NAME)
-                    .map_err(|e| format!("GetValue(FriendlyName) for {id} failed: {e}"))?
+                    .map_err(|e| AudioError::Api(format!("GetValue(FriendlyName) for {id} failed: {e}")))?
             };
 
             // Extract the string from the PROPVARIANT.

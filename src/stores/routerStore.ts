@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import i18next from 'i18next';
-import type { AudioDevice, AudioSession, LogEntry } from '@/lib/types';
+import type { AudioDevice, AudioSession, LogEntry, Role } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import * as api from '@/lib/invoke';
 
@@ -9,7 +9,7 @@ interface RouterState {
   sessions: AudioSession[];
   selectedPid: number | null;
   selectedDeviceId: string | null;
-  role: string;
+  role: Role;
   autoRemember: boolean;
   logs: LogEntry[];
   loading: boolean;
@@ -19,7 +19,7 @@ interface RouterState {
   refreshSessions: () => Promise<void>;
   selectProcess: (pid: number | null) => void;
   selectDevice: (deviceId: string | null) => void;
-  setRole: (role: string) => void;
+  setRole: (role: Role) => void;
   toggleAutoRemember: () => void;
   applyRoute: () => Promise<void>;
   addLog: (message: string, level?: LogEntry['level']) => void;
