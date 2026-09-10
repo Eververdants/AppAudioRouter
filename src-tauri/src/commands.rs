@@ -10,14 +10,14 @@ use crate::config::RouteConfig;
 #[tauri::command]
 pub fn list_devices() -> Result<Vec<audio::AudioDevice>, String> {
     info!("cmd: list_devices");
-    audio::devices::enumerate_render_devices()
+    audio::devices::enumerate_render_devices().map_err(|e| e.to_string())
 }
 
 /// List all active audio sessions (processes with audio).
 #[tauri::command]
 pub fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
     info!("cmd: list_sessions");
-    audio::sessions::enumerate_sessions()
+    audio::sessions::enumerate_sessions().map_err(|e| e.to_string())
 }
 
 /// Set the default audio device for a process.
@@ -27,14 +27,14 @@ pub fn set_route(device_id: String, pid: u32, role: String) -> Result<(), String
 
     let role = parse_role(&role);
 
-    audio::routing::set_process_default_device(&device_id, pid, role)
+    audio::routing::set_process_default_device(&device_id, pid, role).map_err(|e| e.to_string())
 }
 
 /// Set the system-wide default render device.
 #[tauri::command]
 pub fn set_default_device(device_id: String, role: String) -> Result<(), String> {
     info!("cmd: set_default_device device={device_id} role={role}");
-    audio::routing::set_default_device(&device_id, parse_role(&role))
+    audio::routing::set_default_device(&device_id, parse_role(&role)).map_err(|e| e.to_string())
 }
 
 fn parse_role(role: &str) -> audio::Role {
@@ -59,14 +59,14 @@ pub fn set_route_remember(
 
     let role = parse_role(&role);
 
-    audio::routing::set_process_default_device(&device_id, pid, role)?;
+    audio::routing::set_process_default_device(&device_id, pid, role).map_err(|e| e.to_string())?;
 
     config.save_route(&exe_name, &device_id)?;
     info!("remembered route: {exe_name} -> {device_id}");
     Ok(())
 }
 
-/// Get all remembered routes.
+/// Get all remembered routes as `(exe_name, device_id)` pairs.
 #[tauri::command]
 pub fn get_remembered_routes(config: State<'_, RouteConfig>) -> Vec<(String, String)> {
     config.get_all_routes()

@@ -28,6 +28,7 @@
 use log::info;
 use windows::core::{GUID, HSTRING, PCWSTR};
 
+use crate::audio::AudioError;
 use crate::audio::Role;
 
 const AUDIO_POLICY_CONFIG_CLASS: &str = "Windows.Media.Internal.AudioPolicyConfig";
@@ -82,7 +83,7 @@ struct AudioPolicyConfig {
 
 impl AudioPolicyConfig {
     /// Activate the factory and QI to the build-specific interface.
-    fn activate() -> Result<Self, String> {
+    fn activate() -> Result<Self, AudioError> {
         use std::os::windows::ffi::OsStrExt;
 
         extern "system" {
@@ -98,13 +99,15 @@ impl AudioPolicyConfig {
             LoadLibraryW(name.as_ptr())
         };
         if module == 0 {
-            return Err("LoadLibraryW(AudioSes.dll) failed".to_string());
+            return Err(AudioError::Api("LoadLibraryW(AudioSes.dll) failed".to_string()));
         }
         // SAFETY: export name is a valid NUL-terminated literal.
         let proc_addr =
             unsafe { GetProcAddress(module, c"DllGetActivationFactory".as_ptr() as *const u8) };
         if proc_addr == 0 {
-            return Err("AudioSes.dll does not export DllGetActivationFactory".to_string());
+            return Err(AudioError::Api(
+                "AudioSes.dll does not export DllGetActivationFactory".to_string(),
+            ));
         }
         type DllGetActivationFactoryFn =
             unsafe extern "system" fn(isize, *mut *mut core::ffi::c_void) -> windows::core::HRESULT;
@@ -116,7 +119,7 @@ impl AudioPolicyConfig {
         // SAFETY: valid HSTRING and out pointer; factory released in Drop.
         let hr = unsafe { dll_get_factory(hstring_handle(&class_hstring), &mut raw) };
         if hr.is_err() || raw.is_null() {
-            return Err(format!("DllGetActivationFactory failed: 0x{:08X}", hr.0));
+            return Err(AudioError::Api(format!("DllGetActivationFactory failed: 0x{:08X}", hr.0)));
         }
 
         let vtable = unsafe { *(raw as *const usize) };
@@ -129,7 +132,7 @@ impl AudioPolicyConfig {
     fn discover_interface_iid(
         raw: *mut core::ffi::c_void,
         vtable: usize,
-    ) -> Result<GUID, String> {
+    ) -> Result<GUID, AudioError> {
         type GetIidsFn = unsafe extern "system" fn(
             this: *mut core::ffi::c_void,
             iid_count: *mut u32,
@@ -163,11 +166,13 @@ impl AudioPolicyConfig {
         if let Some(last) = discovered.last() {
             return Ok(*last);
         }
-        Err("IAudioPolicyConfigFactory IID not discovered (GetIids failed)".to_string())
+        Err(AudioError::Api(
+            "IAudioPolicyConfigFactory IID not discovered (GetIids failed)".to_string(),
+        ))
     }
 
     /// QueryInterface the activation factory for `iid`.
-    fn query_interface(raw: *mut core::ffi::c_void, iid: &GUID) -> Result<Self, String> {
+    fn query_interface(raw: *mut core::ffi::c_void, iid: &GUID) -> Result<Self, AudioError> {
         type QIFn = unsafe extern "system" fn(
             this: *mut core::ffi::c_void,
             iid: *const GUID,
@@ -181,10 +186,10 @@ impl AudioPolicyConfig {
         // SAFETY: valid GUID and out pointer.
         let hr = unsafe { qi(raw, iid, &mut obj) };
         if hr.is_err() || obj.is_null() {
-            return Err(format!(
+            return Err(AudioError::Api(format!(
                 "QueryInterface(IAudioPolicyConfigFactory {:?}) failed: 0x{:08X}",
                 iid, hr.0
-            ));
+            )));
         }
         let vtable = unsafe { *(obj as *const usize) };
         Ok(Self { obj, vtable })
@@ -249,9 +254,9 @@ fn role_values(role: Role) -> &'static [i32] {
 /// The assignment is persisted by the audio service per executable and applies
 /// to audio sessions started after this call (identical to the Windows 11
 /// Settings "app volume and device preferences" toggle).
-pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Result<(), String> {
+pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Result<(), AudioError> {
     if pid == 0 {
-        return Err("invalid pid".to_string());
+        return Err(AudioError::Api("invalid pid".to_string()));
     }
     let device_id = device_id.to_string();
     // DllGetActivationFactory of AudioSes returns CLASS_E_CLASSNOTAVAILABLE on
@@ -260,7 +265,7 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
     std::thread::spawn(move || {
         let com_owned = crate::audio::init_com()?;
 
-        let result = (|| -> Result<(), String> {
+        let result = (|| -> Result<(), AudioError> {
             let policy = AudioPolicyConfig::activate()?;
             let wrapped = HSTRING::from(wrap_device_id(&device_id));
             let mut ok = 0;
@@ -275,10 +280,10 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
             }
             if ok == 0 {
                 let hr = last_err.unwrap();
-                return Err(format!(
+                return Err(AudioError::Api(format!(
                     "SetPersistedDefaultAudioEndpoint failed: 0x{:08X}",
                     hr.0
-                ));
+                )));
             }
             info!("routed PID {pid} to device {device_id} (roles ok: {ok})");
             Ok(())
@@ -289,7 +294,7 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
         result
     })
     .join()
-    .map_err(|_| "routing thread panicked".to_string())?
+    .map_err(|_| AudioError::Api("routing thread panicked".to_string()))?
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +340,7 @@ struct PolicyConfigVtable {
 
 impl PolicyConfig {
     /// Create the CPolicyConfigClient instance for the modern interface.
-    fn new() -> Result<Self, String> {
+    fn new() -> Result<Self, AudioError> {
         #[link(name = "ole32")]
         extern "system" {
             fn CoCreateInstance(
@@ -359,10 +364,10 @@ impl PolicyConfig {
             )
         };
         if hr.is_err() {
-            return Err(format!(
+            return Err(AudioError::Api(format!(
                 "CoCreateInstance(IPolicyConfig) failed: 0x{:08X}",
                 hr.0
-            ));
+            )));
         }
         Ok(Self { obj: ppv })
     }
@@ -374,7 +379,7 @@ impl PolicyConfig {
     }
 
     /// Set the system-wide default render endpoint for a role.
-    fn set_default_endpoint(&self, device_id: &str, role: i32) -> Result<(), String> {
+    fn set_default_endpoint(&self, device_id: &str, role: i32) -> Result<(), AudioError> {
         use std::os::windows::ffi::OsStrExt;
         let dev_w: Vec<u16> = std::ffi::OsStr::new(device_id)
             .encode_wide()
@@ -385,7 +390,7 @@ impl PolicyConfig {
         let hr =
             unsafe { (self.vtable().SetDefaultEndpoint)(self.obj, PCWSTR(dev_w.as_ptr()), role) };
         if hr.is_err() {
-            return Err(format!("SetDefaultEndpoint failed: 0x{:08X}", hr.0));
+            return Err(AudioError::Api(format!("SetDefaultEndpoint failed: 0x{:08X}", hr.0)));
         }
         Ok(())
     }
@@ -399,21 +404,17 @@ impl Drop for PolicyConfig {
 }
 
 /// Set the system default audio device (applies to apps using the default).
-pub fn set_default_device(device_id: &str, role: Role) -> Result<(), String> {
+pub fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError> {
     let device_id = device_id.to_string();
     // Keep both routing channels off the main STA thread for consistency.
     std::thread::spawn(move || {
         let com_owned = crate::audio::init_com()?;
 
-        let result = (|| -> Result<(), String> {
+        let result = (|| -> Result<(), AudioError> {
             let policy = PolicyConfig::new()?;
-            let role_i32 = match role {
-                Role::Console => ROLE_CONSOLE,
-                Role::Multimedia => ROLE_MULTIMEDIA,
-                Role::Communications => ROLE_COMMUNICATIONS,
-                Role::All => ROLE_MULTIMEDIA,
-            };
-            policy.set_default_endpoint(&device_id, role_i32)?;
+            for &r in role_values(role) {
+                policy.set_default_endpoint(&device_id, r)?;
+            }
             info!("set default device {device_id} (role={role:?})");
             Ok(())
         })();
@@ -423,6 +424,6 @@ pub fn set_default_device(device_id: &str, role: Role) -> Result<(), String> {
         result
     })
     .join()
-    .map_err(|_| "routing thread panicked".to_string())?
+    .map_err(|_| AudioError::Api("routing thread panicked".to_string()))?
 }
 

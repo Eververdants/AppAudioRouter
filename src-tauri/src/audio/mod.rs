@@ -10,8 +10,21 @@ pub mod routing;
 pub mod sessions;
 
 use serde::Serialize;
+use thiserror::Error;
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+
+/// Errors that can originate from the audio module.
+#[derive(Debug, Error)]
+pub enum AudioError {
+    /// COM initialization failed on the calling thread.
+    #[error("CoInitializeEx failed: 0x{0:08X}")]
+    ComInit(i32),
+
+    /// A Windows Core Audio API call returned a failure HRESULT.
+    #[error("{0}")]
+    Api(String),
+}
 
 /// Initialize COM on the calling thread for the duration of a command.
 ///
@@ -20,7 +33,7 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 /// RPC_E_CHANGED_MODE; the apartment is already initialized, so we reuse it.
 ///
 /// Returns `true` when the caller must balance with `CoUninitialize()`.
-pub fn init_com() -> Result<bool, String> {
+pub fn init_com() -> Result<bool, AudioError> {
     // SAFETY: Thread-local COM init; balanced with CoUninitialize when we own it.
     let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     if hr.is_ok() {
@@ -30,7 +43,7 @@ pub fn init_com() -> Result<bool, String> {
         // Already initialized on this thread with a different model; valid to use.
         Ok(false)
     } else {
-        Err(format!("CoInitializeEx failed: 0x{:08X}", hr.0))
+        Err(AudioError::ComInit(hr.0))
     }
 }
 
@@ -65,12 +78,13 @@ pub struct AudioSession {
 /// Role for default endpoint selection.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Role {
+    /// Applies to all roles (console + multimedia + communications).
     #[default]
     All,
+    /// Games, system sounds, and other non-media audio.
     Console,
+    /// Music, video, and other media playback.
     Multimedia,
+    /// Voice chat, phone calls, and other communications.
     Communications,
-}
-
-impl Role {
 }
