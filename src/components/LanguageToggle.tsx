@@ -21,7 +21,7 @@ export function LanguageToggle() {
     <div
       role="group"
       aria-label={t('language.label')}
-      className="flex h-9 items-center rounded-full border border-border bg-bg-secondary p-1"
+      className="flex h-7 items-center rounded-full border border-border bg-bg-secondary p-0.5"
     >
       {OPTIONS.map((option) => {
         const isActive = language === option.value;
@@ -31,7 +31,7 @@ export function LanguageToggle() {
             onClick={() => setLanguage(option.value)}
             aria-label={t(option.ariaKey)}
             aria-pressed={isActive}
-            className={`relative flex h-7 items-center justify-center rounded-full px-2.5 text-xs font-medium transition-colors ${
+            className={`relative flex h-6 items-center justify-center rounded-full px-2 text-[11px] font-medium transition-colors ${
               isActive ? 'text-white' : 'text-text-muted hover:text-accent'
             }`}
           >

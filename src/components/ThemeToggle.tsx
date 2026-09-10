@@ -14,20 +14,20 @@ export function ThemeToggle({ theme, onToggle }: Props) {
   return (
     <button
       onClick={onToggle}
-      className={`relative flex h-9 w-16 items-center rounded-full border border-border bg-bg-secondary p-1 transition-colors hover:bg-bg-tertiary ${
+      className={`relative flex h-7 w-12 items-center rounded-full border border-border bg-bg-secondary p-1 transition-colors hover:bg-bg-tertiary ${
         isDark ? 'justify-end' : 'justify-start'
       }`}
       aria-label={isDark ? t('theme.toLight') : t('theme.toDark')}
     >
       <motion.div
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-glow"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-[0_0_8px_var(--accent-glow)]"
         layout
         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
       >
         {isDark ? (
           <svg
-            width="14"
-            height="14"
+            width="12"
+            height="12"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -37,8 +37,8 @@ export function ThemeToggle({ theme, onToggle }: Props) {
           </svg>
         ) : (
           <svg
-            width="14"
-            height="14"
+            width="12"
+            height="12"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"

@@ -1,13 +1,9 @@
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useTranslation } from 'react-i18next';
-import appIcon from '@/assets/app-icon.png';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
-import { LanguageToggle } from '@/components/LanguageToggle';
 import { LogPanel } from '@/components/LogPanel';
-import { ThemeToggle } from '@/components/ThemeToggle';
-import { useTheme } from '@/hooks/useTheme';
+import { TitleBar } from '@/components/TitleBar';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -32,12 +28,8 @@ function afterFirstPaint(task: () => void): () => void {
 }
 
 export default function App() {
-  const { t } = useTranslation();
-  const { theme, toggle } = useTheme();
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
-  const autoRemember = useRouterStore((s) => s.autoRemember);
-  const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
 
   useEffect(() => {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust
@@ -52,34 +44,8 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-bg-primary text-text-primary">
-      {/* Header */}
-      <motion.header
-        {...panelEnter}
-        className="flex flex-none items-center justify-between border-b border-border px-6 py-3"
-      >
-        <div className="flex items-center gap-3">
-          <img src={appIcon} alt="App Audio Router" className="h-8 w-8 rounded-lg" />
-          <h1 className="text-sm font-semibold">App Audio Router</h1>
-          <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent">
-            v2.0
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Auto-remember lives here so it stays reachable when the log
-              panel is hidden on narrow windows. */}
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-text-muted">
-            <input
-              type="checkbox"
-              checked={autoRemember}
-              onChange={toggleAutoRemember}
-              className="h-3.5 w-3.5 rounded border-border accent-accent"
-            />
-            {t('header.autoRemember')}
-          </label>
-          <LanguageToggle />
-          <ThemeToggle theme={theme} onToggle={toggle} />
-        </div>
-      </motion.header>
+      {/* The native caption bar is disabled, so this bar is the window frame. */}
+      <TitleBar />
 
       {/* Main content */}
       <div className="flex flex-1 gap-4 overflow-hidden p-4">
