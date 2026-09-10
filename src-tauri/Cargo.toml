@@ -35,3 +35,16 @@ windows = { version = "0.58", features = [
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Startup-oriented release profile. A cold start pays for mapping and faulting in
+# the executable, so trade build time for a smaller, denser image: full LTO with a
+# single codegen unit lets LLVM inline across crate boundaries and drop the code
+# that never runs, `strip` removes the symbol tables, and the low opt level keeps
+# the binary compact. `panic = "abort"` also removes the unwinding tables.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "abort"
+incremental = false
