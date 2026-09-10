@@ -8,6 +8,12 @@
   "header": {
     "autoRemember": "Auto-remember"
   },
+  "titleBar": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
+  },
   "router": {
     "selectProcess": "Select a process",
     "selectDevice": "Select a device",
