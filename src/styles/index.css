@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 /* Theme tokens */
+/* NOTE: --bg-primary / --text-primary (and the two palettes as a whole) are
+   also written inline in index.html so the first paint already carries the
+   right colours. Keep both copies in sync when adjusting the palette. */
 :root {
   --bg-primary: #fafafa;
   --bg-secondary: #f3f3f5;

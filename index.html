@@ -4,7 +4,76 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>App Audio Router</title>
+    <!--
+      Boot script + critical CSS, inlined on purpose.
+
+      Both used to be applied by the bundle, which meant the webview painted an
+      unstyled white shell and re-painted (theme included) once React mounted.
+      Running them before the module script makes the very first paint already
+      carry the correct background, text colour and language, so startup has no
+      flash and the first frame is effectively the final one.
+    -->
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme;
+        try {
+          theme = localStorage.getItem('aar-theme');
+        } catch (error) {
+          /* storage may be unavailable; fall through to the system preference */
+        }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        root.classList.toggle('dark', theme === 'dark');
+        root.dataset.theme = theme;
+
+        // Match the language the bundle is about to render in, so CJK text is
+        // not laid out with the wrong font on the first frame.
+        try {
+          var language = localStorage.getItem('aar-language');
+          if (language === 'zh-CN' || language === 'en') root.lang = language;
+        } catch (error) {
+          /* ignore */
+        }
+      })();
+    </script>
+    <style>
+      /* Critical shell. The two custom properties below are duplicated verbatim
+         in styles/index.css, which loads later and simply re-declares them. */
+      :root {
+        --bg-primary: #fafafa;
+        --text-primary: #18181b;
+      }
+      .dark {
+        --bg-primary: #09090b;
+        --text-primary: #fafafa;
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        /* A frameless window must never grow native scrollbars. */
+        overflow: hidden;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

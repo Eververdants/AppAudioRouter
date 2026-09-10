@@ -4,6 +4,11 @@ export type Theme = 'light' | 'dark';
 
 const STORAGE_KEY = 'aar-theme';
 
+/**
+ * Resolves the theme the same way the inline boot script in `index.html` does.
+ * That script has already written the `dark` class before the first paint; this
+ * hook only takes over from there, so the two readings must stay identical.
+ */
 function getInitialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'light' || stored === 'dark') return stored;
