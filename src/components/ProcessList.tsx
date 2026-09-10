@@ -17,7 +17,10 @@ const item = {
 
 export function ProcessList() {
   const { t } = useTranslation();
-  const { sessions, selectedPid, selectProcess, refreshSessions } = useRouterStore();
+  const sessions = useRouterStore((s) => s.sessions);
+  const selectedPid = useRouterStore((s) => s.selectedPid);
+  const selectProcess = useRouterStore((s) => s.selectProcess);
+  const refreshSessions = useRouterStore((s) => s.refreshSessions);
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-bg-secondary p-4">

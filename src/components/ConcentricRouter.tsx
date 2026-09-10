@@ -17,8 +17,12 @@ const DEVICE_RADIUS = 160;
  */
 export function ConcentricRouter() {
   const { t } = useTranslation();
-  const { devices, sessions, selectedPid, selectedDeviceId, selectDevice, applyRoute } =
-    useRouterStore();
+  const devices = useRouterStore((s) => s.devices);
+  const sessions = useRouterStore((s) => s.sessions);
+  const selectedPid = useRouterStore((s) => s.selectedPid);
+  const selectedDeviceId = useRouterStore((s) => s.selectedDeviceId);
+  const selectDevice = useRouterStore((s) => s.selectDevice);
+  const applyRoute = useRouterStore((s) => s.applyRoute);
   const { ref, scale } = useFitScale(STAGE_SIZE);
   const [rippleKey, setRippleKey] = useState(0);
   const [showRipple, setShowRipple] = useState(false);
