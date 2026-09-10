@@ -5,6 +5,7 @@ import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { TitleBar } from '@/components/TitleBar';
 import { useRouterStore } from '@/stores/routerStore';
+import { revealMainWindow } from '@/lib/window';
 
 /**
  * Entrance animation for the three panels. Kept short and free of staggering:
@@ -30,6 +31,12 @@ function afterFirstPaint(task: () => void): () => void {
 export default function App() {
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
+
+  useEffect(() => {
+    // The window is created hidden so nobody sees the unstyled shell. This runs
+    // after the first commit, i.e. once there is something real to show.
+    void revealMainWindow();
+  }, []);
 
   useEffect(() => {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust
