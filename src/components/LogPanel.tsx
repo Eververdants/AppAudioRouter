@@ -8,9 +8,12 @@ export function LogPanel() {
   const logs = useRouterStore((s) => s.logs);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Depend on the last log's id, not the array length — the store caps
+  // logs at 200, so length stops changing once full and scrolling would stall.
+  const lastLogId = logs.at(-1)?.id;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs.length]);
+  }, [lastLogId]);
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-bg-secondary p-4">
