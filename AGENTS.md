@@ -8,7 +8,7 @@
 
 Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript + TailwindCSS + Motion。
 
-核心能力：枚举有音频会话的进程、枚举渲染设备、将进程路由到指定设备、自动记忆路由规则。
+核心能力：枚举有音频会话的进程、枚举渲染设备、将进程路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制）、自动记忆路由规则。
 
 **硬性约束：无任何第三方 exe 依赖。** 所有音频操作由 Rust 直接调用 Windows Core Audio API。
 
@@ -40,10 +40,11 @@ AppAudioRouter/
 │       ├── commands.rs     # Tauri 命令（invoke handler）
 │       ├── audio/
 │       │   ├── mod.rs
-│       │   ├── devices.rs  # IMMDeviceEnumerator 设备枚举
-│       │   ├── sessions.rs # IAudioSessionEnumerator 会话枚举
-│       │   └── routing.rs  # IPolicyConfig 路由设置
-│       └── config.rs       # 配置持久化
+│       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
+│       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
+│       │   ├── routing.rs      # IPolicyConfig 单设备路由设置
+│       │   └── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
+│       └── config.rs       # 配置持久化（exe -> 设备列表）
 ├── src/                    # React 前端
 │   ├── main.tsx
 │   ├── App.tsx
@@ -132,7 +133,9 @@ AppAudioRouter/
 ## 状态管理
 
 - 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
-- 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`）
+- 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
+- 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
+- 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
 
 ---
@@ -181,9 +184,13 @@ AppAudioRouter/
 
 ## 同心圆 UI 规范
 
-- 中心圆：当前选中进程，显示进程名 + 图标占位
+- 中心圆：当前选中进程，显示进程名 + 目标设备数（点击路由到选中的设备集合）
 - 中环：涟漪动画，路由操作时触发
-- 外环：设备列表，每个设备为一个弧段/节点
+- 外环：设备列表（**多选**），每个设备为一个弧段/节点
+  - 第 1 个选中设备 = 主设备（实心 accent 徽标 "1"）
+  - 其余选中设备 = 复制目标（描边样式 + 序号徽标）
+  - 已在当前路由中但未选中的设备带 accent 圆点
+- 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）
 - 激活状态：`scale(1.05)` + `box-shadow` 扩散
 - 路由动画：spring stiffness=300, damping=20
 
