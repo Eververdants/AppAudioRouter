@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { listen } from '@tauri-apps/api/event';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { TitleBar } from '@/components/TitleBar';
 import { useRouterStore } from '@/stores/routerStore';
+import type { DuplicationStoppedEvent } from '@/lib/types';
 import { revealMainWindow } from '@/lib/window';
 
 /**
@@ -48,6 +50,23 @@ export default function App() {
       void refreshSessions();
     });
   }, [refreshDevices, refreshSessions]);
+
+  useEffect(() => {
+    // Duplication engines report their end (user stop, process exit, error)
+    // through this backend event so the badges stay honest.
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listen<DuplicationStoppedEvent>('duplication-stopped', (event) => {
+      useRouterStore.getState().handleDuplicationStopped(event.payload);
+    }).then((off) => {
+      if (disposed) off();
+      else unlisten = off;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   return (
     <div className="flex h-screen flex-col bg-bg-primary text-text-primary">

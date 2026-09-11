@@ -11,17 +11,20 @@ const DEVICE_RADIUS = 160;
 
 /**
  * Concentric circle router visualization.
- * - Center: route button (selected process; clicking routes to the chosen device)
+ * - Center: route button (selected process; clicking applies the route to the
+ *   selected device set — the first device is primary, the rest get copies)
  * - Middle ring: ripple effect on route
- * - Outer ring: selectable devices
+ * - Outer ring: multi-select devices; selected ones are numbered in route
+ *   order, active ones carry a dot
  */
 export function ConcentricRouter() {
   const { t } = useTranslation();
   const devices = useRouterStore((s) => s.devices);
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPid = useRouterStore((s) => s.selectedPid);
-  const selectedDeviceId = useRouterStore((s) => s.selectedDeviceId);
-  const selectDevice = useRouterStore((s) => s.selectDevice);
+  const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
+  const routedPids = useRouterStore((s) => s.routedPids);
+  const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const applyRoute = useRouterStore((s) => s.applyRoute);
   const { ref, scale } = useFitScale(STAGE_SIZE);
   const [rippleKey, setRippleKey] = useState(0);
@@ -29,7 +32,8 @@ export function ConcentricRouter() {
   const latestRippleKey = useRef(0);
 
   const selectedSession = sessions.find((s) => s.pid === selectedPid);
-  const canRoute = Boolean(selectedPid && selectedDeviceId);
+  const activeIds = selectedPid !== null ? (routedPids[selectedPid] ?? []) : [];
+  const canRoute = Boolean(selectedPid && selectedDeviceIds.length > 0);
 
   const handleRoute = async () => {
     if (!canRoute) return;
@@ -76,7 +80,7 @@ export function ConcentricRouter() {
           )}
         </AnimatePresence>
 
-        {/* Outer ring — devices */}
+        {/* Outer ring — devices (multi-select) */}
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative" style={{ width: RING_SIZE, height: RING_SIZE }}>
             <AnimatePresence>
@@ -84,7 +88,10 @@ export function ConcentricRouter() {
                 const angle = (i / devices.length) * Math.PI * 2 - Math.PI / 2;
                 const x = Math.cos(angle) * DEVICE_RADIUS;
                 const y = Math.sin(angle) * DEVICE_RADIUS;
-                const isActive = device.id === selectedDeviceId;
+                const selectionIndex = selectedDeviceIds.indexOf(device.id);
+                const isSelected = selectionIndex >= 0;
+                const isPrimary = selectionIndex === 0;
+                const isActive = activeIds.includes(device.id);
 
                 return (
                   // Outer div carries the position animation: framer-motion
@@ -106,15 +113,28 @@ export function ConcentricRouter() {
                     {/* max-w keeps the pill inside the stage:
                         DEVICE_RADIUS + 62 (half pill) <= STAGE_SIZE / 2 */}
                     <button
-                      onClick={() => selectDevice(device.id)}
-                      className={`max-w-[124px] -translate-x-1/2 -translate-y-1/2 truncate whitespace-nowrap rounded-full border px-3 py-2 text-xs font-medium transition-colors ${
-                        isActive
+                      onClick={() => toggleDeviceSelection(device.id)}
+                      className={`relative max-w-[124px] -translate-x-1/2 -translate-y-1/2 truncate whitespace-nowrap rounded-full border px-3 py-2 text-xs font-medium transition-colors ${
+                        isPrimary
                           ? 'border-accent bg-accent text-white shadow-glow'
-                          : 'border-border bg-bg-secondary text-text-secondary hover:border-accent hover:text-accent'
+                          : isSelected
+                            ? 'border-accent bg-accent-muted text-accent'
+                            : 'border-border bg-bg-secondary text-text-secondary hover:border-accent hover:text-accent'
                       }`}
                       title={device.name}
                     >
                       {device.name}
+                      {isSelected ? (
+                        <span
+                          className={`absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold leading-none ${
+                            isPrimary ? 'bg-white text-accent' : 'bg-accent text-white'
+                          }`}
+                        >
+                          {selectionIndex + 1}
+                        </span>
+                      ) : isActive ? (
+                        <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-bg-secondary" />
+                      ) : null}
                     </button>
                   </motion.div>
                 );
@@ -165,7 +185,13 @@ export function ConcentricRouter() {
                       canRoute ? 'text-white/90' : 'text-white/60'
                     }`}
                   >
-                    {selectedDeviceId ? t('router.clickToRoute') : t('router.selectDevice')}
+                    {canRoute
+                      ? selectedDeviceIds.length > 1
+                        ? t('router.clickToRouteMulti', { n: selectedDeviceIds.length })
+                        : t('router.clickToRoute')
+                      : activeIds.length > 0
+                        ? t('router.routedActive', { n: activeIds.length })
+                        : t('router.selectDevice')}
                   </span>
                 </motion.div>
               ) : (

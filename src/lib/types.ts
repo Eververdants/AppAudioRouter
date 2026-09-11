@@ -20,7 +20,13 @@ export interface LogEntry {
   level: 'info' | 'success' | 'error';
 }
 
-export interface RouteMemory {
-  exe_name: string;
-  device_id: string;
+/** `(exe_name, device_ids)` — ids in route order, first is the primary. */
+export type RememberedRoute = [exeName: string, deviceIds: string[]];
+
+export type DuplicationStopReason = 'stopped' | 'process-exited' | 'error';
+
+export interface DuplicationStoppedEvent {
+  pid: number;
+  reason: DuplicationStopReason;
+  error: string | null;
 }

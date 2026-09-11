@@ -1,7 +1,7 @@
 /** Tauri invoke wrapper with typed commands. */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { AudioDevice, AudioSession, Role } from './types';
+import type { AudioDevice, AudioSession, RememberedRoute, Role } from './types';
 
 export async function listDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>('list_devices');
@@ -15,21 +15,35 @@ export async function setRoute(deviceId: string, pid: number, role: Role): Promi
   await invoke('set_route', { deviceId, pid, role });
 }
 
-export async function setRouteRemember(
-  deviceId: string,
-  pid: number,
-  role: Role,
-  exeName: string,
-): Promise<void> {
-  await invoke('set_route_remember', { deviceId, pid, role, exeName });
-}
-
 export async function setDefaultDevice(deviceId: string, role: Role): Promise<void> {
   await invoke('set_default_device', { deviceId, role });
 }
 
-export async function getRememberedRoutes(): Promise<[string, string][]> {
-  return invoke<[string, string][]>('get_remembered_routes');
+export async function getDefaultDevice(): Promise<AudioDevice> {
+  return invoke<AudioDevice>('get_default_device');
+}
+
+/** Route a process to an ordered device list; first id is the primary. */
+export async function applyRoute(
+  pid: number,
+  exeName: string,
+  deviceIds: string[],
+  remember: boolean,
+): Promise<void> {
+  await invoke('apply_route', { pid, exeName, deviceIds, remember });
+}
+
+/** Stop routing a process: halt duplication and restore the system default. */
+export async function stopRoute(pid: number): Promise<void> {
+  await invoke('stop_route', { pid });
+}
+
+export async function getActiveDuplications(): Promise<number[]> {
+  return invoke<number[]>('get_active_duplications');
+}
+
+export async function getRememberedRoutes(): Promise<RememberedRoute[]> {
+  return invoke<RememberedRoute[]>('get_remembered_routes');
 }
 
 export async function clearRoute(exeName: string): Promise<void> {

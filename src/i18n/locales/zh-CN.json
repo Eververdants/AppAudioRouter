@@ -3,7 +3,9 @@
     "title": "进程列表",
     "refresh": "刷新",
     "empty": "未检测到有音频会话的进程",
-    "emptyHint": "让目标程序发出声音后刷新"
+    "emptyHint": "让目标程序发出声音后刷新",
+    "routedBadge": "已路由到 {{n}} 台设备",
+    "stopRoute": "停止该进程的路由"
   },
   "header": {
     "autoRemember": "自动记忆"
@@ -17,7 +19,9 @@
   "router": {
     "selectProcess": "选择进程",
     "selectDevice": "选择设备",
-    "clickToRoute": "点击路由"
+    "clickToRoute": "点击路由",
+    "clickToRouteMulti": "路由到 {{n}} 台设备",
+    "routedActive": "已路由 {{n}} 台设备"
   },
   "logPanel": {
     "title": "日志"
@@ -36,10 +40,16 @@
     "deviceRefreshFailed": "设备刷新失败：{{error}}",
     "sessionsRefreshed": "进程列表已刷新（{{n}} 项）",
     "sessionsRefreshFailed": "进程刷新失败：{{error}}",
-    "selectProcessAndDevice": "请先选择进程和设备",
+    "selectProcessAndDevice": "请先选择进程和至少一台设备",
     "processGone": "所选进程已不存在",
     "routed": "已将 {{process}} 路由到 {{device}}",
     "routedRemembered": "已将 {{process}} 路由到 {{device}}（已记忆）",
-    "routeFailed": "路由失败：{{error}}"
+    "routedMulti": "已将 {{process}} 路由到 {{device}}（+{{n}} 台复制）",
+    "routedMultiRemembered": "已将 {{process}} 路由到 {{device}}（+{{n}} 台复制，已记忆）",
+    "routeFailed": "路由失败：{{error}}",
+    "routeStopped": "已停止 {{process}} 的路由，恢复系统默认",
+    "stopRouteFailed": "停止路由失败：{{error}}",
+    "duplicationFailed": "进程 {{pid}} 复制路由失败：{{error}}",
+    "duplicationProcessExited": "进程 {{pid}} 已退出，复制路由停止"
   }
 }

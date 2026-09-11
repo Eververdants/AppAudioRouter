@@ -3,7 +3,9 @@
     "title": "Processes",
     "refresh": "Refresh",
     "empty": "No processes with audio sessions found",
-    "emptyHint": "Play sound in the target app, then refresh"
+    "emptyHint": "Play sound in the target app, then refresh",
+    "routedBadge": "Routed to {{n}} device(s)",
+    "stopRoute": "Stop routing this process"
   },
   "header": {
     "autoRemember": "Auto-remember"
@@ -17,7 +19,9 @@
   "router": {
     "selectProcess": "Select a process",
     "selectDevice": "Select a device",
-    "clickToRoute": "Click to route"
+    "clickToRoute": "Click to route",
+    "clickToRouteMulti": "Route to {{n}} devices",
+    "routedActive": "{{n}} devices active"
   },
   "logPanel": {
     "title": "Logs"
@@ -36,10 +40,16 @@
     "deviceRefreshFailed": "Device refresh failed: {{error}}",
     "sessionsRefreshed": "Session list refreshed ({{n}})",
     "sessionsRefreshFailed": "Session refresh failed: {{error}}",
-    "selectProcessAndDevice": "Select a process and a device first",
+    "selectProcessAndDevice": "Select a process and at least one device first",
     "processGone": "Selected process no longer exists",
     "routed": "Routed {{process}} to {{device}}",
     "routedRemembered": "Routed {{process}} to {{device}} (remembered)",
-    "routeFailed": "Routing failed: {{error}}"
+    "routedMulti": "Routed {{process}} to {{device}} (+{{n}} copies)",
+    "routedMultiRemembered": "Routed {{process}} to {{device}} (+{{n}} copies, remembered)",
+    "routeFailed": "Routing failed: {{error}}",
+    "routeStopped": "Stopped routing {{process}}, back to system default",
+    "stopRouteFailed": "Failed to stop routing: {{error}}",
+    "duplicationFailed": "Duplication failed for PID {{pid}}: {{error}}",
+    "duplicationProcessExited": "PID {{pid}} exited, duplication stopped"
   }
 }

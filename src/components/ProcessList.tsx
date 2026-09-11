@@ -19,7 +19,9 @@ export function ProcessList() {
   const { t } = useTranslation();
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPid = useRouterStore((s) => s.selectedPid);
+  const routedPids = useRouterStore((s) => s.routedPids);
   const selectProcess = useRouterStore((s) => s.selectProcess);
+  const stopRoute = useRouterStore((s) => s.stopRoute);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
 
   return (
@@ -47,21 +49,54 @@ export function ProcessList() {
             <span className="text-[10px]">{t('processList.emptyHint')}</span>
           </p>
         ) : (
-          sessions.map((session) => (
-            <motion.button
-              key={session.pid}
-              variants={item}
-              onClick={() => selectProcess(session.pid)}
-              className={`w-full rounded-lg px-3 py-2 text-left text-xs transition-all ${
-                session.pid === selectedPid
-                  ? 'bg-accent/10 text-accent ring-1 ring-accent'
-                  : 'text-text-secondary hover:bg-bg-tertiary'
-              }`}
-            >
-              <div className="font-medium">{session.exe_name}</div>
-              <div className="text-[10px] text-text-muted">PID {session.pid}</div>
-            </motion.button>
-          ))
+          sessions.map((session) => {
+            const routedCount = routedPids[session.pid]?.length ?? 0;
+            return (
+              <motion.div key={session.pid} variants={item} className="relative">
+                <button
+                  onClick={() => selectProcess(session.pid)}
+                  className={`w-full rounded-lg px-3 py-2 pr-9 text-left text-xs transition-all ${
+                    session.pid === selectedPid
+                      ? 'bg-accent/10 text-accent ring-1 ring-accent'
+                      : 'text-text-secondary hover:bg-bg-tertiary'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate font-medium">{session.exe_name}</span>
+                    {routedCount > 0 && (
+                      <span
+                        title={t('processList.routedBadge', { n: routedCount })}
+                        className="flex h-4 min-w-4 flex-none items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-white"
+                      >
+                        {routedCount}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-text-muted">PID {session.pid}</div>
+                </button>
+                {routedCount > 0 && (
+                  <button
+                    onClick={() => void stopRoute(session.pid)}
+                    title={t('processList.stopRoute')}
+                    aria-label={t('processList.stopRoute')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 10 10"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <line x1="1" y1="1" x2="9" y2="9" />
+                      <line x1="9" y1="1" x2="1" y2="9" />
+                    </svg>
+                  </button>
+                )}
+              </motion.div>
+            );
+          })
         )}
       </motion.div>
     </div>
