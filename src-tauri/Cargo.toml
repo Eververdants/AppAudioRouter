@@ -26,12 +26,16 @@ windows = { version = "0.58", features = [
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",
   "Win32_Media_Multimedia",
+  "Win32_Security",
   "Win32_System_Com",
   "Win32_System_ProcessStatus",
   "Win32_System_Threading",
   "Win32_UI_Shell_PropertiesSystem",
   "Win32_System_Variant",
+  "implement",
 ] }
+# Direct dependency so the `implement` macro can emit `::windows_core::...`.
+windows-core = "0.58"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

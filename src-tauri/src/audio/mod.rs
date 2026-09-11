@@ -6,6 +6,7 @@
 //! - Per-app default device routing (IPolicyConfigVista)
 
 pub mod devices;
+pub mod duplication;
 pub mod routing;
 pub mod sessions;
 
