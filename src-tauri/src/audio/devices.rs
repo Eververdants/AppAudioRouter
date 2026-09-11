@@ -2,7 +2,7 @@
 
 use log::info;
 use windows::Win32::Media::Audio::{
-    eRender, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
+    eConsole, eRender, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
     DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
@@ -57,40 +57,72 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
                     .map_err(|e| AudioError::Api(format!("Item({i}) failed: {e}")))?
             };
 
-            // SAFETY: GetId returns a PWSTR we must free with CoTaskMemFree.
-            let id_pwstr = unsafe {
-                device
-                    .GetId()
-                    .map_err(|e| AudioError::Api(format!("GetId({i}) failed: {e}")))?
-            };
-            let id = pwstr_to_string(id_pwstr.as_ptr());
-            unsafe {
-                windows::Win32::System::Com::CoTaskMemFree(Some(id_pwstr.as_ptr() as *const _));
-            }
+            let device = device_info(&device)?;
 
-            // SAFETY: OpenPropertyStore with STGM_READ is valid.
-            let props: IPropertyStore = unsafe {
-                device
-                    .OpenPropertyStore(windows::Win32::System::Com::STGM_READ)
-                    .map_err(|e| AudioError::Api(format!("OpenPropertyStore({id}) failed: {e}")))?
-            };
-
-            // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT.
-            let friendly = unsafe {
-                props.GetValue(&PKEY_DEVICE_FRIENDLY_NAME).map_err(|e| {
-                    AudioError::Api(format!("GetValue(FriendlyName) for {id} failed: {e}"))
-                })?
-            };
-
-            // Extract the string from the PROPVARIANT.
-            // friendly is windows_core::PROPVARIANT which has Drop impl (auto-clears).
-            let name = extract_friendly_name(&friendly, &id);
-
-            info!("render device: {name} [{id}]");
-            devices.push(AudioDevice { id, name });
+            info!("render device: {} [{}]", device.name, device.id);
+            devices.push(device);
         }
 
         Ok(devices)
+    })();
+
+    crate::audio::uninit_com(com_owned);
+
+    result
+}
+
+/// Read the endpoint id and friendly name of one device.
+fn device_info(device: &IMMDevice) -> Result<AudioDevice, AudioError> {
+    // SAFETY: GetId returns a PWSTR we must free with CoTaskMemFree.
+    let id_pwstr = unsafe {
+        device
+            .GetId()
+            .map_err(|e| AudioError::Api(format!("GetId failed: {e}")))?
+    };
+    let id = pwstr_to_string(id_pwstr.as_ptr());
+    unsafe {
+        windows::Win32::System::Com::CoTaskMemFree(Some(id_pwstr.as_ptr() as *const _));
+    }
+
+    // SAFETY: OpenPropertyStore with STGM_READ is valid.
+    let props: IPropertyStore = unsafe {
+        device
+            .OpenPropertyStore(windows::Win32::System::Com::STGM_READ)
+            .map_err(|e| AudioError::Api(format!("OpenPropertyStore({id}) failed: {e}")))?
+    };
+
+    // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT.
+    let friendly = unsafe {
+        props
+            .GetValue(&PKEY_DEVICE_FRIENDLY_NAME)
+            .map_err(|e| AudioError::Api(format!("GetValue(FriendlyName) for {id} failed: {e}")))?
+    };
+
+    // Extract the string from the PROPVARIANT.
+    let name = extract_friendly_name(&friendly, &id);
+    Ok(AudioDevice { id, name })
+}
+
+/// Get the current system default render device.
+pub fn get_default_render_device() -> Result<AudioDevice, AudioError> {
+    let com_owned = crate::audio::init_com()?;
+
+    let result = (|| -> Result<AudioDevice, AudioError> {
+        // SAFETY: MMDeviceEnumerator is the registered coclass.
+        let enumerator: IMMDeviceEnumerator = unsafe {
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| {
+                AudioError::Api(format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}"))
+            })?
+        };
+
+        // SAFETY: eRender + eConsole are valid flow/role values.
+        let device: IMMDevice = unsafe {
+            enumerator
+                .GetDefaultAudioEndpoint(eRender, eConsole)
+                .map_err(|e| AudioError::Api(format!("GetDefaultAudioEndpoint failed: {e}")))?
+        };
+
+        device_info(&device)
     })();
 
     crate::audio::uninit_com(com_owned);

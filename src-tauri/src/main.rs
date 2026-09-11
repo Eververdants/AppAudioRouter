@@ -22,6 +22,7 @@ fn main() {
             let route_config = config::RouteConfig::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(route_config);
+            app.manage(audio::duplication::DuplicationManager::new());
             spawn_reveal_watchdog(app.handle().clone());
             Ok(())
         })
@@ -30,7 +31,10 @@ fn main() {
             commands::list_sessions,
             commands::set_route,
             commands::set_default_device,
-            commands::set_route_remember,
+            commands::get_default_device,
+            commands::apply_route,
+            commands::stop_route,
+            commands::get_active_duplications,
             commands::get_remembered_routes,
             commands::clear_route,
         ])
