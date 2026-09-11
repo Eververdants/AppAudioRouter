@@ -117,3 +117,40 @@ impl RouteConfigInner {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loads_v2_single_device_string_format() {
+        let map: RouteMap =
+            serde_json::from_str(r#"{"routes": {"game.exe": "{0.0.0.00000000}.{a}"}}"#).unwrap();
+        assert_eq!(
+            map.routes["game.exe"].0,
+            vec!["{0.0.0.00000000}.{a}".to_string()]
+        );
+    }
+
+    #[test]
+    fn loads_device_array_format() {
+        let map: RouteMap = serde_json::from_str(
+            r#"{"routes": {"game.exe": ["{0.0.0.00000000}.{a}", "{0.0.0.00000000}.{b}"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            map.routes["game.exe"].0,
+            vec![
+                "{0.0.0.00000000}.{a}".to_string(),
+                "{0.0.0.00000000}.{b}".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn serializes_as_plain_array() {
+        let map: RouteMap = serde_json::from_str(r#"{"routes": {"a.exe": ["x", "y"]}}"#).unwrap();
+        let json = serde_json::to_string(&map).unwrap();
+        assert_eq!(json, r#"{"routes":{"a.exe":["x","y"]}}"#);
+    }
+}
