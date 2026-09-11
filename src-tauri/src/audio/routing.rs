@@ -99,7 +99,9 @@ impl AudioPolicyConfig {
             LoadLibraryW(name.as_ptr())
         };
         if module == 0 {
-            return Err(AudioError::Api("LoadLibraryW(AudioSes.dll) failed".to_string()));
+            return Err(AudioError::Api(
+                "LoadLibraryW(AudioSes.dll) failed".to_string(),
+            ));
         }
         // SAFETY: export name is a valid NUL-terminated literal.
         let proc_addr =
@@ -119,7 +121,10 @@ impl AudioPolicyConfig {
         // SAFETY: valid HSTRING and out pointer; factory released in Drop.
         let hr = unsafe { dll_get_factory(hstring_handle(&class_hstring), &mut raw) };
         if hr.is_err() || raw.is_null() {
-            return Err(AudioError::Api(format!("DllGetActivationFactory failed: 0x{:08X}", hr.0)));
+            return Err(AudioError::Api(format!(
+                "DllGetActivationFactory failed: 0x{:08X}",
+                hr.0
+            )));
         }
 
         let vtable = unsafe { *(raw as *const usize) };
@@ -140,7 +145,8 @@ impl AudioPolicyConfig {
         ) -> windows::core::HRESULT;
 
         // SAFETY: GetIids is IInspectable slot 3.
-        let get_iids: GetIidsFn = unsafe { core::mem::transmute(*((vtable + 3 * 8) as *const usize)) };
+        let get_iids: GetIidsFn =
+            unsafe { core::mem::transmute(*((vtable + 3 * 8) as *const usize)) };
         let mut count: u32 = 0;
         let mut iids: *mut GUID = std::ptr::null_mut();
         // SAFETY: valid out params; returned array freed below.
@@ -302,7 +308,10 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
 // ---------------------------------------------------------------------------
 
 const CLSID_POLICY_CONFIG_CLIENT: GUID = GUID::from_values(
-    0x870af99c, 0x171d, 0x4f9e, [0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9],
+    0x870af99c,
+    0x171d,
+    0x4f9e,
+    [0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9],
 );
 const IID_IPOLICY_CONFIG: GUID = GUID::from_u128(0x4495581a_01b9_4a8f_b05c_741a6c983d28);
 
@@ -335,7 +344,7 @@ struct PolicyConfigVtable {
         i32,    // ERole
     ) -> windows::core::HRESULT, // 13
     SetEndpointVisibility: usize, // 14
-    // Extended slots (15+) are build-specific; never call them.
+                                // Extended slots (15+) are build-specific; never call them.
 }
 
 impl PolicyConfig {
@@ -390,7 +399,10 @@ impl PolicyConfig {
         let hr =
             unsafe { (self.vtable().SetDefaultEndpoint)(self.obj, PCWSTR(dev_w.as_ptr()), role) };
         if hr.is_err() {
-            return Err(AudioError::Api(format!("SetDefaultEndpoint failed: 0x{:08X}", hr.0)));
+            return Err(AudioError::Api(format!(
+                "SetDefaultEndpoint failed: 0x{:08X}",
+                hr.0
+            )));
         }
         Ok(())
     }
@@ -426,4 +438,3 @@ pub fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError>
     .join()
     .map_err(|_| AudioError::Api("routing thread panicked".to_string()))?
 }
-

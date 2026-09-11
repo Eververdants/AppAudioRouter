@@ -61,14 +61,16 @@ pub fn set_route_remember(
 
     audio::routing::set_process_default_device(&device_id, pid, role).map_err(|e| e.to_string())?;
 
-    config.save_route(&exe_name, &device_id)?;
+    config.save_route(&exe_name, std::slice::from_ref(&device_id))?;
     info!("remembered route: {exe_name} -> {device_id}");
     Ok(())
 }
 
-/// Get all remembered routes as `(exe_name, device_id)` pairs.
+/// Get all remembered routes as `(exe_name, device_ids)` pairs.
 #[tauri::command]
-pub fn get_remembered_routes(config: State<'_, RouteConfig>) -> Vec<(String, String)> {
+pub fn get_remembered_routes(
+    config: State<'_, RouteConfig>,
+) -> Vec<(String, crate::config::DeviceList)> {
     config.get_all_routes()
 }
 

@@ -5,13 +5,43 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tauri::{AppHandle, Manager};
 
-/// Persistent route memory: exe_name -> device_id.
+/// Ordered list of route targets for one app.
+///
+/// The first id is the primary endpoint the OS assigns natively; any further
+/// ids receive a duplicated copy of the stream (see `audio::duplication`).
+///
+/// Serialized transparently as an array of ids; also accepts a bare string so
+/// configs written by v2.0 (single device) keep loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceList(#[serde(deserialize_with = "deserialize_device_list")] pub Vec<String>);
+
+/// Deserializes one app's targets, accepting both the v2.0 single-device
+/// string form and the current array form.
+fn deserialize_device_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        One(String),
+        Many(Vec<String>),
+    }
+
+    Ok(match Raw::deserialize(deserializer)? {
+        Raw::One(id) => vec![id],
+        Raw::Many(ids) => ids,
+    })
+}
+
+/// Persistent route memory: exe_name -> ordered target device ids.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RouteMap {
-    routes: HashMap<String, String>,
+    #[serde(default)]
+    routes: HashMap<String, DeviceList>,
 }
 
 /// Manages route config file (interior mutability for Tauri State).
@@ -46,10 +76,13 @@ impl RouteConfig {
         })
     }
 
-    /// Save a route mapping.
-    pub fn save_route(&self, exe_name: &str, device_id: &str) -> Result<(), String> {
+    /// Save an app's ordered route targets.
+    pub fn save_route(&self, exe_name: &str, device_ids: &[String]) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        inner.map.routes.insert(exe_name.to_string(), device_id.to_string());
+        inner
+            .map
+            .routes
+            .insert(exe_name.to_string(), DeviceList(device_ids.to_vec()));
         inner.persist()
     }
 
@@ -60,8 +93,8 @@ impl RouteConfig {
         inner.persist()
     }
 
-    /// Get all routes.
-    pub fn get_all_routes(&self) -> Vec<(String, String)> {
+    /// Get all routes as `(exe_name, device_ids)` pairs, ids in route order.
+    pub fn get_all_routes(&self) -> Vec<(String, DeviceList)> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
             .map
@@ -70,7 +103,6 @@ impl RouteConfig {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     }
-
 }
 
 impl RouteConfigInner {
@@ -79,8 +111,8 @@ impl RouteConfigInner {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("create_dir_all failed: {e}"))?;
         }
-        let content =
-            serde_json::to_string_pretty(&self.map).map_err(|e| format!("serialize failed: {e}"))?;
+        let content = serde_json::to_string_pretty(&self.map)
+            .map_err(|e| format!("serialize failed: {e}"))?;
         fs::write(&self.path, content).map_err(|e| format!("write config failed: {e}"))?;
         Ok(())
     }

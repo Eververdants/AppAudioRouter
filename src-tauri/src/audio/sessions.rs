@@ -8,8 +8,8 @@ use log::info;
 use windows::core::{Interface, PWSTR};
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
-    IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator,
-    MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+    IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
+    DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
@@ -148,9 +148,8 @@ fn get_process_exe_name(pid: u32) -> Option<String> {
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION is safe.
-    let handle: HANDLE = unsafe {
-        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?
-    };
+    let handle: HANDLE =
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()? };
 
     let result = (|| -> Option<String> {
         let mut buf = [0u8; 260];
@@ -160,7 +159,10 @@ fn get_process_exe_name(pid: u32) -> Option<String> {
             return None;
         }
         let path = String::from_utf8_lossy(&buf[..len as usize]);
-        let name = path.rfind('\\').map(|idx| &path[idx + 1..]).unwrap_or(&path);
+        let name = path
+            .rfind('\\')
+            .map(|idx| &path[idx + 1..])
+            .unwrap_or(&path);
         Some(name.to_string())
     })();
 

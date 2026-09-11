@@ -2,8 +2,8 @@
 
 use log::info;
 use windows::Win32::Media::Audio::{
-    eRender, DEVICE_STATE_ACTIVE, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator,
-    MMDeviceEnumerator,
+    eRender, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
+    DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
@@ -14,7 +14,10 @@ use crate::audio::AudioError;
 // PKEY_Device_FriendlyName
 const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
     fmtid: windows::core::GUID::from_values(
-        0xa45c254e, 0xdf1c, 0x4efd, [0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0],
+        0xa45c254e,
+        0xdf1c,
+        0x4efd,
+        [0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0],
     ),
     pid: 14,
 };
@@ -26,8 +29,9 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
     let result = (|| -> Result<Vec<AudioDevice>, AudioError> {
         // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
         let enumerator: IMMDeviceEnumerator = unsafe {
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                .map_err(|e| AudioError::Api(format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}")))?
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| {
+                AudioError::Api(format!("CoCreateInstance(IMMDeviceEnumerator) failed: {e}"))
+            })?
         };
 
         // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
@@ -37,7 +41,11 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
                 .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints failed: {e}")))?
         };
 
-        let count = unsafe { collection.GetCount().map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))? };
+        let count = unsafe {
+            collection
+                .GetCount()
+                .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
+        };
 
         let mut devices = Vec::with_capacity(count as usize);
 
@@ -51,7 +59,9 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
 
             // SAFETY: GetId returns a PWSTR we must free with CoTaskMemFree.
             let id_pwstr = unsafe {
-                device.GetId().map_err(|e| AudioError::Api(format!("GetId({i}) failed: {e}")))?
+                device
+                    .GetId()
+                    .map_err(|e| AudioError::Api(format!("GetId({i}) failed: {e}")))?
             };
             let id = pwstr_to_string(id_pwstr.as_ptr());
             unsafe {
@@ -67,9 +77,9 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
 
             // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT.
             let friendly = unsafe {
-                props
-                    .GetValue(&PKEY_DEVICE_FRIENDLY_NAME)
-                    .map_err(|e| AudioError::Api(format!("GetValue(FriendlyName) for {id} failed: {e}")))?
+                props.GetValue(&PKEY_DEVICE_FRIENDLY_NAME).map_err(|e| {
+                    AudioError::Api(format!("GetValue(FriendlyName) for {id} failed: {e}"))
+                })?
             };
 
             // Extract the string from the PROPVARIANT.
