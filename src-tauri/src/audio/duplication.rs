@@ -342,11 +342,17 @@ impl DuplicationManager {
             .unwrap_or_else(|e| e.into_inner())
             .insert(pid, shared.clone());
 
+        let generation = shared.generation;
         let app = app.clone();
-        std::thread::Builder::new()
+        if let Err(e) = std::thread::Builder::new()
             .name(format!("aar-dup-{pid}"))
             .spawn(move || capture_main(shared, app))
-            .map_err(|e| AudioError::Api(format!("spawn capture thread failed: {e}")))?;
+        {
+            // The engine never started, so no thread will unregister it; drop
+            // the entry here or `active_pids` would report it forever.
+            self.unregister(pid, generation);
+            return Err(AudioError::Api(format!("spawn capture thread failed: {e}")));
+        }
         Ok(())
     }
 
