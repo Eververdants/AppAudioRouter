@@ -302,11 +302,6 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
         // the end of this function after the audio client is released.
         CreateEventW(None, false, false, None).map_err(|e| com_err("CreateEventW", e))?
     };
-    // SAFETY: valid handle; the client is event-driven so the handle must stay
-    // valid for the lifetime of the stream.
-    if let Err(e) = unsafe { client.SetEventHandle(event) } {
-        return Err(com_err("SetEventHandle", e));
-    }
     // SAFETY: format is a complete WAVEFORMATEX(EXTENSIBLE) copied from the
     // default device's mix format.
     let format = unsafe { &*(shared.format.as_ptr() as *const WAVEFORMATEX) };
@@ -338,6 +333,11 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
                 )
             })
             .map_err(|e| com_err("Initialize(capture)", e))?;
+    }
+    // SAFETY: valid handle; the client is event-driven so the handle must stay
+    // valid for the lifetime of the stream. Must come after Initialize.
+    if let Err(e) = unsafe { client.SetEventHandle(event) } {
+        return Err(com_err("SetEventHandle", e));
     }
     // SAFETY: GetService on a fully initialized capture client.
     let capture: IAudioCaptureClient = unsafe {
@@ -627,9 +627,10 @@ fn activate_process_loopback_inner(pid: u32) -> Result<IAudioClient, AudioError>
     };
 
     // Wrap the params in a VT_BLOB PROPVARIANT, as the activation API expects.
-    // The blob is allocated with CoTaskMemAlloc and freed explicitly after the
-    // call completes; the managed PROPVARIANT has no Drop of its own here.
-    let (activation_params, blob_ptr) = unsafe {
+    // The blob is allocated with CoTaskMemAlloc; the managed PROPVARIANT's
+    // Drop runs PropVariantClear, which frees it — so it must NOT be freed
+    // manually anywhere in this function.
+    let activation_params = unsafe {
         // SAFETY: zeroed PROPVARIANT is a valid empty variant.
         let mut raw: windows::core::imp::PROPVARIANT = core::mem::zeroed();
         // SAFETY: params is a plain-C struct; reading its bytes is valid.
@@ -637,7 +638,8 @@ fn activate_process_loopback_inner(pid: u32) -> Result<IAudioClient, AudioError>
             (&params as *const AUDIOCLIENT_ACTIVATION_PARAMS).cast::<u8>(),
             core::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>(),
         );
-        // SAFETY: allocation is freed with CoTaskMemFree after activation.
+        // SAFETY: allocation ownership moves into the PROPVARIANT, whose Drop
+        // (PropVariantClear) releases it.
         let buf = CoTaskMemAlloc(bytes.len());
         if buf.is_null() {
             return Err(AudioError::Api("CoTaskMemAlloc failed".to_string()));
@@ -651,7 +653,7 @@ fn activate_process_loopback_inner(pid: u32) -> Result<IAudioClient, AudioError>
             pBlobData: buf.cast::<u8>(),
         };
         // SAFETY: raw is fully initialized above and ownership moves on.
-        (PROPVARIANT::from_raw(raw), buf.cast::<core::ffi::c_void>())
+        PROPVARIANT::from_raw(raw)
     };
 
     let signal = Arc::new(ActivateSignal::default());
@@ -679,13 +681,11 @@ fn activate_process_loopback_inner(pid: u32) -> Result<IAudioClient, AudioError>
             .wait_timeout_while(done, ACTIVATION_TIMEOUT, |finished| !*finished)
             .unwrap_or_else(|e| e.into_inner());
         if timeout.timed_out() {
-            free_blob(blob_ptr);
             return Err(AudioError::Api(
                 "process loopback activation timed out".to_string(),
             ));
         }
     }
-    free_blob(blob_ptr);
 
     let mut hr = HRESULT(0);
     let mut unk: Option<IUnknown> = None;
@@ -704,12 +704,6 @@ fn activate_process_loopback_inner(pid: u32) -> Result<IAudioClient, AudioError>
     let unk = unk.ok_or_else(|| AudioError::Api("activation returned no interface".to_string()))?;
     unk.cast::<IAudioClient>()
         .map_err(|e| AudioError::Api(format!("activated interface is not IAudioClient: {e}")))
-}
-
-/// Free the CoTaskMemAlloc'd VT_BLOB payload.
-fn free_blob(ptr: *mut core::ffi::c_void) {
-    // SAFETY: balances the CoTaskMemAlloc in activate_process_loopback_inner.
-    unsafe { CoTaskMemFree(Some(ptr)) };
 }
 
 /// Completion flag shared between the activation callback and the waiter.
