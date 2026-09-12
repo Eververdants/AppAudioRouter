@@ -1,7 +1,7 @@
 /** Tauri invoke wrapper with typed commands. */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { AudioDevice, AudioSession, RememberedRoute, Role } from './types';
+import type { AudioDevice, AudioSession, DeviceDelay, RememberedRoute, Role } from './types';
 
 export async function listDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>('list_devices');
@@ -40,6 +40,23 @@ export async function stopRoute(pid: number): Promise<void> {
 
 export async function getActiveDuplications(): Promise<number[]> {
   return invoke<number[]>('get_active_duplications');
+}
+
+export async function getDeviceDelays(): Promise<DeviceDelay[]> {
+  return invoke<DeviceDelay[]>('get_device_delays');
+}
+
+/** Set a device's delay compensation (ms); live engines pick it up instantly. */
+export async function setDeviceDelay(deviceId: string, delayMs: number): Promise<void> {
+  await invoke('set_device_delay', { deviceId, delayMs });
+}
+
+export async function getDelaySync(): Promise<boolean> {
+  return invoke<boolean>('get_delay_sync');
+}
+
+export async function setDelaySync(enabled: boolean): Promise<void> {
+  await invoke('set_delay_sync', { enabled });
 }
 
 export async function getRememberedRoutes(): Promise<RememberedRoute[]> {

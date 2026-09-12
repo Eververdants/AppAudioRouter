@@ -12,6 +12,10 @@ interface RouterState {
   selectedDeviceIds: string[];
   /** Devices each process is currently routed to, keyed by PID. */
   routedPids: Record<number, string[]>;
+  /** Per-device delay compensation in milliseconds. */
+  deviceDelays: Record<string, number>;
+  /** Whether delay compensation is applied by the engine. */
+  delaySync: boolean;
   autoRemember: boolean;
   logs: LogEntry[];
   loading: boolean;
@@ -24,9 +28,15 @@ interface RouterState {
   toggleAutoRemember: () => void;
   applyRoute: () => Promise<void>;
   stopRoute: (pid: number) => Promise<void>;
+  loadDelaySettings: () => Promise<void>;
+  cycleDeviceDelay: (deviceId: string) => Promise<void>;
+  toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   addLog: (message: string, level?: LogEntry['level']) => void;
 }
+
+/** Delay compensation presets (ms) cycled by clicking a device chip. */
+const DELAY_PRESETS = [0, 100, 150, 200, 250, 300, 400, 500];
 
 let logId = 0;
 
@@ -36,6 +46,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   selectedPid: null,
   selectedDeviceIds: [],
   routedPids: {},
+  deviceDelays: {},
+  delaySync: false,
   autoRemember: false,
   logs: [],
   loading: false,
@@ -133,6 +145,52 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       );
     } catch (e) {
       get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  loadDelaySettings: async () => {
+    try {
+      const [delays, delaySync] = await Promise.all([api.getDeviceDelays(), api.getDelaySync()]);
+      const deviceDelays: Record<string, number> = {};
+      for (const [deviceId, delayMs] of delays) {
+        deviceDelays[deviceId] = delayMs;
+      }
+      set({ deviceDelays, delaySync });
+    } catch (e) {
+      get().addLog(i18next.t('log.delaySettingsFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  cycleDeviceDelay: async (deviceId) => {
+    const current = get().deviceDelays[deviceId] ?? 0;
+    const index = DELAY_PRESETS.indexOf(current);
+    const next = DELAY_PRESETS[(index + 1) % DELAY_PRESETS.length] ?? 0;
+    const device = get().devices.find((d) => d.id === deviceId);
+    set((s) => {
+      const deviceDelays: Record<string, number> = { ...s.deviceDelays };
+      deviceDelays[deviceId] = next;
+      return { deviceDelays };
+    });
+    try {
+      await api.setDeviceDelay(deviceId, next);
+      get().addLog(
+        i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }),
+        'info',
+      );
+    } catch (e) {
+      get().addLog(i18next.t('log.delaySetFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  toggleDelaySync: async () => {
+    const next = !get().delaySync;
+    set({ delaySync: next });
+    try {
+      await api.setDelaySync(next);
+      get().addLog(i18next.t(next ? 'log.delaySyncOn' : 'log.delaySyncOff'), 'info');
+    } catch (e) {
+      set({ delaySync: !next });
+      get().addLog(i18next.t('log.delaySyncFailed', { error: String(e) }), 'error');
     }
   },
 

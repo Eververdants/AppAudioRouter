@@ -8,7 +8,15 @@
     "stopRoute": "停止该进程的路由"
   },
   "header": {
-    "autoRemember": "自动记忆"
+    "autoRemember": "自动记忆",
+    "delaySync": "延迟同步",
+    "delaySyncHint": "补偿较快的设备以对齐较慢（蓝牙）设备。请先选中延迟大的设备，再在下方设置各设备补偿。"
+  },
+  "delayBar": {
+    "title": "延迟：",
+    "deviceHint": "点击调整 {{device}} 的延迟补偿",
+    "primaryHint": "主设备由系统直接播放，无法补偿延迟。请先选中延迟大的（蓝牙）设备，再给其他设备加补偿。",
+    "primary": "主设备"
   },
   "titleBar": {
     "minimize": "最小化",
@@ -50,6 +58,12 @@
     "routeStopped": "已停止 {{process}} 的路由，恢复系统默认",
     "stopRouteFailed": "停止路由失败：{{error}}",
     "duplicationFailed": "进程 {{pid}} 复制路由失败：{{error}}",
-    "duplicationProcessExited": "进程 {{pid}} 已退出，复制路由停止"
+    "duplicationProcessExited": "进程 {{pid}} 已退出，复制路由停止",
+    "delaySet": "已将 {{device}} 的延迟补偿设为 {{n}} ms",
+    "delaySetFailed": "设置延迟失败：{{error}}",
+    "delaySyncOn": "延迟补偿已开启",
+    "delaySyncOff": "延迟补偿已关闭",
+    "delaySyncFailed": "切换延迟补偿失败：{{error}}",
+    "delaySettingsFailed": "加载延迟设置失败：{{error}}"
   }
 }

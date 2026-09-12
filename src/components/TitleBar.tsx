@@ -69,6 +69,8 @@ export function TitleBar() {
   const { theme, toggle } = useTheme();
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
+  const delaySync = useRouterStore((s) => s.delaySync);
+  const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -108,8 +110,21 @@ export function TitleBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        {/* Auto-remember lives here so it stays reachable when the log panel is
-            hidden on narrow windows. */}
+        {/* Auto-remember and delay sync live here so they stay reachable when
+            the log panel is hidden on narrow windows. */}
+        <label
+          className="flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted"
+          title={t('header.delaySyncHint')}
+        >
+          <input
+            type="checkbox"
+            checked={delaySync}
+            onChange={() => void toggleDelaySync()}
+            className="h-3.5 w-3.5 rounded border-border accent-accent"
+          />
+          {t('header.delaySync')}
+        </label>
+
         <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
           <input
             type="checkbox"

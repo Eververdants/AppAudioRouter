@@ -23,6 +23,9 @@ export interface LogEntry {
 /** `(exe_name, device_ids)` — ids in route order, first is the primary. */
 export type RememberedRoute = [exeName: string, deviceIds: string[]];
 
+/** `(device_id, delay_ms)` — software delay compensation for that device. */
+export type DeviceDelay = [deviceId: string, delayMs: number];
+
 export type DuplicationStopReason = 'stopped' | 'process-exited' | 'error';
 
 export interface DuplicationStoppedEvent {

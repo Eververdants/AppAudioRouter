@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
+import { DelayBar } from '@/components/DelayBar';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { TitleBar } from '@/components/TitleBar';
@@ -33,12 +34,17 @@ function afterFirstPaint(task: () => void): () => void {
 export default function App() {
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
+  const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
     // after the first commit, i.e. once there is something real to show.
     void revealMainWindow();
   }, []);
+
+  useEffect(() => {
+    void loadDelaySettings();
+  }, [loadDelaySettings]);
 
   useEffect(() => {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust
@@ -80,12 +86,16 @@ export default function App() {
           <ProcessList />
         </motion.aside>
 
-        {/* Center: concentric router */}
+        {/* Center: concentric router + delay compensation bar */}
         <motion.main
           {...panelEnter}
-          className="flex flex-1 items-center justify-center rounded-xl border border-border bg-bg-secondary"
+          className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-bg-secondary p-3"
         >
-          <ConcentricRouter />
+          {/* min-h-0 lets the stage shrink so the delay bar always fits */}
+          <div className="min-h-0 w-full flex-1">
+            <ConcentricRouter />
+          </div>
+          <DelayBar />
         </motion.main>
 
         {/* Right panel: log (hidden below lg to keep the router usable) */}

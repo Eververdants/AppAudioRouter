@@ -8,7 +8,15 @@
     "stopRoute": "Stop routing this process"
   },
   "header": {
-    "autoRemember": "Auto-remember"
+    "autoRemember": "Auto-remember",
+    "delaySync": "Latency sync",
+    "delaySyncHint": "Compensate fast devices to align with a slow (Bluetooth) device. Select the lagging device first, then set delays below."
+  },
+  "delayBar": {
+    "title": "Delay:",
+    "deviceHint": "Click to adjust delay compensation for {{device}}",
+    "primaryHint": "The primary device is played by the OS directly and cannot be delayed. Select the lagging (Bluetooth) device first, then compensate the others.",
+    "primary": "primary"
   },
   "titleBar": {
     "minimize": "Minimize",
@@ -50,6 +58,12 @@
     "routeStopped": "Stopped routing {{process}}, back to system default",
     "stopRouteFailed": "Failed to stop routing: {{error}}",
     "duplicationFailed": "Duplication failed for PID {{pid}}: {{error}}",
-    "duplicationProcessExited": "PID {{pid}} exited, duplication stopped"
+    "duplicationProcessExited": "PID {{pid}} exited, duplication stopped",
+    "delaySet": "Delay compensation for {{device}} set to {{n}} ms",
+    "delaySetFailed": "Failed to set delay: {{error}}",
+    "delaySyncOn": "Delay compensation enabled",
+    "delaySyncOff": "Delay compensation disabled",
+    "delaySyncFailed": "Failed to toggle delay compensation: {{error}}",
+    "delaySettingsFailed": "Failed to load delay settings: {{error}}"
   }
 }
