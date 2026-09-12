@@ -108,14 +108,106 @@ impl RouteConfig {
 impl RouteConfigInner {
     /// Persist to disk.
     fn persist(&self) -> Result<(), String> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("create_dir_all failed: {e}"))?;
-        }
-        let content = serde_json::to_string_pretty(&self.map)
-            .map_err(|e| format!("serialize failed: {e}"))?;
-        fs::write(&self.path, content).map_err(|e| format!("write config failed: {e}"))?;
-        Ok(())
+        persist_json(&self.path, &self.map)
     }
+}
+
+/// Per-device delay compensation store: device_id -> milliseconds.
+///
+/// Used to align a fast device (e.g. wired speakers) with a slow one (e.g. a
+/// Bluetooth headset whose codec adds inherent hardware latency). Only mirrors
+/// (duplicated devices) can be delayed — the primary device is played by the
+/// OS directly.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct DelayMap {
+    #[serde(default)]
+    delays: HashMap<String, u32>,
+}
+
+/// Manages the delay config file (interior mutability for Tauri State).
+pub struct DelayConfig {
+    inner: Mutex<DelayConfigInner>,
+}
+
+struct DelayConfigInner {
+    path: PathBuf,
+    map: DelayMap,
+}
+
+impl DelayConfig {
+    /// Load config from the app data directory.
+    pub fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let path = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir failed: {e}"))?
+            .join("device-delays.json");
+
+        let map = if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            DelayMap::default()
+        };
+
+        Ok(Self {
+            inner: Mutex::new(DelayConfigInner { path, map }),
+        })
+    }
+
+    /// Get one device's delay in milliseconds (0 when unset).
+    pub fn get(&self, device_id: &str) -> u32 {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .delays
+            .get(device_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Set one device's delay and persist. 0 removes the entry.
+    pub fn set(&self, device_id: &str, delay_ms: u32) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if delay_ms == 0 {
+            inner.map.delays.remove(device_id);
+        } else {
+            inner.map.delays.insert(device_id.to_string(), delay_ms);
+        }
+        inner.persist()
+    }
+
+    /// All entries as `(device_id, delay_ms)` pairs.
+    pub fn all(&self) -> Vec<(String, u32)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .map
+            .delays
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+}
+
+impl DelayConfigInner {
+    /// Persist to disk.
+    fn persist(&self) -> Result<(), String> {
+        persist_json(&self.path, &self.map)
+    }
+}
+
+/// Serialize `value` as pretty JSON and write it to `path`, creating parent
+/// directories as needed.
+fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create_dir_all failed: {e}"))?;
+    }
+    let content =
+        serde_json::to_string_pretty(value).map_err(|e| format!("serialize failed: {e}"))?;
+    fs::write(path, content).map_err(|e| format!("write config failed: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]

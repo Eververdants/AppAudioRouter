@@ -1,11 +1,13 @@
 //! Tauri command handlers.
 
+use std::sync::Arc;
+
 use log::info;
 use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::DuplicationManager;
-use crate::config::RouteConfig;
+use crate::config::{DelayConfig, RouteConfig};
 
 /// List all active render (playback) devices.
 #[tauri::command]
@@ -100,6 +102,40 @@ pub fn stop_route(pid: u32, duplications: State<'_, DuplicationManager>) -> Resu
 #[tauri::command]
 pub fn get_active_duplications(duplications: State<'_, DuplicationManager>) -> Vec<u32> {
     duplications.active_pids()
+}
+
+/// Set a device's delay compensation (milliseconds) and push it to any live
+/// engine using that device.
+#[tauri::command]
+pub fn set_device_delay(
+    device_id: String,
+    delay_ms: u32,
+    delays: State<'_, Arc<DelayConfig>>,
+    duplications: State<'_, DuplicationManager>,
+) -> Result<(), String> {
+    info!("cmd: set_device_delay device={device_id} delay={delay_ms}ms");
+    delays.set(&device_id, delay_ms)?;
+    duplications.update_delay(&device_id, delay_ms);
+    Ok(())
+}
+
+/// All configured device delays as `(device_id, delay_ms)` pairs.
+#[tauri::command]
+pub fn get_device_delays(delays: State<'_, Arc<DelayConfig>>) -> Vec<(String, u32)> {
+    delays.all()
+}
+
+/// Toggle delay compensation for all current and future engines.
+#[tauri::command]
+pub fn set_delay_sync(enabled: bool, duplications: State<'_, DuplicationManager>) {
+    info!("cmd: set_delay_sync enabled={enabled}");
+    duplications.set_delay_sync(enabled);
+}
+
+/// Whether delay compensation is currently enabled.
+#[tauri::command]
+pub fn get_delay_sync(duplications: State<'_, DuplicationManager>) -> bool {
+    duplications.delay_sync()
 }
 
 fn parse_role(role: &str) -> audio::Role {

@@ -22,7 +22,11 @@ fn main() {
             let route_config = config::RouteConfig::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(route_config);
-            app.manage(audio::duplication::DuplicationManager::new());
+            let delays = config::DelayConfig::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            let delays = std::sync::Arc::new(delays);
+            app.manage(delays.clone());
+            app.manage(audio::duplication::DuplicationManager::new(delays));
             spawn_reveal_watchdog(app.handle().clone());
             Ok(())
         })
@@ -35,6 +39,10 @@ fn main() {
             commands::apply_route,
             commands::stop_route,
             commands::get_active_duplications,
+            commands::set_device_delay,
+            commands::get_device_delays,
+            commands::set_delay_sync,
+            commands::get_delay_sync,
             commands::get_remembered_routes,
             commands::clear_route,
         ])
