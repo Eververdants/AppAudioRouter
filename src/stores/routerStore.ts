@@ -178,6 +178,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
+      // The backend rejected the value; undo the optimistic update so the UI
+      // keeps matching what the engine actually applies and persists.
+      set((s) => {
+        const deviceDelays = { ...s.deviceDelays };
+        if (current === 0) {
+          delete deviceDelays[deviceId];
+        } else {
+          deviceDelays[deviceId] = current;
+        }
+        return { deviceDelays };
+      });
       get().addLog(i18next.t('log.delaySetFailed', { error: String(e) }), 'error');
     }
   },
