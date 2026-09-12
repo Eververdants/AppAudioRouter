@@ -32,8 +32,10 @@
 //! the wired device runs ahead by that whole setup time. After the start, every
 //! mirror keeps the same pipeline latency between the capture tap and playback;
 //! clock drift between devices is absorbed by trimming the lagging device's
-//! oldest frames (a few milliseconds every few minutes at typical crystal
-//! tolerance). Hardware latency, e.g. a Bluetooth codec's buffer, adds on top
+//! oldest frames and topping the fast device up with silence (a few
+//! milliseconds every few minutes at typical crystal tolerance). The same
+//! top-up realizes a delay compensation raised while the engine is running.
+//! Hardware latency, e.g. a Bluetooth codec's buffer, adds on top
 //! and is outside software control.
 
 use std::collections::{HashMap, VecDeque};
@@ -148,6 +150,29 @@ impl MirrorChannel {
         let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
         let drop = (frames * block_align).min(ring.len());
         ring.drain(..drop);
+    }
+
+    /// Insert `frames` frames of silence at the front of the ring, clamped to
+    /// the ring's free capacity. This raises the mirror's pipeline to its
+    /// latency target — e.g. right after its delay compensation was increased
+    /// or latency sync was enabled — so the larger target takes effect
+    /// immediately instead of being silently unreachable (a full device buffer
+    /// plus real-time capture inflow never fills the gap on its own).
+    fn prepend_silence(&self, frames: usize, block_align: usize) {
+        if frames == 0 || !self.enabled.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
+        let headroom = self.capacity.saturating_sub(ring.len());
+        let bytes = (frames * block_align).min(headroom - headroom % block_align);
+        if bytes == 0 {
+            return;
+        }
+        // Resize with zeros appended, then rotate them to the front: one
+        // allocation instead of a per-byte push_front.
+        let old_len = ring.len();
+        ring.resize(old_len + bytes, 0);
+        ring.rotate_right(bytes);
     }
 
     /// Enqueue one capture chunk, capping the ring (whole frames only) so a
@@ -803,42 +828,59 @@ fn pump_render(
         }
         let free = session.buffer_frames.saturating_sub(padding);
         let allowed = target.saturating_sub(padding).min(free);
-        if allowed == 0 {
-            continue;
-        }
-        let chunk = mirror.pop(allowed, shared.block_align);
-        if chunk.is_empty() {
-            if padding == 0 {
-                // The pipeline ran dry (fast clock or a silent source); keep
-                // the engine fed with silence until data returns.
-                // SAFETY: silent frames need no data access; the buffer is
-                // valid until ReleaseBuffer.
+        let mut played = 0usize;
+        if allowed > 0 {
+            let chunk = mirror.pop(allowed, shared.block_align);
+            if chunk.is_empty() {
+                if padding == 0 {
+                    // The pipeline ran dry (fast clock or a silent source); keep
+                    // the engine fed with silence until data returns.
+                    // SAFETY: silent frames need no data access; the buffer is
+                    // valid until ReleaseBuffer.
+                    unsafe {
+                        session
+                            .render
+                            .GetBuffer(allowed as u32)
+                            .map_err(|e| com_err("GetBuffer(render)", e))?;
+                        session
+                            .render
+                            .ReleaseBuffer(allowed as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
+                            .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
+                    }
+                    played = allowed;
+                }
+            } else {
+                let frames = (chunk.len() / shared.block_align) as u32;
+                // SAFETY: copy of exactly frames * block_align bytes into the
+                // buffer returned by GetBuffer.
                 unsafe {
-                    session
+                    let dst = session
                         .render
-                        .GetBuffer(allowed as u32)
+                        .GetBuffer(frames)
                         .map_err(|e| com_err("GetBuffer(render)", e))?;
+                    std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, chunk.len());
                     session
                         .render
-                        .ReleaseBuffer(allowed as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
+                        .ReleaseBuffer(frames, 0)
                         .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
                 }
+                played = chunk.len() / shared.block_align;
             }
-        } else {
-            let frames = (chunk.len() / shared.block_align) as u32;
-            // SAFETY: copy of exactly frames * block_align bytes into the
-            // buffer returned by GetBuffer.
-            unsafe {
-                let dst = session
-                    .render
-                    .GetBuffer(frames)
-                    .map_err(|e| com_err("GetBuffer(render)", e))?;
-                std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, chunk.len());
-                session
-                    .render
-                    .ReleaseBuffer(frames, 0)
-                    .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
-            }
+        }
+        // Hold the pipeline at its target, measured after this cycle's write.
+        // Excess (device clock slow) is trimmed once past the slack; a
+        // shortfall (device clock fast, a delay compensation was raised, or
+        // latency sync was just enabled) is topped up with silence so the
+        // target is actually reached instead of decaying to the device buffer
+        // floor — which would also desync the mirrors across every silent
+        // passage of the source app (silent packets are never pushed here).
+        let total = padding + played + mirror.buffered_bytes() / shared.block_align;
+        if total > target + shared.trim_slack_frames {
+            // Writes are capped at the target, so padding never exceeds it and
+            // the excess always fits inside the ring.
+            mirror.drop_oldest(total - target, shared.block_align);
+        } else if total < target {
+            mirror.prepend_silence(target - total, shared.block_align);
         }
     }
 }
@@ -1086,6 +1128,45 @@ mod tests {
         assert_eq!(out.len(), 6 * frame);
         assert_eq!(out[0], 4);
         assert_eq!(out[out.len() - frame], 9);
+    }
+
+    #[test]
+    fn prepend_silence_inserts_zeros_at_front() {
+        let ch = channel(100_000);
+        let frame = 8usize;
+        let mut data = vec![0u8; 10 * frame];
+        for (i, slot) in data.chunks_mut(frame).enumerate() {
+            slot[0] = (i + 1) as u8;
+        }
+        ch.push(&data, frame);
+        ch.prepend_silence(4, frame);
+        let out = ch.pop(999, frame);
+        assert_eq!(out.len(), 14 * frame);
+        assert!(out[..4 * frame].iter().all(|&b| b == 0));
+        // The original data follows the silence, in order.
+        assert_eq!(out[4 * frame], 1);
+        assert_eq!(out[out.len() - frame], 10);
+    }
+
+    #[test]
+    fn prepend_silence_respects_capacity() {
+        let ch = channel(40 * 8);
+        let frame = 8usize;
+        ch.push(&vec![1u8; 30 * frame], frame);
+        // Only 10 frames of headroom remain; the request is clamped to it.
+        ch.prepend_silence(100, frame);
+        assert_eq!(ch.buffered_bytes(), 40 * frame);
+        let out = ch.pop(999, frame);
+        assert!(out[..10 * frame].iter().all(|&b| b == 0));
+        assert_eq!(out[10 * frame], 1);
+    }
+
+    #[test]
+    fn prepend_silence_on_disabled_mirror_is_noop() {
+        let ch = channel(100_000);
+        ch.enabled.store(false, Ordering::Relaxed);
+        ch.prepend_silence(10, 8);
+        assert_eq!(ch.buffered_bytes(), 0);
     }
 
     #[test]
