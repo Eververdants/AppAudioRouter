@@ -23,11 +23,23 @@
 //! watch a shared `shutdown` flag and, when it is set — or when the target
 //! process exits — they clean up, unregister the engine, and notify the
 //! frontend via the `duplication-stopped` event.
+//!
+//! Synchronization: render clients do not start independently. The capture
+//! thread opens a gate once every device is initialized and every ring holds
+//! one latency target of pre-roll (or after a timeout, e.g. a silent app), so
+//! all mirrors Start together instead of whenever their device happens to be
+//! ready — a cold Bluetooth connection can take seconds, and without the gate
+//! the wired device runs ahead by that whole setup time. After the start, every
+//! mirror keeps the same pipeline latency between the capture tap and playback;
+//! clock drift between devices is absorbed by trimming the lagging device's
+//! oldest frames (a few milliseconds every few minutes at typical crystal
+//! tolerance). Hardware latency, e.g. a Bluetooth codec's buffer, adds on top
+//! and is outside software control.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::{info, warn};
 use serde_json::json;
@@ -60,6 +72,18 @@ const RENDER_WAIT_MS: u32 = 250;
 const CAPTURE_WAIT_MS: u32 = 2_000;
 /// Upper bound for the asynchronous process-loopback activation.
 const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(5);
+/// Pipeline latency every mirror keeps between the capture tap and playback,
+/// so all mirrors play the same sample at (approximately) the same moment.
+const LATENCY_TARGET_MS: usize = 100;
+/// How far a mirror's pipeline may drift past the target before its render
+/// thread trims the oldest frames by the excess. Clock crystals differ by tens
+/// of ppm, so this fires rarely and each trim is a few milliseconds of audio.
+const TRIM_SLACK_MS: usize = 20;
+/// Upper bound for waiting on the synchronized start. A silent app never fills
+/// the pre-roll, and starting un-synced while silence plays is harmless.
+const PRE_ROLL_TIMEOUT: Duration = Duration::from_secs(4);
+/// Render-thread poll interval while waiting for the start gate.
+const GO_POLL: Duration = Duration::from_millis(2);
 
 /// Generations handed out to engines so a stale thread can never unregister a
 /// newer engine that replaced it for the same PID.
@@ -105,8 +129,22 @@ struct MirrorChannel {
 }
 
 impl MirrorChannel {
-    /// Enqueue one capture chunk, trimming the ring when device clocks drift
-    /// apart. Drops whole frames only, so the ring stays frame-aligned.
+    /// Current buffered amount in bytes.
+    fn buffered_bytes(&self) -> usize {
+        self.ring.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// Drop the oldest `frames` frames. The ring always holds whole frames,
+    /// so the remainder stays frame-aligned.
+    fn drop_oldest(&self, frames: usize, block_align: usize) {
+        let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
+        let drop = (frames * block_align).min(ring.len());
+        ring.drain(..drop);
+    }
+
+    /// Enqueue one capture chunk, capping the ring (whole frames only) so a
+    /// slow-to-open device cannot accumulate unbounded stale audio before the
+    /// synchronized start; the render side trims toward the latency target.
     fn push(&self, chunk: &[u8], block_align: usize) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
@@ -142,6 +180,16 @@ struct EngineShared {
     format: Vec<u8>,
     /// Bytes per frame of the capture format.
     block_align: usize,
+    /// Frames every mirror keeps buffered (device buffer + ring) between the
+    /// capture tap and playback; identical across mirrors for sync.
+    latency_frames: usize,
+    /// Allowed drift past `latency_frames` before frames get trimmed.
+    trim_slack_frames: usize,
+    /// Set once every mirror is initialized and the pre-roll is filled (or the
+    /// wait timed out); render clients Start together when this is set.
+    go: AtomicBool,
+    /// Render threads that finished device initialization (success or failure).
+    ready_count: AtomicUsize,
 }
 
 /// Per-process duplication engines, managed as Tauri state.
@@ -197,6 +245,10 @@ impl DuplicationManager {
             mirrors,
             format,
             block_align,
+            latency_frames: sample_rate as usize * LATENCY_TARGET_MS / 1000,
+            trim_slack_frames: sample_rate as usize * TRIM_SLACK_MS / 1000,
+            go: AtomicBool::new(false),
+            ready_count: AtomicUsize::new(0),
         });
         self.engines
             .lock()
@@ -359,7 +411,11 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
         render_threads.push(std::thread::spawn(move || render_main(shared, mirror)));
     }
 
-    let reason = capture_packets(shared, &capture, event);
+    let mut gate = StartGate {
+        opened_at: Instant::now(),
+        opened: false,
+    };
+    let reason = capture_packets(shared, &capture, event, &mut gate);
     // SAFETY: Stop on a started client; errors during shutdown are ignored.
     unsafe {
         let _ = client.Stop();
@@ -374,13 +430,46 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
     Ok(reason)
 }
 
+/// Tracks whether the synchronized-start gate has been opened.
+struct StartGate {
+    opened_at: Instant,
+    opened: bool,
+}
+
+/// Open the start gate once every mirror is initialized and holds one latency
+/// target of pre-roll, or after the timeout (a silent app never fills it, and
+/// starting un-synced while silence plays is harmless).
+fn open_gate_when_ready(shared: &Arc<EngineShared>, gate: &mut StartGate) {
+    if gate.opened {
+        return;
+    }
+    let pre_roll = shared.latency_frames * shared.block_align;
+    let all_ready = shared.ready_count.load(Ordering::Relaxed) == shared.mirrors.len();
+    let all_filled = all_ready
+        && shared
+            .mirrors
+            .iter()
+            .filter(|m| m.enabled.load(Ordering::Relaxed))
+            .all(|m| m.buffered_bytes() >= pre_roll);
+    if all_filled || gate.opened_at.elapsed() >= PRE_ROLL_TIMEOUT {
+        gate.opened = true;
+        shared.go.store(true, Ordering::Relaxed);
+        info!(
+            "duplication for PID {} started, pre-roll took {:?}",
+            shared.pid,
+            gate.opened_at.elapsed()
+        );
+    }
+}
+
 /// Drain capture packets until shutdown, error, or process exit.
 fn capture_packets(
     shared: &Arc<EngineShared>,
     capture: &IAudioCaptureClient,
     event: HANDLE,
+    gate: &mut StartGate,
 ) -> ExitReason {
-    match capture_packets_inner(shared, capture, event) {
+    match capture_packets_inner(shared, capture, event, gate) {
         Ok(reason) => reason,
         Err(e) => ExitReason::Error(e),
     }
@@ -390,6 +479,7 @@ fn capture_packets_inner(
     shared: &Arc<EngineShared>,
     capture: &IAudioCaptureClient,
     event: HANDLE,
+    gate: &mut StartGate,
 ) -> Result<ExitReason, AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
@@ -399,6 +489,7 @@ fn capture_packets_inner(
         if shared.shutdown.load(Ordering::Relaxed) {
             return Ok(ExitReason::Stopped);
         }
+        open_gate_when_ready(shared, gate);
         if wait == WAIT_TIMEOUT {
             // The loopback event only fires while the process actually plays
             // audio; use idle timeouts to notice process exit.
@@ -445,20 +536,54 @@ fn capture_packets_inner(
 
 /// Entry point of one mirror's render thread.
 fn render_main(shared: Arc<EngineShared>, mirror: Arc<MirrorChannel>) {
-    if let Err(e) = render_loop(&shared, &mirror) {
-        warn!("mirror device {} failed: {e}", mirror.device_id);
-        mirror.enabled.store(false, Ordering::Relaxed);
+    let com_owned = match crate::audio::init_com() {
+        Ok(owned) => owned,
+        Err(e) => {
+            warn!("mirror device {}: {e}", mirror.device_id);
+            mirror.enabled.store(false, Ordering::Relaxed);
+            // A failed mirror must not hold the synchronized-start gate open.
+            shared.ready_count.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    };
+
+    match open_render_session(&shared, &mirror) {
+        Ok(session) => {
+            shared.ready_count.fetch_add(1, Ordering::Relaxed);
+            render_run(&shared, &mirror, session);
+        }
+        Err(e) => {
+            warn!("mirror device {} failed: {e}", mirror.device_id);
+            mirror.enabled.store(false, Ordering::Relaxed);
+            shared.ready_count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    crate::audio::uninit_com(com_owned);
+}
+
+/// A fully initialized render client, not yet started.
+struct RenderSession {
+    client: IAudioClient,
+    render: IAudioRenderClient,
+    event: HANDLE,
+    buffer_frames: usize,
+}
+
+impl Drop for RenderSession {
+    fn drop(&mut self) {
+        // SAFETY: balances CreateEventW in open_render_session.
+        unsafe {
+            let _ = CloseHandle(self.event);
+        }
     }
 }
 
-fn render_loop(shared: &EngineShared, mirror: &MirrorChannel) -> Result<(), AudioError> {
-    let com_owned = crate::audio::init_com()?;
-    let result = render_packets(shared, mirror);
-    crate::audio::uninit_com(com_owned);
-    result
-}
-
-fn render_packets(shared: &EngineShared, mirror: &MirrorChannel) -> Result<(), AudioError> {
+/// Open and initialize one mirror's render client, without starting it.
+fn open_render_session(
+    shared: &EngineShared,
+    mirror: &MirrorChannel,
+) -> Result<RenderSession, AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
     let device_id = mirror.device_id.clone();
@@ -481,25 +606,9 @@ fn render_packets(shared: &EngineShared, mirror: &MirrorChannel) -> Result<(), A
             .map_err(|e| com_err("Activate(IAudioClient)", e))?
     };
     let event = unsafe {
-        // SAFETY: unnamed auto-reset event, closed at the end of this function.
+        // SAFETY: unnamed auto-reset event; owned by RenderSession.
         CreateEventW(None, false, false, None).map_err(|e| com_err("CreateEventW", e))?
     };
-    let render = render_stream(shared, mirror, &client, event);
-    // SAFETY: the render client is stopped/released before the event closes.
-    unsafe {
-        let _ = CloseHandle(event);
-    }
-    render
-}
-
-fn render_stream(
-    shared: &EngineShared,
-    mirror: &MirrorChannel,
-    client: &IAudioClient,
-    event: HANDLE,
-) -> Result<(), AudioError> {
-    let com_err =
-        |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
     // SAFETY: format is a complete WAVEFORMATEX(EXTENSIBLE) copied from the
     // default device's mix format; auto-convert adapts it to this device.
     let format = unsafe { &*(shared.format.as_ptr() as *const WAVEFORMATEX) };
@@ -533,35 +642,63 @@ fn render_stream(
             .GetBufferSize()
             .map_err(|e| com_err("GetBufferSize", e))?
     } as usize;
-    // SAFETY: Start on a fully initialized render client.
-    unsafe {
-        client.Start().map_err(|e| com_err("Start(render)", e))?;
-    }
-
-    let result = pump_render(shared, mirror, client, &render, event, buffer_frames);
-    // SAFETY: Stop on a started client; errors during shutdown are ignored.
-    unsafe {
-        let _ = client.Stop();
-    }
-    result
+    Ok(RenderSession {
+        client,
+        render,
+        event,
+        buffer_frames,
+    })
 }
 
-/// Event-driven render cycle: keep the device buffer filled from the ring,
-/// writing silence whenever the captured stream has nothing (yet).
-#[allow(clippy::too_many_arguments)]
+/// Wait for the synchronized-start gate, then run the render loop.
+fn render_run(shared: &EngineShared, mirror: &MirrorChannel, session: RenderSession) {
+    // A slow device (e.g. Bluetooth connecting for the first time) holds the
+    // gate closed; the other mirrors wait for it instead of running ahead.
+    while !shared.go.load(Ordering::Relaxed) {
+        if shared.shutdown.load(Ordering::Relaxed) {
+            return;
+        }
+        std::thread::sleep(GO_POLL);
+    }
+    if shared.shutdown.load(Ordering::Relaxed) {
+        return;
+    }
+    // SAFETY: Start on a fully initialized client.
+    if let Err(e) = unsafe { session.client.Start() } {
+        warn!("mirror device {} failed to start: {e}", mirror.device_id);
+        mirror.enabled.store(false, Ordering::Relaxed);
+        return;
+    }
+
+    let result = pump_render(shared, mirror, &session);
+    // SAFETY: Stop on a started client; errors during shutdown are ignored.
+    unsafe {
+        let _ = session.client.Stop();
+    }
+    if let Err(e) = result {
+        warn!("mirror device {} failed: {e}", mirror.device_id);
+        mirror.enabled.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Event-driven render cycle.
+///
+/// Every mirror keeps the same total backlog (device buffer + ring) of
+/// `latency_frames` between the capture tap and playback, so all mirrors play
+/// the same sample at the same moment. A device whose clock runs slow crosses
+/// the trim threshold and drops its oldest frames by the drift amount; a fast
+/// device briefly writes silence instead. Hardware latency (e.g. a Bluetooth
+/// codec's buffer) adds on top of this and is outside software control.
 fn pump_render(
     shared: &EngineShared,
     mirror: &MirrorChannel,
-    client: &IAudioClient,
-    render: &IAudioRenderClient,
-    event: HANDLE,
-    buffer_frames: usize,
+    session: &RenderSession,
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
     loop {
         // SAFETY: valid event handle owned by this thread.
-        let wait = unsafe { WaitForSingleObject(event, RENDER_WAIT_MS) };
+        let wait = unsafe { WaitForSingleObject(session.event, RENDER_WAIT_MS) };
         if shared.shutdown.load(Ordering::Relaxed) {
             return Ok(());
         }
@@ -570,36 +707,52 @@ fn pump_render(
         }
         // SAFETY: padding query on a started render client.
         let padding = unsafe {
-            client
+            session
+                .client
                 .GetCurrentPadding()
                 .map_err(|e| com_err("GetCurrentPadding", e))?
         } as usize;
-        let free = buffer_frames.saturating_sub(padding);
-        if free == 0 {
+        let total = padding + mirror.buffered_bytes() / shared.block_align;
+        if total > shared.latency_frames + shared.trim_slack_frames {
+            // Writes are capped at the latency target, so padding never exceeds
+            // it and the excess always fits inside the ring.
+            mirror.drop_oldest(total - shared.latency_frames, shared.block_align);
+        }
+        let free = session.buffer_frames.saturating_sub(padding);
+        let allowed = shared.latency_frames.saturating_sub(padding).min(free);
+        if allowed == 0 {
             continue;
         }
-        let chunk = mirror.pop(free, shared.block_align);
+        let chunk = mirror.pop(allowed, shared.block_align);
         if chunk.is_empty() {
-            // SAFETY: silent frames need no data access; the buffer is valid
-            // until ReleaseBuffer.
-            unsafe {
-                render
-                    .GetBuffer(free as u32)
-                    .map_err(|e| com_err("GetBuffer(render)", e))?;
-                render
-                    .ReleaseBuffer(free as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
-                    .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
+            if padding == 0 {
+                // The pipeline ran dry (fast clock or a silent source); keep
+                // the engine fed with silence until data returns.
+                // SAFETY: silent frames need no data access; the buffer is
+                // valid until ReleaseBuffer.
+                unsafe {
+                    session
+                        .render
+                        .GetBuffer(allowed as u32)
+                        .map_err(|e| com_err("GetBuffer(render)", e))?;
+                    session
+                        .render
+                        .ReleaseBuffer(allowed as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
+                        .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
+                }
             }
         } else {
             let frames = (chunk.len() / shared.block_align) as u32;
             // SAFETY: copy of exactly frames * block_align bytes into the
             // buffer returned by GetBuffer.
             unsafe {
-                let dst = render
+                let dst = session
+                    .render
                     .GetBuffer(frames)
                     .map_err(|e| com_err("GetBuffer(render)", e))?;
                 std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, chunk.len());
-                render
+                session
+                    .render
                     .ReleaseBuffer(frames, 0)
                     .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
             }
@@ -799,5 +952,64 @@ fn process_alive(pid: u32) -> bool {
         // The process was openable when the route was applied, so an
         // OpenProcess failure now means it is gone.
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel(capacity: usize) -> MirrorChannel {
+        MirrorChannel {
+            device_id: "test".to_string(),
+            ring: Mutex::new(VecDeque::new()),
+            capacity,
+            enabled: AtomicBool::new(true),
+        }
+    }
+
+    #[test]
+    fn push_and_pop_stay_frame_aligned() {
+        let ch = channel(100_000);
+        let frame = 8usize;
+        ch.push(&vec![0u8; 100 * frame], frame);
+        assert_eq!(ch.buffered_bytes(), 100 * frame);
+        assert_eq!(ch.pop(30, frame).len(), 30 * frame);
+        // Asking for more than buffered returns exactly what is left.
+        assert_eq!(ch.pop(999, frame).len(), 70 * frame);
+    }
+
+    #[test]
+    fn push_caps_ring_in_whole_frames() {
+        let ch = channel(1000);
+        let frame = 8usize;
+        ch.push(&vec![0u8; 200 * frame], frame);
+        // 1600 bytes pushed, capped at 1000 — itself a multiple of 8.
+        assert_eq!(ch.buffered_bytes(), 1000);
+    }
+
+    #[test]
+    fn drop_oldest_keeps_newest_frames() {
+        let ch = channel(100_000);
+        let frame = 8usize;
+        let mut data = vec![0u8; 10 * frame];
+        for (i, slot) in data.chunks_mut(frame).enumerate() {
+            slot[0] = i as u8;
+        }
+        ch.push(&data, frame);
+        ch.drop_oldest(4, frame);
+        let out = ch.pop(999, frame);
+        assert_eq!(out.len(), 6 * frame);
+        assert_eq!(out[0], 4);
+        assert_eq!(out[out.len() - frame], 9);
+    }
+
+    #[test]
+    fn disabled_mirror_is_passive() {
+        let ch = channel(100_000);
+        ch.enabled.store(false, Ordering::Relaxed);
+        ch.push(&vec![0u8; 80], 8);
+        assert_eq!(ch.buffered_bytes(), 0);
+        assert!(ch.pop(10, 8).is_empty());
     }
 }
