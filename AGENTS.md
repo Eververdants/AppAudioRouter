@@ -8,7 +8,7 @@
 
 Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript + TailwindCSS + Motion。
 
-核心能力：枚举有音频会话的进程、枚举渲染设备、将进程路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制）、自动记忆路由规则。
+核心能力：枚举有音频会话的进程、枚举渲染设备、将进程路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动与按设备延迟补偿以对齐蓝牙）、自动记忆路由规则。
 
 **硬性约束：无任何第三方 exe 依赖。** 所有音频操作由 Rust 直接调用 Windows Core Audio API。
 
@@ -44,7 +44,7 @@ AppAudioRouter/
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
 │       │   ├── routing.rs      # IPolicyConfig 单设备路由设置
 │       │   └── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
-│       └── config.rs       # 配置持久化（exe -> 设备列表）
+│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms）
 ├── src/                    # React 前端
 │   ├── main.tsx
 │   ├── App.tsx
@@ -135,6 +135,7 @@ AppAudioRouter/
 - 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
 - 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
+- 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`）；标题栏「延迟同步」开关控制是否生效，运行中的引擎实时响应补偿值与开关变化
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
 
