@@ -72,10 +72,6 @@ function VolumeRow({ exeName }: { exeName: string }) {
             if (pending !== null) void setVolumeLimit(exeName, pending);
             setPending(null);
           }}
-          onKeyUp={() => {
-            if (pending !== null) void setVolumeLimit(exeName, pending);
-            setPending(null);
-          }}
           onBlur={() => {
             if (pending !== null) void setVolumeLimit(exeName, pending);
             setPending(null);

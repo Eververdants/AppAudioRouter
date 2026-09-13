@@ -85,7 +85,6 @@ function DelayRow({ deviceId, name }: { deviceId: string; name: string }) {
           setPending((prev) => ({ ...prev, [deviceId]: preset }));
         }}
         onPointerUp={commit}
-        onKeyUp={commit}
         onBlur={commit}
         aria-label={name}
         className="h-1 w-40 flex-none"
