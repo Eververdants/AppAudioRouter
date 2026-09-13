@@ -288,13 +288,24 @@ impl VolumeConfigInner {
 
 /// Serialize `value` as pretty JSON and write it to `path`, creating parent
 /// directories as needed.
+///
+/// The write is atomic: the content lands in a same-directory `.tmp` file first,
+/// then that file is renamed over the target. A crash mid-write can therefore
+/// leave the stale `.tmp` behind, but never a half-written config — renaming
+/// within one directory is atomic on all supported filesystems.
 fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create_dir_all failed: {e}"))?;
     }
     let content =
         serde_json::to_string_pretty(value).map_err(|e| format!("serialize failed: {e}"))?;
-    fs::write(path, content).map_err(|e| format!("write config failed: {e}"))?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, content).map_err(|e| format!("write config failed: {e}"))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        // Best-effort cleanup of the temp file; the real error is the rename.
+        let _ = fs::remove_file(&tmp);
+        format!("commit config failed: {e}")
+    })?;
     Ok(())
 }
 
