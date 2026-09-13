@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::DuplicationManager;
-use crate::config::{DelayConfig, RouteConfig};
+use crate::config::{DelayConfig, RouteConfig, VolumeConfig};
 
 /// List all active render (playback) devices.
 #[tauri::command]
@@ -52,6 +52,9 @@ pub fn get_default_device() -> Result<audio::AudioDevice, String> {
 /// The first device becomes the process's native endpoint (all roles); every
 /// further device receives a duplicated copy of the stream. When only one
 /// device is given, any running duplication engine for the process is stopped.
+// Tauri commands carry their State params in the signature, so the argument
+// count is fixed by the framework.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn apply_route(
     pid: u32,
@@ -59,6 +62,7 @@ pub fn apply_route(
     device_ids: Vec<String>,
     remember: bool,
     config: State<'_, RouteConfig>,
+    volumes: State<'_, Arc<VolumeConfig>>,
     duplications: State<'_, DuplicationManager>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -82,6 +86,15 @@ pub fn apply_route(
     if remember {
         config.save_route(&exe_name, &device_ids)?;
         info!("remembered route: {exe_name} -> {device_ids:?}");
+    }
+
+    // Re-apply a remembered volume cap so a re-routed app never plays louder
+    // than its configured limit. Best-effort: routing already succeeded.
+    let limit = volumes.get(&exe_name);
+    if limit < 100 {
+        if let Err(e) = audio::sessions::set_session_volume(pid, limit as f32 / 100.0) {
+            log::warn!("re-apply volume limit {limit}% to {exe_name} failed: {e}");
+        }
     }
     Ok(())
 }
@@ -136,6 +149,33 @@ pub fn set_delay_sync(enabled: bool, duplications: State<'_, DuplicationManager>
 #[tauri::command]
 pub fn get_delay_sync(duplications: State<'_, DuplicationManager>) -> bool {
     duplications.delay_sync()
+}
+
+/// Set the volume limit (0–100) of an app's live audio session and remember
+/// it per executable so re-routed sessions are capped again automatically.
+#[tauri::command]
+pub fn set_session_volume(
+    pid: u32,
+    exe_name: String,
+    volume: u32,
+    volumes: State<'_, Arc<VolumeConfig>>,
+) -> Result<(), String> {
+    info!("cmd: set_session_volume pid={pid} exe={exe_name} volume={volume}%");
+    if volume > 100 {
+        return Err("volume out of range 0-100".to_string());
+    }
+    let touched = audio::sessions::set_session_volume(pid, volume as f32 / 100.0)
+        .map_err(|e| e.to_string())?;
+    if touched == 0 {
+        return Err(format!("no live audio session for pid {pid}"));
+    }
+    volumes.set(&exe_name, volume)
+}
+
+/// All remembered volume limits as `(exe_name, percent)` pairs.
+#[tauri::command]
+pub fn get_volume_limits(volumes: State<'_, Arc<VolumeConfig>>) -> Vec<(String, u32)> {
+    volumes.all()
 }
 
 fn parse_role(role: &str) -> audio::Role {

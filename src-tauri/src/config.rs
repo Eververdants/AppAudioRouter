@@ -198,6 +198,94 @@ impl DelayConfigInner {
     }
 }
 
+/// Per-app volume limit store: exe_name -> percent (0–100).
+///
+/// A limit is applied as the app's audio-session master volume, so an app can
+/// never play louder than the cap. 100 means "no limit" and is not persisted.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct VolumeMap {
+    #[serde(default)]
+    volumes: HashMap<String, u32>,
+}
+
+/// Manages the volume-limit config file (interior mutability for Tauri State).
+pub struct VolumeConfig {
+    inner: Mutex<VolumeConfigInner>,
+}
+
+struct VolumeConfigInner {
+    path: PathBuf,
+    map: VolumeMap,
+}
+
+impl VolumeConfig {
+    /// Load config from the app data directory.
+    pub fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let path = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir failed: {e}"))?
+            .join("session-volumes.json");
+
+        let map = if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            VolumeMap::default()
+        };
+
+        Ok(Self {
+            inner: Mutex::new(VolumeConfigInner { path, map }),
+        })
+    }
+
+    /// Get one app's volume limit in percent (100 when unset).
+    pub fn get(&self, exe_name: &str) -> u32 {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .volumes
+            .get(exe_name)
+            .copied()
+            .unwrap_or(100)
+    }
+
+    /// Set one app's volume limit (0–100) and persist. 100 removes the entry.
+    pub fn set(&self, exe_name: &str, percent: u32) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if percent >= 100 {
+            inner.map.volumes.remove(exe_name);
+        } else {
+            inner
+                .map
+                .volumes
+                .insert(exe_name.to_string(), percent.min(99));
+        }
+        inner.persist()
+    }
+
+    /// All entries as `(exe_name, percent)` pairs.
+    pub fn all(&self) -> Vec<(String, u32)> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .volumes
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+}
+
+impl VolumeConfigInner {
+    /// Persist to disk.
+    fn persist(&self) -> Result<(), String> {
+        persist_json(&self.path, &self.map)
+    }
+}
+
 /// Serialize `value` as pretty JSON and write it to `path`, creating parent
 /// directories as needed.
 fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {

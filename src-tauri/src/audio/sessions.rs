@@ -8,8 +8,8 @@ use log::info;
 use windows::core::{Interface, PWSTR};
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
-    IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
-    DEVICE_STATE_ACTIVE,
+    IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, ISimpleAudioVolume,
+    MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
@@ -139,6 +139,109 @@ fn collect_device_sessions(
     }
 
     Ok(())
+}
+
+/// Apply `f` to the [`ISimpleAudioVolume`] of every live session owned by
+/// `pid`, across all active render devices.
+///
+/// Returns the number of session volumes touched — 0 means the process has no
+/// live audio session right now.
+fn with_session_volumes(
+    pid: u32,
+    mut f: impl FnMut(&ISimpleAudioVolume) -> Result<(), AudioError>,
+) -> Result<usize, AudioError> {
+    let com_owned = crate::audio::init_com()?;
+
+    let result = (|| -> Result<usize, AudioError> {
+        // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
+        let enumerator: IMMDeviceEnumerator = unsafe {
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| AudioError::Api(format!("CoCreateInstance failed: {e}")))?
+        };
+        // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
+        let devices: IMMDeviceCollection = unsafe {
+            enumerator
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints failed: {e}")))?
+        };
+        let device_count = unsafe {
+            devices
+                .GetCount()
+                .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
+        };
+
+        let mut touched = 0;
+        for d in 0..device_count {
+            // SAFETY: d in [0, device_count).
+            let device: IMMDevice = unsafe {
+                devices
+                    .Item(d)
+                    .map_err(|e| AudioError::Api(format!("Item({d}) failed: {e}")))?
+            };
+            // SAFETY: Activate on an active render device.
+            let manager: IAudioSessionManager2 = unsafe {
+                device
+                    .Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
+                    .map_err(|e| {
+                        AudioError::Api(format!("Activate(IAudioSessionManager2) failed: {e}"))
+                    })?
+            };
+            // SAFETY: GetSessionEnumerator on an active session manager.
+            let session_enum: IAudioSessionEnumerator = unsafe {
+                manager
+                    .GetSessionEnumerator()
+                    .map_err(|e| AudioError::Api(format!("GetSessionEnumerator failed: {e}")))?
+            };
+            let session_count = unsafe {
+                session_enum
+                    .GetCount()
+                    .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
+            };
+
+            for i in 0..session_count {
+                // SAFETY: i in [0, session_count).
+                let control: IAudioSessionControl = unsafe {
+                    session_enum
+                        .GetSession(i)
+                        .map_err(|e| AudioError::Api(format!("GetSession({i}) failed: {e}")))?
+                };
+                // SAFETY: cast to IAudioSessionControl2.
+                let control2: IAudioSessionControl2 = control.cast().map_err(|e| {
+                    AudioError::Api(format!("cast(IAudioSessionControl2) failed: {e}"))
+                })?;
+                let session_pid = unsafe {
+                    control2
+                        .GetProcessId()
+                        .map_err(|e| AudioError::Api(format!("GetProcessId({i}) failed: {e}")))?
+                };
+                if session_pid != pid {
+                    continue;
+                }
+                // SAFETY: the session control object implements ISimpleAudioVolume;
+                // this is the documented per-session volume path.
+                let volume: ISimpleAudioVolume = control.cast().map_err(|e| {
+                    AudioError::Api(format!("cast(ISimpleAudioVolume) failed: {e}"))
+                })?;
+                f(&volume)?;
+                touched += 1;
+            }
+        }
+        Ok(touched)
+    })();
+
+    crate::audio::uninit_com(com_owned);
+    result
+}
+
+/// Set the master volume (0.0–1.0) of every live audio session owned by
+/// `pid`. Returns the number of sessions touched.
+pub fn set_session_volume(pid: u32, volume: f32) -> Result<usize, AudioError> {
+    let volume = volume.clamp(0.0, 1.0);
+    with_session_volumes(pid, |v| {
+        // SAFETY: eventcontext = null means no session event notification GUID.
+        unsafe { v.SetMasterVolume(volume, std::ptr::null()) }
+            .map_err(|e| AudioError::Api(format!("SetMasterVolume failed: {e}")))
+    })
 }
 
 /// Get the executable name for a PID.

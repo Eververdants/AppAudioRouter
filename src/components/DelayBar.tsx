@@ -12,12 +12,12 @@ import { useRouterStore } from '@/stores/routerStore';
 export function DelayBar() {
   const { t } = useTranslation();
   const devices = useRouterStore((s) => s.devices);
-  const selectedPid = useRouterStore((s) => s.selectedPid);
+  const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const cycleDeviceDelay = useRouterStore((s) => s.cycleDeviceDelay);
 
-  const visible = selectedPid !== null && selectedDeviceIds.length > 0;
+  const visible = selectedPids.length > 0 && selectedDeviceIds.length > 0;
 
   return (
     <AnimatePresence>

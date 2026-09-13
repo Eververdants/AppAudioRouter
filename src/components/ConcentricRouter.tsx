@@ -36,7 +36,7 @@ export function ConcentricRouter() {
   const { t } = useTranslation();
   const devices = useRouterStore((s) => s.devices);
   const sessions = useRouterStore((s) => s.sessions);
-  const selectedPid = useRouterStore((s) => s.selectedPid);
+  const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
@@ -46,9 +46,13 @@ export function ConcentricRouter() {
   const [showRipple, setShowRipple] = useState(false);
   const latestRippleKey = useRef(0);
 
-  const selectedSession = sessions.find((s) => s.pid === selectedPid);
-  const activeIds = selectedPid !== null ? (routedPids[selectedPid] ?? []) : [];
-  const canRoute = Boolean(selectedPid && selectedDeviceIds.length > 0);
+  const selectedCount = selectedPids.length;
+  const isMulti = selectedCount > 1;
+  const primarySession = sessions.find((s) => s.pid === selectedPids[0]);
+  // Union of devices the selected processes are currently routed to.
+  const activeIds =
+    selectedCount === 0 ? [] : [...new Set(selectedPids.flatMap((pid) => routedPids[pid] ?? []))];
+  const canRoute = selectedCount > 0 && selectedDeviceIds.length > 0;
 
   const handleRoute = async () => {
     if (!canRoute) return;
@@ -249,7 +253,13 @@ export function ConcentricRouter() {
             type="button"
             onClick={handleRoute}
             disabled={!canRoute}
-            title={canRoute ? t('router.clickToRoute') : undefined}
+            title={
+              canRoute
+                ? selectedPids
+                    .map((pid) => sessions.find((s) => s.pid === pid)?.exe_name ?? `PID ${pid}`)
+                    .join(' · ')
+                : undefined
+            }
             whileHover={canRoute ? { scale: 1.04 } : undefined}
             whileTap={canRoute ? { scale: 0.97 } : undefined}
             transition={{ type: 'spring', stiffness: 380, damping: 24 }}
@@ -265,9 +275,9 @@ export function ConcentricRouter() {
               className="pointer-events-none absolute inset-[6px] rounded-full border border-white/50 dark:border-white/[0.05]"
             />
             <AnimatePresence mode="wait">
-              {selectedSession ? (
+              {primarySession ? (
                 <motion.div
-                  key={selectedSession.pid}
+                  key={selectedPids.join(',')}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
@@ -285,8 +295,10 @@ export function ConcentricRouter() {
                       <polygon points="6 3 21 12 6 21 6 3" />
                     </svg>
                   </span>
-                  <span className="max-w-[104px] truncate text-[13px] font-semibold text-text-primary">
-                    {selectedSession.exe_name}
+                  <span className="max-w-[104px] truncate text-[13px] font-semibold leading-tight text-text-primary">
+                    {isMulti
+                      ? t('router.processCount', { n: selectedCount })
+                      : primarySession.exe_name}
                   </span>
                   <span
                     className={`text-[10px] leading-none ${

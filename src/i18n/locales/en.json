@@ -5,7 +5,11 @@
     "empty": "No processes with audio sessions found",
     "emptyHint": "Play sound in the target app, then refresh",
     "routedBadge": "Routed to {{n}} device(s)",
-    "stopRoute": "Stop routing this process"
+    "stopRoute": "Stop routing this process",
+    "stopAll": "Stop all routing",
+    "multiSelectHint": "Click to select; Ctrl+click to pick several and route them together",
+    "volumeLimit": "Volume limit",
+    "volumeHint": "Cap this app's session volume; restored automatically on re-route"
   },
   "delayBar": {
     "title": "Delay",
@@ -43,7 +47,8 @@
     "selectDevice": "Select a device",
     "clickToRoute": "Click to route",
     "clickToRouteMulti": "Route to {{n}} devices",
-    "routedActive": "{{n}} devices active"
+    "routedActive": "{{n}} devices active",
+    "processCount": "{{n}} processes"
   },
   "logPanel": {
     "title": "Logs"
@@ -64,6 +69,13 @@
     "routedRemembered": "Routed {{process}} to {{device}} (remembered)",
     "routedMulti": "Routed {{process}} to {{device}} (+{{n}} copies)",
     "routedMultiRemembered": "Routed {{process}} to {{device}} (+{{n}} copies, remembered)",
+    "routedMultiProcess": "Routed {{n}} processes to {{device}} (+{{m}} copies)",
+    "routedMultiProcessRemembered": "Routed {{n}} processes to {{device}} (+{{m}} copies, remembered)",
+    "someProcessesGone": "{{n}} selected processes no longer exist, skipped",
+    "stoppedAll": "Stopped all routing ({{n}} processes)",
+    "volumeSet": "Volume limit for {{exe}} set to {{n}}%",
+    "volumeSetFailed": "Failed to set volume limit: {{error}}",
+    "volumeLimitsFailed": "Failed to load volume limits: {{error}}",
     "routeFailed": "Routing failed: {{error}}",
     "routeStopped": "Stopped routing {{process}}, back to system default",
     "stopRouteFailed": "Failed to stop routing: {{error}}",

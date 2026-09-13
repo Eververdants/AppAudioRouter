@@ -5,7 +5,11 @@
     "empty": "未检测到有音频会话的进程",
     "emptyHint": "让目标程序发出声音后刷新",
     "routedBadge": "已路由到 {{n}} 台设备",
-    "stopRoute": "停止该进程的路由"
+    "stopRoute": "停止该进程的路由",
+    "stopAll": "停止全部路由",
+    "multiSelectHint": "点击选择；Ctrl+点击可多选，一起路由",
+    "volumeLimit": "音量上限",
+    "volumeHint": "限制该程序的会话音量，重新路由后自动恢复"
   },
   "delayBar": {
     "title": "延迟",
@@ -43,7 +47,8 @@
     "selectDevice": "选择设备",
     "clickToRoute": "点击路由",
     "clickToRouteMulti": "路由到 {{n}} 台设备",
-    "routedActive": "已路由 {{n}} 台设备"
+    "routedActive": "已路由 {{n}} 台设备",
+    "processCount": "{{n}} 个进程"
   },
   "logPanel": {
     "title": "日志"
@@ -64,6 +69,13 @@
     "routedRemembered": "已将 {{process}} 路由到 {{device}}（已记忆）",
     "routedMulti": "已将 {{process}} 路由到 {{device}}（+{{n}} 台复制）",
     "routedMultiRemembered": "已将 {{process}} 路由到 {{device}}（+{{n}} 台复制，已记忆）",
+    "routedMultiProcess": "已将 {{n}} 个进程路由到 {{device}}（+{{m}} 台复制）",
+    "routedMultiProcessRemembered": "已将 {{n}} 个进程路由到 {{device}}（+{{m}} 台复制，已记忆）",
+    "someProcessesGone": "{{n}} 个所选进程已不存在，已跳过",
+    "stoppedAll": "已停止全部路由（{{n}} 个进程）",
+    "volumeSet": "已将 {{exe}} 的音量上限设为 {{n}}%",
+    "volumeSetFailed": "设置音量上限失败：{{error}}",
+    "volumeLimitsFailed": "加载音量上限失败：{{error}}",
     "routeFailed": "路由失败：{{error}}",
     "routeStopped": "已停止 {{process}} 的路由，恢复系统默认",
     "stopRouteFailed": "停止路由失败：{{error}}",

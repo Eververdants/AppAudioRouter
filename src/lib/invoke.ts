@@ -59,6 +59,20 @@ export async function setDelaySync(enabled: boolean): Promise<void> {
   await invoke('set_delay_sync', { enabled });
 }
 
+/** Cap an app's live session volume (0–100) and remember the limit per exe. */
+export async function setSessionVolume(
+  pid: number,
+  exeName: string,
+  volume: number,
+): Promise<void> {
+  await invoke('set_session_volume', { pid, exeName, volume });
+}
+
+/** All remembered volume limits as `(exe_name, percent)` pairs. */
+export async function getVolumeLimits(): Promise<[string, number][]> {
+  return invoke<[string, number][]>('get_volume_limits');
+}
+
 export async function getRememberedRoutes(): Promise<RememberedRoute[]> {
   return invoke<RememberedRoute[]>('get_remembered_routes');
 }

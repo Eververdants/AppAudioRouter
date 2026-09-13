@@ -27,6 +27,9 @@ fn main() {
             let delays = std::sync::Arc::new(delays);
             app.manage(delays.clone());
             app.manage(audio::duplication::DuplicationManager::new(delays));
+            let volumes = config::VolumeConfig::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            app.manage(std::sync::Arc::new(volumes));
             spawn_reveal_watchdog(app.handle().clone());
             Ok(())
         })
@@ -45,6 +48,8 @@ fn main() {
             commands::get_delay_sync,
             commands::get_remembered_routes,
             commands::clear_route,
+            commands::set_session_volume,
+            commands::get_volume_limits,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
