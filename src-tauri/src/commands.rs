@@ -104,9 +104,12 @@ pub fn apply_route(
 #[tauri::command]
 pub fn stop_route(pid: u32, duplications: State<'_, DuplicationManager>) -> Result<(), String> {
     info!("cmd: stop_route pid={pid}");
+    // Resolve the fallback endpoint before tearing down duplication: if the lookup
+    // fails we return early and the app keeps playing to its current device
+    // instead of being left with no active route at all.
+    let default_device = audio::devices::get_default_render_device().map_err(|e| e.to_string())?;
     duplications.stop(pid);
 
-    let default_device = audio::devices::get_default_render_device().map_err(|e| e.to_string())?;
     audio::routing::set_process_default_device(&default_device.id, pid, audio::Role::All)
         .map_err(|e| e.to_string())
 }

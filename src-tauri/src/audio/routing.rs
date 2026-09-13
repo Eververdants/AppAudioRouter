@@ -246,6 +246,25 @@ fn wrap_device_id(device_id: &str) -> String {
     format!("{MMDEVAPI_TOKEN}{device_id}{RENDER_DEVICE_INTERFACE}")
 }
 
+/// Validate a device id before it reaches any COM call.
+///
+/// Endpoint ids are non-empty, bounded in length (a few hundred chars at most),
+/// and come from device enumeration in practice — but the value crosses the
+/// frontend boundary, so treat it as untrusted: reject anything blank or absurd
+/// long before it is baked into a symlink and handed to the audio service.
+pub fn validate_device_id(device_id: &str) -> Result<(), AudioError> {
+    if device_id.is_empty() {
+        return Err(AudioError::Api("empty device id".to_string()));
+    }
+    // A real endpoint id is well under this; the bound stops runaway input from
+    // being copied into stack buffers and COM calls.
+    const MAX_DEVICE_ID_LEN: usize = 1024;
+    if device_id.len() > MAX_DEVICE_ID_LEN {
+        return Err(AudioError::Api("device id too long".to_string()));
+    }
+    Ok(())
+}
+
 fn role_values(role: Role) -> &'static [i32] {
     match role {
         Role::Console => &[ROLE_CONSOLE],
@@ -264,6 +283,7 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
     if pid == 0 {
         return Err(AudioError::Api("invalid pid".to_string()));
     }
+    validate_device_id(device_id)?;
     let device_id = device_id.to_string();
     // DllGetActivationFactory of AudioSes returns CLASS_E_CLASSNOTAVAILABLE on
     // an STA thread (Tauri sync commands run on the main thread, which WebView2
@@ -417,6 +437,7 @@ impl Drop for PolicyConfig {
 
 /// Set the system default audio device (applies to apps using the default).
 pub fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError> {
+    validate_device_id(device_id)?;
     let device_id = device_id.to_string();
     // Keep both routing channels off the main STA thread for consistency.
     std::thread::spawn(move || {
