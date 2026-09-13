@@ -30,13 +30,14 @@ interface RouterState {
   stopRoute: (pid: number) => Promise<void>;
   loadDelaySettings: () => Promise<void>;
   cycleDeviceDelay: (deviceId: string) => Promise<void>;
+  setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
   toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   addLog: (message: string, level?: LogEntry['level']) => void;
 }
 
-/** Delay compensation presets (ms) cycled by clicking a device chip. */
-const DELAY_PRESETS = [0, 100, 150, 200, 250, 300, 400, 500];
+/** Delay compensation presets (ms) cycled by the chips and offered by the settings sliders. */
+export const DELAY_PRESETS = [0, 100, 150, 200, 250, 300, 400, 500];
 
 let logId = 0;
 
@@ -165,16 +166,18 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const current = get().deviceDelays[deviceId] ?? 0;
     const index = DELAY_PRESETS.indexOf(current);
     const next = DELAY_PRESETS[(index + 1) % DELAY_PRESETS.length] ?? 0;
+    await get().setDeviceDelayValue(deviceId, next);
+  },
+
+  setDeviceDelayValue: async (deviceId, delayMs) => {
+    const current = get().deviceDelays[deviceId] ?? 0;
+    if (current === delayMs) return;
     const device = get().devices.find((d) => d.id === deviceId);
-    set((s) => {
-      const deviceDelays: Record<string, number> = { ...s.deviceDelays };
-      deviceDelays[deviceId] = next;
-      return { deviceDelays };
-    });
+    set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: delayMs } }));
     try {
-      await api.setDeviceDelay(deviceId, next);
+      await api.setDeviceDelay(deviceId, delayMs);
       get().addLog(
-        i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }),
+        i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: delayMs }),
         'info',
       );
     } catch (e) {

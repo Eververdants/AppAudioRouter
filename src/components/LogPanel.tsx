@@ -16,8 +16,17 @@ export function LogPanel() {
   }, [lastLogId]);
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-border bg-bg-secondary p-4">
-      <h2 className="mb-3 text-sm font-semibold text-text-primary">{t('logPanel.title')}</h2>
+    <div className="flex h-full flex-col rounded-2xl border border-glass bg-glass p-4 shadow-glass backdrop-blur-xl">
+      <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-text-primary">
+        {t('logPanel.title')}
+        {/* live dot: subtle heartbeat so the panel reads as "recording" */}
+        <motion.span
+          aria-hidden="true"
+          className="h-1.5 w-1.5 rounded-full bg-success"
+          animate={{ opacity: [1, 0.3, 1] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      </h2>
 
       <div className="flex-1 overflow-y-auto font-mono text-[11px]">
         <AnimatePresence initial={false}>
@@ -29,9 +38,9 @@ export function LogPanel() {
               exit={{ opacity: 0 }}
               className={`py-0.5 ${
                 log.level === 'success'
-                  ? 'text-green-500'
+                  ? 'text-success'
                   : log.level === 'error'
-                    ? 'text-red-500'
+                    ? 'text-error'
                     : 'text-text-secondary'
               }`}
             >

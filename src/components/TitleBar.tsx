@@ -1,10 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import appIcon from '@/assets/app-icon.png';
-import { LanguageToggle } from '@/components/LanguageToggle';
-import { ThemeToggle } from '@/components/ThemeToggle';
-import { useTheme } from '@/hooks/useTheme';
-import { useRouterStore } from '@/stores/routerStore';
 import {
   closeWindow,
   isWindowMaximized,
@@ -59,18 +56,19 @@ function WindowControl({
  * Custom title bar replacing the native one.
  *
  * The window is frameless, so this bar owns the whole caption: it is the drag
- * handle (`data-tauri-drag-region`), it hosts the app-level controls that used
- * to live in the in-app header, and it draws the minimize / maximize / close
- * buttons. Interactive children must not carry the drag attribute, otherwise
- * they would stop receiving clicks.
+ * handle (`data-tauri-drag-region`), it draws the minimize / maximize / close
+ * buttons, and it toggles between the router view and the settings page.
+ * Interactive children must not carry the drag attribute, otherwise they would
+ * stop receiving clicks.
  */
-export function TitleBar() {
+export function TitleBar({
+  settingsOpen,
+  onToggleSettings,
+}: {
+  settingsOpen: boolean;
+  onToggleSettings: () => void;
+}) {
   const { t } = useTranslation();
-  const { theme, toggle } = useTheme();
-  const autoRemember = useRouterStore((s) => s.autoRemember);
-  const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
-  const delaySync = useRouterStore((s) => s.delaySync);
-  const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -97,7 +95,7 @@ export function TitleBar() {
     <header
       data-tauri-drag-region
       style={{ height: BAR_HEIGHT }}
-      className="flex flex-none select-none items-stretch justify-between border-b border-border bg-bg-secondary"
+      className="relative z-20 flex flex-none select-none items-stretch justify-between border-b border-glass bg-glass backdrop-blur-xl"
     >
       {/* Brand. `pointer-events-none` keeps the whole area draggable instead of
           swallowing the press on the text. */}
@@ -110,35 +108,38 @@ export function TitleBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        {/* Auto-remember and delay sync live here so they stay reachable when
-            the log panel is hidden on narrow windows. */}
-        <label
-          className="flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted"
-          title={t('header.delaySyncHint')}
+        <motion.button
+          type="button"
+          onClick={onToggleSettings}
+          aria-label={t('settings.title')}
+          title={t('settings.title')}
+          aria-pressed={settingsOpen}
+          whileHover={{ rotate: 30, scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+          className={`mr-1 flex h-7 w-7 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+            settingsOpen
+              ? 'bg-accent-muted text-accent'
+              : 'text-text-secondary hover:bg-bg-tertiary hover:text-accent'
+          }`}
         >
-          <input
-            type="checkbox"
-            checked={delaySync}
-            onChange={() => void toggleDelaySync()}
-            className="h-3.5 w-3.5 rounded border-border accent-accent"
-          />
-          {t('header.delaySync')}
-        </label>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </motion.button>
 
-        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
-          <input
-            type="checkbox"
-            checked={autoRemember}
-            onChange={toggleAutoRemember}
-            className="h-3.5 w-3.5 rounded border-border accent-accent"
-          />
-          {t('header.autoRemember')}
-        </label>
-
-        <LanguageToggle />
-        <ThemeToggle theme={theme} onToggle={toggle} />
-
-        <div className="ml-1 flex h-full items-stretch">
+        <div className="flex h-full items-stretch">
           <WindowControl label={t('titleBar.minimize')} onClick={() => void minimizeWindow()}>
             <line x1="0" y1="5" x2="10" y2="5" />
           </WindowControl>

@@ -49,12 +49,15 @@ AppAudioRouter/
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
-│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（含设备列表）
+│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（含设备列表与音频流连线）
 │   │   ├── ProcessList.tsx
+│   │   ├── DelayBar.tsx          # 延迟补偿快捷条（档位循环点击）
+│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟滑杆/关于）
 │   │   ├── LogPanel.tsx
-│   │   ├── ThemeToggle.tsx
-│   │   ├── LanguageToggle.tsx
-│   │   └── TitleBar.tsx    # 自定义标题栏（无边框窗口）
+│   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
+│   │   └── ui/             # 基础控件
+│   │       ├── Switch.tsx              # 动画开关
+│   │       └── SegmentedControl.tsx    # 滑动胶囊分段控件
 │   ├── hooks/              # 自定义 hooks
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
@@ -135,7 +138,7 @@ AppAudioRouter/
 - 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
 - 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
-- 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`）；标题栏「延迟同步」开关控制是否生效，运行中的引擎实时响应补偿值与开关变化
+- 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`）；设置页面「延迟同步」开关控制是否生效（主界面延迟条可快捷循环档位，设置页可滑杆精调），运行中的引擎实时响应补偿值与开关变化
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
 
@@ -185,15 +188,17 @@ AppAudioRouter/
 
 ## 同心圆 UI 规范
 
-- 中心圆：当前选中进程，显示进程名 + 目标设备数（点击路由到选中的设备集合）
-- 中环：涟漪动画，路由操作时触发
-- 外环：设备列表（**多选**），每个设备为一个弧段/节点
+- 中心圆：当前选中进程，显示进程名 + 目标设备数（点击路由到选中的设备集合）；液态玻璃质感（accent 渐变 + 顶部高光 + 内圈描边），可路由时有呼吸光晕
+- 中环：涟漪动画，路由操作时触发（双波纹）；慢速旋转装饰环含轨道点
+- 音频流连线：中心到每个选中设备的虚线曲线（统一顺时针弧度），持续向外流动；已生效路由的连线更亮且带光晕
+- 外环：设备列表（**多选**），每个设备为一个玻璃胶囊节点
   - 第 1 个选中设备 = 主设备（实心 accent 徽标 "1"）
   - 其余选中设备 = 复制目标（描边样式 + 序号徽标）
-  - 已在当前路由中但未选中的设备带 accent 圆点
-- 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）
+  - 已在当前路由中的设备带 success 圆点 + 扩散脉冲光环
+- 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）
 - 激活状态：`scale(1.05)` + `box-shadow` 扩散
 - 路由动画：spring stiffness=300, damping=20
+- 视觉体系：液态玻璃（`--glass-*` tokens + backdrop-blur + shadow-glass），body 环境渐变 + App 内漂移光晕为玻璃提供"折射"色彩；所有微动效统一走 Motion，不手写 @keyframes
 
 ---
 

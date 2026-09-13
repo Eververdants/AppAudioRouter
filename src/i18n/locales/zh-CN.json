@@ -7,16 +7,30 @@
     "routedBadge": "已路由到 {{n}} 台设备",
     "stopRoute": "停止该进程的路由"
   },
-  "header": {
-    "autoRemember": "自动记忆",
-    "delaySync": "延迟同步",
-    "delaySyncHint": "补偿较快的设备以对齐较慢（蓝牙）设备。请先选中延迟大的设备，再在下方设置各设备补偿。"
-  },
   "delayBar": {
-    "title": "延迟：",
+    "title": "延迟",
     "deviceHint": "点击调整 {{device}} 的延迟补偿",
     "primaryHint": "主设备由系统直接播放，无法补偿延迟。请先选中延迟大的（蓝牙）设备，再给其他设备加补偿。",
     "primary": "主设备"
+  },
+  "settings": {
+    "title": "设置",
+    "back": "返回",
+    "appearance": "外观",
+    "theme": "主题",
+    "themeLight": "浅色",
+    "themeDark": "深色",
+    "language": "语言",
+    "routing": "路由",
+    "autoRemember": "自动记忆",
+    "autoRememberDesc": "记住每个进程的设备路由，下次自动恢复",
+    "delaySync": "延迟同步",
+    "delaySyncDesc": "补偿较快的设备以对齐较慢（蓝牙）设备",
+    "delays": "延迟补偿",
+    "delayPrimaryNote": "主设备由系统直接播放、无法补偿；延迟较大的（蓝牙）设备应作为复制目标。拖动滑杆，松手后生效。",
+    "noDevices": "暂无音频设备",
+    "about": "关于",
+    "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
   },
   "titleBar": {
     "minimize": "最小化",
@@ -33,10 +47,6 @@
   },
   "logPanel": {
     "title": "日志"
-  },
-  "theme": {
-    "toLight": "切换到亮色主题",
-    "toDark": "切换到暗色主题"
   },
   "language": {
     "label": "语言",
