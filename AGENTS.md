@@ -44,20 +44,21 @@ AppAudioRouter/
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
 │       │   ├── routing.rs      # IPolicyConfig 单设备路由设置
 │       │   └── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
-│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms；session-volumes.json: exe -> 音量上限 %）
+│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；session-volumes.json: exe -> 音量上限 %）
 ├── src/                    # React 前端
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
 │   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（含设备列表与音频流连线）
 │   │   ├── ProcessList.tsx
-│   │   ├── DelayBar.tsx          # 延迟补偿快捷条（档位循环点击）
-│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟滑杆/关于）
+│   │   ├── DelayPanel.tsx        # 延迟补偿面板（常驻舞台底部，每台复制设备一个 ±1s 步进控件）
+│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟范围与逐设备步进/关于）
 │   │   ├── LogPanel.tsx
 │   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
 │   │   └── ui/             # 基础控件
 │   │       ├── Switch.tsx              # 动画开关
-│   │       └── SegmentedControl.tsx    # 滑动胶囊分段控件
+│   │       ├── SegmentedControl.tsx    # 滑动胶囊分段控件
+│   │       └── DelayStepper.tsx        # 延迟步进控件（−/毫秒输入/+，一步 1 秒）
 │   ├── hooks/              # 自定义 hooks
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
@@ -72,6 +73,7 @@ AppAudioRouter/
 │   │       └── zh-CN.json
 │   ├── lib/                # 工具函数
 │   │   ├── invoke.ts       # Tauri invoke 封装
+│   │   ├── delay.ts        # 延迟步进/钳制/范围换算
 │   │   ├── types.ts        # 共享类型定义
 │   │   └── window.ts       # 窗口控制（懒加载 Tauri API）
 │   └── styles/
@@ -138,8 +140,10 @@ AppAudioRouter/
 - 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
 - 进程选择是有序集合（`selectedPids`）：单击单选，Ctrl+点击多选；一次路由操作应用到全部选中进程
 - 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
+- 系统默认渲染设备由 `get_default_device` 取得并存入 `defaultDeviceId`；进程无可记忆路由时以它作为默认关联设备（选中进程即自动选中），进程列表每行显示该进程当前播放到的设备
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
-- 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`）；设置页面「延迟同步」开关控制是否生效（主界面延迟条可快捷循环档位，设置页可滑杆精调），运行中的引擎实时响应补偿值与开关变化
+- 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`，设备 -> 有符号延迟 ms，另有 `delay_range_ms` 记录正负范围上限）；引擎侧语义：正值让该镜像设备延后，负值表示它是组内最早的一台、改为把其余镜像一并延后（软件延迟只能加不能减）；主设备由系统直接播放、不参与补偿
+- 延迟调节入口是常驻的 `DelayPanel`（舞台底部，非悬浮/非隐藏）：标题 + 「延迟同步」开关 + 每台复制设备一个 `DelayStepper`（− / 毫秒输入 / +，步进 1 秒，数值可精确键入）；范围在设置页用 ±1/2/5/10 秒分段控件调整，缩小范围时前后端同时把越界值钳到新上限；运行中的引擎实时响应补偿值与开关变化
 - 音量上限按 exe 持久化到 `app_data_dir/session-volumes.json`（`config.rs`，exe -> %），通过 `ISimpleAudioVolume` 设置会话主音量，`apply_route` 时自动重放；100 表示不限制（不落盘）
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
@@ -152,6 +156,7 @@ AppAudioRouter/
 - `darkMode: 'class'` 策略
 - 主题切换通过 `document.documentElement.classList.toggle('dark')`
 - 持久化用户偏好到 `localStorage` + 跟随系统初始值
+- 色板为青色（cyan）信号色，不用靛紫/紫罗兰；改色时 `:root` / `.dark` 两份定义、`--accent-rgb` 镜像通道与 `--ambient-*` 环境光必须一起改
 
 ```css
 :root {
@@ -161,10 +166,10 @@ AppAudioRouter/
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
   --text-muted: #71717a;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-muted: rgba(99, 102, 241, 0.12);
-  --accent-glow: rgba(99, 102, 241, 0.35);
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-muted: rgba(8, 145, 178, 0.12);
+  --accent-glow: rgba(8, 145, 178, 0.32);
   --border: #e4e4e7;
   --success: #10b981;
   --error: #ef4444;
@@ -176,10 +181,10 @@ AppAudioRouter/
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
   --text-muted: #a1a1aa;
-  --accent: #818cf8;
-  --accent-hover: #6366f1;
-  --accent-muted: rgba(129, 140, 248, 0.14);
-  --accent-glow: rgba(129, 140, 248, 0.3);
+  --accent: #22d3ee;
+  --accent-hover: #06b6d4;
+  --accent-muted: rgba(34, 211, 238, 0.14);
+  --accent-glow: rgba(34, 211, 238, 0.28);
   --border: #27272a;
   --success: #34d399;
   --error: #f87171;
@@ -197,7 +202,9 @@ AppAudioRouter/
   - 第 1 个选中设备 = 主设备（实心 accent 徽标 "1"）
   - 其余选中设备 = 复制目标（描边样式 + 序号徽标）
   - 已在当前路由中的设备带 success 圆点 + 扩散脉冲光环
-- 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）
+  - 系统默认播放设备在节点右下角带一个 muted 小圆点（title 提示）
+- 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）；每行下方显示该进程当前播放到的设备（路由主设备或系统默认设备）
+- 舞台底部常驻延迟面板（`DelayPanel`），未选择进程/设备时展示说明文案而不是隐藏入口
 - 激活状态：`scale(1.05)` + `box-shadow` 扩散
 - 路由动画：spring stiffness=300, damping=20
 - 视觉体系：液态玻璃（`--glass-*` tokens + backdrop-blur + shadow-glass），body 环境渐变 + App 内漂移光晕为玻璃提供"折射"色彩；所有微动效统一走 Motion，不手写 @keyframes
