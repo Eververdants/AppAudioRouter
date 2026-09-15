@@ -112,16 +112,50 @@ impl RouteConfigInner {
     }
 }
 
-/// Per-device delay compensation store: device_id -> milliseconds.
+/// Default half-range of the delay controls: the largest magnitude a delay may
+/// be set to (±5 s).
+pub const DELAY_RANGE_DEFAULT_MS: u32 = 5_000;
+/// Lower bound of the configurable range — one step of the UI, so a smaller
+/// range would leave nothing to adjust.
+pub const DELAY_RANGE_MIN_MS: u32 = 1_000;
+/// Upper bound of the configurable range. The duplication engine sizes its
+/// ring buffers for the worst case it allows (largest positive delay plus the
+/// largest group shift), so raising this costs memory per mirror.
+pub const DELAY_RANGE_MAX_MS: u32 = 10_000;
+
+/// Per-device delay compensation store: device_id -> milliseconds (signed).
 ///
 /// Used to align a fast device (e.g. wired speakers) with a slow one (e.g. a
 /// Bluetooth headset whose codec adds inherent hardware latency). Only mirrors
-/// (duplicated devices) can be delayed — the primary device is played by the
-/// OS directly.
-#[derive(Debug, Default, Serialize, Deserialize)]
+/// (duplicated devices) can be compensated — the primary device is played by
+/// the OS directly.
+///
+/// A positive value holds that mirror back; a negative value marks it as the
+/// earliest device of the group, which lifts every *other* mirror by the same
+/// amount instead (software delay can only add latency, never remove it).
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DelayMap {
     #[serde(default)]
-    delays: HashMap<String, u32>,
+    delays: HashMap<String, i32>,
+    /// Largest magnitude a delay may be set to, in milliseconds. Persisted next
+    /// to the values so the engine and the UI agree on the same bound.
+    #[serde(default = "default_delay_range_ms")]
+    delay_range_ms: u32,
+}
+
+impl Default for DelayMap {
+    fn default() -> Self {
+        Self {
+            delays: HashMap::new(),
+            delay_range_ms: default_delay_range_ms(),
+        }
+    }
+}
+
+/// Serde default for [`DelayMap::delay_range_ms`], applied to configs written
+/// before the range was configurable.
+fn default_delay_range_ms() -> u32 {
+    DELAY_RANGE_DEFAULT_MS
 }
 
 /// Manages the delay config file (interior mutability for Tauri State).
@@ -132,6 +166,20 @@ pub struct DelayConfig {
 struct DelayConfigInner {
     path: PathBuf,
     map: DelayMap,
+}
+
+impl DelayMap {
+    /// Pull the range and every stored value into the supported bounds: values
+    /// that no longer fit are clamped to the new bound, and ones clamped to 0
+    /// are dropped.
+    fn clamp_to_range(&mut self, range_ms: u32) {
+        let range = range_ms.clamp(DELAY_RANGE_MIN_MS, DELAY_RANGE_MAX_MS) as i32;
+        self.delay_range_ms = range as u32;
+        for delay in self.delays.values_mut() {
+            *delay = (*delay).clamp(-range, range);
+        }
+        self.delays.retain(|_, delay| *delay != 0);
+    }
 }
 
 impl DelayConfig {
@@ -157,7 +205,7 @@ impl DelayConfig {
     }
 
     /// Get one device's delay in milliseconds (0 when unset).
-    pub fn get(&self, device_id: &str) -> u32 {
+    pub fn get(&self, device_id: &str) -> i32 {
         self.inner
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -168,9 +216,37 @@ impl DelayConfig {
             .unwrap_or(0)
     }
 
-    /// Set one device's delay and persist. 0 removes the entry.
-    pub fn set(&self, device_id: &str, delay_ms: u32) -> Result<(), String> {
+    /// Largest magnitude a delay may be set to, in milliseconds.
+    pub fn range_ms(&self) -> u32 {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .delay_range_ms
+    }
+
+    /// Set the delay range and pull every stored value into it, so the engine
+    /// never applies a delay the UI is unable to show. `range_ms` is clamped to
+    /// the supported bounds.
+    pub fn set_range_ms(&self, range_ms: u32) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.map.clamp_to_range(range_ms);
+        inner.persist()
+    }
+
+    /// Set one device's delay and persist. 0 removes the entry.
+    ///
+    /// A magnitude beyond the configured range is rejected rather than clamped:
+    /// the caller (the UI) is expected to stay in range, and a silent clamp
+    /// would leave the two sides disagreeing about the applied value.
+    pub fn set(&self, device_id: &str, delay_ms: i32) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let range = inner.map.delay_range_ms as i64;
+        if (delay_ms as i64).abs() > range {
+            return Err(format!(
+                "delay {delay_ms} ms is outside the configured ±{range} ms range"
+            ));
+        }
         if delay_ms == 0 {
             inner.map.delays.remove(device_id);
         } else {
@@ -180,7 +256,7 @@ impl DelayConfig {
     }
 
     /// All entries as `(device_id, delay_ms)` pairs.
-    pub fn all(&self) -> Vec<(String, u32)> {
+    pub fn all(&self) -> Vec<(String, i32)> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
             .map
@@ -343,5 +419,50 @@ mod tests {
         let map: RouteMap = serde_json::from_str(r#"{"routes": {"a.exe": ["x", "y"]}}"#).unwrap();
         let json = serde_json::to_string(&map).unwrap();
         assert_eq!(json, r#"{"routes":{"a.exe":["x","y"]}}"#);
+    }
+
+    #[test]
+    fn delay_config_loads_unsigned_values_written_before_signed_delays() {
+        let map: DelayMap = serde_json::from_str(r#"{"delays": {"dev": 300}}"#).unwrap();
+        assert_eq!(map.delays["dev"], 300);
+        // No range stored yet: the default applies.
+        assert_eq!(map.delay_range_ms, DELAY_RANGE_DEFAULT_MS);
+    }
+
+    #[test]
+    fn delay_config_roundtrips_signed_values() {
+        let map: DelayMap =
+            serde_json::from_str(r#"{"delays":{"early":-1000,"late":2000},"delay_range_ms":3000}"#)
+                .unwrap();
+        assert_eq!(map.delays["early"], -1000);
+        assert_eq!(map.delays["late"], 2000);
+        assert_eq!(map.delay_range_ms, 3000);
+    }
+
+    #[test]
+    fn lowering_the_range_clamps_and_drops_delays() {
+        let mut map = DelayMap {
+            delays: HashMap::from([
+                ("big".to_string(), 5_000),
+                ("negative".to_string(), -4_000),
+                ("small".to_string(), -500),
+            ]),
+            delay_range_ms: DELAY_RANGE_MAX_MS,
+        };
+        map.clamp_to_range(2_000);
+        assert_eq!(map.delay_range_ms, 2_000);
+        assert_eq!(map.delays["big"], 2_000);
+        assert_eq!(map.delays["negative"], -2_000);
+        // -500 is already inside ±2 s, so it survives untouched.
+        assert_eq!(map.delays["small"], -500);
+    }
+
+    #[test]
+    fn delay_range_is_clamped_to_the_supported_bounds() {
+        let mut map = DelayMap::default();
+        map.clamp_to_range(60_000);
+        assert_eq!(map.delay_range_ms, DELAY_RANGE_MAX_MS);
+        map.clamp_to_range(0);
+        assert_eq!(map.delay_range_ms, DELAY_RANGE_MIN_MS);
     }
 }

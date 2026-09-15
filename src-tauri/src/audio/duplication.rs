@@ -26,20 +26,23 @@
 //!
 //! Synchronization: render clients do not start independently. The capture
 //! thread opens a gate once every device is initialized and every ring holds
-//! one latency target of pre-roll (or after a timeout, e.g. a silent app), so
+//! one base pipeline of pre-roll (or after a timeout, e.g. a silent app), so
 //! all mirrors Start together instead of whenever their device happens to be
 //! ready — a cold Bluetooth connection can take seconds, and without the gate
 //! the wired device runs ahead by that whole setup time. After the start, every
-//! mirror keeps the same pipeline latency between the capture tap and playback;
-//! clock drift between devices is absorbed by trimming the lagging device's
-//! oldest frames and topping the fast device up with silence (a few
-//! milliseconds every few minutes at typical crystal tolerance). The same
-//! top-up realizes a delay compensation raised while the engine is running.
-//! Hardware latency, e.g. a Bluetooth codec's buffer, adds on top
+//! mirror keeps its own backlog between the capture tap and playback: the same
+//! base latency for all of them, plus its per-device delay compensation, so
+//! they play the same sample at the same moment offset by exactly the
+//! configured delays. A delay is realized as silence placed ahead of the
+//! mirror's audio, and clock drift between devices is absorbed by trimming the
+//! lagging device's oldest frames and topping the fast device up with silence
+//! (a few milliseconds every few minutes at typical crystal tolerance). The
+//! same top-up realizes a delay compensation raised while the engine is
+//! running. Hardware latency, e.g. a Bluetooth codec's buffer, adds on top
 //! and is outside software control.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -65,7 +68,7 @@ use windows::Win32::System::Threading::{
 };
 
 use crate::audio::AudioError;
-use crate::config::DelayConfig;
+use crate::config::{DelayConfig, DELAY_RANGE_MAX_MS};
 
 /// Shared-mode stream buffer, in hundreds of nanoseconds (200 ms).
 const STREAM_BUFFER_DURATION: i64 = 2_000_000;
@@ -87,10 +90,6 @@ const TRIM_SLACK_MS: usize = 20;
 const PRE_ROLL_TIMEOUT: Duration = Duration::from_secs(4);
 /// Render-thread poll interval while waiting for the start gate.
 const GO_POLL: Duration = Duration::from_millis(2);
-/// Upper bound for a mirror's delay compensation (milliseconds). The UI offers
-/// presets up to this value; the ring buffer is sized to hold the largest
-/// possible pre-roll.
-const MAX_DELAY_MS: u32 = 500;
 
 /// Generations handed out to engines so a stale thread can never unregister a
 /// newer engine that replaced it for the same PID.
@@ -131,8 +130,10 @@ struct MirrorChannel {
     /// Ring capacity in bytes (base latency + max delay + margin).
     capacity: usize,
     /// Extra software delay for this mirror in milliseconds, used to align a
-    /// fast device with a slow one (e.g. a Bluetooth headset). Live-adjustable.
-    delay_ms: AtomicU32,
+    /// fast device with a slow one (e.g. a Bluetooth headset). Positive holds
+    /// the mirror back; negative marks it as the earliest mirror of the group,
+    /// which lifts the others instead (see `target_frames`). Live-adjustable.
+    delay_ms: AtomicI32,
     /// Cleared when the device fails to open or errors out; pushes and pops
     /// become no-ops so the remaining mirrors keep playing.
     enabled: AtomicBool,
@@ -268,7 +269,7 @@ impl DuplicationManager {
 
     /// Push a new delay value to any live engine using `device_id`. Persisting
     /// the value is the caller's job (see `DelayConfig`).
-    pub fn update_delay(&self, device_id: &str, delay_ms: u32) {
+    pub fn update_delay(&self, device_id: &str, delay_ms: i32) {
         for engine in self
             .engines
             .lock()
@@ -279,6 +280,24 @@ impl DuplicationManager {
                 if mirror.device_id == device_id {
                     mirror.delay_ms.store(delay_ms, Ordering::Relaxed);
                 }
+            }
+        }
+    }
+
+    /// Re-read every mirror's persisted delay. Needed after the configured
+    /// range changed, which may have clamped values that live engines are still
+    /// applying.
+    pub fn reload_delays(&self) {
+        for engine in self
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+        {
+            for mirror in &engine.mirrors {
+                mirror
+                    .delay_ms
+                    .store(self.delays.get(&mirror.device_id), Ordering::Relaxed);
             }
         }
     }
@@ -304,17 +323,19 @@ impl DuplicationManager {
         }
 
         let (format, block_align, sample_rate) = default_mix_format()?;
-        // Ring must hold the largest possible pre-roll: base latency plus a
-        // fully compensated mirror, plus slack for the trim threshold.
+        // Ring must hold the worst case pipeline a configuration can ask for:
+        // the base latency, the largest positive delay, and the largest group
+        // shift (a mirror advanced by the most negative delay lifts all the
+        // others by that amount).
         let ring_capacity = sample_rate as usize
-            * (LATENCY_TARGET_MS + MAX_DELAY_MS as usize + TRIM_SLACK_MS + 100)
+            * (LATENCY_TARGET_MS + 2 * DELAY_RANGE_MAX_MS as usize + TRIM_SLACK_MS + 100)
             / 1000
             * block_align;
         let mirrors = mirror_device_ids
             .into_iter()
             .map(|device_id| {
                 Arc::new(MirrorChannel {
-                    delay_ms: AtomicU32::new(self.delays.get(&device_id)),
+                    delay_ms: AtomicI32::new(self.delays.get(&device_id)),
                     device_id,
                     ring: Mutex::new(VecDeque::new()),
                     capacity: ring_capacity,
@@ -529,27 +550,60 @@ struct StartGate {
     opened: bool,
 }
 
-/// Open the start gate once every mirror is initialized and holds one latency
-/// target of pre-roll (including the largest configured delay), or after the
-/// timeout (a silent app never fills it, and starting un-synced while silence
-/// plays is harmless).
+/// Group shift in frames: how far every mirror's pipeline is lifted so that a
+/// mirror advanced by a negative delay can sit at the base latency. Zero unless
+/// delay sync is on and some live mirror holds a negative delay — software
+/// delay can only add latency, so "earlier" is expressed by holding the rest
+/// back instead.
+fn delay_shift_frames(shared: &EngineShared) -> usize {
+    if !shared.sync_delays.load(Ordering::Relaxed) {
+        return 0;
+    }
+    let most_negative_ms = shared
+        .mirrors
+        .iter()
+        .filter(|m| m.enabled.load(Ordering::Relaxed))
+        .map(|m| m.delay_ms.load(Ordering::Relaxed))
+        .min()
+        .unwrap_or(0)
+        .min(0);
+    shared.sample_rate as usize * most_negative_ms.unsigned_abs() as usize / 1000
+}
+
+/// Frames this mirror keeps buffered between the capture tap and playback: the
+/// shared base latency, the group shift, and its own delay compensation. All
+/// mirrors holding their own target means they all play the same capture
+/// position at the same time, offset by exactly the configured delays.
+fn target_frames(shared: &EngineShared, mirror: &MirrorChannel) -> usize {
+    if !shared.sync_delays.load(Ordering::Relaxed) {
+        return shared.latency_frames;
+    }
+    let offset_ms = mirror.delay_ms.load(Ordering::Relaxed);
+    let offset_frames = shared.sample_rate as usize * offset_ms.unsigned_abs() as usize / 1000;
+    let shift_frames = delay_shift_frames(shared);
+    // The shift covers the most negative offset in the group, so subtracting
+    // this mirror's own negative offset can never underflow.
+    let offset_frames = if offset_ms >= 0 {
+        shift_frames + offset_frames
+    } else {
+        shift_frames.saturating_sub(offset_frames)
+    };
+    shared.latency_frames + offset_frames
+}
+
+/// Open the start gate once every mirror is initialized and holds one base
+/// pipeline of pre-roll, or after the timeout (a silent app never fills it, and
+/// starting un-synced while silence plays is harmless).
+///
+/// Only the *base* latency is required, not each mirror's full target: a
+/// delay is realized by silence placed ahead of the mirror's audio (see
+/// `pump_render`), which needs no captured history, so a large configured
+/// delay never stalls the start.
 fn open_gate_when_ready(shared: &Arc<EngineShared>, gate: &mut StartGate) {
     if gate.opened {
         return;
     }
-    let max_delay_ms = if shared.sync_delays.load(Ordering::Relaxed) {
-        shared
-            .mirrors
-            .iter()
-            .filter(|m| m.enabled.load(Ordering::Relaxed))
-            .map(|m| m.delay_ms.load(Ordering::Relaxed) as usize)
-            .max()
-            .unwrap_or(0)
-    } else {
-        0
-    };
-    let pre_roll = (shared.latency_frames + shared.sample_rate as usize * max_delay_ms / 1000)
-        * shared.block_align;
+    let pre_roll = shared.latency_frames * shared.block_align;
     let all_ready = shared.ready_count.load(Ordering::Relaxed) == shared.mirrors.len();
     let all_filled = all_ready
         && shared
@@ -789,12 +843,14 @@ fn render_run(shared: &EngineShared, mirror: &MirrorChannel, session: RenderSess
 
 /// Event-driven render cycle.
 ///
-/// Every mirror keeps the same total backlog (device buffer + ring) of
-/// `latency_frames` between the capture tap and playback, so all mirrors play
-/// the same sample at the same moment. A device whose clock runs slow crosses
-/// the trim threshold and drops its oldest frames by the drift amount; a fast
-/// device briefly writes silence instead. Hardware latency (e.g. a Bluetooth
-/// codec's buffer) adds on top of this and is outside software control.
+/// Every mirror keeps a backlog (device buffer + ring) of its own target
+/// between the capture tap and playback — the shared base latency plus the
+/// group shift plus its delay compensation (see `target_frames`) — so all
+/// mirrors play the same sample at the same moment, offset by exactly the
+/// configured delays. A device whose clock runs slow crosses the trim
+/// threshold and drops its oldest frames by the drift amount; a fast device
+/// briefly writes silence instead. Hardware latency (e.g. a Bluetooth codec's
+/// buffer) adds on top of this and is outside software control.
 fn pump_render(
     shared: &EngineShared,
     mirror: &MirrorChannel,
@@ -818,23 +874,24 @@ fn pump_render(
                 .GetCurrentPadding()
                 .map_err(|e| com_err("GetCurrentPadding", e))?
         } as usize;
-        // This mirror's pipeline target: the shared latency plus its delay
-        // compensation (only while the feature is enabled).
-        let delay_ms = if shared.sync_delays.load(Ordering::Relaxed) {
-            mirror.delay_ms.load(Ordering::Relaxed) as usize
-        } else {
-            0
-        };
-        let target = shared.latency_frames + shared.sample_rate as usize * delay_ms / 1000;
+        let target = target_frames(shared, mirror);
+        // Settle the backlog on its target *before* handing frames to the
+        // device. The total (device buffer + ring) is unchanged by the hand-off,
+        // so correcting first is equivalent to correcting afterwards — except
+        // that a shortfall is then made up with silence placed *ahead* of the
+        // audio, which is what a delay means. Correcting afterwards would play
+        // the audio early and the silence late, so a raised delay (or an
+        // under-filled pre-roll) would not take effect until the next buffer.
         let total = padding + mirror.buffered_bytes() / shared.block_align;
         if total > target + shared.trim_slack_frames {
             // Writes are capped at the target, so padding never exceeds it and
             // the excess always fits inside the ring.
             mirror.drop_oldest(total - target, shared.block_align);
+        } else if total < target {
+            mirror.prepend_silence(target - total, shared.block_align);
         }
         let free = session.buffer_frames.saturating_sub(padding);
         let allowed = target.saturating_sub(padding).min(free);
-        let mut played = 0usize;
         if allowed > 0 {
             let chunk = mirror.pop(allowed, shared.block_align);
             if chunk.is_empty() {
@@ -853,7 +910,6 @@ fn pump_render(
                             .ReleaseBuffer(allowed as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
                             .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
                     }
-                    played = allowed;
                 }
             } else {
                 let frames = (chunk.len() / shared.block_align) as u32;
@@ -870,23 +926,7 @@ fn pump_render(
                         .ReleaseBuffer(frames, 0)
                         .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
                 }
-                played = chunk.len() / shared.block_align;
             }
-        }
-        // Hold the pipeline at its target, measured after this cycle's write.
-        // Excess (device clock slow) is trimmed once past the slack; a
-        // shortfall (device clock fast, a delay compensation was raised, or
-        // latency sync was just enabled) is topped up with silence so the
-        // target is actually reached instead of decaying to the device buffer
-        // floor — which would also desync the mirrors across every silent
-        // passage of the source app (silent packets are never pushed here).
-        let total = padding + played + mirror.buffered_bytes() / shared.block_align;
-        if total > target + shared.trim_slack_frames {
-            // Writes are capped at the target, so padding never exceeds it and
-            // the excess always fits inside the ring.
-            mirror.drop_oldest(total - target, shared.block_align);
-        } else if total < target {
-            mirror.prepend_silence(target - total, shared.block_align);
         }
     }
 }
@@ -1095,8 +1135,38 @@ mod tests {
             device_id: "test".to_string(),
             ring: Mutex::new(VecDeque::new()),
             capacity,
-            delay_ms: AtomicU32::new(0),
+            delay_ms: AtomicI32::new(0),
             enabled: AtomicBool::new(true),
+        }
+    }
+
+    /// Engine shared state with `mirror_delays.len()` mirrors, a 100 ms base
+    /// latency and a 48 kHz capture format.
+    fn engine(mirror_delays: &[i32], sync: bool) -> EngineShared {
+        EngineShared {
+            pid: 1,
+            generation: 0,
+            shutdown: AtomicBool::new(false),
+            mirrors: mirror_delays
+                .iter()
+                .map(|&delay| {
+                    Arc::new(MirrorChannel {
+                        device_id: format!("device-{delay}"),
+                        ring: Mutex::new(VecDeque::new()),
+                        capacity: 1_000_000,
+                        delay_ms: AtomicI32::new(delay),
+                        enabled: AtomicBool::new(true),
+                    })
+                })
+                .collect(),
+            format: Vec::new(),
+            block_align: 8,
+            sample_rate: 48_000,
+            latency_frames: 4_800,
+            trim_slack_frames: 960,
+            sync_delays: AtomicBool::new(sync),
+            go: AtomicBool::new(false),
+            ready_count: AtomicUsize::new(0),
         }
     }
 
@@ -1179,8 +1249,49 @@ mod tests {
     fn disabled_mirror_is_passive() {
         let ch = channel(100_000);
         ch.enabled.store(false, Ordering::Relaxed);
-        ch.push(&vec![0u8; 80], 8);
+        ch.push(&[0u8; 80], 8);
         assert_eq!(ch.buffered_bytes(), 0);
         assert!(ch.pop(10, 8).is_empty());
+    }
+
+    #[test]
+    fn a_positive_delay_holds_that_mirror_back() {
+        let shared = engine(&[0, 1_000], true);
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 48_000);
+    }
+
+    #[test]
+    fn a_negative_delay_lifts_the_other_mirrors_instead() {
+        let shared = engine(&[-1_000, 0], true);
+        // The advanced mirror drops to the base latency …
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
+        assert_eq!(delay_shift_frames(&shared), 48_000);
+        // … and the group is held back by the same amount.
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 48_000);
+    }
+
+    #[test]
+    fn a_negative_delay_on_the_only_mirror_is_a_no_op() {
+        let shared = engine(&[-1_000], true);
+        // Nothing else can be held back, so the group shift cancels out.
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
+    }
+
+    #[test]
+    fn delays_are_ignored_while_delay_sync_is_off() {
+        let shared = engine(&[2_000, -3_000], false);
+        assert_eq!(delay_shift_frames(&shared), 0);
+        for mirror in &shared.mirrors {
+            assert_eq!(target_frames(&shared, mirror), 4_800);
+        }
+    }
+
+    #[test]
+    fn disabled_mirrors_do_not_shift_the_group() {
+        let shared = engine(&[-1_000, 0], true);
+        shared.mirrors[0].enabled.store(false, Ordering::Relaxed);
+        assert_eq!(delay_shift_frames(&shared), 0);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800);
     }
 }

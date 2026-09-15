@@ -120,12 +120,16 @@ pub fn get_active_duplications(duplications: State<'_, DuplicationManager>) -> V
     duplications.active_pids()
 }
 
-/// Set a device's delay compensation (milliseconds) and push it to any live
-/// engine using that device.
+/// Set a device's delay compensation (milliseconds, signed) and push it to any
+/// live engine using that device.
+///
+/// Positive holds the device back; negative marks it as the earliest device in
+/// the group, which lifts the other mirrors instead. A magnitude beyond the
+/// configured range is rejected.
 #[tauri::command]
 pub fn set_device_delay(
     device_id: String,
-    delay_ms: u32,
+    delay_ms: i32,
     delays: State<'_, Arc<DelayConfig>>,
     duplications: State<'_, DuplicationManager>,
 ) -> Result<(), String> {
@@ -137,8 +141,28 @@ pub fn set_device_delay(
 
 /// All configured device delays as `(device_id, delay_ms)` pairs.
 #[tauri::command]
-pub fn get_device_delays(delays: State<'_, Arc<DelayConfig>>) -> Vec<(String, u32)> {
+pub fn get_device_delays(delays: State<'_, Arc<DelayConfig>>) -> Vec<(String, i32)> {
     delays.all()
+}
+
+/// Largest magnitude a delay may be set to, in milliseconds.
+#[tauri::command]
+pub fn get_delay_range(delays: State<'_, Arc<DelayConfig>>) -> u32 {
+    delays.range_ms()
+}
+
+/// Set the delay range. Stored values outside the new bound are clamped, so
+/// live engines are refreshed as well.
+#[tauri::command]
+pub fn set_delay_range(
+    range_ms: u32,
+    delays: State<'_, Arc<DelayConfig>>,
+    duplications: State<'_, DuplicationManager>,
+) -> Result<(), String> {
+    info!("cmd: set_delay_range range=±{range_ms}ms");
+    delays.set_range_ms(range_ms)?;
+    duplications.reload_delays();
+    Ok(())
 }
 
 /// Toggle delay compensation for all current and future engines.
