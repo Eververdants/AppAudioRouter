@@ -79,8 +79,13 @@ export function DelayStepper({
   };
 
   const nudge = (direction: 1 | -1) => {
+    const raw = draft;
     setDraft(null);
-    void setDeviceDelayValue(deviceId, stepDelay(committed, direction, rangeMs));
+    // Clicking a step button blurs the field first, which commits whatever was
+    // typed; step from that value so the click never discards the edit.
+    const parsed = raw !== null && raw.trim() !== '' ? Number(raw) : Number.NaN;
+    const base = Number.isFinite(parsed) ? parsed : committed;
+    void setDeviceDelayValue(deviceId, stepDelay(base, direction, rangeMs));
   };
 
   return (
