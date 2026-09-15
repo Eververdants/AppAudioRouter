@@ -46,12 +46,12 @@ function AmbientLight() {
         transition={{ duration: 26, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute -bottom-24 left-[2%] h-72 w-72 rounded-full bg-[#38bdf8]/15 blur-[110px]"
+        className="absolute -bottom-24 left-[2%] h-72 w-72 rounded-full bg-[#3b82f6]/15 blur-[110px]"
         animate={{ x: [0, 28, -22, 0], y: [0, -22, 14, 0] }}
         transition={{ duration: 32, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute left-[44%] top-[34%] h-64 w-64 rounded-full bg-[#c084fc]/10 blur-[100px]"
+        className="absolute left-[44%] top-[34%] h-64 w-64 rounded-full bg-[#2dd4bf]/10 blur-[100px]"
         animate={{ x: [0, -24, 26, 0], y: [0, 18, -14, 0] }}
         transition={{ duration: 38, repeat: Infinity, ease: 'easeInOut' }}
       />

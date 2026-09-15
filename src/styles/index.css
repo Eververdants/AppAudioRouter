@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 /* Theme tokens */
-/* NOTE: --bg-primary / --text-primary (and the two palettes as a whole) are
-   also written inline in index.html so the first paint already carries the
-   right colours. Keep both copies in sync when adjusting the palette. */
+/* NOTE: --bg-primary / --text-primary are also written inline in index.html so
+   the first paint already carries the right colours. Keep both copies in sync
+   when adjusting the palette. */
 :root {
   --bg-primary: #fafafa;
   --bg-secondary: #f3f3f5;
@@ -13,10 +13,10 @@
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
   --text-muted: #71717a;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-muted: rgba(99, 102, 241, 0.12);
-  --accent-glow: rgba(99, 102, 241, 0.35);
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-muted: rgba(8, 145, 178, 0.12);
+  --accent-glow: rgba(8, 145, 178, 0.32);
   --border: #e4e4e7;
   --success: #10b981;
   --error: #ef4444;
@@ -26,7 +26,7 @@
      alpha to a plain var() colour, so those tokens are declared as
      `rgb(var(--x-rgb) / <alpha-value>)` in tailwind.config.ts. Keep the
      channels in sync with the hex/rgba values above. */
-  --accent-rgb: 99 102 241;
+  --accent-rgb: 8 145 178;
   --error-rgb: 239 68 68;
   --border-rgb: 228 228 231;
   --bg-tertiary-rgb: 232 232 236;
@@ -44,9 +44,9 @@
   --glass-shadow: rgba(24, 24, 27, 0.14);
 
   /* Ambient wash painted by the body gradient. */
-  --ambient-a: rgba(99, 102, 241, 0.1);
-  --ambient-b: rgba(56, 189, 248, 0.09);
-  --ambient-c: rgba(192, 132, 252, 0.07);
+  --ambient-a: rgba(8, 145, 178, 0.1);
+  --ambient-b: rgba(59, 130, 246, 0.09);
+  --ambient-c: rgba(20, 184, 166, 0.07);
 }
 
 .dark {
@@ -56,15 +56,15 @@
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
   --text-muted: #a1a1aa;
-  --accent: #818cf8;
-  --accent-hover: #6366f1;
-  --accent-muted: rgba(129, 140, 248, 0.14);
-  --accent-glow: rgba(129, 140, 248, 0.3);
+  --accent: #22d3ee;
+  --accent-hover: #06b6d4;
+  --accent-muted: rgba(34, 211, 238, 0.14);
+  --accent-glow: rgba(34, 211, 238, 0.28);
   --border: #27272a;
   --success: #34d399;
   --error: #f87171;
 
-  --accent-rgb: 129 140 248;
+  --accent-rgb: 34 211 238;
   --error-rgb: 248 113 113;
   --border-rgb: 39 39 42;
   --bg-tertiary-rgb: 39 39 42;
@@ -78,9 +78,9 @@
   --glass-edge: rgba(255, 255, 255, 0.06);
   --glass-shadow: rgba(0, 0, 0, 0.55);
 
-  --ambient-a: rgba(99, 102, 241, 0.16);
-  --ambient-b: rgba(56, 189, 248, 0.1);
-  --ambient-c: rgba(192, 132, 252, 0.1);
+  --ambient-a: rgba(34, 211, 238, 0.15);
+  --ambient-b: rgba(59, 130, 246, 0.1);
+  --ambient-c: rgba(45, 212, 191, 0.09);
 }
 
 * {
