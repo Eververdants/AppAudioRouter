@@ -11,11 +11,16 @@
     "volumeLimit": "音量上限",
     "volumeHint": "限制该程序的会话音量，重新路由后自动恢复"
   },
-  "delayBar": {
-    "title": "延迟",
-    "deviceHint": "点击调整 {{device}} 的延迟补偿",
-    "primaryHint": "主设备由系统直接播放，无法补偿延迟。请先选中延迟大的（蓝牙）设备，再给其他设备加补偿。",
-    "primary": "主设备"
+  "delayPanel": {
+    "title": "延迟补偿",
+    "sync": "延迟同步",
+    "emptyHint": "选择进程与设备后，可为每台复制设备单独调节延迟：步进 1 秒，范围 ±{{range}} 秒。",
+    "hint": "步进 1 秒，范围 ±{{range}} 秒。正值＝该设备延后播放；负值＝该设备在组内最早，其余复制设备相应延后。",
+    "primary": "系统直接播放",
+    "primaryHint": "主设备由系统直接播放，无法补偿延迟。若延迟大的是蓝牙设备，请先把它选为主设备（第一个），再给其他设备加补偿。",
+    "stepUp": "增加 1 秒",
+    "stepDown": "减少 1 秒",
+    "valueLabel": "{{device}} 的延迟补偿（毫秒）"
   },
   "settings": {
     "title": "设置",
@@ -31,7 +36,9 @@
     "delaySync": "延迟同步",
     "delaySyncDesc": "补偿较快的设备以对齐较慢（蓝牙）设备",
     "delays": "延迟补偿",
-    "delayPrimaryNote": "主设备由系统直接播放、无法补偿；延迟较大的（蓝牙）设备应作为复制目标。拖动滑杆，松手后生效。",
+    "delayPrimaryNote": "主设备由系统直接播放、无法补偿；延迟较大的（蓝牙）设备应作为复制目标。正值让该设备延后，负值标记它为组内最早的设备（其余复制设备随之延后）。",
+    "delayRange": "延迟范围",
+    "delayRangeDesc": "每台设备的延迟可在该正负范围内以 1 秒为步进调节",
     "noDevices": "暂无音频设备",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
@@ -83,6 +90,8 @@
     "duplicationProcessExited": "进程 {{pid}} 已退出，复制路由停止",
     "delaySet": "已将 {{device}} 的延迟补偿设为 {{n}} ms",
     "delaySetFailed": "设置延迟失败：{{error}}",
+    "delayRangeSet": "延迟范围已设为 ±{{n}} 秒",
+    "delayRangeSetFailed": "设置延迟范围失败：{{error}}",
     "delaySyncOn": "延迟补偿已开启",
     "delaySyncOff": "延迟补偿已关闭",
     "delaySyncFailed": "切换延迟补偿失败：{{error}}",

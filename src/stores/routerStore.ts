@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import i18next from 'i18next';
 import type { AudioDevice, AudioSession, DuplicationStoppedEvent, LogEntry } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
+import { DEFAULT_DELAY_RANGE_MS, clampDelay, rangeSeconds } from '@/lib/delay';
 import * as api from '@/lib/invoke';
 
 interface RouterState {
@@ -13,8 +14,10 @@ interface RouterState {
   selectedDeviceIds: string[];
   /** Devices each process is currently routed to, keyed by PID. */
   routedPids: Record<number, string[]>;
-  /** Per-device delay compensation in milliseconds. */
+  /** Per-device delay compensation in milliseconds (signed). */
   deviceDelays: Record<string, number>;
+  /** Largest magnitude a delay may be set to, in milliseconds. */
+  delayRangeMs: number;
   /** Per-exe volume limits in percent (100 = no limit). */
   volumeLimits: Record<string, number>;
   /** Whether delay compensation is applied by the engine. */
@@ -36,15 +39,12 @@ interface RouterState {
   loadDelaySettings: () => Promise<void>;
   loadVolumeLimits: () => Promise<void>;
   setVolumeLimit: (exeName: string, percent: number) => Promise<void>;
-  cycleDeviceDelay: (deviceId: string) => Promise<void>;
   setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
+  setDelayRange: (rangeMs: number) => Promise<void>;
   toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   addLog: (message: string, level?: LogEntry['level']) => void;
 }
-
-/** Delay compensation presets (ms) cycled by the chips and offered by the settings sliders. */
-export const DELAY_PRESETS = [0, 100, 150, 200, 250, 300, 400, 500];
 
 let logId = 0;
 
@@ -55,6 +55,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   selectedDeviceIds: [],
   routedPids: {},
   deviceDelays: {},
+  delayRangeMs: DEFAULT_DELAY_RANGE_MS,
   volumeLimits: {},
   delaySync: false,
   autoRemember: false,
@@ -215,12 +216,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   loadDelaySettings: async () => {
     try {
-      const [delays, delaySync] = await Promise.all([api.getDeviceDelays(), api.getDelaySync()]);
+      const [delays, delaySync, delayRangeMs] = await Promise.all([
+        api.getDeviceDelays(),
+        api.getDelaySync(),
+        api.getDelayRange(),
+      ]);
       const deviceDelays: Record<string, number> = {};
       for (const [deviceId, delayMs] of delays) {
         deviceDelays[deviceId] = delayMs;
       }
-      set({ deviceDelays, delaySync });
+      set({ deviceDelays, delaySync, delayRangeMs });
     } catch (e) {
       get().addLog(i18next.t('log.delaySettingsFailed', { error: String(e) }), 'error');
     }
@@ -265,24 +270,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
-  cycleDeviceDelay: async (deviceId) => {
-    const current = get().deviceDelays[deviceId] ?? 0;
-    const index = DELAY_PRESETS.indexOf(current);
-    const next = DELAY_PRESETS[(index + 1) % DELAY_PRESETS.length] ?? 0;
-    await get().setDeviceDelayValue(deviceId, next);
-  },
-
   setDeviceDelayValue: async (deviceId, delayMs) => {
     const current = get().deviceDelays[deviceId] ?? 0;
-    if (current === delayMs) return;
+    const next = clampDelay(delayMs, get().delayRangeMs);
+    if (current === next) return;
     const device = get().devices.find((d) => d.id === deviceId);
-    set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: delayMs } }));
+    set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: next } }));
     try {
-      await api.setDeviceDelay(deviceId, delayMs);
-      get().addLog(
-        i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: delayMs }),
-        'info',
-      );
+      await api.setDeviceDelay(deviceId, next);
+      get().addLog(i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }), 'info');
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
       // keeps matching what the engine actually applies and persists.
@@ -296,6 +292,28 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         return { deviceDelays };
       });
       get().addLog(i18next.t('log.delaySetFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  setDelayRange: async (rangeMs) => {
+    const { delayRangeMs: previousRange, deviceDelays: previousDelays } = get();
+    if (previousRange === rangeMs) return;
+    // Lowering the range pulls the affected values down with it, matching what
+    // the backend does when it persists the new bound.
+    set((s) => {
+      const deviceDelays: Record<string, number> = {};
+      for (const [deviceId, delayMs] of Object.entries(s.deviceDelays)) {
+        const clamped = clampDelay(delayMs, rangeMs);
+        if (clamped !== 0) deviceDelays[deviceId] = clamped;
+      }
+      return { delayRangeMs: rangeMs, deviceDelays };
+    });
+    try {
+      await api.setDelayRange(rangeMs);
+      get().addLog(i18next.t('log.delayRangeSet', { n: rangeSeconds(rangeMs) }), 'info');
+    } catch (e) {
+      set({ delayRangeMs: previousRange, deviceDelays: previousDelays });
+      get().addLog(i18next.t('log.delayRangeSetFailed', { error: String(e) }), 'error');
     }
   },
 

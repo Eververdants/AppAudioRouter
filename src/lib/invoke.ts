@@ -46,9 +46,20 @@ export async function getDeviceDelays(): Promise<DeviceDelay[]> {
   return invoke<DeviceDelay[]>('get_device_delays');
 }
 
-/** Set a device's delay compensation (ms); live engines pick it up instantly. */
+/** Set a device's delay compensation (ms, signed); live engines pick it up
+ * instantly. Rejected when the magnitude exceeds the configured range. */
 export async function setDeviceDelay(deviceId: string, delayMs: number): Promise<void> {
   await invoke('set_device_delay', { deviceId, delayMs });
+}
+
+/** Largest magnitude a delay may be set to, in milliseconds. */
+export async function getDelayRange(): Promise<number> {
+  return invoke<number>('get_delay_range');
+}
+
+/** Set the delay range; values outside the new bound are clamped and applied. */
+export async function setDelayRange(rangeMs: number): Promise<void> {
+  await invoke('set_delay_range', { rangeMs });
 }
 
 export async function getDelaySync(): Promise<boolean> {

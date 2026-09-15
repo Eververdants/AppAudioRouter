@@ -11,11 +11,16 @@
     "volumeLimit": "Volume limit",
     "volumeHint": "Cap this app's session volume; restored automatically on re-route"
   },
-  "delayBar": {
-    "title": "Delay",
-    "deviceHint": "Click to adjust delay compensation for {{device}}",
-    "primaryHint": "The primary device is played by the OS directly and cannot be delayed. Select the lagging (Bluetooth) device first, then compensate the others.",
-    "primary": "primary"
+  "delayPanel": {
+    "title": "Delay compensation",
+    "sync": "Latency sync",
+    "emptyHint": "Once a process and its devices are selected, every copied device can be delayed: 1 s per step, up to ±{{range}} s.",
+    "hint": "1 s per step, up to ±{{range}} s. Positive makes this device play later; negative marks it as the earliest of the group, moving the other copies later instead.",
+    "primary": "played by the OS",
+    "primaryHint": "The primary device is played by the OS directly and cannot be delayed. If the lagging device is a Bluetooth one, select it first (it becomes the primary) and compensate the others.",
+    "stepUp": "One second later",
+    "stepDown": "One second earlier",
+    "valueLabel": "Delay compensation of {{device}} in milliseconds"
   },
   "settings": {
     "title": "Settings",
@@ -31,7 +36,9 @@
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
     "delays": "Delay compensation",
-    "delayPrimaryNote": "The primary device is played by the OS directly and cannot be delayed; make the lagging (Bluetooth) device a copy target instead. Drag the sliders; changes apply on release.",
+    "delayPrimaryNote": "The primary device is played by the OS directly and cannot be delayed; make the lagging (Bluetooth) device a copy target instead. A positive value holds a device back, a negative one marks it as the earliest device of the group (the other copies move later).",
+    "delayRange": "Delay range",
+    "delayRangeDesc": "Delays can be set within this ± range, stepped by whole seconds",
     "noDevices": "No audio devices",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."
@@ -83,6 +90,8 @@
     "duplicationProcessExited": "PID {{pid}} exited, duplication stopped",
     "delaySet": "Delay compensation for {{device}} set to {{n}} ms",
     "delaySetFailed": "Failed to set delay: {{error}}",
+    "delayRangeSet": "Delay range set to ±{{n}} s",
+    "delayRangeSetFailed": "Failed to set the delay range: {{error}}",
     "delaySyncOn": "Delay compensation enabled",
     "delaySyncOff": "Delay compensation disabled",
     "delaySyncFailed": "Failed to toggle delay compensation: {{error}}",

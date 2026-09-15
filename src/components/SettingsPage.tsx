@@ -1,11 +1,13 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { DelayStepper } from '@/components/ui/DelayStepper';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
-import { DELAY_PRESETS, useRouterStore } from '@/stores/routerStore';
+import { DELAY_RANGE_OPTIONS, rangeSeconds } from '@/lib/delay';
+import { useRouterStore } from '@/stores/routerStore';
 
 const cardEnter = {
   initial: { opacity: 0, y: 10 },
@@ -44,61 +46,14 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
   );
 }
 
-/** A device row: name + preset-snapped slider + live value. */
-function DelayRow({ deviceId, name }: { deviceId: string; name: string }) {
-  const deviceDelays = useRouterStore((s) => s.deviceDelays);
-  const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);
-  // Dragging fires continuously; only commit (persist + notify the engine) on
-  // release so the backend and the log are not spammed mid-drag.
-  const [pending, setPending] = useState<Record<string, number>>({});
-
-  const committed = deviceDelays[deviceId] ?? 0;
-  const value = pending[deviceId] ?? committed;
-  const currentIndex = DELAY_PRESETS.indexOf(value);
-  const presetIndex = currentIndex >= 0 ? currentIndex : 0;
-  const fillPercent = (presetIndex / (DELAY_PRESETS.length - 1)) * 100;
-
-  const commit = () => {
-    const next = pending[deviceId];
-    if (next === undefined) return;
-    setPending((prev) => {
-      const rest = { ...prev };
-      delete rest[deviceId];
-      return rest;
-    });
-    void setDeviceDelayValue(deviceId, next);
-  };
-
+/** A device row: name + the shared −/value/+ delay stepper. */
+function DelayRow({ deviceId, name, rangeMs }: { deviceId: string; name: string; rangeMs: number }) {
   return (
-    <div className="flex items-center gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
+    <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={name}>
         {name}
       </span>
-      <input
-        type="range"
-        min={0}
-        max={DELAY_PRESETS.length - 1}
-        step={1}
-        value={presetIndex}
-        onChange={(e) => {
-          const preset = DELAY_PRESETS[Number(e.target.value)] ?? 0;
-          setPending((prev) => ({ ...prev, [deviceId]: preset }));
-        }}
-        onPointerUp={commit}
-        onBlur={commit}
-        aria-label={name}
-        className="h-1 w-40 flex-none"
-        style={{
-          background: `linear-gradient(to right, var(--accent) ${fillPercent}%, var(--border) ${fillPercent}%)`,
-        }}
-      />
-      <span
-        className={`w-14 flex-none text-right text-xs tabular-nums ${
-          value > 0 ? 'font-semibold text-accent' : 'text-text-muted'
-        }`}
-      >
-        {value} ms
-      </span>
+      <DelayStepper deviceId={deviceId} name={name} rangeMs={rangeMs} />
     </div>
   );
 }
@@ -137,6 +92,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
   const delaySync = useRouterStore((s) => s.delaySync);
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
+  const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
+  const setDelayRange = useRouterStore((s) => s.setDelayRange);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -293,7 +250,19 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             }
             label={t('settings.delays')}
           >
-            <p className="px-3 pb-2 pt-1 text-[11px] leading-relaxed text-text-muted">
+            <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
+              <SegmentedControl
+                layoutId="settings-delay-range"
+                ariaLabel={t('settings.delayRange')}
+                value={String(delayRangeMs)}
+                onChange={(value) => void setDelayRange(Number(value))}
+                options={DELAY_RANGE_OPTIONS.map((ms) => ({
+                  value: String(ms),
+                  label: `±${rangeSeconds(ms)}s`,
+                }))}
+              />
+            </Row>
+            <p className="px-3 pb-1 pt-2 text-[11px] leading-relaxed text-text-muted">
               {t('settings.delayPrimaryNote')}
             </p>
             {devices.length === 0 ? (
@@ -302,7 +271,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               </p>
             ) : (
               devices.map((device) => (
-                <DelayRow key={device.id} deviceId={device.id} name={device.name} />
+                <DelayRow
+                  key={device.id}
+                  deviceId={device.id}
+                  name={device.name}
+                  rangeMs={delayRangeMs}
+                />
               ))
             )}
           </SectionCard>
