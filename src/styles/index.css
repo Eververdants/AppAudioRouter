@@ -180,3 +180,16 @@ input[type='range']::-moz-range-thumb {
 input[type='range']:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
+
+/* Number input (the delay value field). The stepper's own ± buttons and the
+   arrow keys are the step controls; the native spinners would overlay the
+   value inside a 54 px field, so they stay hidden. */
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
