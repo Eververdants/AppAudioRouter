@@ -14,6 +14,11 @@ interface RouterState {
   selectedDeviceIds: string[];
   /** Devices each process is currently routed to, keyed by PID. */
   routedPids: Record<number, string[]>;
+  /**
+   * System default render device. It is the endpoint a process plays through
+   * until it gets an explicit route, so selecting a process falls back to it.
+   */
+  defaultDeviceId: string | null;
   /** Per-device delay compensation in milliseconds (signed). */
   deviceDelays: Record<string, number>;
   /** Largest magnitude a delay may be set to, in milliseconds. */
@@ -29,6 +34,7 @@ interface RouterState {
   // actions
   refreshDevices: () => Promise<void>;
   refreshSessions: () => Promise<void>;
+  loadDefaultDevice: () => Promise<void>;
   selectProcess: (pid: number) => void;
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
@@ -48,12 +54,19 @@ interface RouterState {
 
 let logId = 0;
 
+/** The system default device as a route target, when it is still present. */
+function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
+  const id = state.defaultDeviceId;
+  return id !== null && state.devices.some((d) => d.id === id) ? [id] : [];
+}
+
 export const useRouterStore = create<RouterState>((set, get) => ({
   devices: [],
   sessions: [],
   selectedPids: [],
   selectedDeviceIds: [],
   routedPids: {},
+  defaultDeviceId: null,
   deviceDelays: {},
   delayRangeMs: DEFAULT_DELAY_RANGE_MS,
   volumeLimits: {},
@@ -82,11 +95,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
+  loadDefaultDevice: async () => {
+    try {
+      const device = await api.getDefaultDevice();
+      set({ defaultDeviceId: device.id });
+    } catch (e) {
+      get().addLog(i18next.t('log.defaultDeviceFailed', { error: String(e) }), 'error');
+    }
+  },
+
   selectProcess: (pid) =>
     set((s) => ({
-      // Single selection starts fresh from that process's active targets.
+      // Single selection starts fresh from that process's active targets, or
+      // from the system default endpoint it already plays through.
       selectedPids: [pid],
-      selectedDeviceIds: s.routedPids[pid] ?? [],
+      selectedDeviceIds: s.routedPids[pid] ?? defaultTargets(s),
     })),
 
   toggleProcessSelection: (pid) =>

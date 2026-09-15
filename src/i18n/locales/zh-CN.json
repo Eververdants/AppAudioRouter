@@ -8,6 +8,7 @@
     "stopRoute": "停止该进程的路由",
     "stopAll": "停止全部路由",
     "multiSelectHint": "点击选择；Ctrl+点击可多选，一起路由",
+    "associatedDevice": "该进程播放到的设备：{{device}}",
     "volumeLimit": "音量上限",
     "volumeHint": "限制该程序的会话音量，重新路由后自动恢复"
   },
@@ -55,7 +56,8 @@
     "clickToRoute": "点击路由",
     "clickToRouteMulti": "路由到 {{n}} 台设备",
     "routedActive": "已路由 {{n}} 台设备",
-    "processCount": "{{n}} 个进程"
+    "processCount": "{{n}} 个进程",
+    "defaultDevice": "系统默认播放设备"
   },
   "logPanel": {
     "title": "日志"
@@ -68,6 +70,7 @@
   "log": {
     "deviceRefreshed": "设备列表已刷新（{{n}} 项）",
     "deviceRefreshFailed": "设备刷新失败：{{error}}",
+    "defaultDeviceFailed": "获取系统默认播放设备失败：{{error}}",
     "sessionsRefreshed": "进程列表已刷新（{{n}} 项）",
     "sessionsRefreshFailed": "进程刷新失败：{{error}}",
     "selectProcessAndDevice": "请先选择进程和至少一台设备",

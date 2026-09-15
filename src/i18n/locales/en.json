@@ -8,6 +8,7 @@
     "stopRoute": "Stop routing this process",
     "stopAll": "Stop all routing",
     "multiSelectHint": "Click to select; Ctrl+click to pick several and route them together",
+    "associatedDevice": "Plays through {{device}}",
     "volumeLimit": "Volume limit",
     "volumeHint": "Cap this app's session volume; restored automatically on re-route"
   },
@@ -55,7 +56,8 @@
     "clickToRoute": "Click to route",
     "clickToRouteMulti": "Route to {{n}} devices",
     "routedActive": "{{n}} devices active",
-    "processCount": "{{n}} processes"
+    "processCount": "{{n}} processes",
+    "defaultDevice": "System default playback device"
   },
   "logPanel": {
     "title": "Logs"
@@ -68,6 +70,7 @@
   "log": {
     "deviceRefreshed": "Device list refreshed ({{n}})",
     "deviceRefreshFailed": "Device refresh failed: {{error}}",
+    "defaultDeviceFailed": "Failed to read the system default playback device: {{error}}",
     "sessionsRefreshed": "Session list refreshed ({{n}})",
     "sessionsRefreshFailed": "Session refresh failed: {{error}}",
     "selectProcessAndDevice": "Select a process and at least one device first",

@@ -96,9 +96,11 @@ function VolumeRow({ exeName }: { exeName: string }) {
 
 export function ProcessList() {
   const { t } = useTranslation();
+  const devices = useRouterStore((s) => s.devices);
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const routedPids = useRouterStore((s) => s.routedPids);
+  const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const selectProcess = useRouterStore((s) => s.selectProcess);
   const toggleProcessSelection = useRouterStore((s) => s.toggleProcessSelection);
   const stopRoute = useRouterStore((s) => s.stopRoute);
@@ -106,6 +108,14 @@ export function ProcessList() {
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
 
   const routedCount = Object.keys(routedPids).length;
+
+  /** Playback device a process is associated with: its route's primary device,
+   * or the system default it currently plays through. */
+  const associatedName = (pid: number): string | null => {
+    const id = routedPids[pid]?.[0] ?? defaultDeviceId;
+    if (id === null) return null;
+    return devices.find((d) => d.id === id)?.name ?? null;
+  };
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-glass bg-glass p-4 shadow-glass backdrop-blur-xl">
@@ -187,6 +197,7 @@ export function ProcessList() {
           sessions.map((session) => {
             const routedCountForPid = routedPids[session.pid]?.length ?? 0;
             const isSelected = selectedPids.includes(session.pid);
+            const deviceName = associatedName(session.pid);
             return (
               <motion.div key={session.pid} variants={item}>
                 <div className="relative">
@@ -236,6 +247,30 @@ export function ProcessList() {
                       )}
                     </span>
                     <span className="relative text-[10px] text-text-muted">PID {session.pid}</span>
+                    {/* The device this process plays through: its route's
+                        primary, or the system default while it is unrouted. */}
+                    {deviceName !== null && (
+                      <span
+                        className="relative mt-1 flex items-center gap-1 text-[9px] text-text-muted"
+                        title={t('processList.associatedDevice', { device: deviceName })}
+                      >
+                        <svg
+                          width="8"
+                          height="8"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          aria-hidden="true"
+                          className="flex-none"
+                        >
+                          <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        <span className="truncate">{deviceName}</span>
+                      </span>
+                    )}
                   </motion.button>
                   <AnimatePresence>
                     {routedCountForPid > 0 && (

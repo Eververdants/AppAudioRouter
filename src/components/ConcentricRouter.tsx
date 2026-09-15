@@ -39,6 +39,7 @@ export function ConcentricRouter() {
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
+  const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const applyRoute = useRouterStore((s) => s.applyRoute);
   const { ref, scale } = useFitScale(STAGE_SIZE);
@@ -187,6 +188,14 @@ export function ConcentricRouter() {
                     className="absolute left-1/2 top-1/2"
                   >
                     <div className="-translate-x-1/2 -translate-y-1/2">
+                      {/* System default endpoint: the device every unrouted
+                          process already plays through. */}
+                      {device.id === defaultDeviceId && (
+                        <span
+                          title={t('router.defaultDevice')}
+                          className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-text-muted/80 ring-2 ring-bg-secondary"
+                        />
+                      )}
                       {/* Live halo: an expanding ring behind routed devices. */}
                       {isLive && (
                         <motion.span

@@ -62,6 +62,7 @@ function AmbientLight() {
 export default function App() {
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
+  const loadDefaultDevice = useRouterStore((s) => s.loadDefaultDevice);
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
   const loadVolumeLimits = useRouterStore((s) => s.loadVolumeLimits);
   const [view, setView] = useState<'router' | 'settings'>('router');
@@ -81,12 +82,15 @@ export default function App() {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust
     // side, and every result appends a log entry. Running that during the first
     // render made the IPC round-trips and the extra re-renders compete with the
-    // initial paint, so wait until the first frame is on screen.
+    // initial paint, so wait until the first frame is on screen. The system
+    // default device is fetched alongside, since it is what a process is
+    // associated with until it is routed somewhere explicitly.
     return afterFirstPaint(() => {
       void refreshDevices();
+      void loadDefaultDevice();
       void refreshSessions();
     });
-  }, [refreshDevices, refreshSessions]);
+  }, [refreshDevices, loadDefaultDevice, refreshSessions]);
 
   useEffect(() => {
     // Duplication engines report their end (user stop, process exit, error)
