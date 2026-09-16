@@ -246,31 +246,23 @@ export function ProcessList() {
                         </span>
                       )}
                     </span>
-                    <span className="relative text-[10px] text-text-muted">PID {session.pid}</span>
-                    {/* The device this process plays through: its route's
-                        primary, or the system default while it is unrouted. */}
-                    {deviceName !== null && (
-                      <span
-                        className="relative mt-1 flex items-center gap-1 text-[9px] text-text-muted"
-                        title={t('processList.associatedDevice', { device: deviceName })}
-                      >
-                        <svg
-                          width="8"
-                          height="8"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          aria-hidden="true"
-                          className="flex-none"
-                        >
-                          <path d="M11 5 6 9H2v6h4l5 4V5z" />
-                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                        </svg>
-                        <span className="truncate">{deviceName}</span>
-                      </span>
-                    )}
+                    {/* PID and the device the process plays through share one
+                        muted line: a row of its own made the list feel dense
+                        for a detail that is only reference information. */}
+                    <span className="relative flex items-center gap-1 text-[10px] text-text-muted">
+                      <span className="flex-none">PID {session.pid}</span>
+                      {deviceName !== null && (
+                        <>
+                          <span className="flex-none opacity-50">·</span>
+                          <span
+                            className="truncate"
+                            title={t('processList.associatedDevice', { device: deviceName })}
+                          >
+                            {deviceName}
+                          </span>
+                        </>
+                      )}
+                    </span>
                   </motion.button>
                   <AnimatePresence>
                     {routedCountForPid > 0 && (

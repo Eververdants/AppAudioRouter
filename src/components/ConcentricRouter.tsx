@@ -7,7 +7,7 @@ import { useRouterStore } from '@/stores/routerStore';
 
 /** Fixed design size of the router stage; the whole stage is scaled to fit. */
 const STAGE_SIZE = 460;
-const ORBIT_RADIUS = 152;
+const ORBIT_RADIUS = 164;
 const CENTER = STAGE_SIZE / 2;
 /** Perpendicular bow of the route curves: everything bends the same way,
  * which reads as one flow around the hub instead of rigid spokes. */
@@ -191,7 +191,9 @@ export function ConcentricRouter() {
                     }}
                     className="absolute left-1/2 top-1/2"
                   >
-                    <div className="-translate-x-1/2 -translate-y-1/2">
+                    {/* `group/device` lets the delay capsule below reveal
+                        itself while the pointer is on this node. */}
+                    <div className="group/device -translate-x-1/2 -translate-y-1/2">
                       {/* System default endpoint: the device every unrouted
                           process already plays through. */}
                       {device.id === defaultDeviceId && (
@@ -214,7 +216,7 @@ export function ConcentricRouter() {
                         whileHover={{ scale: 1.06 }}
                         whileTap={{ scale: 0.94 }}
                         transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                        className={`relative flex max-w-[120px] items-center rounded-full border px-3 py-1.5 text-[11px] font-medium outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                        className={`relative flex max-w-[116px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-accent/60 ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected
@@ -253,7 +255,7 @@ export function ConcentricRouter() {
                             animate={{ opacity: 1, x: '-50%', y: 0, scale: 1 }}
                             exit={{ opacity: 0, x: '-50%', y: -4, scale: 0.9 }}
                             transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                            className="absolute left-1/2 top-full pt-1"
+                            className="absolute left-1/2 top-full pt-0.5"
                           >
                             <DelayCapsule
                               deviceId={device.id}
