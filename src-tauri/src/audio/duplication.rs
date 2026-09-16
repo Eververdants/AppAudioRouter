@@ -308,9 +308,10 @@ impl DuplicationManager {
             .unwrap_or_else(|e| e.into_inner())
             .values()
         {
-            engine
-                .primary_delay_ms
-                .store(self.delays.get(&engine.primary_device_id), Ordering::Relaxed);
+            engine.primary_delay_ms.store(
+                self.delays.get(&engine.primary_device_id),
+                Ordering::Relaxed,
+            );
             for mirror in &engine.mirrors {
                 mirror
                     .delay_ms
