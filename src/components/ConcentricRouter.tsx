@@ -9,6 +9,13 @@ import { useRouterStore } from '@/stores/routerStore';
 const STAGE_SIZE = 460;
 const ORBIT_RADIUS = 164;
 const CENTER = STAGE_SIZE / 2;
+/** Widest a device capsule may get, derived rather than picked: a node at the
+ *  horizontal extreme of the orbit is `ORBIT_RADIUS` from the centre, so
+ *  anything wider than the room left on either side would spill out of the
+ *  stage. Capsules size to their content up to this, so a short name makes a
+ *  short chip; a name longer than this truncates, and the full one stays in the
+ *  tooltip and in the settings list. */
+const MAX_NODE_WIDTH = 2 * (CENTER - ORBIT_RADIUS);
 /** Perpendicular bow of the route curves: everything bends the same way,
  * which reads as one flow around the hub instead of rigid spokes. */
 const CURVE_BOW = 30;
@@ -213,11 +220,13 @@ export function ConcentricRouter() {
                       )}
                       {/* One capsule per device: the name selects it, the
                           trailing segment belongs to the same object and holds
-                          the delay. */}
+                          the delay. Its width follows its content; only the
+                          stage-derived ceiling can truncate the name. */}
                       <motion.div
                         whileHover={{ scale: 1.06 }}
                         transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                        className={`relative flex max-w-[132px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
+                        style={{ maxWidth: MAX_NODE_WIDTH }}
+                        className={`relative flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected
@@ -225,13 +234,16 @@ export function ConcentricRouter() {
                               : 'border-glass bg-glass-strong text-text-secondary shadow-glass hover:border-accent/40 hover:text-accent'
                         }`}
                       >
+                        {/* The name takes the room it needs and gives it back
+                            as the delay segment opens; only the capsule's own
+                            cap pushes it into truncating. */}
                         <motion.button
                           type="button"
                           onClick={() => toggleDeviceSelection(device.id)}
                           whileTap={{ scale: 0.94 }}
                           transition={{ type: 'spring', stiffness: 420, damping: 26 }}
                           title={device.name}
-                          className="flex min-w-[40px] max-w-[64px] items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                          className="flex min-w-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                         >
                           <span className="truncate">{device.name}</span>
                         </motion.button>
