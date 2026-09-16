@@ -217,7 +217,7 @@ export function ConcentricRouter() {
                       <motion.div
                         whileHover={{ scale: 1.06 }}
                         transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                        className={`relative flex max-w-[136px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
+                        className={`relative flex max-w-[132px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected
@@ -231,7 +231,7 @@ export function ConcentricRouter() {
                           whileTap={{ scale: 0.94 }}
                           transition={{ type: 'spring', stiffness: 420, damping: 26 }}
                           title={device.name}
-                          className="flex min-w-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                          className="flex min-w-[40px] max-w-[64px] items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                         >
                           <span className="truncate">{device.name}</span>
                         </motion.button>
