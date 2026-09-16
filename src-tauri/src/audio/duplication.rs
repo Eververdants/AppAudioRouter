@@ -31,15 +31,15 @@
 //! ready — a cold Bluetooth connection can take seconds, and without the gate
 //! the wired device runs ahead by that whole setup time. After the start, every
 //! mirror keeps its own backlog between the capture tap and playback: the same
-//! base latency for all of them, plus its per-device delay compensation, so
-//! they play the same sample at the same moment offset by exactly the
-//! configured delays. A delay is realized as silence placed ahead of the
-//! mirror's audio, and clock drift between devices is absorbed by trimming the
-//! lagging device's oldest frames and topping the fast device up with silence
-//! (a few milliseconds every few minutes at typical crystal tolerance). The
-//! same top-up realizes a delay compensation raised while the engine is
-//! running. Hardware latency, e.g. a Bluetooth codec's buffer, adds on top
-//! and is outside software control.
+//! base latency for all of them, plus how far its own delay sits above the
+//! earliest device of the group, so they play the same sample at the same
+//! moment offset by exactly the differences that were configured. A delay is
+//! realized as silence placed ahead of the mirror's audio, and clock drift
+//! between devices is absorbed by trimming the lagging device's oldest frames
+//! and topping the fast device up with silence (a few milliseconds every few
+//! minutes at typical crystal tolerance). The same top-up realizes a delay
+//! changed while the engine is running. Hardware latency, e.g. a Bluetooth
+//! codec's buffer, adds on top and is outside software control.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
@@ -129,10 +129,12 @@ struct MirrorChannel {
     ring: Mutex<VecDeque<u8>>,
     /// Ring capacity in bytes (base latency + max delay + margin).
     capacity: usize,
-    /// Extra software delay for this mirror in milliseconds, used to align a
-    /// fast device with a slow one (e.g. a Bluetooth headset). Positive holds
-    /// the mirror back; negative marks it as the earliest mirror of the group,
-    /// which lifts the others instead (see `target_frames`). Live-adjustable.
+    /// Extra software delay for this mirror in milliseconds, measured against
+    /// the app's audio as captured — the same unit for every device, with no
+    /// device singled out as the reference. Only the difference to the earliest
+    /// device of the group is realizable (see `group_min_delay_ms`), so a value
+    /// below that reference just keeps the mirror at the base latency.
+    /// Live-adjustable.
     delay_ms: AtomicI32,
     /// Cleared when the device fails to open or errors out; pushes and pops
     /// become no-ops so the remaining mirrors keep playing.
@@ -210,6 +212,14 @@ struct EngineShared {
     generation: u64,
     shutdown: AtomicBool,
     mirrors: Vec<Arc<MirrorChannel>>,
+    /// Device the OS plays natively, i.e. the one endpoint this engine cannot
+    /// hold back in software. Only used to route delay updates to
+    /// `primary_delay_ms`.
+    primary_device_id: String,
+    /// The primary device's configured delay. It cannot be applied, but it is
+    /// the reference the mirrors are measured against (see
+    /// `group_min_delay_ms`), so a change has to reach live engines.
+    primary_delay_ms: AtomicI32,
     /// Raw bytes of the capture format (WAVEFORMATEX, possibly extensible).
     format: Vec<u8>,
     /// Bytes per frame of the capture format.
@@ -267,8 +277,9 @@ impl DuplicationManager {
         self.delay_sync.load(Ordering::Relaxed)
     }
 
-    /// Push a new delay value to any live engine using `device_id`. Persisting
-    /// the value is the caller's job (see `DelayConfig`).
+    /// Push a new delay value to any live engine using `device_id`, regardless
+    /// of whether the device is a mirror or the primary one. Persisting the
+    /// value is the caller's job (see `DelayConfig`).
     pub fn update_delay(&self, device_id: &str, delay_ms: i32) {
         for engine in self
             .engines
@@ -276,6 +287,9 @@ impl DuplicationManager {
             .unwrap_or_else(|e| e.into_inner())
             .values()
         {
+            if engine.primary_device_id == device_id {
+                engine.primary_delay_ms.store(delay_ms, Ordering::Relaxed);
+            }
             for mirror in &engine.mirrors {
                 if mirror.device_id == device_id {
                     mirror.delay_ms.store(delay_ms, Ordering::Relaxed);
@@ -284,7 +298,7 @@ impl DuplicationManager {
         }
     }
 
-    /// Re-read every mirror's persisted delay. Needed after the configured
+    /// Re-read every device's persisted delay. Needed after the configured
     /// range changed, which may have clamped values that live engines are still
     /// applying.
     pub fn reload_delays(&self) {
@@ -294,6 +308,9 @@ impl DuplicationManager {
             .unwrap_or_else(|e| e.into_inner())
             .values()
         {
+            engine
+                .primary_delay_ms
+                .store(self.delays.get(&engine.primary_device_id), Ordering::Relaxed);
             for mirror in &engine.mirrors {
                 mirror
                     .delay_ms
@@ -305,12 +322,17 @@ impl DuplicationManager {
     /// Start duplicating `pid`'s audio to `mirror_device_ids`, replacing any
     /// engine already running for the process.
     ///
+    /// `primary_device_id` is the endpoint the OS plays natively; every delay is
+    /// measured against it, so it has to be known by the engine (see
+    /// `group_min_delay_ms`).
+    ///
     /// The capture format is probed synchronously (a fast call); the
     /// process-loopback activation runs on the engine thread and reports
     /// failures through the `duplication-stopped` event with reason `error`.
     pub fn start(
         &self,
         pid: u32,
+        primary_device_id: &str,
         mirror_device_ids: Vec<String>,
         app: &AppHandle,
     ) -> Result<(), AudioError> {
@@ -324,9 +346,8 @@ impl DuplicationManager {
 
         let (format, block_align, sample_rate) = default_mix_format()?;
         // Ring must hold the worst case pipeline a configuration can ask for:
-        // the base latency, the largest positive delay, and the largest group
-        // shift (a mirror advanced by the most negative delay lifts all the
-        // others by that amount).
+        // the base latency plus the largest spread between the earliest and the
+        // latest device, which two opposite extremes of the range can produce.
         let ring_capacity = sample_rate as usize
             * (LATENCY_TARGET_MS + 2 * DELAY_RANGE_MAX_MS as usize + TRIM_SLACK_MS + 100)
             / 1000
@@ -349,6 +370,8 @@ impl DuplicationManager {
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             shutdown: AtomicBool::new(false),
             mirrors,
+            primary_device_id: primary_device_id.to_string(),
+            primary_delay_ms: AtomicI32::new(self.delays.get(primary_device_id)),
             format,
             block_align,
             sample_rate,
@@ -550,44 +573,40 @@ struct StartGate {
     opened: bool,
 }
 
-/// Group shift in frames: how far every mirror's pipeline is lifted so that a
-/// mirror advanced by a negative delay can sit at the base latency. Zero unless
-/// delay sync is on and some live mirror holds a negative delay — software
-/// delay can only add latency, so "earlier" is expressed by holding the rest
-/// back instead.
-fn delay_shift_frames(shared: &EngineShared) -> usize {
-    if !shared.sync_delays.load(Ordering::Relaxed) {
-        return 0;
-    }
-    let most_negative_ms = shared
+/// Delay of the earliest device of the group, in milliseconds.
+///
+/// Every device carries its own delay measured against the app's audio as
+/// captured, but only the earliest one can stay where it is: the OS plays the
+/// primary device natively and software delay can only be added, never removed.
+/// That earliest device is therefore the group's reference and every other
+/// device is held back by the difference (see `target_frames`). The route is
+/// ordered so the primary is normally the minimum, but a delay lowered while
+/// the engine runs can briefly move the reference to a mirror — which simply
+/// shifts the group instead of glitching.
+fn group_min_delay_ms(shared: &EngineShared) -> i32 {
+    shared
         .mirrors
         .iter()
         .filter(|m| m.enabled.load(Ordering::Relaxed))
         .map(|m| m.delay_ms.load(Ordering::Relaxed))
+        .chain(std::iter::once(
+            shared.primary_delay_ms.load(Ordering::Relaxed),
+        ))
         .min()
         .unwrap_or(0)
-        .min(0);
-    shared.sample_rate as usize * most_negative_ms.unsigned_abs() as usize / 1000
 }
 
 /// Frames this mirror keeps buffered between the capture tap and playback: the
-/// shared base latency, the group shift, and its own delay compensation. All
-/// mirrors holding their own target means they all play the same capture
-/// position at the same time, offset by exactly the configured delays.
+/// base latency plus how far its own delay sits above the earliest device in
+/// the group. All mirrors holding their own target means they all play the same
+/// capture position at the same time, offset by exactly the delays that were
+/// configured for them.
 fn target_frames(shared: &EngineShared, mirror: &MirrorChannel) -> usize {
     if !shared.sync_delays.load(Ordering::Relaxed) {
         return shared.latency_frames;
     }
-    let offset_ms = mirror.delay_ms.load(Ordering::Relaxed);
-    let offset_frames = shared.sample_rate as usize * offset_ms.unsigned_abs() as usize / 1000;
-    let shift_frames = delay_shift_frames(shared);
-    // The shift covers the most negative offset in the group, so subtracting
-    // this mirror's own negative offset can never underflow.
-    let offset_frames = if offset_ms >= 0 {
-        shift_frames + offset_frames
-    } else {
-        shift_frames.saturating_sub(offset_frames)
-    };
+    let offset_ms = mirror.delay_ms.load(Ordering::Relaxed) - group_min_delay_ms(shared);
+    let offset_frames = shared.sample_rate as usize * offset_ms.max(0) as usize / 1000;
     shared.latency_frames + offset_frames
 }
 
@@ -1140,9 +1159,10 @@ mod tests {
         }
     }
 
-    /// Engine shared state with `mirror_delays.len()` mirrors, a 100 ms base
-    /// latency and a 48 kHz capture format.
-    fn engine(mirror_delays: &[i32], sync: bool) -> EngineShared {
+    /// Engine shared state with `mirror_delays.len()` mirrors and `primary_ms`
+    /// on the natively played device, a 100 ms base latency and a 48 kHz
+    /// capture format.
+    fn engine(mirror_delays: &[i32], primary_ms: i32, sync: bool) -> EngineShared {
         EngineShared {
             pid: 1,
             generation: 0,
@@ -1159,6 +1179,8 @@ mod tests {
                     })
                 })
                 .collect(),
+            primary_device_id: "primary".to_string(),
+            primary_delay_ms: AtomicI32::new(primary_ms),
             format: Vec::new(),
             block_align: 8,
             sample_rate: 48_000,
@@ -1255,43 +1277,65 @@ mod tests {
     }
 
     #[test]
-    fn a_positive_delay_holds_that_mirror_back() {
-        let shared = engine(&[0, 1_000], true);
-        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
-        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 48_000);
+    fn a_delay_is_measured_against_the_app_audio() {
+        // The primary plays natively at 0 ms; a mirror set to 1 s is held back
+        // by exactly that second.
+        let shared = engine(&[1_000], 0, true);
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800 + 48_000);
     }
 
     #[test]
-    fn a_negative_delay_lifts_the_other_mirrors_instead() {
-        let shared = engine(&[-1_000, 0], true);
-        // The advanced mirror drops to the base latency …
+    fn the_earliest_device_of_the_group_is_the_reference() {
+        // Wired set to 0 ms, Bluetooth set to 200 ms: the wired one stays at the
+        // base latency and the Bluetooth copy is held back by 200 ms.
+        let shared = engine(&[0, 200], 0, true);
+        assert_eq!(group_min_delay_ms(&shared), 0);
         assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
-        assert_eq!(delay_shift_frames(&shared), 48_000);
-        // … and the group is held back by the same amount.
-        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 48_000);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 9_600);
     }
 
     #[test]
-    fn a_negative_delay_on_the_only_mirror_is_a_no_op() {
-        let shared = engine(&[-1_000], true);
-        // Nothing else can be held back, so the group shift cancels out.
+    fn every_device_carries_its_own_absolute_delay() {
+        // Three devices at 0 / 50 / 250 ms keep their exact 50 ms and 250 ms
+        // spreads, whatever order the route was built in.
+        let shared = engine(&[50, 250], 0, true);
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800 + 2_400);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 12_000);
+    }
+
+    #[test]
+    fn the_primary_delay_of_the_group_lifts_every_mirror() {
+        // The primary is set to 300 ms: it cannot be delayed itself, so the
+        // whole group is aligned relative to it and the mirrors sit 300 ms and
+        // 500 ms above the earliest device, i.e. 0 ms and 200 ms apart.
+        let shared = engine(&[300, 500], 300, true);
+        assert_eq!(group_min_delay_ms(&shared), 300);
         assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 9_600);
+    }
+
+    #[test]
+    fn a_delay_below_the_reference_keeps_the_mirror_at_the_base_latency() {
+        // A value under the group minimum would require *negative* software
+        // delay; the mirror simply stays at the base latency instead.
+        let shared = engine(&[-500], -200, true);
+        assert_eq!(group_min_delay_ms(&shared), -500);
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
+    }
+
+    #[test]
+    fn disabled_mirrors_do_not_move_the_reference() {
+        let shared = engine(&[-1_000, 0], 0, true);
+        shared.mirrors[0].enabled.store(false, Ordering::Relaxed);
+        assert_eq!(group_min_delay_ms(&shared), 0);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800);
     }
 
     #[test]
     fn delays_are_ignored_while_delay_sync_is_off() {
-        let shared = engine(&[2_000, -3_000], false);
-        assert_eq!(delay_shift_frames(&shared), 0);
+        let shared = engine(&[2_000, -3_000], 1_000, false);
         for mirror in &shared.mirrors {
             assert_eq!(target_frames(&shared, mirror), 4_800);
         }
-    }
-
-    #[test]
-    fn disabled_mirrors_do_not_shift_the_group() {
-        let shared = engine(&[-1_000, 0], true);
-        shared.mirrors[0].enabled.store(false, Ordering::Relaxed);
-        assert_eq!(delay_shift_frames(&shared), 0);
-        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800);
     }
 }

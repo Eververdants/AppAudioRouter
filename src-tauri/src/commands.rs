@@ -52,6 +52,11 @@ pub fn get_default_device() -> Result<audio::AudioDevice, String> {
 /// The first device becomes the process's native endpoint (all roles); every
 /// further device receives a duplicated copy of the stream. When only one
 /// device is given, any running duplication engine for the process is stopped.
+///
+/// Each device's configured delay is measured against the app's audio, so the
+/// engine also needs the primary device's value: the earliest device of the
+/// group is the reference the copies are held back from. The frontend orders
+/// the list by delay, which normally puts the earliest device first.
 // Tauri commands carry their State params in the signature, so the argument
 // count is fixed by the framework.
 #[allow(clippy::too_many_arguments)]
@@ -79,7 +84,7 @@ pub fn apply_route(
     duplications.stop(pid);
     if device_ids.len() > 1 {
         duplications
-            .start(pid, device_ids[1..].to_vec(), &app)
+            .start(pid, &device_ids[0], device_ids[1..].to_vec(), &app)
             .map_err(|e| e.to_string())?;
     }
 
