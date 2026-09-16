@@ -277,7 +277,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               />
             </Row>
             <p className="px-3 pb-1 pt-2 text-[11px] leading-relaxed text-text-muted">
-              {t('settings.delayPrimaryNote')}
+              {t('settings.delayNote')}
             </p>
             {devices.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-text-muted">

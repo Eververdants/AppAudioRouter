@@ -12,16 +12,11 @@
     "volumeLimit": "Volume limit",
     "volumeHint": "Cap this app's session volume; restored automatically on re-route"
   },
-  "delayPanel": {
-    "title": "Delay compensation",
-    "sync": "Latency sync",
-    "emptyHint": "Once a process and its devices are selected, every copied device can be delayed: {{step}} per step, up to ±{{range}} s.",
-    "hint": "{{step}} per step, up to ±{{range}} s. Positive makes this device play later; negative marks it as the earliest of the group, moving the other copies later instead.",
-    "primary": "played by the OS",
-    "primaryHint": "The primary device is played by the OS directly and cannot be delayed. If the lagging device is a Bluetooth one, select it first (it becomes the primary) and compensate the others.",
+  "deviceDelay": {
+    "valueLabel": "Delay compensation of {{device}} in milliseconds",
     "stepUp": "{{step}} later",
     "stepDown": "{{step}} earlier",
-    "valueLabel": "Delay compensation of {{device}} in milliseconds"
+    "syncOff": "Latency sync is off, so these values are not applied; enable it in the settings"
   },
   "settings": {
     "title": "Settings",
@@ -37,7 +32,7 @@
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
     "delays": "Delay compensation",
-    "delayPrimaryNote": "The primary device is played by the OS directly and cannot be delayed; make the lagging (Bluetooth) device a copy target instead. A positive value holds a device back, a negative one marks it as the earliest device of the group (the other copies move later).",
+    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. The capsule under each device node on the main screen edits the same value.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
     "delayStep": "Step size",

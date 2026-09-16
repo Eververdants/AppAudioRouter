@@ -71,6 +71,19 @@ function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>)
   return id !== null && state.devices.some((d) => d.id === id) ? [id] : [];
 }
 
+/**
+ * Route order for a set of devices: earliest delay first.
+ *
+ * Delays are absolute — each device is measured against the app's audio — but
+ * only the earliest device can stay where it is, because the OS plays the
+ * primary one natively and software delay can only be added. Ordering the route
+ * this way puts that earliest device first, so every other device really is
+ * held back by exactly the difference the user configured.
+ */
+function orderByDelay(ids: string[], delays: Record<string, number>): string[] {
+  return [...ids].sort((a, b) => (delays[a] ?? 0) - (delays[b] ?? 0));
+}
+
 export const useRouterStore = create<RouterState>((set, get) => ({
   devices: [],
   sessions: [],
@@ -166,20 +179,23 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.someProcessesGone', { n: skipped }), 'info');
     }
 
-    const deviceNames = selectedDeviceIds.map(
-      (id) => get().devices.find((d) => d.id === id)?.name ?? id,
-    );
+    // Apply in delay order so the earliest device is the one the OS plays
+    // natively; the selection is reordered along with it, which is what the
+    // badges on the stage show.
+    const ordered = orderByDelay(selectedDeviceIds, get().deviceDelays);
+    const deviceNames = ordered.map((id) => get().devices.find((d) => d.id === id)?.name ?? id);
     const primary = deviceNames[0];
-    const extra = selectedDeviceIds.length - 1;
+    const extra = ordered.length - 1;
     try {
       for (const target of targets) {
-        await api.applyRoute(target.pid, target.exeName, selectedDeviceIds, autoRemember);
+        await api.applyRoute(target.pid, target.exeName, ordered, autoRemember);
       }
       set((s) => ({
         routedPids: {
           ...s.routedPids,
-          ...Object.fromEntries(targets.map((t) => [t.pid, [...selectedDeviceIds]])),
+          ...Object.fromEntries(targets.map((t) => [t.pid, [...ordered]])),
         },
+        selectedDeviceIds: ordered,
       }));
       const count = targets.length;
       const key =

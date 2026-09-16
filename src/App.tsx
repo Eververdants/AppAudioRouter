@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
-import { DelayPanel } from '@/components/DelayPanel';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { SettingsPage } from '@/components/SettingsPage';
@@ -136,16 +135,16 @@ export default function App() {
               <ProcessList />
             </motion.aside>
 
-            {/* Center: concentric router + the delay panel on a glass stage */}
+            {/* Center: the concentric router on a glass stage. Device delays are
+                set on the device nodes themselves, so the stage owns the whole
+                column. */}
             <motion.main
               {...panelEnter}
               className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-glass bg-glass p-3 shadow-glass backdrop-blur-xl"
             >
-              {/* min-h-0 lets the stage shrink so the delay panel always fits */}
               <div className="min-h-0 w-full flex-1">
                 <ConcentricRouter />
               </div>
-              <DelayPanel />
             </motion.main>
 
             {/* Right panel: log (hidden below lg to keep the router usable) */}

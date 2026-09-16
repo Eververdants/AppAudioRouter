@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { DelayCapsule } from '@/components/ui/DelayCapsule';
 import { useFitScale } from '@/hooks/useFitScale';
 import { useRouterStore } from '@/stores/routerStore';
 
 /** Fixed design size of the router stage; the whole stage is scaled to fit. */
 const STAGE_SIZE = 460;
-const ORBIT_RADIUS = 164;
+const ORBIT_RADIUS = 152;
 const CENTER = STAGE_SIZE / 2;
 /** Perpendicular bow of the route curves: everything bends the same way,
  * which reads as one flow around the hub instead of rigid spokes. */
@@ -30,7 +31,9 @@ function routePath(x: number, y: number): string {
  * One quiet composition: a frosted-glass hub, a hairline orbit, and the
  * selected devices sitting on it, linked to the hub by faint flowing curves
  * that diffuse under the frosted glass. Restraint over decoration — motion is
- * reserved for state: selecting, routing, living routes.
+ * reserved for state: selecting, routing, living routes. Devices of the current
+ * route also carry their delay bubble, so latency is adjusted where the device
+ * is rather than in a panel of its own.
  */
 export function ConcentricRouter() {
   const { t } = useTranslation();
@@ -40,6 +43,7 @@ export function ConcentricRouter() {
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
+  const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const applyRoute = useRouterStore((s) => s.applyRoute);
   const { ref, scale } = useFitScale(STAGE_SIZE);
@@ -237,6 +241,28 @@ export function ConcentricRouter() {
                           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
                         )}
                       </motion.button>
+                      {/* Delay bubble: only devices of the current route carry
+                          one, and it sits with its device instead of in a
+                          panel below the stage. Framer writes the transform
+                          inline, so the centering offset is part of the
+                          animated values rather than a translate class. */}
+                      <AnimatePresence>
+                        {isSelected && (
+                          <motion.div
+                            initial={{ opacity: 0, x: '-50%', y: -4, scale: 0.9 }}
+                            animate={{ opacity: 1, x: '-50%', y: 0, scale: 1 }}
+                            exit={{ opacity: 0, x: '-50%', y: -4, scale: 0.9 }}
+                            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                            className="absolute left-1/2 top-full pt-1"
+                          >
+                            <DelayCapsule
+                              deviceId={device.id}
+                              name={device.name}
+                              rangeMs={delayRangeMs}
+                            />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   </motion.div>
                 );
