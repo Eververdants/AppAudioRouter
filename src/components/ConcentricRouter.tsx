@@ -217,7 +217,7 @@ export function ConcentricRouter() {
                       <motion.div
                         whileHover={{ scale: 1.06 }}
                         transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                        className={`relative flex max-w-[184px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
+                        className={`relative flex max-w-[136px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected

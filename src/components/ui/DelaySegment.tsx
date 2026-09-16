@@ -44,7 +44,7 @@ export function DelaySegment({
           stays collapsed even on hover. */}
       <div
         className={`flex items-center overflow-hidden transition-[max-width] duration-200 ease-out ${
-          committed === 0 ? 'max-w-0' : `max-w-[38px] ${collapse}`
+          committed === 0 ? 'max-w-0' : `max-w-[42px] ${collapse}`
         }`}
       >
         <span aria-hidden="true" className="mx-1.5 h-3 w-px flex-none bg-border" />
@@ -52,7 +52,7 @@ export function DelaySegment({
       </div>
 
       {/* Stepper */}
-      <div className="flex max-w-0 items-center overflow-hidden transition-[max-width] duration-200 ease-out group-hover/device:max-w-[76px] group-focus-within/device:max-w-[76px]">
+      <div className="flex max-w-0 items-center overflow-hidden transition-[max-width] duration-200 ease-out group-hover/device:max-w-[72px] group-focus-within/device:max-w-[72px]">
         <StepButton
           size="sm"
           label={t('deviceDelay.stepDown', { step: stepLabel })}
@@ -78,7 +78,7 @@ export function DelaySegment({
             }
           }}
           aria-label={t('deviceDelay.valueLabel', { device: name })}
-          className="h-5 w-9 flex-none bg-transparent text-center text-[10px] font-medium tabular-nums text-accent outline-none"
+          className="h-5 w-8 flex-none bg-transparent text-center text-[10px] font-medium tabular-nums text-accent outline-none"
         />
         <StepButton
           size="sm"
