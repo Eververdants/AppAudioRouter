@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DelayStepper } from '@/components/ui/DelayStepper';
 import { Switch } from '@/components/ui/Switch';
-import { rangeSeconds } from '@/lib/delay';
+import { formatStep, rangeSeconds } from '@/lib/delay';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -12,8 +12,9 @@ import { useRouterStore } from '@/stores/routerStore';
  * the device chips of a small bar and only reacted to a click, which left the
  * feature looking unadjustable. The panel names itself, carries the sync
  * toggle, and gives every duplicated device an explicit −/value/+ control
- * (one second per step, signed, bounded by the range from the settings). The
- * primary device is listed but cannot be delayed — the OS plays it directly.
+ * (stepping by the configured step, signed, bounded by the range from the
+ * settings). The primary device is listed but cannot be delayed — the OS plays
+ * it directly.
  */
 export function DelayPanel() {
   const { t } = useTranslation();
@@ -23,6 +24,7 @@ export function DelayPanel() {
   const delaySync = useRouterStore((s) => s.delaySync);
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
+  const delayStepMs = useRouterStore((s) => s.delayStepMs);
 
   const rows =
     selectedPids.length > 0
@@ -32,7 +34,8 @@ export function DelayPanel() {
           name: devices.find((d) => d.id === id)?.name ?? id,
         }))
       : [];
-  const seconds = rangeSeconds(delayRangeMs);
+  const range = rangeSeconds(delayRangeMs);
+  const step = formatStep(delayStepMs);
 
   return (
     <div className="w-full flex-none rounded-2xl border border-glass bg-glass px-3 py-2 shadow-glass backdrop-blur-xl">
@@ -73,7 +76,7 @@ export function DelayPanel() {
             transition={{ duration: 0.15 }}
             className="mt-1 text-[10px] leading-relaxed text-text-muted"
           >
-            {t('delayPanel.emptyHint', { range: seconds })}
+            {t('delayPanel.emptyHint', { step, range })}
           </motion.p>
         ) : (
           <motion.div
@@ -110,7 +113,7 @@ export function DelayPanel() {
               </div>
             ))}
             <p className="pt-0.5 text-[9px] leading-relaxed text-text-muted">
-              {t('delayPanel.hint', { range: seconds })}
+              {t('delayPanel.hint', { step, range })}
             </p>
           </motion.div>
         )}

@@ -15,12 +15,12 @@
   "delayPanel": {
     "title": "延迟补偿",
     "sync": "延迟同步",
-    "emptyHint": "选择进程与设备后，可为每台复制设备单独调节延迟：步进 1 秒，范围 ±{{range}} 秒。",
-    "hint": "步进 1 秒，范围 ±{{range}} 秒。正值＝该设备延后播放；负值＝该设备在组内最早，其余复制设备相应延后。",
+    "emptyHint": "选择进程与设备后，可为每台复制设备单独调节延迟：步进 {{step}}，范围 ±{{range}} 秒。",
+    "hint": "步进 {{step}}，范围 ±{{range}} 秒。正值＝该设备延后播放；负值＝该设备在组内最早，其余复制设备相应延后。",
     "primary": "系统直接播放",
     "primaryHint": "主设备由系统直接播放，无法补偿延迟。若延迟大的是蓝牙设备，请先把它选为主设备（第一个），再给其他设备加补偿。",
-    "stepUp": "增加 1 秒",
-    "stepDown": "减少 1 秒",
+    "stepUp": "增加 {{step}}",
+    "stepDown": "减少 {{step}}",
     "valueLabel": "{{device}} 的延迟补偿（毫秒）"
   },
   "settings": {
@@ -39,7 +39,9 @@
     "delays": "延迟补偿",
     "delayPrimaryNote": "主设备由系统直接播放、无法补偿；延迟较大的（蓝牙）设备应作为复制目标。正值让该设备延后，负值标记它为组内最早的设备（其余复制设备随之延后）。",
     "delayRange": "延迟范围",
-    "delayRangeDesc": "每台设备的延迟可在该正负范围内以 1 秒为步进调节",
+    "delayRangeDesc": "每台设备的延迟可在该正负范围内调节",
+    "delayStep": "调节步进",
+    "delayStepDesc": "点按 − / + 每次调整的幅度；数值也可直接键入",
     "noDevices": "暂无音频设备",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"

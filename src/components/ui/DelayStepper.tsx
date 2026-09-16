@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DELAY_STEP_MS, clampDelay, stepDelay } from '@/lib/delay';
+import { clampDelay, formatStep, stepDelay } from '@/lib/delay';
 import { useRouterStore } from '@/stores/routerStore';
 
 /** Round ± stepper button. */
@@ -41,9 +41,9 @@ function StepButton({
 }
 
 /**
- * Delay compensation control for one device: a −/+ pair stepping one whole
- * second, with a directly editable millisecond value in between so it can also
- * be typed exactly.
+ * Delay compensation control for one device: a −/+ pair stepping by the
+ * configured step, with a directly editable millisecond value in between so an
+ * exact figure can be entered too.
  *
  * Values are written through the store, which applies them optimistically,
  * persists them, and rolls them back if the backend rejects them.
@@ -59,6 +59,7 @@ export function DelayStepper({
 }) {
   const { t } = useTranslation();
   const committed = useRouterStore((s) => s.deviceDelays[deviceId] ?? 0);
+  const stepMs = useRouterStore((s) => s.delayStepMs);
   const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);
   /** Text being typed; `null` while the field mirrors the committed value. */
   const [draft, setDraft] = useState<string | null>(null);
@@ -85,13 +86,15 @@ export function DelayStepper({
     // typed; step from that value so the click never discards the edit.
     const parsed = raw !== null && raw.trim() !== '' ? Number(raw) : Number.NaN;
     const base = Number.isFinite(parsed) ? parsed : committed;
-    void setDeviceDelayValue(deviceId, stepDelay(base, direction, rangeMs));
+    void setDeviceDelayValue(deviceId, stepDelay(base, direction, rangeMs, stepMs));
   };
+
+  const stepLabel = formatStep(stepMs);
 
   return (
     <div className="flex flex-none items-center gap-1">
       <StepButton
-        label={t('delayPanel.stepDown')}
+        label={t('delayPanel.stepDown', { step: stepLabel })}
         disabled={committed <= -rangeMs}
         onClick={() => nudge(-1)}
       >
@@ -101,7 +104,7 @@ export function DelayStepper({
         <input
           type="number"
           inputMode="numeric"
-          step={DELAY_STEP_MS}
+          step={stepMs}
           min={-rangeMs}
           max={rangeMs}
           value={draft ?? String(committed)}
@@ -120,7 +123,7 @@ export function DelayStepper({
         <span className="ml-0.5 text-[9px] leading-none text-text-muted">ms</span>
       </div>
       <StepButton
-        label={t('delayPanel.stepUp')}
+        label={t('delayPanel.stepUp', { step: stepLabel })}
         disabled={committed >= rangeMs}
         onClick={() => nudge(1)}
       >

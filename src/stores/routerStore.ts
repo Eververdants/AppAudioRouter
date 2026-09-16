@@ -2,7 +2,14 @@ import { create } from 'zustand';
 import i18next from 'i18next';
 import type { AudioDevice, AudioSession, DuplicationStoppedEvent, LogEntry } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
-import { DEFAULT_DELAY_RANGE_MS, clampDelay, rangeSeconds } from '@/lib/delay';
+import {
+  DEFAULT_DELAY_RANGE_MS,
+  DELAY_STEP_STORAGE_KEY,
+  clampDelay,
+  clampStep,
+  rangeSeconds,
+  readDelayStep,
+} from '@/lib/delay';
 import * as api from '@/lib/invoke';
 
 interface RouterState {
@@ -23,6 +30,9 @@ interface RouterState {
   deviceDelays: Record<string, number>;
   /** Largest magnitude a delay may be set to, in milliseconds. */
   delayRangeMs: number;
+  /** How much one −/+ click changes a delay, in milliseconds. A UI preference
+   * (persisted to localStorage, like the theme), not an engine setting. */
+  delayStepMs: number;
   /** Per-exe volume limits in percent (100 = no limit). */
   volumeLimits: Record<string, number>;
   /** Whether delay compensation is applied by the engine. */
@@ -47,6 +57,7 @@ interface RouterState {
   setVolumeLimit: (exeName: string, percent: number) => Promise<void>;
   setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
   setDelayRange: (rangeMs: number) => Promise<void>;
+  setDelayStep: (stepMs: number) => void;
   toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   addLog: (message: string, level?: LogEntry['level']) => void;
@@ -69,6 +80,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   defaultDeviceId: null,
   deviceDelays: {},
   delayRangeMs: DEFAULT_DELAY_RANGE_MS,
+  delayStepMs: readDelayStep(),
   volumeLimits: {},
   delaySync: false,
   autoRemember: false,
@@ -337,6 +349,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       set({ delayRangeMs: previousRange, deviceDelays: previousDelays });
       get().addLog(i18next.t('log.delayRangeSetFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  setDelayStep: (stepMs) => {
+    const step = clampStep(stepMs);
+    if (get().delayStepMs === step) return;
+    set({ delayStepMs: step });
+    try {
+      localStorage.setItem(DELAY_STEP_STORAGE_KEY, String(step));
+    } catch {
+      /* storage may be unavailable; the preference just does not persist */
     }
   },
 

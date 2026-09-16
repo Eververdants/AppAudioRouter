@@ -15,12 +15,12 @@
   "delayPanel": {
     "title": "Delay compensation",
     "sync": "Latency sync",
-    "emptyHint": "Once a process and its devices are selected, every copied device can be delayed: 1 s per step, up to ±{{range}} s.",
-    "hint": "1 s per step, up to ±{{range}} s. Positive makes this device play later; negative marks it as the earliest of the group, moving the other copies later instead.",
+    "emptyHint": "Once a process and its devices are selected, every copied device can be delayed: {{step}} per step, up to ±{{range}} s.",
+    "hint": "{{step}} per step, up to ±{{range}} s. Positive makes this device play later; negative marks it as the earliest of the group, moving the other copies later instead.",
     "primary": "played by the OS",
     "primaryHint": "The primary device is played by the OS directly and cannot be delayed. If the lagging device is a Bluetooth one, select it first (it becomes the primary) and compensate the others.",
-    "stepUp": "One second later",
-    "stepDown": "One second earlier",
+    "stepUp": "{{step}} later",
+    "stepDown": "{{step}} earlier",
     "valueLabel": "Delay compensation of {{device}} in milliseconds"
   },
   "settings": {
@@ -39,7 +39,9 @@
     "delays": "Delay compensation",
     "delayPrimaryNote": "The primary device is played by the OS directly and cannot be delayed; make the lagging (Bluetooth) device a copy target instead. A positive value holds a device back, a negative one marks it as the earliest device of the group (the other copies move later).",
     "delayRange": "Delay range",
-    "delayRangeDesc": "Delays can be set within this ± range, stepped by whole seconds",
+    "delayRangeDesc": "Delays can be set within this ± range",
+    "delayStep": "Step size",
+    "delayStepDesc": "How much each − / + click changes; an exact value can also be typed",
     "noDevices": "No audio devices",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."

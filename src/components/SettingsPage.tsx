@@ -6,7 +6,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
-import { DELAY_RANGE_OPTIONS, rangeSeconds } from '@/lib/delay';
+import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
 import { useRouterStore } from '@/stores/routerStore';
 
 const cardEnter = {
@@ -94,6 +94,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const setDelayRange = useRouterStore((s) => s.setDelayRange);
+  const delayStepMs = useRouterStore((s) => s.delayStepMs);
+  const setDelayStep = useRouterStore((s) => s.setDelayStep);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -259,6 +261,18 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 options={DELAY_RANGE_OPTIONS.map((ms) => ({
                   value: String(ms),
                   label: `±${rangeSeconds(ms)}s`,
+                }))}
+              />
+            </Row>
+            <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
+              <SegmentedControl
+                layoutId="settings-delay-step"
+                ariaLabel={t('settings.delayStep')}
+                value={String(delayStepMs)}
+                onChange={(value) => setDelayStep(Number(value))}
+                options={DELAY_STEP_OPTIONS.map((ms) => ({
+                  value: String(ms),
+                  label: formatStep(ms),
                 }))}
               />
             </Row>
