@@ -49,19 +49,21 @@ AppAudioRouter/
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
-│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（含设备列表与音频流连线）
+│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（设备节点 + 每个选中设备旁的延迟气泡）
 │   │   ├── ProcessList.tsx
-│   │   ├── DelayPanel.tsx        # 延迟补偿面板（常驻舞台底部，每台复制设备一个 ±1s 步进控件）
-│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟范围与逐设备步进/关于）
+│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟范围·步进·逐设备设置/关于）
 │   │   ├── LogPanel.tsx
 │   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
 │   │   └── ui/             # 基础控件
 │   │       ├── Switch.tsx              # 动画开关
 │   │       ├── SegmentedControl.tsx    # 滑动胶囊分段控件
-│   │       └── DelayStepper.tsx        # 延迟步进控件（−/毫秒输入/+，步进可配，默认 10 ms）
+│   │       ├── StepButton.tsx          # 圆形 ± 按钮（延迟控件共用）
+│   │       ├── DelayCapsule.tsx        # 设备节点旁的延迟小胶囊（−/数值/+）
+│   │       └── DelayStepper.tsx        # 设置页的延迟行控件（同款逻辑、方框样式）
 │   ├── hooks/              # 自定义 hooks
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
+│   │   ├── useDelayValue.ts  # 延迟编辑状态（草稿/提交/步进），两个延迟控件共用
 │   │   └── useFitScale.ts  # 适配缩放（同心圆舞台）
 │   ├── stores/             # 状态管理
 │   │   └── routerStore.ts  # Zustand store
@@ -142,8 +144,12 @@ AppAudioRouter/
 - 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
 - 系统默认渲染设备由 `get_default_device` 取得并存入 `defaultDeviceId`；进程无可记忆路由时以它作为默认关联设备（选中进程即自动选中），进程列表每行显示该进程当前播放到的设备
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
-- 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`，设备 -> 有符号延迟 ms，另有 `delay_range_ms` 记录正负范围上限）；引擎侧语义：正值让该镜像设备延后，负值表示它是组内最早的一台、改为把其余镜像一并延后（软件延迟只能加不能减）；主设备由系统直接播放、不参与补偿
-- 延迟调节入口是常驻的 `DelayPanel`（舞台底部，非悬浮/非隐藏）：标题 + 「延迟同步」开关 + 每台复制设备一个 `DelayStepper`（− / 毫秒输入 / +）；步进可在设置页选 1/10/50/100/1000 ms（默认 **10 ms**，属 UI 偏好，存 localStorage `aar-delay-step`），数值也可直接键入；范围在设置页用 ±1/2/5/10 秒分段控件调整，缩小范围时前后端同时把越界值钳到新上限；运行中的引擎实时响应补偿值与开关变化
+- 延迟是**每台设备各自相对系统音频的绝对值**（不是相对某台主设备）：每台设备都可设，主设备（系统直连那台）也能设；
+  `duplication.rs` 以「组内延迟最小的设备」为基准，`target_frames()` = 基础 100ms `LATENCY_TARGET_MS` + (自身延迟 − 组内最小值)，
+  所以相对差一定被精确还原、绝对值会被归一化到最早的那台（软件延迟只能加不能减）。组内最小值同时包含主设备的值（`primary_delay_ms`）。
+- 应用路由时前端按延迟从小到大排序（`orderByDelay`），让延迟最小的设备成为系统直连的主设备；设置页可调 ±1/2/5/10 秒范围与步进（默认 10 ms，`aar-delay-step`），缩小范围时前后端同时钳制越界值。
+- 延迟入口在**设备节点本身**：同心圆上每个选中设备的节点下方挂一个 `DelayCapsule`（−/数值/+，值可键入）；不要在舞台底部再做常驻面板。
+  `delaySync` 关闭时胶囊变淡并提示「延迟同步已关闭」；设置页仍保留逐设备列表，便于给未选中的设备预设延迟。
 - 音量上限按 exe 持久化到 `app_data_dir/session-volumes.json`（`config.rs`，exe -> %），通过 `ISimpleAudioVolume` 设置会话主音量，`apply_route` 时自动重放；100 表示不限制（不落盘）
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
@@ -203,8 +209,9 @@ AppAudioRouter/
   - 其余选中设备 = 复制目标（描边样式 + 序号徽标）
   - 已在当前路由中的设备带 success 圆点 + 扩散脉冲光环
   - 系统默认播放设备在节点右下角带一个 muted 小圆点（title 提示）
+  - 选中设备的节点**下方挂延迟小胶囊**（`DelayCapsule`）：− / 毫秒数值（可键入）/ +，半径 152 给气泡留出空间
 - 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）；每行下方显示该进程当前播放到的设备（路由主设备或系统默认设备）
-- 舞台底部常驻延迟面板（`DelayPanel`），未选择进程/设备时展示说明文案而不是隐藏入口
+- 舞台底部不放常驻面板：延迟在设备节点上改，其余设置都在设置页
 - 激活状态：`scale(1.05)` + `box-shadow` 扩散
 - 路由动画：spring stiffness=300, damping=20
 - 视觉体系：液态玻璃（`--glass-*` tokens + backdrop-blur + shadow-glass），body 环境渐变 + App 内漂移光晕为玻璃提供"折射"色彩；所有微动效统一走 Motion，不手写 @keyframes
