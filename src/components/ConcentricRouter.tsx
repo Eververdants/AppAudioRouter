@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { DelayCapsule } from '@/components/ui/DelayCapsule';
+import { DelaySegment } from '@/components/ui/DelaySegment';
 import { useFitScale } from '@/hooks/useFitScale';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -191,8 +191,8 @@ export function ConcentricRouter() {
                     }}
                     className="absolute left-1/2 top-1/2"
                   >
-                    {/* `group/device` lets the delay capsule below reveal
-                        itself while the pointer is on this node. */}
+                    {/* `group/device` lets the delay segment at the chip's
+                        trailing edge open while the pointer is on this node. */}
                     <div className="group/device -translate-x-1/2 -translate-y-1/2">
                       {/* System default endpoint: the device every unrouted
                           process already plays through. */}
@@ -211,21 +211,37 @@ export function ConcentricRouter() {
                           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
                         />
                       )}
-                      <motion.button
-                        onClick={() => toggleDeviceSelection(device.id)}
+                      {/* One capsule per device: the name selects it, the
+                          trailing segment belongs to the same object and holds
+                          the delay. */}
+                      <motion.div
                         whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.94 }}
                         transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                        className={`relative flex max-w-[116px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                        className={`relative flex max-w-[184px] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected
                               ? 'bg-accent-muted/70 border-accent/50 text-accent'
                               : 'border-glass bg-glass-strong text-text-secondary shadow-glass hover:border-accent/40 hover:text-accent'
                         }`}
-                        title={device.name}
                       >
-                        <span className="truncate">{device.name}</span>
+                        <motion.button
+                          type="button"
+                          onClick={() => toggleDeviceSelection(device.id)}
+                          whileTap={{ scale: 0.94 }}
+                          transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+                          title={device.name}
+                          className="flex min-w-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                        >
+                          <span className="truncate">{device.name}</span>
+                        </motion.button>
+                        {isSelected && (
+                          <DelaySegment
+                            deviceId={device.id}
+                            name={device.name}
+                            rangeMs={delayRangeMs}
+                          />
+                        )}
                         {isSelected && (
                           <motion.span
                             key={selectionIndex}
@@ -242,29 +258,7 @@ export function ConcentricRouter() {
                         {isLive && !isSelected && (
                           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
                         )}
-                      </motion.button>
-                      {/* Delay bubble: only devices of the current route carry
-                          one, and it sits with its device instead of in a
-                          panel below the stage. Framer writes the transform
-                          inline, so the centering offset is part of the
-                          animated values rather than a translate class. */}
-                      <AnimatePresence>
-                        {isSelected && (
-                          <motion.div
-                            initial={{ opacity: 0, x: '-50%', y: -4, scale: 0.9 }}
-                            animate={{ opacity: 1, x: '-50%', y: 0, scale: 1 }}
-                            exit={{ opacity: 0, x: '-50%', y: -4, scale: 0.9 }}
-                            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                            className="absolute left-1/2 top-full pt-0.5"
-                          >
-                            <DelayCapsule
-                              deviceId={device.id}
-                              name={device.name}
-                              rangeMs={delayRangeMs}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                      </motion.div>
                     </div>
                   </motion.div>
                 );
