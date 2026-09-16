@@ -14,6 +14,15 @@ const COLLAPSED = 'grid-cols-[0fr]';
 const EXPANDED = 'grid-cols-[1fr]';
 
 /**
+ * Room the revealed stepper takes: two `sm` step buttons (20 px each) plus the
+ * value field (36 px). The node capsule adds exactly this to its ceiling while
+ * the segment is open, so the stepper never has to take the space from the
+ * device name. Kept in sync with the sizes below by hand — Tailwind classes
+ * cannot be read from here.
+ */
+export const DELAY_STEPPER_WIDTH = 2 * 20 + 36;
+
+/**
  * Delay control of one device, as a trailing segment of its node capsule.
  *
  * It is part of the chip rather than a second bubble floating under it, so a
@@ -95,7 +104,7 @@ export function DelaySegment({
               }
             }}
             aria-label={t('deviceDelay.valueLabel', { device: name })}
-            className="h-5 w-8 flex-none bg-transparent text-center text-[10px] font-medium tabular-nums text-accent outline-none"
+            className="h-5 w-9 flex-none bg-transparent px-0 text-center text-[10px] font-medium tabular-nums text-accent outline-none"
           />
           <StepButton
             size="sm"

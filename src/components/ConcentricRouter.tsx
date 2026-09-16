@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { DelaySegment } from '@/components/ui/DelaySegment';
+import { DelaySegment, DELAY_STEPPER_WIDTH } from '@/components/ui/DelaySegment';
 import { useFitScale } from '@/hooks/useFitScale';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -16,6 +16,11 @@ const CENTER = STAGE_SIZE / 2;
  *  short chip; a name longer than this truncates, and the full one stays in the
  *  tooltip and in the settings list. */
 const MAX_NODE_WIDTH = 2 * (CENTER - ORBIT_RADIUS);
+/** Ceiling while the delay stepper is revealed: the resting one plus exactly
+ *  the room the stepper occupies. The capsule grows by what the stepper needs
+ *  instead of taking it out of the name, which is what used to happen — the
+ *  name shrank to a few characters the moment the pointer arrived. */
+const EDITING_NODE_WIDTH = MAX_NODE_WIDTH + DELAY_STEPPER_WIDTH;
 /** Perpendicular bow of the route curves: everything bends the same way,
  * which reads as one flow around the hub instead of rigid spokes. */
 const CURVE_BOW = 30;
@@ -180,6 +185,11 @@ export function ConcentricRouter() {
                 const isSelected = selectionIndex >= 0;
                 const isPrimary = selectionIndex === 0;
                 const isLive = activeIds.includes(device.id);
+                // The ceiling rises only where a stepper can actually appear —
+                // otherwise a hover would widen a pill for no reason.
+                const editingCeiling = isSelected
+                  ? 'group-hover/device:max-w-[var(--node-edit-max-w)] group-focus-within/device:max-w-[var(--node-edit-max-w)]'
+                  : '';
 
                 return (
                   // Outer div carries the position animation: framer-motion
@@ -196,11 +206,21 @@ export function ConcentricRouter() {
                       damping: 22,
                       delay: i * 0.04,
                     }}
-                    className="absolute left-1/2 top-1/2"
+                    className="absolute left-1/2 top-1/2 hover:z-10 focus-within:z-10"
                   >
                     {/* `group/device` lets the delay segment at the chip's
-                        trailing edge open while the pointer is on this node. */}
-                    <div className="group/device -translate-x-1/2 -translate-y-1/2">
+                        trailing edge open while the pointer is on this node.
+                        The two width ceilings reach the capsule as custom
+                        properties: the derived numbers stay in one place. */}
+                    <div
+                      className="group/device -translate-x-1/2 -translate-y-1/2"
+                      style={
+                        {
+                          '--node-max-w': `${MAX_NODE_WIDTH}px`,
+                          '--node-edit-max-w': `${EDITING_NODE_WIDTH}px`,
+                        } as CSSProperties
+                      }
+                    >
                       {/* System default endpoint: the device every unrouted
                           process already plays through. */}
                       {device.id === defaultDeviceId && (
@@ -220,13 +240,12 @@ export function ConcentricRouter() {
                       )}
                       {/* One capsule per device: the name selects it, the
                           trailing segment belongs to the same object and holds
-                          the delay. Its width follows its content; only the
-                          stage-derived ceiling can truncate the name. */}
-                      <motion.div
-                        whileHover={{ scale: 1.06 }}
-                        transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                        style={{ maxWidth: MAX_NODE_WIDTH }}
-                        className={`relative flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
+                          the delay. Its width follows its content up to the
+                          resting ceiling, which rises by the stepper's own room
+                          while the delay is being edited, so the name keeps
+                          what it had instead of being squeezed to a stub. */}
+                      <div
+                        className={`relative flex max-w-[var(--node-max-w)] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${editingCeiling} ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected
@@ -239,7 +258,17 @@ export function ConcentricRouter() {
                             cap pushes it into truncating. */}
                         <motion.button
                           type="button"
-                          onClick={() => toggleDeviceSelection(device.id)}
+                          onClick={(e) => {
+                            toggleDeviceSelection(device.id);
+                            // A mouse click would otherwise leave the button
+                            // focused, and `focus-within` would hold the delay
+                            // stepper open — so every pill the user had just
+                            // selected sat there wide open with its name
+                            // squeezed. Keyboard activation (detail 0) keeps
+                            // the focus, which is what makes the stepper
+                            // reachable with Tab.
+                            if (e.detail > 0) e.currentTarget.blur();
+                          }}
                           whileTap={{ scale: 0.94 }}
                           transition={{ type: 'spring', stiffness: 420, damping: 26 }}
                           title={device.name}
@@ -270,7 +299,7 @@ export function ConcentricRouter() {
                         {isLive && !isSelected && (
                           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
                         )}
-                      </motion.div>
+                      </div>
                     </div>
                   </motion.div>
                 );
