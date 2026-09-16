@@ -58,7 +58,7 @@ AppAudioRouter/
 │   │   └── ui/             # 基础控件
 │   │       ├── Switch.tsx              # 动画开关
 │   │       ├── SegmentedControl.tsx    # 滑动胶囊分段控件
-│   │       └── DelayStepper.tsx        # 延迟步进控件（−/毫秒输入/+，一步 1 秒）
+│   │       └── DelayStepper.tsx        # 延迟步进控件（−/毫秒输入/+，步进可配，默认 10 ms）
 │   ├── hooks/              # 自定义 hooks
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
@@ -143,7 +143,7 @@ AppAudioRouter/
 - 系统默认渲染设备由 `get_default_device` 取得并存入 `defaultDeviceId`；进程无可记忆路由时以它作为默认关联设备（选中进程即自动选中），进程列表每行显示该进程当前播放到的设备
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
 - 延迟补偿按设备持久化到 `app_data_dir/device-delays.json`（`config.rs`，设备 -> 有符号延迟 ms，另有 `delay_range_ms` 记录正负范围上限）；引擎侧语义：正值让该镜像设备延后，负值表示它是组内最早的一台、改为把其余镜像一并延后（软件延迟只能加不能减）；主设备由系统直接播放、不参与补偿
-- 延迟调节入口是常驻的 `DelayPanel`（舞台底部，非悬浮/非隐藏）：标题 + 「延迟同步」开关 + 每台复制设备一个 `DelayStepper`（− / 毫秒输入 / +，步进 1 秒，数值可精确键入）；范围在设置页用 ±1/2/5/10 秒分段控件调整，缩小范围时前后端同时把越界值钳到新上限；运行中的引擎实时响应补偿值与开关变化
+- 延迟调节入口是常驻的 `DelayPanel`（舞台底部，非悬浮/非隐藏）：标题 + 「延迟同步」开关 + 每台复制设备一个 `DelayStepper`（− / 毫秒输入 / +）；步进可在设置页选 1/10/50/100/1000 ms（默认 **10 ms**，属 UI 偏好，存 localStorage `aar-delay-step`），数值也可直接键入；范围在设置页用 ±1/2/5/10 秒分段控件调整，缩小范围时前后端同时把越界值钳到新上限；运行中的引擎实时响应补偿值与开关变化
 - 音量上限按 exe 持久化到 `app_data_dir/session-volumes.json`（`config.rs`，exe -> %），通过 `ISimpleAudioVolume` 设置会话主音量，`apply_route` 时自动重放；100 表示不限制（不落盘）
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
