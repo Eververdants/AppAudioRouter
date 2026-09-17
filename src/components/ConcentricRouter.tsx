@@ -1,7 +1,7 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { DelaySegment, DELAY_STEPPER_WIDTH } from '@/components/ui/DelaySegment';
+import { DelayReadout } from '@/components/ui/DelayReadout';
 import { useFitScale } from '@/hooks/useFitScale';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -14,13 +14,10 @@ const CENTER = STAGE_SIZE / 2;
  *  anything wider than the room left on either side would spill out of the
  *  stage. Capsules size to their content up to this, so a short name makes a
  *  short chip; a name longer than this truncates, and the full one stays in the
- *  tooltip and in the settings list. */
+ *  tooltip and in the settings list. The delay readout lives inside that same
+ *  budget and never asks for more, which is why no hover ever changes a width
+ *  here — a chip grows by nothing when the pointer arrives. */
 const MAX_NODE_WIDTH = 2 * (CENTER - ORBIT_RADIUS);
-/** Ceiling while the delay stepper is revealed: the resting one plus exactly
- *  the room the stepper occupies. The capsule grows by what the stepper needs
- *  instead of taking it out of the name, which is what used to happen — the
- *  name shrank to a few characters the moment the pointer arrived. */
-const EDITING_NODE_WIDTH = MAX_NODE_WIDTH + DELAY_STEPPER_WIDTH;
 /** Perpendicular bow of the route curves: everything bends the same way,
  * which reads as one flow around the hub instead of rigid spokes. */
 const CURVE_BOW = 30;
@@ -185,11 +182,6 @@ export function ConcentricRouter() {
                 const isSelected = selectionIndex >= 0;
                 const isPrimary = selectionIndex === 0;
                 const isLive = activeIds.includes(device.id);
-                // The ceiling rises only where a stepper can actually appear —
-                // otherwise a hover would widen a pill for no reason.
-                const editingCeiling = isSelected
-                  ? 'group-hover/device:max-w-[var(--node-edit-max-w)] group-focus-within/device:max-w-[var(--node-edit-max-w)]'
-                  : '';
 
                 return (
                   // Outer div carries the position animation: framer-motion
@@ -208,19 +200,10 @@ export function ConcentricRouter() {
                     }}
                     className="absolute left-1/2 top-1/2 hover:z-10 focus-within:z-10"
                   >
-                    {/* `group/device` lets the delay segment at the chip's
-                        trailing edge open while the pointer is on this node.
-                        The two width ceilings reach the capsule as custom
-                        properties: the derived numbers stay in one place. */}
-                    <div
-                      className="group/device -translate-x-1/2 -translate-y-1/2"
-                      style={
-                        {
-                          '--node-max-w': `${MAX_NODE_WIDTH}px`,
-                          '--node-edit-max-w': `${EDITING_NODE_WIDTH}px`,
-                        } as CSSProperties
-                      }
-                    >
+                    {/* `group/device` lets the hairline under the delay
+                        readout answer the pointer, so the chip reads as one
+                        object rather than a name with a widget bolted on. */}
+                    <div className="group/device -translate-x-1/2 -translate-y-1/2">
                       {/* System default endpoint: the device every unrouted
                           process already plays through. */}
                       {device.id === defaultDeviceId && (
@@ -238,14 +221,13 @@ export function ConcentricRouter() {
                           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
                         />
                       )}
-                      {/* One capsule per device: the name selects it, the
-                          trailing segment belongs to the same object and holds
-                          the delay. Its width follows its content up to the
-                          resting ceiling, which rises by the stepper's own room
-                          while the delay is being edited, so the name keeps
-                          what it had instead of being squeezed to a stub. */}
+                      {/* One capsule per device: the name selects it, and the
+                          delay sits behind a hairline in the same capsule —
+                          a number that is itself the control, so there is no
+                          second widget to make room for. */}
                       <div
-                        className={`relative flex max-w-[var(--node-max-w)] items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${editingCeiling} ${
+                        style={{ maxWidth: MAX_NODE_WIDTH }}
+                        className={`relative flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
                           isPrimary
                             ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
                             : isSelected
@@ -253,20 +235,16 @@ export function ConcentricRouter() {
                               : 'border-glass bg-glass-strong text-text-secondary shadow-glass hover:border-accent/40 hover:text-accent'
                         }`}
                       >
-                        {/* The name takes the room it needs and gives it back
-                            as the delay segment opens; only the capsule's own
-                            cap pushes it into truncating. */}
+                        {/* The name takes the room it needs; the capsule's own
+                            cap is the only thing that truncates it. */}
                         <motion.button
                           type="button"
                           onClick={(e) => {
                             toggleDeviceSelection(device.id);
                             // A mouse click would otherwise leave the button
-                            // focused, and `focus-within` would hold the delay
-                            // stepper open — so every pill the user had just
-                            // selected sat there wide open with its name
-                            // squeezed. Keyboard activation (detail 0) keeps
-                            // the focus, which is what makes the stepper
-                            // reachable with Tab.
+                            // focused, and the next Space would silently undo
+                            // the selection just made. Keyboard activation
+                            // (detail 0) keeps the focus it needs.
                             if (e.detail > 0) e.currentTarget.blur();
                           }}
                           whileTap={{ scale: 0.94 }}
@@ -277,7 +255,7 @@ export function ConcentricRouter() {
                           <span className="truncate">{device.name}</span>
                         </motion.button>
                         {isSelected && (
-                          <DelaySegment
+                          <DelayReadout
                             deviceId={device.id}
                             name={device.name}
                             rangeMs={delayRangeMs}

@@ -47,7 +47,19 @@ export function clampDelay(ms: number, rangeMs: number): number {
 }
 
 /**
- * Next delay when stepping once up or down.
+ * Delay as a signed label: `0`, `+250`, `−2500`.
+ *
+ * The minus sign is U+2212, not the hyphen the ASCII value carries: at tabular
+ * widths a hyphen reads as a stray dash, while the real minus sits on the same
+ * axis as the plus on the other side of zero.
+ */
+export function formatDelaySigned(ms: number): string {
+  if (ms === 0) return '0';
+  return ms > 0 ? `+${ms}` : `\u2212${Math.abs(ms)}`;
+}
+
+/**
+ * Next delay when stepping `times` times up or down.
  *
  * The current value is snapped to the step first, so a value left behind by a
  * coarser or finer step lands on the current grid instead of keeping an odd
@@ -58,9 +70,10 @@ export function stepDelay(
   direction: 1 | -1,
   rangeMs: number,
   stepMs: number,
+  times = 1,
 ): number {
   const snapped = Math.round(ms / stepMs) * stepMs;
-  return clampDelay(snapped + direction * stepMs, rangeMs);
+  return clampDelay(snapped + direction * stepMs * times, rangeMs);
 }
 
 /** Whole seconds, for labels that state the configured range. */

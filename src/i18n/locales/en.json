@@ -14,6 +14,7 @@
   },
   "deviceDelay": {
     "valueLabel": "Delay compensation of {{device}} in milliseconds",
+    "hint": "Drag sideways, or scroll / press arrows for {{step}} a time (hold Shift for ten); click to type an exact value",
     "stepUp": "{{step}} later",
     "stepDown": "{{step}} earlier",
     "syncOff": "Latency sync is off, so these values are not applied; enable it in the settings"
@@ -32,7 +33,7 @@
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
     "delays": "Delay compensation",
-    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. The capsule under each device node on the main screen edits the same value.",
+    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number on a device node, or scroll it.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
     "delayStep": "Step size",

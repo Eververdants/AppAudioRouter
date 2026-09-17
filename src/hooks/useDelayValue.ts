@@ -32,14 +32,18 @@ export function useDelayValue(deviceId: string, rangeMs: number) {
     void setDeviceDelayValue(deviceId, clampDelay(parsed, rangeMs));
   };
 
-  const nudge = (direction: 1 | -1) => {
+  /**
+   * Step by the configured amount, `times` times at once (a wheel notch or a
+   * shifted arrow key covers more ground than a single click).
+   */
+  const nudge = (direction: 1 | -1, times = 1) => {
     const raw = draft;
     setDraft(null);
     // Clicking a step button blurs the field first, which commits whatever was
     // typed; step from that value so the click never discards the edit.
     const parsed = raw !== null && raw.trim() !== '' ? Number(raw) : Number.NaN;
     const base = Number.isFinite(parsed) ? parsed : committed;
-    void setDeviceDelayValue(deviceId, stepDelay(base, direction, rangeMs, stepMs));
+    void setDeviceDelayValue(deviceId, stepDelay(base, direction, rangeMs, stepMs, times));
   };
 
   /** Escape abandons the draft instead of committing it on blur. */
