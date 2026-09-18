@@ -58,6 +58,12 @@ function AmbientLight() {
   );
 }
 
+// Tracks the most recent duplication-stopped listener effect run. Under
+// StrictMode the effect tears down and re-runs before the first subscription
+// resolves; the token lets a stale run drop its own handle instead of
+// orphaning it or overwriting the newer run's handle.
+let activeListenToken: unknown = null;
+
 export default function App() {
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
@@ -94,16 +100,28 @@ export default function App() {
   useEffect(() => {
     // Duplication engines report their end (user stop, process exit, error)
     // through this backend event so the badges stay honest.
-    let disposed = false;
+    //
+    // The subscription is created asynchronously, so a single `disposed` flag
+    // is not enough under StrictMode (effect runs, tears down, runs again
+    // before the first promise resolves): the first subscription would be
+    // orphaned. Instead each effect run owns a token and keeps its own
+    // unsubscribe handle keyed by it, so every subscription is torn down and
+    // no second copy is ever silently registered.
+    const token = {};
+    activeListenToken = token;
     let unlisten: (() => void) | null = null;
     void listen<DuplicationStoppedEvent>('duplication-stopped', (event) => {
       useRouterStore.getState().handleDuplicationStopped(event.payload);
     }).then((off) => {
-      if (disposed) off();
-      else unlisten = off;
+      // A newer effect run already replaced this one: drop the stale handle.
+      if (activeListenToken !== token) {
+        off();
+      } else {
+        unlisten = off;
+      }
     });
     return () => {
-      disposed = true;
+      if (activeListenToken === token) activeListenToken = null;
       unlisten?.();
     };
   }, []);

@@ -13,6 +13,10 @@ import {
 /** Bar height in px, kept in sync with the `h-9` class on the header. */
 const BAR_HEIGHT = 36;
 
+// Tracks the most recent resize-listener effect run so a StrictMode
+// double-mount cannot orphan the first subscription.
+let activeResizeToken: unknown = null;
+
 /** Window control button, sized like the Windows 11 caption buttons. */
 function WindowControl({
   label,
@@ -72,21 +76,24 @@ export function TitleBar({
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
+    // Token-based subscription so a StrictMode double-mount cannot orphan the
+    // first resize listener (see the same pattern in App.tsx).
+    const token = {};
+    activeResizeToken = token;
     let unlisten: (() => void) | null = null;
-    let disposed = false;
 
     const refresh = () => {
       void isWindowMaximized().then(setMaximized);
     };
 
     void onWindowResized(refresh).then((off) => {
-      if (disposed) off();
+      if (activeResizeToken !== token) off();
       else unlisten = off;
     });
     refresh();
 
     return () => {
-      disposed = true;
+      if (activeResizeToken === token) activeResizeToken = null;
       unlisten?.();
     };
   }, []);

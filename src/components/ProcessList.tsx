@@ -142,7 +142,10 @@ export function ProcessList() {
                         is never clipped. */}
                     {isSelected && (
                       <motion.span
-                        layoutId="process-active-pill"
+                        // layoutId must be unique per animating element: a shared
+                        // id makes framer-motion slide a single pill to one row,
+                        // leaving the other selected rows unhighlighted.
+                        layoutId={`process-active-pill-${session.pid}`}
                         className="absolute inset-0 rounded-lg border border-accent/60 bg-accent-muted"
                         transition={{ type: 'spring', stiffness: 450, damping: 34 }}
                       />

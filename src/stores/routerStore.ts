@@ -40,6 +40,9 @@ interface RouterState {
   autoRemember: boolean;
   logs: LogEntry[];
   loading: boolean;
+  /** True while a route request is in flight, so a rapid double-click cannot
+   * dispatch two overlapping routes against the same selection. */
+  applying: boolean;
 
   // actions
   refreshDevices: () => Promise<void>;
@@ -99,6 +102,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   autoRemember: false,
   logs: [],
   loading: false,
+  applying: false,
 
   refreshDevices: async () => {
     try {
@@ -161,8 +165,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   toggleAutoRemember: () => set((s) => ({ autoRemember: !s.autoRemember })),
 
   applyRoute: async () => {
+    // A flighting request already owns the selection: a second click while the
+    // first is in flight would dispatch a duplicate route against the same
+    // targets. Let the first one land, then start from fresh state.
+    if (get().applying) return;
+    set({ applying: true });
     const { selectedPids, selectedDeviceIds, autoRemember, sessions } = get();
     if (selectedPids.length === 0 || selectedDeviceIds.length === 0) {
+      set({ applying: false });
       get().addLog(i18next.t('log.selectProcessAndDevice'), 'error');
       return;
     }
@@ -171,6 +181,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       return session ? [{ pid, exeName: session.exe_name }] : [];
     });
     if (targets.length === 0) {
+      set({ applying: false });
       get().addLog(i18next.t('log.processGone'), 'error');
       return;
     }
@@ -217,13 +228,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       );
     } catch (e) {
       get().addLog(i18next.t('log.routeFailed', { error: String(e) }), 'error');
+    } finally {
+      // Always release the flighting flag — a failed route must not leave the
+      // hub latched disabled against a still-routable selection.
+      set({ applying: false });
     }
   },
 
   stopRoute: async (pid) => {
     const session = get().sessions.find((s) => s.pid === pid);
+    if (!get().routedPids[pid]) return;
+    // Snapshot before mutating: if the backend rejects the stop the UI must
+    // keep showing the route as live instead of silently desyncing from it.
+    const previous = get().routedPids[pid];
     try {
-      await api.stopRoute(pid);
+      // Optimistic: reflect the stop immediately so the UI feels instant.
       set((s) => {
         const routedPids = { ...s.routedPids };
         delete routedPids[pid];
@@ -234,11 +253,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           selectedDeviceIds: wasOnlySelection ? [] : s.selectedDeviceIds,
         };
       });
+      await api.stopRoute(pid);
       get().addLog(
         i18next.t('log.routeStopped', { process: session?.exe_name ?? `PID ${pid}` }),
         'info',
       );
     } catch (e) {
+      // Backend didn't actually stop: roll the route back into view.
+      set((s) => ({ routedPids: { ...s.routedPids, [pid]: previous! } }));
       get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
     }
   },
@@ -246,23 +268,36 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   stopAllRoutes: async () => {
     const pids = Object.keys(get().routedPids).map(Number);
     if (pids.length === 0) return;
+    // Optimistic: assume every stop succeeds, then put back the ones that
+    // didn't. Failed stops must keep their route live rather than desyncing
+    // the UI from an engine that is still duplicating.
+    const snapshot = { ...get().routedPids };
+    set({ routedPids: {} });
+    const failed: number[] = [];
     for (const pid of pids) {
       try {
         await api.stopRoute(pid);
       } catch (e) {
+        failed.push(pid);
         get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
       }
     }
-    const count = pids.length;
     set((s) => {
-      const selectedPids = s.selectedPids.filter((p) => !pids.includes(p));
+      const routedPids: Record<number, string[]> = {};
+      for (const pid of failed) routedPids[pid] = snapshot[pid] ?? [];
+      const selectedPids = s.selectedPids.filter(
+        (p) => !pids.includes(p) || failed.includes(p),
+      );
       return {
-        routedPids: {},
+        routedPids,
         selectedPids,
         selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
       };
     });
-    get().addLog(i18next.t('log.stoppedAll', { n: count }), 'info');
+    get().addLog(
+      i18next.t('log.stoppedAll', { n: pids.length - failed.length }),
+      failed.length > 0 ? 'error' : 'info',
+    );
   },
 
   loadDelaySettings: async () => {

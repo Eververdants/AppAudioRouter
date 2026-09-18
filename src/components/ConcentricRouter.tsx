@@ -55,6 +55,7 @@ export function ConcentricRouter() {
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const applyRoute = useRouterStore((s) => s.applyRoute);
+  const applying = useRouterStore((s) => s.applying);
   const { ref, scale } = useFitScale(STAGE_SIZE);
   const [rippleKey, setRippleKey] = useState(0);
   const [showRipple, setShowRipple] = useState(false);
@@ -304,16 +305,18 @@ export function ConcentricRouter() {
           <motion.button
             type="button"
             onClick={handleRoute}
-            disabled={!canRoute}
+            disabled={!canRoute || applying}
             title={
-              canRoute
-                ? selectedPids
-                    .map((pid) => sessions.find((s) => s.pid === pid)?.exe_name ?? `PID ${pid}`)
-                    .join(' · ')
-                : undefined
+              applying
+                ? undefined
+                : canRoute
+                  ? selectedPids
+                      .map((pid) => sessions.find((s) => s.pid === pid)?.exe_name ?? `PID ${pid}`)
+                      .join(' · ')
+                  : undefined
             }
-            whileHover={canRoute ? { scale: 1.04 } : undefined}
-            whileTap={canRoute ? { scale: 0.97 } : undefined}
+            whileHover={canRoute && !applying ? { scale: 1.04 } : undefined}
+            whileTap={canRoute && !applying ? { scale: 0.97 } : undefined}
             transition={{ type: 'spring', stiffness: 380, damping: 24 }}
             className={`relative flex h-36 w-36 flex-col items-center justify-center rounded-full border outline-none backdrop-blur-2xl transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-accent/60 ${
               canRoute

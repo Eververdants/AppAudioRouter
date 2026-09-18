@@ -1096,21 +1096,22 @@ fn pump_render(
         if allowed > 0 {
             let mut chunk = mirror.pop(allowed, shared.block_align);
             if chunk.is_empty() {
-                if padding == 0 {
-                    // The pipeline ran dry (fast clock or a silent source); keep
-                    // the engine fed with silence until data returns.
-                    // SAFETY: silent frames need no data access; the buffer is
-                    // valid until ReleaseBuffer.
-                    unsafe {
-                        session
-                            .render
-                            .GetBuffer(allowed as u32)
-                            .map_err(|e| com_err("GetBuffer(render)", e))?;
-                        session
-                            .render
-                            .ReleaseBuffer(allowed as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
-                            .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
-                    }
+                // The pipeline ran dry (fast clock or a silent source); keep
+                // the engine fed with silence until data returns. This must run
+                // even when the device buffer already holds frames (padding > 0)
+                // — otherwise that queued audio plays out underrun with no
+                // fresh data written behind it, which audibly glitches.
+                // SAFETY: silent frames need no data access; the buffer is
+                // valid until ReleaseBuffer.
+                unsafe {
+                    session
+                        .render
+                        .GetBuffer(allowed as u32)
+                        .map_err(|e| com_err("GetBuffer(render)", e))?;
+                    session
+                        .render
+                        .ReleaseBuffer(allowed as u32, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)
+                        .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
                 }
             } else {
                 // Per-device volume is applied here, the one place where the
