@@ -14,9 +14,9 @@ const CENTER = STAGE_SIZE / 2;
  *  anything wider than the room left on either side would spill out of the
  *  stage. Capsules size to their content up to this, so a short name makes a
  *  short chip; a name longer than this truncates, and the full one stays in the
- *  tooltip and in the settings list. The delay readout lives inside that same
- *  budget and never asks for more, which is why no hover ever changes a width
- *  here — a chip grows by nothing when the pointer arrives. */
+ *  tooltip and in the settings list. The delay is annotated *under* the
+ *  capsule, not inside it, so this budget belongs to the name alone — and no
+ *  hover or edit ever changes a width here. */
 const MAX_NODE_WIDTH = 2 * (CENTER - ORBIT_RADIUS);
 /** Perpendicular bow of the route curves: everything bends the same way,
  * which reads as one flow around the hub instead of rigid spokes. */
@@ -52,6 +52,7 @@ export function ConcentricRouter() {
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
+  const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const applyRoute = useRouterStore((s) => s.applyRoute);
@@ -200,10 +201,12 @@ export function ConcentricRouter() {
                     }}
                     className="absolute left-1/2 top-1/2 hover:z-10 focus-within:z-10"
                   >
-                    {/* `group/device` lets the hairline under the delay
-                        readout answer the pointer, so the chip reads as one
-                        object rather than a name with a widget bolted on. */}
-                    <div className="group/device -translate-x-1/2 -translate-y-1/2">
+                    {/* `group/device` is the node as a whole: the capsule plus
+                        the delay annotated under it. Absolute positioning is
+                        what keeps them independent — the number never changes
+                        the capsule's width, and the capsule never changes the
+                        number's place on the stage. */}
+                    <div className="group/device relative -translate-x-1/2 -translate-y-1/2">
                       {/* System default endpoint: the device every unrouted
                           process already plays through. */}
                       {device.id === defaultDeviceId && (
@@ -221,10 +224,8 @@ export function ConcentricRouter() {
                           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
                         />
                       )}
-                      {/* One capsule per device: the name selects it, and the
-                          delay sits behind a hairline in the same capsule —
-                          a number that is itself the control, so there is no
-                          second widget to make room for. */}
+                      {/* The capsule is the device name and nothing else; the
+                          delay hangs under it as an annotation. */}
                       <div
                         style={{ maxWidth: MAX_NODE_WIDTH }}
                         className={`relative flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
@@ -255,13 +256,6 @@ export function ConcentricRouter() {
                           <span className="truncate">{device.name}</span>
                         </motion.button>
                         {isSelected && (
-                          <DelayReadout
-                            deviceId={device.id}
-                            name={device.name}
-                            rangeMs={delayRangeMs}
-                          />
-                        )}
-                        {isSelected && (
                           <motion.span
                             key={selectionIndex}
                             initial={{ scale: 0 }}
@@ -278,6 +272,16 @@ export function ConcentricRouter() {
                           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
                         )}
                       </div>
+                      {/* A device you are working with shows its delay; so does
+                          any device that carries one, selected or not — the
+                          stage must not hide an offset that is being applied. */}
+                      {(isSelected || (deviceDelays[device.id] ?? 0) !== 0) && (
+                        <DelayReadout
+                          deviceId={device.id}
+                          name={device.name}
+                          rangeMs={delayRangeMs}
+                        />
+                      )}
                     </div>
                   </motion.div>
                 );

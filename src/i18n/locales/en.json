@@ -33,7 +33,7 @@
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
     "delays": "Delay compensation",
-    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number on a device node, or scroll it.",
+    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number under a device node, or scroll it.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
     "delayStep": "Step size",

@@ -11,10 +11,14 @@ const PX_PER_STEP = 4;
 const DRAG_SLOP_PX = 3;
 
 /**
- * One device's delay, as a number on the trailing edge of its node capsule.
+ * One device's delay, annotated under its node capsule.
  *
- * The number *is* the control — there are no −/+ buttons to give it company, so
- * the capsule keeps one width whether it is being read or being edited:
+ * It sits *outside* the capsule — no border, no plate, just a hairline stem and
+ * a signed number — so the capsule stays what it always was, a device name, and
+ * is never widened by the value living in it. Being absolutely positioned, the
+ * number can also change length without moving anything on the stage.
+ *
+ * The number *is* the control — there are no −/+ buttons to give it company:
  *
  * - drag sideways to scrub, one configured step per few pixels;
  * - wheel (or arrow keys) to step, shifted for ten steps at a time;
@@ -117,11 +121,16 @@ export function DelayReadout({
           setEditing(true);
         }
       }}
-      className={`group/delay relative flex h-4 min-w-[50px] flex-none cursor-ew-resize select-none touch-none items-center rounded-full pl-1.5 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent/60 ${
+      className={`group/delay absolute left-1/2 top-full z-10 mt-1.5 flex h-4 -translate-x-1/2 cursor-ew-resize select-none touch-none items-center justify-center gap-px rounded-sm px-1 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent/60 ${
         delaySync ? '' : 'opacity-50'
       }`}
     >
-      <span aria-hidden="true" className="mr-1.5 h-3 w-px flex-none bg-border" />
+      {/* Stem: a hairline bridging the gap to the capsule, so the number reads
+          as an annotation of that device rather than a stray label. */}
+      <span
+        aria-hidden="true"
+        className="absolute -top-1.5 left-1/2 h-1.5 w-px -translate-x-1/2 bg-accent/30"
+      />
       {editing ? (
         <input
           autoFocus
@@ -148,23 +157,25 @@ export function DelayReadout({
             }
           }}
           aria-label={t('deviceDelay.valueLabel', { device: name })}
-          className="min-w-0 flex-1 bg-transparent text-right text-[10px] font-medium tabular-nums text-accent outline-none"
+          className="w-[38px] flex-none bg-transparent text-center text-[10px] font-medium tabular-nums text-accent outline-none"
         />
       ) : (
         <span
-          className={`min-w-0 flex-1 text-right text-[10px] font-medium tabular-nums transition-transform duration-100 ${
-            scrub === null ? 'text-accent' : 'scale-110 text-accent'
-          }`}
+          className={`text-[10px] font-medium tabular-nums transition-[color,transform] duration-100 ${
+            shown === 0
+              ? 'text-text-muted group-hover/delay:text-accent group-focus-within/delay:text-accent'
+              : 'text-accent'
+          } ${scrub === null ? '' : 'scale-110'}`}
         >
           {formatDelaySigned(shown)}
         </span>
       )}
-      <span className="ml-px flex-none text-[8px] leading-none text-text-muted">ms</span>
+      <span className="flex-none text-[8px] leading-none text-text-muted">ms</span>
       {/* Hairline underline: the only hint that the number is live, and it
           costs no width, so the capsule is the same object at rest. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-2 bottom-px h-px bg-transparent transition-colors group-hover/delay:bg-accent/40 group-focus-visible/delay:bg-accent/40"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-transparent transition-colors group-hover/delay:bg-accent/40 group-focus-visible/delay:bg-accent/40"
       />
     </span>
   );
