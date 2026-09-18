@@ -43,10 +43,5 @@
     ],
     "externalBin": [],
     "resources": []
-  },
-  "plugins": {
-    "shell": {
-      "open": false
-    }
   }
 }

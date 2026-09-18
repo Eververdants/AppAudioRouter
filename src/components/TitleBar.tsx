@@ -100,6 +100,12 @@ export function TitleBar({
 
   return (
     <header
+      // The native caption is disabled, so this custom bar is the window frame.
+      // `role="toolbar"` groups the controls for AT; the brand stays a plain
+      // labelled region. `data-tauri-drag-region` makes the empty space a drag
+      // handle — interactive children must not carry it or they stop clicking.
+      role="toolbar"
+      aria-label={t('productName')}
       data-tauri-drag-region
       style={{ height: BAR_HEIGHT }}
       className="relative z-20 flex flex-none select-none items-stretch justify-between border-b border-glass bg-glass backdrop-blur-xl"

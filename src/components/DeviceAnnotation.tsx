@@ -1,31 +1,33 @@
 import { DelayReadout } from '@/components/ui/DelayReadout';
 import { VolumeReadout } from '@/components/ui/VolumeReadout';
-import { useRouterStore } from '@/stores/routerStore';
 
 /**
  * The annotations hanging under one device node: its delay and its volume.
  *
- * Absolutely positioned, so nothing here can change the capsule's width, and a
- * hairline stem ties the row to the capsule it belongs to. A value appears when
- * the device is being worked with (selected) or when it carries something that
- * is actually being applied — the stage must never hide an offset that is in
- * effect, and must not shout about devices that are neutral either.
+ * The values are owned by the parent DeviceNode, which subscribes to them
+ * once; they are read here only to decide whether each annotation should show.
+ * A value appears when the device is being worked with (selected) or when it
+ * carries something that is actually being applied — the stage must never hide
+ * an offset that is in effect, and must not shout about devices that are
+ * neutral either.
  */
 export function DeviceAnnotation({
   deviceId,
   name,
   rangeMs,
   isSelected,
+  delay,
+  volume,
 }: {
   deviceId: string;
   name: string;
   rangeMs: number;
   isSelected: boolean;
+  delay?: number;
+  volume?: number;
 }) {
-  const delay = useRouterStore((s) => s.deviceDelays[deviceId] ?? 0);
-  const volume = useRouterStore((s) => s.deviceVolumes[deviceId] ?? 100);
   const showDelay = isSelected || delay !== 0;
-  const showVolume = isSelected || volume < 100;
+  const showVolume = isSelected || volume !== 100;
 
   if (!showDelay && !showVolume) return null;
 

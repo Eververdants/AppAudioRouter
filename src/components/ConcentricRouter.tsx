@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DeviceAnnotation } from '@/components/DeviceAnnotation';
@@ -19,7 +19,7 @@ const CENTER = STAGE_SIZE / 2;
  *  hover or edit ever changes a width here. */
 const MAX_NODE_WIDTH = 2 * (CENTER - ORBIT_RADIUS);
 /** Perpendicular bow of the route curves: everything bends the same way,
- * which reads as one flow around the hub instead of rigid spokes. */
+ *  which reads as one flow around the hub instead of rigid spokes. */
 const CURVE_BOW = 30;
 
 function deviceOffset(index: number, total: number): { x: number; y: number } {
@@ -34,15 +34,130 @@ function routePath(x: number, y: number): string {
   return `M ${CENTER} ${CENTER} Q ${cx} ${cy} ${CENTER + x} ${CENTER + y}`;
 }
 
+const item = {
+  hidden: { opacity: 0, scale: 0 },
+  show: { opacity: 1, scale: 1 },
+};
+
+/**
+ * One device node on the orbit. Memoized and subscribed only to its own delay
+ * and volume, so scrubbing one device's value does not re-render the whole
+ * orbit — only this node's annotation.
+ */
+interface DeviceNodeProps {
+  device: { id: string; name: string };
+  x: number;
+  y: number;
+  selectionIndex: number;
+  isSelected: boolean;
+  isPrimary: boolean;
+  isLive: boolean;
+  isDefault: boolean;
+  delayRangeMs: number;
+  onToggle: (deviceId: string) => void;
+}
+
+const DeviceNode = memo(function DeviceNode({
+  device,
+  x,
+  y,
+  selectionIndex,
+  isSelected,
+  isPrimary,
+  isLive,
+  isDefault,
+  delayRangeMs,
+  onToggle,
+}: DeviceNodeProps) {
+  const { t } = useTranslation();
+  const delay = useRouterStore((s) => s.deviceDelays[device.id]);
+  const volume = useRouterStore((s) => s.deviceVolumes[device.id]);
+
+  return (
+    <motion.div
+      variants={item}
+      initial="hidden"
+      animate="show"
+      exit="hidden"
+      transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+      style={{ x, y }}
+      className="absolute left-1/2 top-1/2 hover:z-10 focus-within:z-10"
+    >
+      <div className="group/device relative -translate-x-1/2 -translate-y-1/2">
+        {isDefault && (
+          <span
+            title={t('router.defaultDevice')}
+            className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-text-muted/80 ring-2 ring-bg-secondary"
+          />
+        )}
+        {isLive && (
+          <motion.span
+            aria-hidden="true"
+            className="absolute inset-0 rounded-full border border-accent/40"
+            animate={{ scale: [1, 1.35], opacity: [0.5, 0] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
+          />
+        )}
+        <div
+          style={{ maxWidth: MAX_NODE_WIDTH }}
+          className={`relative flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
+            isPrimary
+              ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
+              : isSelected
+                ? 'bg-accent-muted/70 border-accent/50 text-accent'
+                : 'border-glass bg-glass-strong text-text-secondary shadow-glass hover:border-accent/40 hover:text-accent'
+          }`}
+        >
+          <motion.button
+            type="button"
+            onClick={(e) => {
+              onToggle(device.id);
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+            whileTap={{ scale: 0.94 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+            title={device.name}
+            className="flex min-w-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          >
+            <span className="truncate">{device.name}</span>
+          </motion.button>
+          {isSelected && (
+            <motion.span
+              key={selectionIndex}
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 24 }}
+              className={`absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold leading-none ${
+                isPrimary ? 'bg-accent text-white' : 'bg-accent/80 text-white'
+              }`}
+            >
+              {selectionIndex + 1}
+            </motion.span>
+          )}
+          {isLive && !isSelected && (
+            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
+          )}
+        </div>
+        <DeviceAnnotation
+          deviceId={device.id}
+          name={device.name}
+          rangeMs={delayRangeMs}
+          isSelected={isSelected}
+          delay={delay}
+          volume={volume}
+        />
+      </div>
+    </motion.div>
+  );
+});
+
 /**
  * Concentric circle router visualization.
  *
  * One quiet composition: a frosted-glass hub, a hairline orbit, and the
  * selected devices sitting on it, linked to the hub by faint flowing curves
  * that diffuse under the frosted glass. Restraint over decoration — motion is
- * reserved for state: selecting, routing, living routes. Devices of the current
- * route also carry their delay bubble, so latency is adjusted where the device
- * is rather than in a panel of its own.
+ * reserved for state: selecting, routing, living routes.
  */
 export function ConcentricRouter() {
   const { t } = useTranslation();
@@ -67,6 +182,14 @@ export function ConcentricRouter() {
   // Union of devices the selected processes are currently routed to.
   const activeIds =
     selectedCount === 0 ? [] : [...new Set(selectedPids.flatMap((pid) => routedPids[pid] ?? []))];
+
+  // Geometry depends only on the device list; memoize so it is recomputed on
+  // hotplug, not on every selection/delay/volume change.
+  const offsets = useMemo(
+    () => devices.map((_, i) => deviceOffset(i, devices.length)),
+    [devices],
+  );
+
   const canRoute = selectedCount > 0 && selectedDeviceIds.length > 0;
 
   const handleRoute = async () => {
@@ -148,7 +271,7 @@ export function ConcentricRouter() {
             {selectedDeviceIds.map((id, routeIndex) => {
               const deviceIndex = devices.findIndex((d) => d.id === id);
               if (deviceIndex < 0) return null;
-              const { x, y } = deviceOffset(deviceIndex, devices.length);
+              const { x, y } = offsets[deviceIndex] ?? { x: 0, y: 0 };
               const isLive = activeIds.includes(id);
               return (
                 <motion.path
@@ -178,111 +301,26 @@ export function ConcentricRouter() {
           <div className="relative" style={{ width: ORBIT_RADIUS * 2, height: ORBIT_RADIUS * 2 }}>
             <AnimatePresence>
               {devices.map((device, i) => {
-                const { x, y } = deviceOffset(i, devices.length);
+                const { x, y } = offsets[i] ?? { x: 0, y: 0 };
                 const selectionIndex = selectedDeviceIds.indexOf(device.id);
                 const isSelected = selectionIndex >= 0;
                 const isPrimary = selectionIndex === 0;
                 const isLive = activeIds.includes(device.id);
 
                 return (
-                  // Outer div carries the position animation: framer-motion
-                  // writes x/y into an inline transform, which would override
-                  // centering translate classes on the elements inside it.
-                  <motion.div
+                  <DeviceNode
                     key={device.id}
-                    initial={{ opacity: 0, scale: 0 }}
-                    animate={{ opacity: 1, scale: 1, x, y }}
-                    exit={{ opacity: 0, scale: 0 }}
-                    transition={{
-                      type: 'spring',
-                      stiffness: 260,
-                      damping: 22,
-                      delay: i * 0.04,
-                    }}
-                    className="absolute left-1/2 top-1/2 focus-within:z-10 hover:z-10"
-                  >
-                    {/* `group/device` is the node as a whole: the capsule plus
-                        the delay annotated under it. Absolute positioning is
-                        what keeps them independent — the number never changes
-                        the capsule's width, and the capsule never changes the
-                        number's place on the stage. */}
-                    <div className="group/device relative -translate-x-1/2 -translate-y-1/2">
-                      {/* System default endpoint: the device every unrouted
-                          process already plays through. */}
-                      {device.id === defaultDeviceId && (
-                        <span
-                          title={t('router.defaultDevice')}
-                          className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-text-muted/80 ring-2 ring-bg-secondary"
-                        />
-                      )}
-                      {/* Live halo: an expanding ring behind routed devices. */}
-                      {isLive && (
-                        <motion.span
-                          aria-hidden="true"
-                          className="absolute inset-0 rounded-full border border-accent/40"
-                          animate={{ scale: [1, 1.35], opacity: [0.5, 0] }}
-                          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
-                        />
-                      )}
-                      {/* The capsule is the device name and nothing else; the
-                          delay hangs under it as an annotation. */}
-                      <div
-                        style={{ maxWidth: MAX_NODE_WIDTH }}
-                        className={`relative flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[color,background-color,border-color,box-shadow] ${
-                          isPrimary
-                            ? 'border-accent/70 bg-accent-muted text-accent shadow-glow'
-                            : isSelected
-                              ? 'bg-accent-muted/70 border-accent/50 text-accent'
-                              : 'border-glass bg-glass-strong text-text-secondary shadow-glass hover:border-accent/40 hover:text-accent'
-                        }`}
-                      >
-                        {/* The name takes the room it needs; the capsule's own
-                            cap is the only thing that truncates it. */}
-                        <motion.button
-                          type="button"
-                          onClick={(e) => {
-                            toggleDeviceSelection(device.id);
-                            // A mouse click would otherwise leave the button
-                            // focused, and the next Space would silently undo
-                            // the selection just made. Keyboard activation
-                            // (detail 0) keeps the focus it needs.
-                            if (e.detail > 0) e.currentTarget.blur();
-                          }}
-                          whileTap={{ scale: 0.94 }}
-                          transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-                          title={device.name}
-                          className="flex min-w-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                        >
-                          <span className="truncate">{device.name}</span>
-                        </motion.button>
-                        {isSelected && (
-                          <motion.span
-                            key={selectionIndex}
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            transition={{ type: 'spring', stiffness: 500, damping: 24 }}
-                            className={`absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold leading-none ${
-                              isPrimary ? 'bg-accent text-white' : 'bg-accent/80 text-white'
-                            }`}
-                          >
-                            {selectionIndex + 1}
-                          </motion.span>
-                        )}
-                        {isLive && !isSelected && (
-                          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
-                        )}
-                      </div>
-                      {/* A device you are working with shows its delay and
-                          volume; so does any device that carries an offset or a
-                          level change, selected or not. */}
-                      <DeviceAnnotation
-                        deviceId={device.id}
-                        name={device.name}
-                        rangeMs={delayRangeMs}
-                        isSelected={isSelected}
-                      />
-                    </div>
-                  </motion.div>
+                    device={device}
+                    x={x}
+                    y={y}
+                    selectionIndex={selectionIndex}
+                    isSelected={isSelected}
+                    isPrimary={isPrimary}
+                    isLive={isLive}
+                    isDefault={device.id === defaultDeviceId}
+                    delayRangeMs={delayRangeMs}
+                    onToggle={toggleDeviceSelection}
+                  />
                 );
               })}
             </AnimatePresence>
@@ -389,7 +427,6 @@ export function ConcentricRouter() {
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2"
-                      aria-hidden="true"
                     >
                       <circle cx="12" cy="12" r="10" />
                       <path d="M12 16v-4M12 8h.01" />
