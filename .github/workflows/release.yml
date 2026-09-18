@@ -71,7 +71,22 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'App Audio Router ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download and install this version.'
+          # The release page is an indexed landing page, so it carries the
+          # same description and links as the README instead of a placeholder.
+          releaseBody: |
+            Per-app audio routing for Windows 10 and 11 — send one program to several output devices at once, each with its own delay compensation and its own volume. No virtual audio driver and no third-party executable.
+
+            ### Install
+
+            Download the `.msi` installer, or the NSIS `-setup.exe`, from the assets below and run it. WebView2 is the only runtime requirement, and it ships with Windows 11.
+
+            ### Documentation
+
+            - [English README](https://github.com/Eververdants/AppAudioRouter#readme)
+            - [简体中文说明](https://github.com/Eververdants/AppAudioRouter/blob/main/README.zh-CN.md)
+            - [Commits in this release](https://github.com/Eververdants/AppAudioRouter/commits/${{ github.ref_name }})
+
+            Built from the tag by GitHub Actions — a dependency audit runs first, then the installers are compiled on `windows-latest`.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
