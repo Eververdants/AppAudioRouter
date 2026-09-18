@@ -335,12 +335,12 @@ impl VolumeConfig {
     pub fn set(&self, device_id: &str, percent: u32) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         if percent >= 100 {
+            // The default (100 %) is not stored, so a reset round-trips back to
+            // the same neutral value the frontend assumes. Clamping here would
+            // make 100 collapse to 99 and the two sides would disagree forever.
             inner.map.volumes.remove(device_id);
         } else {
-            inner
-                .map
-                .volumes
-                .insert(device_id.to_string(), percent.min(99));
+            inner.map.volumes.insert(device_id.to_string(), percent);
         }
         inner.persist()
     }
