@@ -81,7 +81,7 @@ const DeviceNode = memo(function DeviceNode({
       exit="hidden"
       transition={{ type: 'spring', stiffness: 260, damping: 22 }}
       style={{ x, y }}
-      className="absolute left-1/2 top-1/2 hover:z-10 focus-within:z-10"
+      className="absolute left-1/2 top-1/2 focus-within:z-10 hover:z-10"
     >
       <div className="group/device relative -translate-x-1/2 -translate-y-1/2">
         {isDefault && (
@@ -185,10 +185,7 @@ export function ConcentricRouter() {
 
   // Geometry depends only on the device list; memoize so it is recomputed on
   // hotplug, not on every selection/delay/volume change.
-  const offsets = useMemo(
-    () => devices.map((_, i) => deviceOffset(i, devices.length)),
-    [devices],
-  );
+  const offsets = useMemo(() => devices.map((_, i) => deviceOffset(i, devices.length)), [devices]);
 
   const canRoute = selectedCount > 0 && selectedDeviceIds.length > 0;
 
