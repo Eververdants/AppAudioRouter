@@ -224,7 +224,9 @@ fn apply_gain(bytes: &mut [u8], format: SampleFormat, gain: f32) {
                 _ => i32::MAX as f32,
             };
             for sample in bytes.chunks_exact_mut(width) {
-                let scaled = (read_int_le(sample) as f32 * gain).round().clamp(-max - 1.0, max);
+                let scaled = (read_int_le(sample) as f32 * gain)
+                    .round()
+                    .clamp(-max - 1.0, max);
                 write_int_le(sample, scaled as i32);
             }
         }
@@ -435,7 +437,9 @@ impl DuplicationManager {
             .values()
         {
             if engine.primary_device_id == device_id {
-                engine.primary_volume_percent.store(percent, Ordering::Relaxed);
+                engine
+                    .primary_volume_percent
+                    .store(percent, Ordering::Relaxed);
             }
             for mirror in &engine.mirrors {
                 if mirror.device_id == device_id {
@@ -1538,7 +1542,9 @@ mod tests {
         for (mirror, percent) in shared.mirrors.iter().zip(mirror_percents) {
             mirror.volume_percent.store(*percent, Ordering::Relaxed);
         }
-        shared.primary_volume_percent.store(primary_percent, Ordering::Relaxed);
+        shared
+            .primary_volume_percent
+            .store(primary_percent, Ordering::Relaxed);
         shared
     }
 

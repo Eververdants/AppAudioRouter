@@ -16,11 +16,13 @@ fn main() {
     // Release defaults to `warn` so per-session/device enumeration (which dumps
     // window titles and endpoint ids) never lands in a shipped log file; debug
     // builds stay at `info`. Override with RUST_LOG=app_audio_router=debug.
-    let default_filter = if cfg!(debug_assertions) { "info" } else { "warn" };
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(default_filter),
-    )
-    .init();
+    let default_filter = if cfg!(debug_assertions) {
+        "info"
+    } else {
+        "warn"
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
+        .init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
