@@ -197,27 +197,29 @@ fn write_int_le(bytes: &mut [u8], value: i32) {
 ///
 /// This is per-device volume: it runs on the capture-format bytes on their way
 /// into one mirror, and that format is exactly what the mirror's render client
-/// was initialized with, so the device receives the shape it expects.
+/// was initialized with, so the device receives the shape it expects. Only
+/// whole samples are scaled — a trailing partial sample, which an endpoint
+/// never produces, is left as it is.
 fn apply_gain(bytes: &mut [u8], format: SampleFormat, gain: f32) {
     if gain >= 1.0 {
         return;
     }
     match format {
         SampleFormat::Float32 => {
-            for sample in bytes.chunks_exact_mut(4) {
+            for sample in bytes.as_chunks_mut::<4>().0 {
                 let value = f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]) * gain;
                 sample.copy_from_slice(&value.to_le_bytes());
             }
         }
         SampleFormat::Float64 => {
-            for sample in bytes.chunks_exact_mut(8) {
+            for sample in bytes.as_chunks_mut::<8>().0 {
                 let mut raw = [0u8; 8];
                 raw.copy_from_slice(sample);
                 let value = f64::from_le_bytes(raw) * gain as f64;
                 sample.copy_from_slice(&value.to_le_bytes());
             }
         }
-        SampleFormat::Int(width @ (2 | 3 | 4)) => {
+        SampleFormat::Int(width @ 2..=4) => {
             let max = match width {
                 2 => i16::MAX as f32,
                 3 => 8_388_607.0,
