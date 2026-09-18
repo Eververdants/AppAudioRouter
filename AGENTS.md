@@ -8,7 +8,7 @@
 
 Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript + TailwindCSS + Motion。
 
-核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动与按设备延迟补偿以对齐蓝牙）、按进程设置会话音量上限（重启路由后自动恢复）、自动记忆路由规则。
+核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度）、自动记忆路由规则。
 
 **硬性约束：无任何第三方 exe 依赖。** 所有音频操作由 Rust 直接调用 Windows Core Audio API。
 
@@ -44,12 +44,13 @@ AppAudioRouter/
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
 │       │   ├── routing.rs      # IPolicyConfig 单设备路由设置
 │       │   └── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
-│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；session-volumes.json: exe -> 音量上限 %）
+│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %）
 ├── src/                    # React 前端
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
-│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（设备节点 + 每个选中设备旁的延迟气泡）
+│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（设备节点 + 节点下方的延迟/音量标注）
+│   │   ├── DeviceAnnotation.tsx  # 挂在设备节点下方的一行标注（延迟 + 音量），顺带管显隐与 hairline 引线
 │   │   ├── ProcessList.tsx
 │   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟范围·步进·逐设备设置/关于）
 │   │   ├── LogPanel.tsx
@@ -57,9 +58,11 @@ AppAudioRouter/
 │   │   └── ui/             # 基础控件
 │   │       ├── Switch.tsx              # 动画开关
 │   │       ├── SegmentedControl.tsx    # 滑动胶囊分段控件
-│   │       ├── StepButton.tsx          # 圆形 ± 按钮（延迟控件共用）
-│   │       ├── DelayReadout.tsx        # 设备胶囊下方的延迟标注（数值即控件：拖动/滚轮/方向键步进，点击键入）
-│   │       └── DelayStepper.tsx        # 设置页的延迟行控件（同款逻辑、方框样式）
+│   │       ├── ScrubReadout.tsx        # 通用「数值即控件」（拖动/滚轮/方向键/键入），延迟与音量共用
+│   │       ├── DelayReadout.tsx        # 延迟读数：签名毫秒 + 步进/范围，套 ScrubReadout
+│   │       ├── VolumeReadout.tsx       # 音量读数：百分比 0–100，套 ScrubReadout
+│   │       ├── StepButton.tsx          # 圆形 ± 按钮（仅设置页在用）
+│   │       └── DelayStepper.tsx        # 设置页的延迟行控件（−/数值/+ 方框样式）
 │   ├── hooks/              # 自定义 hooks
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
@@ -148,7 +151,7 @@ AppAudioRouter/
   `duplication.rs` 以「组内延迟最小的设备」为基准，`target_frames()` = 基础 100ms `LATENCY_TARGET_MS` + (自身延迟 − 组内最小值)，
   所以相对差一定被精确还原、绝对值会被归一化到最早的那台（软件延迟只能加不能减）。组内最小值同时包含主设备的值（`primary_delay_ms`）。
 - 应用路由时前端按延迟从小到大排序（`orderByDelay`），让延迟最小的设备成为系统直连的主设备；设置页可调 ±1/2/5/10 秒范围与步进（默认 10 ms，`aar-delay-step`），缩小范围时前后端同时钳制越界值。
-- 延迟入口在**设备节点胶囊下方**（`DelayReadout`，绝对定位，不参与胶囊布局）：
+- 延迟入口在**设备节点胶囊下方**（`DeviceAnnotation` 里的 `DelayReadout`，绝对定位，不参与胶囊布局）：
   hairline 引线 + 签名数值 + 小号 `ms`，**没有任何 ± 按钮**，胶囊本身只写设备名。
   横向拖动按配置步进连续调节（4px 一步），滚轮 / 方向键步进（Shift 十倍），点击键入精确值。
   拖动期间只更新本地预览、松手一次性提交（一次手势只留一条日志）；步进与键入即时提交。
@@ -157,7 +160,14 @@ AppAudioRouter/
   **胶囊宽度恒定**——悬停/编辑都不改变任何宽度（历史上那套「胶囊内嵌步进器 + 悬停展开」的方案已废弃，不要再复活）。
   不要在舞台底部再做常驻面板。`delaySync` 关闭时该读数变淡并提示「延迟同步已关闭」；
   设置页仍保留逐设备列表（`DelayStepper`，−/数值/+），便于给未选中的设备预设延迟。
-- 音量上限按 exe 持久化到 `app_data_dir/session-volumes.json`（`config.rs`，exe -> %），通过 `ISimpleAudioVolume` 设置会话主音量，`apply_route` 时自动重放；100 表示不限制（不落盘）
+- 音量按设备持久化到 `app_data_dir/device-volumes.json`（`config.rs`，设备 -> %）。值与延迟同构：**以组内最响的一台为基准**，
+  `duplication.rs` 的 `group_max_volume()` 取组内（含主设备）最大值，镜像按 `own / max` 在 `pump_render` 写设备**之前**缩放采样的增益；
+  软件增益只能衰减，所以最响的那台无法被压低，只能作为基准，其余设备向它对齐。0 表示静音，100 表示原样（不落盘）。
+  采样格式在 `start()` 时从 `WAVEFORMATEX`(可能 extensible) 解析成 `SampleFormat`（float32/float64/PCM 16·24·32），
+  认不出的格式**跳过增益**而不是乱改数据；增益为 1.0 时直接短路，常规情况不付任何代价。
+  **不要**再回到「按 exe 压会话音量」那套（`ISimpleAudioVolume` / `set_session_volume` / session-volumes.json 已于 2026-09-19 整体移除）。
+  前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
+  0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
 
@@ -216,15 +226,16 @@ AppAudioRouter/
   - 其余选中设备 = 复制目标（描边样式 + 序号徽标）
   - 已在当前路由中的设备带 success 圆点 + 扩散脉冲光环
   - 系统默认播放设备在节点右下角带一个 muted 小圆点（title 提示）
-  - 选中设备的延迟**挂在胶囊下方**（`DelayReadout`，绝对定位）：hairline 引线 + 签名数值（`+180`，U+2212 负号）+ 小号 `ms`——
-    胶囊本身只写设备名，一个设备仍然是一个对象，不要另起气泡/面板。数值即控件：拖动/滚轮/方向键/键入（详见「状态管理」的延迟条目），没有 ± 按钮。
+  - 延迟与音量**挂在胶囊下方**（`DeviceAnnotation` 里排一行，绝对定位）：hairline 引线 + 两个读数（`+180 ms  │  60 %`）——
+    胶囊本身只写设备名，一个设备仍然是一个对象，不要另起气泡/面板。两者都是**数值即控件**（`ScrubReadout`）：拖动/滚轮/方向键/键入，没有 ± 按钮。
   - **长度自适应，但只有一个上限**：胶囊宽度由内容决定，设备名 `min-w-0 truncate` 占它需要的宽度；
     上限是推导值而不是像素预算：`MAX_NODE_WIDTH = 2 × (CENTER − ORBIT_RADIUS)`（=132px，轨道水平极端的节点到舞台边缘的余量），
-    以 inline style `style={{ maxWidth: MAX_NODE_WIDTH }}` 下发。这个额度**只属于设备名**（延迟在胶囊外，不参与）。
+    以 inline style `style={{ maxWidth: MAX_NODE_WIDTH }}` 下发。这个额度**只属于设备名**（标注在胶囊外，不参与）。
     **悬停/编辑不改变任何宽度**——这是「延迟占满了」事故之后定下的铁律：不要复活任何「悬停让胶囊变宽」的设计。
     **不要再给名字设 `max-w-[42px]` 这类像素预算**——会得到忽长忽短的胶囊。
-  - 延迟标注绝对定位在 `top-full` 居中处，宽度随数值自然变化也**不会推动任何东西**；
-    悬停反馈是一根 `absolute` hairline 下划线（`group/delay`），不占宽度。
+  - 标注行绝对定位在 `top-full` 居中处，宽度随数值自然变化也**不会推动任何东西**；
+    每个读数各自的悬停反馈是一根 `absolute` hairline 下划线（`group/scrub`），不占宽度。两个读数之间的分隔用 1px 竖 hairline。
+  - 标注显隐：**选中 或 该读数非中性**（延迟≠0 / 音量<100）——已生效的偏移绝不能被藏起来，没动的设备也不该无谓地占视觉。
   - 点击名称按钮选中设备后要 `blur()`（仅指针点击，`e.detail > 0`）：否则按钮保持焦点，下一个 Space 会静默取消刚做的选择。
     键盘激活（`detail === 0`）必须保留焦点。
 - 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）；每行第二行是 `PID xxx · 当前播放设备`（同一行内，不要再单开一行显示设备）
