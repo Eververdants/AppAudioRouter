@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useRouterStore } from '@/stores/routerStore';
@@ -15,84 +14,6 @@ const item: Variants = {
   hidden: { opacity: 0, x: -8 },
   show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
 };
-
-/** Volume-limit slider for one selected process row (expanded inline). */
-function VolumeRow({ exeName }: { exeName: string }) {
-  const { t } = useTranslation();
-  const volumeLimits = useRouterStore((s) => s.volumeLimits);
-  const setVolumeLimit = useRouterStore((s) => s.setVolumeLimit);
-  // Dragging fires continuously; only commit on release so the backend, the
-  // config file and the log are not spammed mid-drag.
-  const [pending, setPending] = useState<number | null>(null);
-
-  const committed = volumeLimits[exeName] ?? 100;
-  const value = pending ?? committed;
-  const capped = value < 100;
-
-  return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: 'auto', opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.18, ease: 'easeOut' }}
-      className="overflow-hidden"
-    >
-      <div
-        className="bg-accent-muted/40 mt-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5"
-        title={t('processList.volumeHint')}
-      >
-        <svg
-          width="11"
-          height="11"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden="true"
-          className={`flex-none ${capped ? 'text-accent' : 'text-text-muted'}`}
-        >
-          <path d="M11 5 6 9H2v6h4l5 4V5z" />
-          {capped ? (
-            <>
-              <line x1="16" y1="9" x2="22" y2="15" />
-              <line x1="22" y1="9" x2="16" y2="15" />
-            </>
-          ) : (
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-          )}
-        </svg>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={value}
-          onChange={(e) => setPending(Number(e.target.value))}
-          onPointerUp={() => {
-            if (pending !== null) void setVolumeLimit(exeName, pending);
-            setPending(null);
-          }}
-          onBlur={() => {
-            if (pending !== null) void setVolumeLimit(exeName, pending);
-            setPending(null);
-          }}
-          aria-label={t('processList.volumeLimit')}
-          className="h-1 min-w-0 flex-1"
-          style={{
-            background: `linear-gradient(to right, var(--accent) ${value}%, var(--border) ${value}%)`,
-          }}
-        />
-        <span
-          className={`w-9 flex-none text-right text-[10px] font-medium tabular-nums ${
-            capped ? 'text-accent' : 'text-text-muted'
-          }`}
-        >
-          {value}%
-        </span>
-      </div>
-    </motion.div>
-  );
-}
 
 export function ProcessList() {
   const { t } = useTranslation();
@@ -292,9 +213,6 @@ export function ProcessList() {
                     )}
                   </AnimatePresence>
                 </div>
-                <AnimatePresence initial={false}>
-                  {isSelected && <VolumeRow exeName={session.exe_name} />}
-                </AnimatePresence>
               </motion.div>
             );
           })

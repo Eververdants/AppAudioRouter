@@ -8,9 +8,11 @@
     "stopRoute": "Stop routing this process",
     "stopAll": "Stop all routing",
     "multiSelectHint": "Click to select; Ctrl+click to pick several and route them together",
-    "associatedDevice": "Plays through {{device}}",
-    "volumeLimit": "Volume limit",
-    "volumeHint": "Cap this app's session volume; restored automatically on re-route"
+    "associatedDevice": "Plays through {{device}}"
+  },
+  "deviceVolume": {
+    "valueLabel": "Volume of {{device}}, relative to the loudest device, in percent",
+    "hint": "Attenuates this device relative to the loudest one in its group. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value"
   },
   "deviceDelay": {
     "valueLabel": "Delay compensation of {{device}} in milliseconds",
@@ -81,9 +83,9 @@
     "routedMultiProcessRemembered": "Routed {{n}} processes to {{device}} (+{{m}} copies, remembered)",
     "someProcessesGone": "{{n}} selected processes no longer exist, skipped",
     "stoppedAll": "Stopped all routing ({{n}} processes)",
-    "volumeSet": "Volume limit for {{exe}} set to {{n}}%",
-    "volumeSetFailed": "Failed to set volume limit: {{error}}",
-    "volumeLimitsFailed": "Failed to load volume limits: {{error}}",
+    "deviceVolumeSet": "Volume of {{device}} set to {{n}}%",
+    "deviceVolumeFailed": "Failed to set device volume: {{error}}",
+    "deviceVolumesFailed": "Failed to load device volumes: {{error}}",
     "routeFailed": "Routing failed: {{error}}",
     "routeStopped": "Stopped routing {{process}}, back to system default",
     "stopRouteFailed": "Failed to stop routing: {{error}}",

@@ -70,18 +70,14 @@ export async function setDelaySync(enabled: boolean): Promise<void> {
   await invoke('set_delay_sync', { enabled });
 }
 
-/** Cap an app's live session volume (0–100) and remember the limit per exe. */
-export async function setSessionVolume(
-  pid: number,
-  exeName: string,
-  volume: number,
-): Promise<void> {
-  await invoke('set_session_volume', { pid, exeName, volume });
+/** Set a device's volume (percent, 0–100), live engines pick it up instantly. */
+export async function setDeviceVolume(deviceId: string, percent: number): Promise<void> {
+  await invoke('set_device_volume', { deviceId, percent });
 }
 
-/** All remembered volume limits as `(exe_name, percent)` pairs. */
-export async function getVolumeLimits(): Promise<[string, number][]> {
-  return invoke<[string, number][]>('get_volume_limits');
+/** All configured device volumes as `(device_id, percent)` pairs. */
+export async function getDeviceVolumes(): Promise<[string, number][]> {
+  return invoke<[string, number][]>('get_device_volumes');
 }
 
 export async function getRememberedRoutes(): Promise<RememberedRoute[]> {

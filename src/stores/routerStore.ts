@@ -33,8 +33,8 @@ interface RouterState {
   /** How much one −/+ click changes a delay, in milliseconds. A UI preference
    * (persisted to localStorage, like the theme), not an engine setting. */
   delayStepMs: number;
-  /** Per-exe volume limits in percent (100 = no limit). */
-  volumeLimits: Record<string, number>;
+  /** Per-device volume in percent (100 = the level the app produced). */
+  deviceVolumes: Record<string, number>;
   /** Whether delay compensation is applied by the engine. */
   delaySync: boolean;
   autoRemember: boolean;
@@ -53,8 +53,8 @@ interface RouterState {
   stopRoute: (pid: number) => Promise<void>;
   stopAllRoutes: () => Promise<void>;
   loadDelaySettings: () => Promise<void>;
-  loadVolumeLimits: () => Promise<void>;
-  setVolumeLimit: (exeName: string, percent: number) => Promise<void>;
+  loadDeviceVolumes: () => Promise<void>;
+  setDeviceVolume: (deviceId: string, percent: number) => Promise<void>;
   setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
   setDelayRange: (rangeMs: number) => Promise<void>;
   setDelayStep: (stepMs: number) => void;
@@ -94,7 +94,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   deviceDelays: {},
   delayRangeMs: DEFAULT_DELAY_RANGE_MS,
   delayStepMs: readDelayStep(),
-  volumeLimits: {},
+  deviceVolumes: {},
   delaySync: false,
   autoRemember: false,
   logs: [],
@@ -282,42 +282,51 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
-  loadVolumeLimits: async () => {
+  loadDeviceVolumes: async () => {
     try {
-      const limits = await api.getVolumeLimits();
-      const volumeLimits: Record<string, number> = {};
-      for (const [exeName, percent] of limits) {
-        volumeLimits[exeName] = percent;
+      const pairs = await api.getDeviceVolumes();
+      const deviceVolumes: Record<string, number> = {};
+      for (const [deviceId, percent] of pairs) {
+        deviceVolumes[deviceId] = percent;
       }
-      set({ volumeLimits });
+      set({ deviceVolumes });
     } catch (e) {
-      get().addLog(i18next.t('log.volumeLimitsFailed', { error: String(e) }), 'error');
+      get().addLog(i18next.t('log.deviceVolumesFailed', { error: String(e) }), 'error');
     }
   },
 
-  setVolumeLimit: async (exeName, percent) => {
-    const current = get().volumeLimits[exeName] ?? 100;
+  setDeviceVolume: async (deviceId, percent) => {
+    const current = get().deviceVolumes[deviceId] ?? 100;
     if (current === percent) return;
-    set((s) => ({ volumeLimits: { ...s.volumeLimits, [exeName]: percent } }));
-    // Apply to every live session of this executable (an app can own several).
-    const targets = get().sessions.filter((s) => s.exe_name === exeName);
-    try {
-      for (const session of targets) {
-        await api.setSessionVolume(session.pid, exeName, percent);
+    const device = get().devices.find((d) => d.id === deviceId);
+    set((s) => {
+      const deviceVolumes = { ...s.deviceVolumes };
+      if (percent >= 100) {
+        delete deviceVolumes[deviceId];
+      } else {
+        deviceVolumes[deviceId] = percent;
       }
-      get().addLog(i18next.t('log.volumeSet', { exe: exeName, n: percent }), 'info');
+      return { deviceVolumes };
+    });
+    try {
+      await api.setDeviceVolume(deviceId, percent);
+      get().addLog(
+        i18next.t('log.deviceVolumeSet', { device: device?.name ?? deviceId, n: percent }),
+        'info',
+      );
     } catch (e) {
-      // Roll back so the UI keeps matching what the engine applies and persists.
+      // The backend rejected the value; undo the optimistic update so the UI
+      // keeps matching what the engine actually applies and persists.
       set((s) => {
-        const volumeLimits = { ...s.volumeLimits };
+        const deviceVolumes = { ...s.deviceVolumes };
         if (current >= 100) {
-          delete volumeLimits[exeName];
+          delete deviceVolumes[deviceId];
         } else {
-          volumeLimits[exeName] = current;
+          deviceVolumes[deviceId] = current;
         }
-        return { volumeLimits };
+        return { deviceVolumes };
       });
-      get().addLog(i18next.t('log.volumeSetFailed', { error: String(e) }), 'error');
+      get().addLog(i18next.t('log.deviceVolumeFailed', { error: String(e) }), 'error');
     }
   },
 

@@ -63,7 +63,7 @@ export default function App() {
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
   const loadDefaultDevice = useRouterStore((s) => s.loadDefaultDevice);
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
-  const loadVolumeLimits = useRouterStore((s) => s.loadVolumeLimits);
+  const loadDeviceVolumes = useRouterStore((s) => s.loadDeviceVolumes);
   const [view, setView] = useState<'router' | 'settings'>('router');
 
   useEffect(() => {
@@ -74,8 +74,8 @@ export default function App() {
 
   useEffect(() => {
     void loadDelaySettings();
-    void loadVolumeLimits();
-  }, [loadDelaySettings, loadVolumeLimits]);
+    void loadDeviceVolumes();
+  }, [loadDelaySettings, loadDeviceVolumes]);
 
   useEffect(() => {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust

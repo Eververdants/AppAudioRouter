@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { DelayReadout } from '@/components/ui/DelayReadout';
+import { DeviceAnnotation } from '@/components/DeviceAnnotation';
 import { useFitScale } from '@/hooks/useFitScale';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -52,7 +52,6 @@ export function ConcentricRouter() {
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
-  const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const applyRoute = useRouterStore((s) => s.applyRoute);
@@ -272,16 +271,15 @@ export function ConcentricRouter() {
                           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-bg-secondary" />
                         )}
                       </div>
-                      {/* A device you are working with shows its delay; so does
-                          any device that carries one, selected or not — the
-                          stage must not hide an offset that is being applied. */}
-                      {(isSelected || (deviceDelays[device.id] ?? 0) !== 0) && (
-                        <DelayReadout
-                          deviceId={device.id}
-                          name={device.name}
-                          rangeMs={delayRangeMs}
-                        />
-                      )}
+                      {/* A device you are working with shows its delay and
+                          volume; so does any device that carries an offset or a
+                          level change, selected or not. */}
+                      <DeviceAnnotation
+                        deviceId={device.id}
+                        name={device.name}
+                        rangeMs={delayRangeMs}
+                        isSelected={isSelected}
+                      />
                     </div>
                   </motion.div>
                 );
