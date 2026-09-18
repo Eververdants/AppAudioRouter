@@ -70,6 +70,7 @@ export default function App() {
   const loadDefaultDevice = useRouterStore((s) => s.loadDefaultDevice);
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
   const loadDeviceVolumes = useRouterStore((s) => s.loadDeviceVolumes);
+  const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const [view, setView] = useState<'router' | 'settings'>('router');
 
   useEffect(() => {
@@ -94,8 +95,13 @@ export default function App() {
       void refreshDevices();
       void loadDefaultDevice();
       void refreshSessions();
+      // Routes can outlast the process (the audio service persists them), so
+      // on boot the backend may already be duplicating for some PIDs while the
+      // store still thinks nothing is routed. Reconcile before first paint so
+      // the badges match reality from the moment the window shows.
+      void reconcileActiveDuplications();
     });
-  }, [refreshDevices, loadDefaultDevice, refreshSessions]);
+  }, [refreshDevices, loadDefaultDevice, refreshSessions, reconcileActiveDuplications]);
 
   useEffect(() => {
     // Duplication engines report their end (user stop, process exit, error)

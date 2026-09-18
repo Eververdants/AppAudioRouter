@@ -63,6 +63,9 @@ interface RouterState {
   setDelayStep: (stepMs: number) => void;
   toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
+  /** On boot, ask the backend which PIDs it is still duplicating (routes
+   *  survive a restart) and reconcile the UI so its badges match reality. */
+  reconcileActiveDuplications: () => Promise<void>;
   addLog: (message: string, level?: LogEntry['level']) => void;
 }
 
@@ -107,7 +110,20 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   refreshDevices: async () => {
     try {
       const devices = await api.listDevices();
+      const liveIds = new Set(devices.map((d) => d.id));
       set({ devices });
+      // A physically-routed device may have been unplugged. Drop it from the
+      // selection and from any route that referenced it; a route left pointing
+      // at a gone device is silently unroutable and confuses the badges.
+      set((s) => {
+        const selectedDeviceIds = s.selectedDeviceIds.filter((id) => liveIds.has(id));
+        const routedPids: Record<number, string[]> = {};
+        for (const [pid, ids] of Object.entries(s.routedPids)) {
+          const remaining = ids.filter((id) => liveIds.has(id));
+          if (remaining.length > 0) routedPids[Number(pid)] = remaining;
+        }
+        return { selectedDeviceIds, routedPids };
+      });
       get().addLog(i18next.t('log.deviceRefreshed', { n: devices.length }), 'info');
     } catch (e) {
       get().addLog(i18next.t('log.deviceRefreshFailed', { error: String(e) }), 'error');
@@ -456,6 +472,29 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }), 'error');
     } else {
       get().addLog(i18next.t('log.duplicationProcessExited', { pid }), 'info');
+    }
+  },
+
+  reconcileActiveDuplications: async () => {
+    // Routes are persisted by the audio service and a duplication engine can
+    // outlive this process (it dies only when the target process exits or the
+    // user stops it). On boot the frontend would otherwise believe nothing is
+    // routed, so ask the backend what it is still duplicating and mark those
+    // PIDs live. The device list is not reported back, so a reconciled route
+    // shows as active without its device badges until the user re-routes.
+    try {
+      const active = await api.getActiveDuplications();
+      const live = new Set(active);
+      if (live.size === 0) return;
+      set((s) => {
+        const routedPids: Record<number, string[]> = {};
+        for (const pid of live) {
+          routedPids[pid] = s.routedPids[pid] ?? [];
+        }
+        return { routedPids };
+      });
+    } catch {
+      /* enumerating active engines is best-effort; the user can re-route */
     }
   },
 
