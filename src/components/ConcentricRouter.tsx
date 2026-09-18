@@ -199,7 +199,7 @@ export function ConcentricRouter() {
                       damping: 22,
                       delay: i * 0.04,
                     }}
-                    className="absolute left-1/2 top-1/2 hover:z-10 focus-within:z-10"
+                    className="absolute left-1/2 top-1/2 focus-within:z-10 hover:z-10"
                   >
                     {/* `group/device` is the node as a whole: the capsule plus
                         the delay annotated under it. Absolute positioning is

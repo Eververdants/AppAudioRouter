@@ -301,9 +301,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     set((s) => {
       const routedPids: Record<number, string[]> = {};
       for (const pid of failed) routedPids[pid] = snapshot[pid] ?? [];
-      const selectedPids = s.selectedPids.filter(
-        (p) => !pids.includes(p) || failed.includes(p),
-      );
+      const selectedPids = s.selectedPids.filter((p) => !pids.includes(p) || failed.includes(p));
       return {
         routedPids,
         selectedPids,
@@ -389,7 +387,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: next } }));
     try {
       await api.setDeviceDelay(deviceId, next);
-      get().addLog(i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }), 'info');
+      get().addLog(
+        i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }),
+        'info',
+      );
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
       // keeps matching what the engine actually applies and persists.
