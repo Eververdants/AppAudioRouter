@@ -42,7 +42,7 @@
 //! codec's buffer, adds on top and is outside software control.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -68,7 +68,7 @@ use windows::Win32::System::Threading::{
 };
 
 use crate::audio::AudioError;
-use crate::config::{DelayConfig, DELAY_RANGE_MAX_MS};
+use crate::config::{DelayConfig, VolumeConfig, DELAY_RANGE_MAX_MS};
 
 /// Shared-mode stream buffer, in hundreds of nanoseconds (200 ms).
 const STREAM_BUFFER_DURATION: i64 = 2_000_000;
@@ -122,6 +122,116 @@ impl ExitReason {
     }
 }
 
+/// How one sample is stored in the shared capture format.
+///
+/// Windows mix formats are float32 in practice, but a device may hand back
+/// extensible PCM, so the integer widths are handled as well. A format this
+/// engine does not understand leaves the audio untouched rather than mangled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SampleFormat {
+    Float32,
+    Float64,
+    /// Signed little-endian integers, 2, 3 or 4 bytes wide.
+    Int(usize),
+    /// Not scaled; per-device volume is skipped for the stream.
+    Unknown,
+}
+
+impl SampleFormat {
+    /// Read the format out of a `WAVEFORMATEX`, which may be extensible.
+    fn parse(format: &[u8]) -> Self {
+        const WAVE_FORMAT_PCM: u16 = 0x0001;
+        const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
+        const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
+        /// `KSDATAFORMAT_SUBTYPE_IEEE_FLOAT`, first four bytes as laid out in
+        /// memory (the GUID's first field is little-endian).
+        const FLOAT_SUBTYPE: [u8; 4] = [0x03, 0x00, 0x00, 0x00];
+        /// Offset of `SubFormat` inside a `WAVEFORMATEXTENSIBLE`.
+        const SUBFORMAT_OFFSET: usize = 24;
+        /// `WAVEFORMATEX` (18 bytes) plus the 22 bytes extensible appends.
+        const EXTENSIBLE_LEN: usize = 40;
+
+        if format.len() < core::mem::size_of::<WAVEFORMATEX>() {
+            return Self::Unknown;
+        }
+        // SAFETY: the length was checked above; WAVEFORMATEX is packed, so
+        // reading it from an unaligned byte slice is sound.
+        let wfx = unsafe { &*(format.as_ptr() as *const WAVEFORMATEX) };
+        let tag = if wfx.wFormatTag == WAVE_FORMAT_EXTENSIBLE && format.len() >= EXTENSIBLE_LEN {
+            let sub = &format[SUBFORMAT_OFFSET..SUBFORMAT_OFFSET + 4];
+            if sub == FLOAT_SUBTYPE {
+                WAVE_FORMAT_IEEE_FLOAT
+            } else {
+                WAVE_FORMAT_PCM
+            }
+        } else {
+            wfx.wFormatTag
+        };
+        match (tag, wfx.wBitsPerSample as usize) {
+            (WAVE_FORMAT_IEEE_FLOAT, 32) => Self::Float32,
+            (WAVE_FORMAT_IEEE_FLOAT, 64) => Self::Float64,
+            (WAVE_FORMAT_PCM, bits @ (16 | 24 | 32)) => Self::Int(bits / 8),
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// Read a little-endian signed integer of 2–4 bytes, sign-extended to `i32`.
+fn read_int_le(bytes: &[u8]) -> i32 {
+    let mut raw = 0u32;
+    for (i, byte) in bytes.iter().enumerate() {
+        raw |= (*byte as u32) << (8 * i);
+    }
+    let shift = 32 - 8 * bytes.len() as u32;
+    ((raw << shift) as i32) >> shift
+}
+
+/// Write `value` as a little-endian signed integer of `bytes.len()` bytes.
+fn write_int_le(bytes: &mut [u8], value: i32) {
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = ((value >> (8 * i)) & 0xFF) as u8;
+    }
+}
+
+/// Scale every sample of `bytes` by `gain`, in place.
+///
+/// This is per-device volume: it runs on the capture-format bytes on their way
+/// into one mirror, and that format is exactly what the mirror's render client
+/// was initialized with, so the device receives the shape it expects.
+fn apply_gain(bytes: &mut [u8], format: SampleFormat, gain: f32) {
+    if gain >= 1.0 {
+        return;
+    }
+    match format {
+        SampleFormat::Float32 => {
+            for sample in bytes.chunks_exact_mut(4) {
+                let value = f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]) * gain;
+                sample.copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        SampleFormat::Float64 => {
+            for sample in bytes.chunks_exact_mut(8) {
+                let mut raw = [0u8; 8];
+                raw.copy_from_slice(sample);
+                let value = f64::from_le_bytes(raw) * gain as f64;
+                sample.copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        SampleFormat::Int(width @ (2 | 3 | 4)) => {
+            let max = match width {
+                2 => i16::MAX as f32,
+                3 => 8_388_607.0,
+                _ => i32::MAX as f32,
+            };
+            for sample in bytes.chunks_exact_mut(width) {
+                let scaled = (read_int_le(sample) as f32 * gain).round().clamp(-max - 1.0, max);
+                write_int_le(sample, scaled as i32);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// One mirror device with its frame ring buffer.
 struct MirrorChannel {
     device_id: String,
@@ -136,6 +246,11 @@ struct MirrorChannel {
     /// below that reference just keeps the mirror at the base latency.
     /// Live-adjustable.
     delay_ms: AtomicI32,
+    /// This device's share (0–100) of the group's loudest device. The render
+    /// side scales its frames by `own / max`, so 100 leaves the audio as the
+    /// app produced it; only attenuation is realizable, which is why the
+    /// loudest device of the group is the reference. Live-adjustable.
+    volume_percent: AtomicU32,
     /// Cleared when the device fails to open or errors out; pushes and pops
     /// become no-ops so the remaining mirrors keep playing.
     enabled: AtomicBool,
@@ -220,8 +335,16 @@ struct EngineShared {
     /// the reference the mirrors are measured against (see
     /// `group_min_delay_ms`), so a change has to reach live engines.
     primary_delay_ms: AtomicI32,
+    /// The primary device's configured volume. The OS plays that endpoint
+    /// natively, so the value cannot be applied to it — but it still counts
+    /// towards the group's reference level (see `group_max_volume`), which is
+    /// what every mirror is scaled against.
+    primary_volume_percent: AtomicU32,
     /// Raw bytes of the capture format (WAVEFORMATEX, possibly extensible).
     format: Vec<u8>,
+    /// How the capture format stores one sample, so volume can be applied to
+    /// the bytes on their way to a mirror.
+    sample: SampleFormat,
     /// Bytes per frame of the capture format.
     block_align: usize,
     /// Capture format's sample rate, for converting delay ms into frames.
@@ -245,16 +368,20 @@ pub struct DuplicationManager {
     engines: Mutex<HashMap<u32, Arc<EngineShared>>>,
     /// Persisted per-device delay compensation values.
     delays: Arc<DelayConfig>,
+    /// Persisted per-device volume values.
+    volumes: Arc<VolumeConfig>,
     /// Whether delay compensation is enabled (mirrors the frontend toggle).
     delay_sync: AtomicBool,
 }
 
 impl DuplicationManager {
-    /// Create the manager, reading initial delay values from `delays`.
-    pub fn new(delays: Arc<DelayConfig>) -> Self {
+    /// Create the manager, reading initial per-device values from `delays` and
+    /// `volumes`.
+    pub fn new(delays: Arc<DelayConfig>, volumes: Arc<VolumeConfig>) -> Self {
         Self {
             engines: Mutex::new(HashMap::new()),
             delays,
+            volumes,
             delay_sync: AtomicBool::new(false),
         }
     }
@@ -293,6 +420,26 @@ impl DuplicationManager {
             for mirror in &engine.mirrors {
                 if mirror.device_id == device_id {
                     mirror.delay_ms.store(delay_ms, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// Push a new volume value to any live engine using `device_id`, mirror or
+    /// primary. Persisting the value is the caller's job (see `VolumeConfig`).
+    pub fn update_volume(&self, device_id: &str, percent: u32) {
+        for engine in self
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+        {
+            if engine.primary_device_id == device_id {
+                engine.primary_volume_percent.store(percent, Ordering::Relaxed);
+            }
+            for mirror in &engine.mirrors {
+                if mirror.device_id == device_id {
+                    mirror.volume_percent.store(percent, Ordering::Relaxed);
                 }
             }
         }
@@ -346,6 +493,7 @@ impl DuplicationManager {
         }
 
         let (format, block_align, sample_rate) = default_mix_format()?;
+        let sample = SampleFormat::parse(&format);
         // Ring must hold the worst case pipeline a configuration can ask for:
         // the base latency plus the largest spread between the earliest and the
         // latest device, which two opposite extremes of the range can produce.
@@ -358,6 +506,7 @@ impl DuplicationManager {
             .map(|device_id| {
                 Arc::new(MirrorChannel {
                     delay_ms: AtomicI32::new(self.delays.get(&device_id)),
+                    volume_percent: AtomicU32::new(self.volumes.get(&device_id)),
                     device_id,
                     ring: Mutex::new(VecDeque::new()),
                     capacity: ring_capacity,
@@ -373,7 +522,9 @@ impl DuplicationManager {
             mirrors,
             primary_device_id: primary_device_id.to_string(),
             primary_delay_ms: AtomicI32::new(self.delays.get(primary_device_id)),
+            primary_volume_percent: AtomicU32::new(self.volumes.get(primary_device_id)),
             format,
+            sample,
             block_align,
             sample_rate,
             latency_frames: sample_rate as usize * LATENCY_TARGET_MS / 1000,
@@ -595,6 +746,36 @@ fn group_min_delay_ms(shared: &EngineShared) -> i32 {
         ))
         .min()
         .unwrap_or(0)
+}
+
+/// Volume of the group's loudest device, which is the level every other device
+/// is scaled against.
+///
+/// This is the volume counterpart of the delay reference: the engine only
+/// writes mirrors, and software gain attenuates but never boosts, so the
+/// loudest device of the group stays exactly where the app put it and the rest
+/// are brought down towards it. The primary counts towards the reference even
+/// though its own value cannot be applied. Mirrors that failed to open are
+/// ignored, exactly as they are for delays. Floored at 1 so an all-zero group
+/// stays a valid (silent) division.
+fn group_max_volume(shared: &EngineShared) -> u32 {
+    shared
+        .mirrors
+        .iter()
+        .filter(|m| m.enabled.load(Ordering::Relaxed))
+        .map(|m| m.volume_percent.load(Ordering::Relaxed))
+        .chain(std::iter::once(
+            shared.primary_volume_percent.load(Ordering::Relaxed),
+        ))
+        .max()
+        .unwrap_or(100)
+        .max(1)
+}
+
+/// Gain to apply to `mirror`'s frames: its own share of the group's loudest
+/// device, i.e. 1.0 when it is the loudest one (or the only one left).
+fn volume_gain(shared: &EngineShared, mirror: &MirrorChannel) -> f32 {
+    mirror.volume_percent.load(Ordering::Relaxed) as f32 / group_max_volume(shared) as f32
 }
 
 /// Frames this mirror keeps buffered between the capture tap and playback: the
@@ -913,7 +1094,7 @@ fn pump_render(
         let free = session.buffer_frames.saturating_sub(padding);
         let allowed = target.saturating_sub(padding).min(free);
         if allowed > 0 {
-            let chunk = mirror.pop(allowed, shared.block_align);
+            let mut chunk = mirror.pop(allowed, shared.block_align);
             if chunk.is_empty() {
                 if padding == 0 {
                     // The pipeline ran dry (fast clock or a silent source); keep
@@ -932,6 +1113,11 @@ fn pump_render(
                     }
                 }
             } else {
+                // Per-device volume is applied here, the one place where the
+                // app's audio is in our hands: the chunk is in the capture
+                // format, which is also what this mirror's render client was
+                // initialized with, so the device gets the shape it expects.
+                apply_gain(&mut chunk, shared.sample, volume_gain(shared, mirror));
                 let frames = (chunk.len() / shared.block_align) as u32;
                 // SAFETY: copy of exactly frames * block_align bytes into the
                 // buffer returned by GetBuffer.
@@ -1156,6 +1342,7 @@ mod tests {
             ring: Mutex::new(VecDeque::new()),
             capacity,
             delay_ms: AtomicI32::new(0),
+            volume_percent: AtomicU32::new(100),
             enabled: AtomicBool::new(true),
         }
     }
@@ -1176,13 +1363,16 @@ mod tests {
                         ring: Mutex::new(VecDeque::new()),
                         capacity: 1_000_000,
                         delay_ms: AtomicI32::new(delay),
+                        volume_percent: AtomicU32::new(100),
                         enabled: AtomicBool::new(true),
                     })
                 })
                 .collect(),
             primary_device_id: "primary".to_string(),
             primary_delay_ms: AtomicI32::new(primary_ms),
+            primary_volume_percent: AtomicU32::new(100),
             format: Vec::new(),
+            sample: SampleFormat::Unknown,
             block_align: 8,
             sample_rate: 48_000,
             latency_frames: 4_800,
@@ -1338,5 +1528,104 @@ mod tests {
         for mirror in &shared.mirrors {
             assert_eq!(target_frames(&shared, mirror), 4_800);
         }
+    }
+
+    /// Engine whose mirrors carry the given volumes, with the primary at
+    /// `primary_percent`.
+    fn engine_with_volumes(mirror_percents: &[u32], primary_percent: u32) -> EngineShared {
+        let shared = engine(&vec![0; mirror_percents.len()], 0, true);
+        for (mirror, percent) in shared.mirrors.iter().zip(mirror_percents) {
+            mirror.volume_percent.store(*percent, Ordering::Relaxed);
+        }
+        shared.primary_volume_percent.store(primary_percent, Ordering::Relaxed);
+        shared
+    }
+
+    #[test]
+    fn the_loudest_device_is_the_reference_volume() {
+        let shared = engine_with_volumes(&[50, 100], 80);
+        assert_eq!(group_max_volume(&shared), 100);
+        // The loudest device plays as the app produced it; the quieter one is
+        // brought down to half.
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.5);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[1]), 1.0);
+    }
+
+    #[test]
+    fn the_primary_counts_towards_the_reference_volume() {
+        // The primary is the loudest, so every mirror is measured against it
+        // even though its own value cannot be applied to the audio.
+        let shared = engine_with_volumes(&[25, 50], 100);
+        assert_eq!(group_max_volume(&shared), 100);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.25);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[1]), 0.5);
+    }
+
+    #[test]
+    fn an_all_muted_group_stays_silent_instead_of_dividing_by_zero() {
+        let shared = engine_with_volumes(&[0, 0], 0);
+        assert_eq!(group_max_volume(&shared), 1);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.0);
+    }
+
+    #[test]
+    fn disabled_mirrors_do_not_raise_the_reference_volume() {
+        let shared = engine_with_volumes(&[20, 100], 50);
+        shared.mirrors[1].enabled.store(false, Ordering::Relaxed);
+        assert_eq!(group_max_volume(&shared), 50);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.4);
+    }
+
+    #[test]
+    fn gain_scales_float32_samples_in_place() {
+        let mut bytes: Vec<u8> = [1.0f32, -0.5, 0.0, 0.25]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        apply_gain(&mut bytes, SampleFormat::Float32, 0.5);
+        let scaled: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        assert_eq!(scaled, vec![0.5, -0.25, 0.0, 0.125]);
+    }
+
+    #[test]
+    fn gain_scales_16_bit_pcm_samples() {
+        let mut bytes: Vec<u8> = [i16::MIN, -1000, 1000, i16::MAX]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        apply_gain(&mut bytes, SampleFormat::Int(2), 0.5);
+        let scaled: Vec<i16> = bytes
+            .chunks_exact(2)
+            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        // Halving an odd value rounds away from zero, so the top ends at 16384
+        // rather than 16383 — the error is one LSB of the quantisation step.
+        assert_eq!(scaled, vec![-16384, -500, 500, 16384]);
+    }
+
+    #[test]
+    fn gain_leaves_the_audio_alone_when_it_cannot_be_read() {
+        let mut bytes = vec![7u8, 7, 7, 7];
+        let before = bytes.clone();
+        apply_gain(&mut bytes, SampleFormat::Unknown, 0.5);
+        assert_eq!(bytes, before);
+    }
+
+    #[test]
+    fn an_extensible_float_format_is_recognized() {
+        // 40 bytes: WAVEFORMATEX with cbSize=22 followed by the extensible
+        // tail, whose SubFormat starts at offset 24.
+        let mut format = vec![0u8; 40];
+        format[0..2].copy_from_slice(&0xFFFEu16.to_le_bytes());
+        format[14..16].copy_from_slice(&32u16.to_le_bytes());
+        format[18..20].copy_from_slice(&22u16.to_le_bytes());
+        format[24..28].copy_from_slice(&[0x03, 0x00, 0x00, 0x00]);
+        assert_eq!(SampleFormat::parse(&format), SampleFormat::Float32);
+
+        format[24..28].copy_from_slice(&[0x01, 0x00, 0x00, 0x00]);
+        assert_eq!(SampleFormat::parse(&format), SampleFormat::Int(4));
     }
 }

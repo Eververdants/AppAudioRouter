@@ -67,7 +67,6 @@ pub fn apply_route(
     device_ids: Vec<String>,
     remember: bool,
     config: State<'_, RouteConfig>,
-    volumes: State<'_, Arc<VolumeConfig>>,
     duplications: State<'_, DuplicationManager>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -80,7 +79,8 @@ pub fn apply_route(
     audio::routing::set_process_default_device(&device_ids[0], pid, audio::Role::All)
         .map_err(|e| e.to_string())?;
 
-    // Mirrors: software duplication to every further device.
+    // Mirrors: software duplication to every further device. The engine reads
+    // each device's configured delay and volume itself.
     duplications.stop(pid);
     if device_ids.len() > 1 {
         duplications
@@ -91,15 +91,6 @@ pub fn apply_route(
     if remember {
         config.save_route(&exe_name, &device_ids)?;
         info!("remembered route: {exe_name} -> {device_ids:?}");
-    }
-
-    // Re-apply a remembered volume cap so a re-routed app never plays louder
-    // than its configured limit. Best-effort: routing already succeeded.
-    let limit = volumes.get(&exe_name);
-    if limit < 100 {
-        if let Err(e) = audio::sessions::set_session_volume(pid, limit as f32 / 100.0) {
-            log::warn!("re-apply volume limit {limit}% to {exe_name} failed: {e}");
-        }
     }
     Ok(())
 }
@@ -183,30 +174,33 @@ pub fn get_delay_sync(duplications: State<'_, DuplicationManager>) -> bool {
     duplications.delay_sync()
 }
 
-/// Set the volume limit (0–100) of an app's live audio session and remember
-/// it per executable so re-routed sessions are capped again automatically.
+/// Set a device's volume (percent, 0–100) and push it to any live engine using
+/// that device.
+///
+/// The value is the device's share of the loudest device in its group: the
+/// engine scales every mirror by `own / max`, so 100 leaves that device at the
+/// level the app produced and smaller values attenuate it. Only the mirrors can
+/// be scaled — the primary device is played by the OS — but its value still
+/// counts towards the group's reference level.
 #[tauri::command]
-pub fn set_session_volume(
-    pid: u32,
-    exe_name: String,
-    volume: u32,
+pub fn set_device_volume(
+    device_id: String,
+    percent: u32,
     volumes: State<'_, Arc<VolumeConfig>>,
+    duplications: State<'_, DuplicationManager>,
 ) -> Result<(), String> {
-    info!("cmd: set_session_volume pid={pid} exe={exe_name} volume={volume}%");
-    if volume > 100 {
+    info!("cmd: set_device_volume device={device_id} volume={percent}%");
+    if percent > 100 {
         return Err("volume out of range 0-100".to_string());
     }
-    let touched = audio::sessions::set_session_volume(pid, volume as f32 / 100.0)
-        .map_err(|e| e.to_string())?;
-    if touched == 0 {
-        return Err(format!("no live audio session for pid {pid}"));
-    }
-    volumes.set(&exe_name, volume)
+    volumes.set(&device_id, percent)?;
+    duplications.update_volume(&device_id, percent);
+    Ok(())
 }
 
-/// All remembered volume limits as `(exe_name, percent)` pairs.
+/// All configured device volumes as `(device_id, percent)` pairs.
 #[tauri::command]
-pub fn get_volume_limits(volumes: State<'_, Arc<VolumeConfig>>) -> Vec<(String, u32)> {
+pub fn get_device_volumes(volumes: State<'_, Arc<VolumeConfig>>) -> Vec<(String, u32)> {
     volumes.all()
 }
 

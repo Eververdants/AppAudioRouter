@@ -274,17 +274,20 @@ impl DelayConfigInner {
     }
 }
 
-/// Per-app volume limit store: exe_name -> percent (0–100).
+/// Per-device volume store: device_id -> percent (0–100).
 ///
-/// A limit is applied as the app's audio-session master volume, so an app can
-/// never play louder than the cap. 100 means "no limit" and is not persisted.
+/// The value is a device's share of the group's loudest device: a mirror is
+/// scaled by `own / max`, so 100 means "play at the level the app asked for"
+/// and is not persisted. Software gain can only attenuate, which is why the
+/// loudest device is the reference the rest are measured against — the same
+/// shape as delays, where the earliest device is the reference.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct VolumeMap {
     #[serde(default)]
     volumes: HashMap<String, u32>,
 }
 
-/// Manages the volume-limit config file (interior mutability for Tauri State).
+/// Manages the per-device volume config file (interior mutability for Tauri State).
 pub struct VolumeConfig {
     inner: Mutex<VolumeConfigInner>,
 }
@@ -301,7 +304,7 @@ impl VolumeConfig {
             .path()
             .app_data_dir()
             .map_err(|e| format!("app_data_dir failed: {e}"))?
-            .join("session-volumes.json");
+            .join("device-volumes.json");
 
         let map = if path.exists() {
             let content =
@@ -316,33 +319,33 @@ impl VolumeConfig {
         })
     }
 
-    /// Get one app's volume limit in percent (100 when unset).
-    pub fn get(&self, exe_name: &str) -> u32 {
+    /// Get one device's volume in percent (100 when unset).
+    pub fn get(&self, device_id: &str) -> u32 {
         self.inner
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .map
             .volumes
-            .get(exe_name)
+            .get(device_id)
             .copied()
             .unwrap_or(100)
     }
 
-    /// Set one app's volume limit (0–100) and persist. 100 removes the entry.
-    pub fn set(&self, exe_name: &str, percent: u32) -> Result<(), String> {
+    /// Set one device's volume (0–100) and persist. 100 removes the entry.
+    pub fn set(&self, device_id: &str, percent: u32) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         if percent >= 100 {
-            inner.map.volumes.remove(exe_name);
+            inner.map.volumes.remove(device_id);
         } else {
             inner
                 .map
                 .volumes
-                .insert(exe_name.to_string(), percent.min(99));
+                .insert(device_id.to_string(), percent.min(99));
         }
         inner.persist()
     }
 
-    /// All entries as `(exe_name, percent)` pairs.
+    /// All entries as `(device_id, percent)` pairs.
     pub fn all(&self) -> Vec<(String, u32)> {
         self.inner
             .lock()
