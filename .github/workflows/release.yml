@@ -11,9 +11,28 @@ env:
 permissions:
   contents: write
 
-jobs:
+  audit:
+    name: Cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: src-tauri
+        run: cargo audit
+
   build:
     name: Build ${{ matrix.platform }}
+    needs: audit
     strategy:
       fail-fast: false
       matrix:

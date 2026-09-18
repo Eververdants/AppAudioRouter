@@ -62,11 +62,6 @@
   "logPanel": {
     "title": "日志"
   },
-  "language": {
-    "label": "语言",
-    "chinese": "中文",
-    "english": "English"
-  },
   "log": {
     "deviceRefreshed": "设备列表已刷新（{{n}} 项）",
     "deviceRefreshFailed": "设备刷新失败：{{error}}",

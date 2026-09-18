@@ -62,11 +62,6 @@
   "logPanel": {
     "title": "Logs"
   },
-  "language": {
-    "label": "Language",
-    "chinese": "中文",
-    "english": "English"
-  },
   "log": {
     "deviceRefreshed": "Device list refreshed ({{n}})",
     "deviceRefreshFailed": "Device refresh failed: {{error}}",
