@@ -1,17 +1,16 @@
 {
   "$schema": "https://schema.tauri.app/capability/2.0.0",
   "identifier": "main",
-  "description": "Plugin permissions for the main window. Custom invoke commands are allowlisted separately in build.rs (AppManifest::commands).",
+  "description": "The only capability the app ships: tauri.conf.json names it under app.security.capabilities, which switches every other file in this folder off. Anything missing here is a command the webview cannot call, and the failure shows up only as a console warning, so keep it in step with the window API the frontend uses.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
-    "core:window:allow-maximize",
-    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-hide",
     "core:window:allow-show",
+    "core:window:allow-set-focus",
     "store:default"
   ]
 }
