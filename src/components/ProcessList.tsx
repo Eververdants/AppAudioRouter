@@ -171,10 +171,7 @@ export function ProcessList() {
             return (
               <motion.div key={session.pid} variants={item}>
                 <div className="relative">
-                  <SelectionPill
-                    selected={isSelected}
-                    sliding={session.pid === anchorPid}
-                  />
+                  <SelectionPill selected={isSelected} sliding={session.pid === anchorPid} />
                   <motion.button
                     onClick={(e) => {
                       // Ctrl+click adds to the selection so several processes
