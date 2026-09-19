@@ -15,6 +15,52 @@ const item: Variants = {
   show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
 };
 
+/**
+ * Shared layout id of the selection highlight.
+ *
+ * One id means one element: framer-motion slides that single pill from the row
+ * it was on to the row it is on now, which is what makes a click feel like the
+ * selection travelling down the list. Give each row its own id, as this list
+ * used to, and there is nothing to slide — the old pill just disappears and a
+ * new one appears.
+ */
+const SELECTION_PILL_LAYOUT_ID = 'process-selection-pill';
+
+const SELECTION_PILL_CLASS =
+  'pointer-events-none absolute inset-0 rounded-lg border border-accent/60 bg-accent-muted';
+
+/**
+ * The highlight behind a chosen row.
+ *
+ * A layout id can only exist once at a time, so the sliding pill belongs to one
+ * row — the first selected process — and the rest of a Ctrl multi-selection get
+ * a static twin. Without that split the second selected row would be left bare,
+ * which is the reason the per-row ids were there in the first place.
+ *
+ * It is a sibling of the row button rather than a child: the button scales on
+ * tap, and a transform on an ancestor skews the box framer-motion measures, so
+ * the pill would miss its target whenever a tap and a slide happened together.
+ */
+function SelectionPill({ selected, sliding }: { selected: boolean; sliding: boolean }) {
+  if (!selected) return null;
+  return sliding ? (
+    <motion.span
+      key="sliding"
+      layoutId={SELECTION_PILL_LAYOUT_ID}
+      transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+      className={SELECTION_PILL_CLASS}
+    />
+  ) : (
+    <motion.span
+      key="static"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
+      className={SELECTION_PILL_CLASS}
+    />
+  );
+}
+
 export function ProcessList() {
   const { t } = useTranslation();
   const devices = useRouterStore((s) => s.devices);
@@ -29,6 +75,9 @@ export function ProcessList() {
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
 
   const routedCount = Object.keys(routedPids).length;
+  // The first selected process owns the sliding pill, so a plain click on
+  // another row carries the highlight across instead of blinking.
+  const anchorPid: number | null = selectedPids[0] ?? null;
 
   /** Playback device a process is associated with: its route's primary device,
    * or the system default it currently plays through. */
@@ -122,6 +171,10 @@ export function ProcessList() {
             return (
               <motion.div key={session.pid} variants={item}>
                 <div className="relative">
+                  <SelectionPill
+                    selected={isSelected}
+                    sliding={session.pid === anchorPid}
+                  />
                   <motion.button
                     onClick={(e) => {
                       // Ctrl+click adds to the selection so several processes
@@ -137,19 +190,6 @@ export function ProcessList() {
                     title={t('processList.multiSelectHint')}
                     className="relative w-full rounded-lg px-3 py-2 pr-9 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
-                    {/* Sliding selection highlight, shared across all items.
-                        A border (not a ring) stays inside the scroll box and
-                        is never clipped. */}
-                    {isSelected && (
-                      <motion.span
-                        // layoutId must be unique per animating element: a shared
-                        // id makes framer-motion slide a single pill to one row,
-                        // leaving the other selected rows unhighlighted.
-                        layoutId={`process-active-pill-${session.pid}`}
-                        className="absolute inset-0 rounded-lg border border-accent/60 bg-accent-muted"
-                        transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-                      />
-                    )}
                     <span
                       className={`relative flex items-center gap-1.5 font-medium ${
                         isSelected ? 'text-accent' : 'text-text-secondary'
