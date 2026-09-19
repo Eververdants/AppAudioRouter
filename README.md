@@ -22,28 +22,6 @@
 
 ---
 
-## Table of contents
-
-- [What is App Audio Router?](#what-is-app-audio-router)
-- [Screenshots](#screenshots)
-- [Features](#features)
-- [How it compares to other options](#how-it-compares-to-other-options)
-- [Requirements](#requirements)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Delay compensation explained](#delay-compensation-explained)
-- [Volume balancing explained](#volume-balancing-explained)
-- [How it works](#how-it-works)
-- [Tech stack](#tech-stack)
-- [Project layout](#project-layout)
-- [Build from source](#build-from-source)
-- [FAQ](#faq)
-- [Limitations and notes](#limitations-and-notes)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
 ## What is App Audio Router?
 
 App Audio Router (**AAR**) is a per-application audio router for Windows. Windows itself only lets an application play to one output at a time; App Audio Router lifts that restriction. Pick a program, pick one or more playback devices, and the program's audio goes to all of them at once — live, without restarting the program.
