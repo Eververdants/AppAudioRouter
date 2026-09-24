@@ -35,6 +35,11 @@
     "autoRememberDesc": "记住每个进程的设备路由，下次自动恢复",
     "delaySync": "延迟同步",
     "delaySyncDesc": "补偿较快的设备以对齐较慢（蓝牙）设备",
+    "background": "后台运行",
+    "closeToTray": "关闭窗口时最小化到托盘",
+    "closeToTrayDesc": "点关闭只隐藏窗口，所有路由继续生效；从托盘图标可唤回窗口。关闭此项后，关闭窗口会退出程序并一并停止路由。",
+    "autostart": "开机自动启动",
+    "autostartDesc": "登录后台静默启动，只显示托盘图标，记忆路由在你打开任何程序之前就已就绪。",
     "delays": "延迟补偿",
     "delayNote": "每台设备的延迟相对系统音频独立设置；路由时按延迟从小到大排列，系统直接播放的那台无法再被延后，作为对齐基准。主界面设备节点下方的数值可直接拖动或滚轮调节。",
     "delayRange": "延迟范围",
@@ -50,6 +55,10 @@
     "maximize": "最大化",
     "restore": "向下还原",
     "close": "关闭"
+  },
+  "tray": {
+    "show": "显示 / 隐藏 App Audio Router",
+    "quit": "退出"
   },
   "router": {
     "selectProcess": "选择进程",
@@ -94,6 +103,15 @@
     "delaySyncOn": "延迟补偿已开启",
     "delaySyncOff": "延迟补偿已关闭",
     "delaySyncFailed": "切换延迟补偿失败：{{error}}",
-    "delaySettingsFailed": "加载延迟设置失败：{{error}}"
+    "delaySettingsFailed": "加载延迟设置失败：{{error}}",
+    "devicesChanged": "设备列表已变化（{{n}}）",
+    "sessionsChanged": "进程列表已变化（{{n}}）",
+    "closeToTrayOn": "关闭窗口现在会隐藏到托盘",
+    "closeToTrayOff": "关闭窗口现在会退出程序",
+    "closeToTrayFailed": "保存托盘设置失败：{{error}}",
+    "autostartOn": "已注册为开机启动应用",
+    "autostartOff": "已移除开机启动项",
+    "autostartFailed": "修改开机启动项失败：{{error}}",
+    "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}"
   }
 }

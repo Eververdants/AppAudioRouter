@@ -87,3 +87,31 @@ export async function getRememberedRoutes(): Promise<RememberedRoute[]> {
 export async function clearRoute(exeName: string): Promise<void> {
   await invoke('clear_route', { exeName });
 }
+
+/** Whether the close button hides the window to the tray instead of quitting. */
+export async function getCloseToTray(): Promise<boolean> {
+  return invoke<boolean>('get_close_to_tray');
+}
+
+export async function setCloseToTray(enabled: boolean): Promise<void> {
+  await invoke('set_close_to_tray', { enabled });
+}
+
+/** Whether the app is registered to start when the user signs in. */
+export async function getAutostart(): Promise<boolean> {
+  return invoke<boolean>('get_autostart');
+}
+
+export async function setAutostart(enabled: boolean): Promise<void> {
+  await invoke('set_autostart', { enabled });
+}
+
+/** True when Windows launched this instance at sign-in, so no window should show. */
+export async function isSilentLaunch(): Promise<boolean> {
+  return invoke<boolean>('is_silent_launch');
+}
+
+/** Localize the native tray menu, which cannot reach the frontend's i18n itself. */
+export async function setTrayLabels(show: string, quit: string): Promise<void> {
+  await invoke('set_tray_labels', { show, quit });
+}

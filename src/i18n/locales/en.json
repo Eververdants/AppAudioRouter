@@ -35,6 +35,11 @@
     "autoRememberDesc": "Remember each process's device routing and restore it automatically",
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
+    "background": "Background",
+    "closeToTray": "Minimize to tray when closed",
+    "closeToTrayDesc": "The close button hides the window while every route keeps running, and the tray icon brings the window back. Turned off, closing quits the app and stops the routes with it.",
+    "autostart": "Start with Windows",
+    "autostartDesc": "Launches into the tray with no window at sign-in, so remembered routes are ready before you open anything.",
     "delays": "Delay compensation",
     "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number under a device node, or scroll it.",
     "delayRange": "Delay range",
@@ -50,6 +55,10 @@
     "maximize": "Maximize",
     "restore": "Restore",
     "close": "Close"
+  },
+  "tray": {
+    "show": "Show / hide App Audio Router",
+    "quit": "Quit"
   },
   "router": {
     "selectProcess": "Select a process",
@@ -94,6 +103,15 @@
     "delaySyncOn": "Delay compensation enabled",
     "delaySyncOff": "Delay compensation disabled",
     "delaySyncFailed": "Failed to toggle delay compensation: {{error}}",
-    "delaySettingsFailed": "Failed to load delay settings: {{error}}"
+    "delaySettingsFailed": "Failed to load delay settings: {{error}}",
+    "devicesChanged": "Device list changed ({{n}})",
+    "sessionsChanged": "Session list changed ({{n}})",
+    "closeToTrayOn": "Closing the window now hides it to the tray",
+    "closeToTrayOff": "Closing the window now quits the app",
+    "closeToTrayFailed": "Failed to save the tray preference: {{error}}",
+    "autostartOn": "Registered as a Windows startup app",
+    "autostartOff": "Removed from Windows startup",
+    "autostartFailed": "Failed to change the startup entry: {{error}}",
+    "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}"
   }
 }

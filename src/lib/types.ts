@@ -34,3 +34,10 @@ export interface DuplicationStoppedEvent {
   reason: DuplicationStopReason;
   error: string | null;
 }
+
+/** A Core Audio change reported by the backend's notification thread: which
+ * half of the lists are now stale. */
+export interface AudioChangedEvent {
+  devices: boolean;
+  sessions: boolean;
+}

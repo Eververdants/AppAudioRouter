@@ -1,14 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { listen } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { SettingsPage } from '@/components/SettingsPage';
 import { TitleBar } from '@/components/TitleBar';
+import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useRouterStore } from '@/stores/routerStore';
-import type { DuplicationStoppedEvent } from '@/lib/types';
+import type { AudioChangedEvent, DuplicationStoppedEvent } from '@/lib/types';
+import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
+
+/**
+ * A single hotplug or a device waking up reaches Core Audio as a burst of
+ * notifications (added, then default, then state, then property). One
+ * re-enumeration at the end of the burst is all the UI needs.
+ */
+const AUDIO_SYNC_DEBOUNCE_MS = 400;
 
 /**
  * Entrance animation for the three panels. Kept short and free of staggering:
@@ -58,31 +67,47 @@ function AmbientLight() {
   );
 }
 
-// Tracks the most recent duplication-stopped listener effect run. Under
-// StrictMode the effect tears down and re-runs before the first subscription
-// resolves; the token lets a stale run drop its own handle instead of
-// orphaning it or overwriting the newer run's handle.
-let activeListenToken: unknown = null;
-
 export default function App() {
+  const { t, i18n } = useTranslation();
   const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
   const loadDefaultDevice = useRouterStore((s) => s.loadDefaultDevice);
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
   const loadDeviceVolumes = useRouterStore((s) => s.loadDeviceVolumes);
+  const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const [view, setView] = useState<'router' | 'settings'>('router');
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
     // after the first commit, i.e. once there is something real to show.
-    void revealMainWindow();
+    //
+    // A launch at sign-in carries --hidden, because a background tool that puts a
+    // window in front of a user who did not ask for one is not background: the
+    // tray is the way in from there.
+    void isSilentLaunch()
+      .catch((error) => {
+        console.warn('[window] silent-launch check failed', error);
+        return false;
+      })
+      .then((silent) => {
+        if (!silent) void revealMainWindow();
+      });
   }, []);
 
   useEffect(() => {
     void loadDelaySettings();
     void loadDeviceVolumes();
   }, [loadDelaySettings, loadDeviceVolumes]);
+
+  useEffect(() => {
+    // The tray menu is a native control and cannot read i18next, so its labels
+    // are pushed over whenever the UI language changes.
+    void setTrayLabels(t('tray.show'), t('tray.quit')).catch((error) => {
+      // A plain browser tab during `vite dev` has no tray at all.
+      console.warn('[tray] could not set the menu labels', error);
+    });
+  }, [t, i18n.language]);
 
   useEffect(() => {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust
@@ -100,37 +125,54 @@ export default function App() {
       // store still thinks nothing is routed. Reconcile before first paint so
       // the badges match reality from the moment the window shows.
       void reconcileActiveDuplications();
+      // The tray preference and the startup registry entry are only read by the
+      // settings page, so they wait for the first paint like the rest.
+      void loadShellSettings();
     });
-  }, [refreshDevices, loadDefaultDevice, refreshSessions, reconcileActiveDuplications]);
+  }, [
+    refreshDevices,
+    loadDefaultDevice,
+    refreshSessions,
+    reconcileActiveDuplications,
+    loadShellSettings,
+  ]);
 
-  useEffect(() => {
-    // Duplication engines report their end (user stop, process exit, error)
-    // through this backend event so the badges stay honest.
-    //
-    // The subscription is created asynchronously, so a single `disposed` flag
-    // is not enough under StrictMode (effect runs, tears down, runs again
-    // before the first promise resolves): the first subscription would be
-    // orphaned. Instead each effect run owns a token and keeps its own
-    // unsubscribe handle keyed by it, so every subscription is torn down and
-    // no second copy is ever silently registered.
-    const token = {};
-    activeListenToken = token;
-    let unlisten: (() => void) | null = null;
-    void listen<DuplicationStoppedEvent>('duplication-stopped', (event) => {
-      useRouterStore.getState().handleDuplicationStopped(event.payload);
-    }).then((off) => {
-      // A newer effect run already replaced this one: drop the stale handle.
-      if (activeListenToken !== token) {
-        off();
-      } else {
-        unlisten = off;
-      }
-    });
-    return () => {
-      if (activeListenToken === token) activeListenToken = null;
-      unlisten?.();
-    };
+  // Duplication engines report their end (user stop, process exit, error) through
+  // this backend event so the badges stay honest.
+  useBackendEvent<DuplicationStoppedEvent>('duplication-stopped', (payload) => {
+    useRouterStore.getState().handleDuplicationStopped(payload);
+  });
+
+  // Core Audio says something moved — a device was plugged in, an app started or
+  // stopped playing. React on a timer instead of per notification, and read the
+  // store at fire time so a route applied during the wait is not overwritten.
+  const pendingSync = useRef<AudioChangedEvent | null>(null);
+  const syncTimer = useRef<number | null>(null);
+  const queueAudioSync = useCallback((changed: AudioChangedEvent) => {
+    // Two emits can straddle the debounce window; merge so neither half of what
+    // they reported gets dropped by the later one.
+    const merged = pendingSync.current ?? { devices: false, sessions: false };
+    merged.devices = merged.devices || changed.devices;
+    merged.sessions = merged.sessions || changed.sessions;
+    pendingSync.current = merged;
+
+    if (syncTimer.current !== null) window.clearTimeout(syncTimer.current);
+    syncTimer.current = window.setTimeout(() => {
+      syncTimer.current = null;
+      const next = pendingSync.current;
+      pendingSync.current = null;
+      if (next) void useRouterStore.getState().syncFromNotification(next);
+    }, AUDIO_SYNC_DEBOUNCE_MS);
   }, []);
+  useBackendEvent<AudioChangedEvent>('audio-changed', queueAudioSync);
+
+  useEffect(
+    () => () => {
+      if (syncTimer.current !== null) window.clearTimeout(syncTimer.current);
+      pendingSync.current = null;
+    },
+    [],
+  );
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">

@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import i18next from 'i18next';
-import type { AudioDevice, AudioSession, DuplicationStoppedEvent, LogEntry } from '@/lib/types';
+import type {
+  AudioChangedEvent,
+  AudioDevice,
+  AudioSession,
+  DuplicationStoppedEvent,
+  LogEntry,
+} from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import {
   DEFAULT_DELAY_RANGE_MS,
@@ -38,6 +44,10 @@ interface RouterState {
   /** Whether delay compensation is applied by the engine. */
   delaySync: boolean;
   autoRemember: boolean;
+  /** Whether the close button hides the window to the tray instead of quitting. */
+  closeToTray: boolean;
+  /** Whether Windows starts this app at sign-in. */
+  autostart: boolean;
   logs: LogEntry[];
   loading: boolean;
   /** True while a route request is in flight, so a rapid double-click cannot
@@ -45,13 +55,24 @@ interface RouterState {
   applying: boolean;
 
   // actions
-  refreshDevices: () => Promise<void>;
-  refreshSessions: () => Promise<void>;
+  /** Pull the device list from the audio engine. `viaNotification` marks a refresh
+   * the backend's change callbacks provoked: it only reaches the log when the list
+   * really differs from what the UI already shows. */
+  refreshDevices: (viaNotification?: boolean) => Promise<void>;
+  /** Pull the process list, with the same logging rule as [`refreshDevices`]. */
+  refreshSessions: (viaNotification?: boolean) => Promise<void>;
+  /** Fold one Core Audio change notification into the UI: refresh whatever moved
+   * and quietly, since the user did not ask for this. */
+  syncFromNotification: (changed: AudioChangedEvent) => Promise<void>;
   loadDefaultDevice: () => Promise<void>;
   selectProcess: (pid: number) => void;
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
   toggleAutoRemember: () => void;
+  /** Read the close-to-tray preference and the startup registry entry. */
+  loadShellSettings: () => Promise<void>;
+  toggleCloseToTray: () => Promise<void>;
+  toggleAutostart: () => Promise<void>;
   applyRoute: () => Promise<void>;
   stopRoute: (pid: number) => Promise<void>;
   stopAllRoutes: () => Promise<void>;
@@ -90,6 +111,21 @@ function orderByDelay(ids: string[], delays: Record<string, number>): string[] {
   return [...ids].sort((a, b) => (delays[a] ?? 0) - (delays[b] ?? 0));
 }
 
+/**
+ * Identity of the device list, so a refresh that came from a Core Audio
+ * notification can tell "the audio engine moved" apart from "what the screen
+ * shows moved" — the first happens several times per hotplug, the second is the
+ * only one worth a log line.
+ */
+function deviceSignature(devices: AudioDevice[]): string {
+  return devices.map((d) => `${d.id}|${d.name}`).join('\n');
+}
+
+/** Same idea for the process list; a session's title is not part of its identity. */
+function sessionSignature(sessions: AudioSession[]): string {
+  return sessions.map((s) => `${s.pid}|${s.exe_name}`).join('\n');
+}
+
 export const useRouterStore = create<RouterState>((set, get) => ({
   devices: [],
   sessions: [],
@@ -103,14 +139,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   deviceVolumes: {},
   delaySync: false,
   autoRemember: false,
+  closeToTray: false,
+  autostart: false,
   logs: [],
   loading: false,
   applying: false,
 
-  refreshDevices: async () => {
+  refreshDevices: async (viaNotification = false) => {
     try {
       const devices = await api.listDevices();
       const liveIds = new Set(devices.map((d) => d.id));
+      const unchanged = deviceSignature(devices) === deviceSignature(get().devices);
       set({ devices });
       // A physically-routed device may have been unplugged. Drop it from the
       // selection and from any route that referenced it; a route left pointing
@@ -124,20 +163,44 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { selectedDeviceIds, routedPids };
       });
-      get().addLog(i18next.t('log.deviceRefreshed', { n: devices.length }), 'info');
+      // Nothing on screen moved, so a notification gets no line at all.
+      if (viaNotification && unchanged) return;
+      get().addLog(
+        viaNotification
+          ? i18next.t('log.devicesChanged', { n: devices.length })
+          : i18next.t('log.deviceRefreshed', { n: devices.length }),
+        'info',
+      );
     } catch (e) {
       get().addLog(i18next.t('log.deviceRefreshFailed', { error: String(e) }), 'error');
     }
   },
 
-  refreshSessions: async () => {
+  refreshSessions: async (viaNotification = false) => {
     try {
       const sessions = await api.listSessions();
+      const unchanged = sessionSignature(sessions) === sessionSignature(get().sessions);
       set({ sessions });
-      get().addLog(i18next.t('log.sessionsRefreshed', { n: sessions.length }), 'info');
+      if (viaNotification && unchanged) return;
+      get().addLog(
+        viaNotification
+          ? i18next.t('log.sessionsChanged', { n: sessions.length })
+          : i18next.t('log.sessionsRefreshed', { n: sessions.length }),
+        'info',
+      );
     } catch (e) {
       get().addLog(i18next.t('log.sessionsRefreshFailed', { error: String(e) }), 'error');
     }
+  },
+
+  syncFromNotification: async ({ devices, sessions }) => {
+    if (devices) {
+      // The system default is what an unrouted process falls back to, and it is
+      // exactly what unplugging the current output tends to move.
+      await get().refreshDevices(true);
+      await get().loadDefaultDevice();
+    }
+    if (sessions) await get().refreshSessions(true);
   },
 
   loadDefaultDevice: async () => {
@@ -179,6 +242,47 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }),
 
   toggleAutoRemember: () => set((s) => ({ autoRemember: !s.autoRemember })),
+
+  loadShellSettings: async () => {
+    // Both come from the native side: the close-to-tray preference sits with the
+    // other backend settings, and the startup entry's source of truth is the
+    // registry — Task Manager can delete it, and the switch has to show that.
+    try {
+      const [closeToTray, autostart] = await Promise.all([
+        api.getCloseToTray(),
+        api.getAutostart(),
+      ]);
+      set({ closeToTray, autostart });
+    } catch (e) {
+      get().addLog(i18next.t('log.shellSettingsFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  toggleCloseToTray: async () => {
+    const next = !get().closeToTray;
+    set({ closeToTray: next });
+    try {
+      await api.setCloseToTray(next);
+      get().addLog(i18next.t(next ? 'log.closeToTrayOn' : 'log.closeToTrayOff'), 'info');
+    } catch (e) {
+      set({ closeToTray: !next });
+      get().addLog(i18next.t('log.closeToTrayFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  toggleAutostart: async () => {
+    const next = !get().autostart;
+    set({ autostart: next });
+    try {
+      await api.setAutostart(next);
+      get().addLog(i18next.t(next ? 'log.autostartOn' : 'log.autostartOff'), 'info');
+    } catch (e) {
+      // Writing HKCU\...\Run can genuinely fail; the switch must snap back rather
+      // than lie about an entry that is not there.
+      set({ autostart: !next });
+      get().addLog(i18next.t('log.autostartFailed', { error: String(e) }), 'error');
+    }
+  },
 
   applyRoute: async () => {
     // A flighting request already owns the selection: a second click while the

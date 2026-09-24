@@ -96,6 +96,10 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const setDelayRange = useRouterStore((s) => s.setDelayRange);
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const setDelayStep = useRouterStore((s) => s.setDelayStep);
+  const closeToTray = useRouterStore((s) => s.closeToTray);
+  const toggleCloseToTray = useRouterStore((s) => s.toggleCloseToTray);
+  const autostart = useRouterStore((s) => s.autostart);
+  const toggleAutostart = useRouterStore((s) => s.toggleAutostart);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -245,6 +249,43 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 3v11" />
+                <path d="M8 10.5 12 14.5 16 10.5" />
+                <path d="M4 17.5h16" />
+              </svg>
+            }
+            label={t('settings.background')}
+          >
+            <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
+              <Switch
+                checked={closeToTray}
+                onChange={() => void toggleCloseToTray()}
+                label={t('settings.closeToTray')}
+              />
+            </Row>
+            <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
+              <Switch
+                checked={autostart}
+                onChange={() => void toggleAutostart()}
+                label={t('settings.autostart')}
+              />
+            </Row>
+          </SectionCard>
+        </motion.div>
+
+        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.16 }}>
+          <SectionCard
+            icon={
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
               >
                 <circle cx="12" cy="12" r="9" />
                 <polyline points="12 7 12 12 15.5 13.5" />
@@ -296,7 +337,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           </SectionCard>
         </motion.div>
 
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.16 }}>
+        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.2 }}>
           <SectionCard
             icon={
               <svg

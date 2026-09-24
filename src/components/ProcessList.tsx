@@ -125,7 +125,10 @@ export function ProcessList() {
             )}
           </AnimatePresence>
           <motion.button
-            onClick={refreshSessions}
+            // Called through a lambda on purpose: `refreshSessions` takes an
+            // optional "this came from a notification" flag, and the click event
+            // would arrive as a truthy one if the handler were passed directly.
+            onClick={() => void refreshSessions()}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.92 }}
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
