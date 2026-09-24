@@ -346,9 +346,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         selectedDeviceIds: ordered,
         engineGenerations: {
           ...s.engineGenerations,
-          ...Object.fromEntries(
-            targets.map((t) => [t.pid, (s.engineGenerations[t.pid] ?? 0) + 1]),
-          ),
+          ...Object.fromEntries(targets.map((t) => [t.pid, (s.engineGenerations[t.pid] ?? 0) + 1])),
         },
       }));
       const count = targets.length;

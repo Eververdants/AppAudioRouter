@@ -72,7 +72,6 @@ export async function getDeviceVolumes(): Promise<[string, number][]> {
   return invoke<[string, number][]>('get_device_volumes');
 }
 
-
 /** Whether the close button hides the window to the tray instead of quitting. */
 export async function getCloseToTray(): Promise<boolean> {
   return invoke<boolean>('get_close_to_tray');

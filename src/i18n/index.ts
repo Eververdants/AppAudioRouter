@@ -20,15 +20,18 @@ function getInitialLanguage(): Language {
   return navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
 
-void i18next.use(initReactI18next).init({
-  resources,
-  lng: getInitialLanguage(),
-  fallbackLng: 'en',
-  // React escapes rendered text itself; escaping here would double-encode.
-  interpolation: { escapeValue: false },
-}).catch((error) => {
-  console.warn('[i18n] initialization failed', error);
-});
+void i18next
+  .use(initReactI18next)
+  .init({
+    resources,
+    lng: getInitialLanguage(),
+    fallbackLng: 'en',
+    // React escapes rendered text itself; escaping here would double-encode.
+    interpolation: { escapeValue: false },
+  })
+  .catch((error) => {
+    console.warn('[i18n] initialization failed', error);
+  });
 
 i18next.on('languageChanged', (lng) => {
   document.documentElement.lang = lng;

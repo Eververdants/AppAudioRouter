@@ -47,7 +47,15 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
 }
 
 /** A device row: name + the shared −/value/+ delay stepper. */
-function DelayRow({ deviceId, name, rangeMs }: { deviceId: string; name: string; rangeMs: number }) {
+function DelayRow({
+  deviceId,
+  name,
+  rangeMs,
+}: {
+  deviceId: string;
+  name: string;
+  rangeMs: number;
+}) {
   return (
     <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={name}>
