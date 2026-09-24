@@ -13,7 +13,7 @@ tauri-build = { version = "2.6", features = [] }
 # These requirements are kept in step with the JS packages in package.json:
 # the Tauri CLI refuses to build when the crate and the npm package for the
 # same component disagree on the minor version.
-tauri = { version = "2.11", features = [] }
+tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-store = "2.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -31,6 +31,7 @@ windows = { version = "0.58", features = [
   "Win32_Security",
   "Win32_System_Com",
   "Win32_System_ProcessStatus",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_UI_Shell_PropertiesSystem",
   "Win32_System_Variant",

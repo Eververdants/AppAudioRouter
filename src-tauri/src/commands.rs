@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::DuplicationManager;
-use crate::config::{DelayConfig, RouteConfig, VolumeConfig};
+use crate::config::{AppSettings, DelayConfig, RouteConfig, VolumeConfig};
 
 /// List all active render (playback) devices.
 #[tauri::command]
@@ -225,4 +225,47 @@ pub fn get_remembered_routes(
 #[tauri::command]
 pub fn clear_route(exe_name: String, config: State<'_, RouteConfig>) -> Result<(), String> {
     config.remove_route(&exe_name)
+}
+
+// ---------------------------------------------------------------- shell
+
+/// Whether closing the window hides it to the tray instead of quitting.
+#[tauri::command]
+pub fn get_close_to_tray(settings: State<'_, AppSettings>) -> bool {
+    settings.close_to_tray()
+}
+
+/// Set the close-to-tray preference.
+#[tauri::command]
+pub fn set_close_to_tray(enabled: bool, settings: State<'_, AppSettings>) -> Result<(), String> {
+    info!("cmd: set_close_to_tray enabled={enabled}");
+    settings.set_close_to_tray(enabled)
+}
+
+/// Whether the app is registered to start at logon.
+#[tauri::command]
+pub fn get_autostart() -> Result<bool, String> {
+    crate::autostart::is_enabled()
+}
+
+/// Register or unregister the logon startup entry.
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    info!("cmd: set_autostart enabled={enabled}");
+    crate::autostart::set_enabled(enabled)
+}
+
+/// True when Windows launched this instance at logon.
+///
+/// The startup entry carries `--hidden` so a boot does not put a window in front
+/// of the user; the frontend asks this before it reveals itself.
+#[tauri::command]
+pub fn is_silent_launch() -> bool {
+    crate::autostart::is_silent_launch()
+}
+
+/// Push the tray menu labels in the frontend's language.
+#[tauri::command]
+pub fn set_tray_labels(show: String, quit: String, app: AppHandle) -> Result<(), String> {
+    crate::tray::set_labels(&app, &show, &quit)
 }

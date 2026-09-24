@@ -2,12 +2,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod autostart;
 mod commands;
 mod config;
+mod tray;
 
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WindowEvent};
 
 /// How long to wait for the frontend to reveal the window before forcing it.
 const REVEAL_FALLBACK: Duration = Duration::from_secs(5);
@@ -38,9 +40,36 @@ fn main() {
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             let volumes = std::sync::Arc::new(volumes);
             app.manage(volumes.clone());
+            let settings = config::AppSettings::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            app.manage(settings);
             app.manage(audio::duplication::DuplicationManager::new(delays, volumes));
-            spawn_reveal_watchdog(app.handle().clone());
+
+            // The window is a control panel; the tray is what keeps the app
+            // reachable while it steers audio in the background.
+            tray::build(app.handle()).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            autostart::repair_if_drifted();
+            audio::notifications::start(app.handle().clone());
+
+            let silent = autostart::is_silent_launch();
+            spawn_reveal_watchdog(app.handle().clone(), silent);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // The close button is the one gesture that could take the running
+            // duplications down with it, so honour the preference before quitting.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let hide = window
+                        .app_handle()
+                        .state::<config::AppSettings>()
+                        .close_to_tray();
+                    if hide {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_devices,
@@ -61,6 +90,12 @@ fn main() {
             commands::clear_route,
             commands::set_device_volume,
             commands::get_device_volumes,
+            commands::get_close_to_tray,
+            commands::set_close_to_tray,
+            commands::get_autostart,
+            commands::set_autostart,
+            commands::is_silent_launch,
+            commands::set_tray_labels,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -74,11 +109,17 @@ fn main() {
 /// missing permission — this watchdog reveals the window anyway rather than
 /// leaving the app running with no visible UI.
 ///
+/// A logon launch (`silent`) is the one case where staying invisible is the
+/// point, so the watchdog stands down and the tray becomes the only way in.
+///
 /// Spawned on the async runtime rather than a bare thread so the task is
 /// cancelled on shutdown: holding an `AppHandle` in a sleeping thread would
 /// otherwise keep the process alive after the user closes the window.
-fn spawn_reveal_watchdog(app: AppHandle) {
+fn spawn_reveal_watchdog(app: AppHandle, silent: bool) {
     tauri::async_runtime::spawn(async move {
+        if silent {
+            return;
+        }
         tokio::time::sleep(REVEAL_FALLBACK).await;
         let Some(window) = app.get_webview_window("main") else {
             return;
