@@ -77,9 +77,12 @@ fn stored_command() -> Result<Option<String>, String> {
         };
         win32_result(status, "RegQueryValueExW")?;
 
+        // as_chunks yields (chunks, remainder); REG_SZ data is always even-length.
         let units: Vec<u16> = buf[..read as usize]
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .collect();
         Ok(Some(
             String::from_utf16_lossy(&units)

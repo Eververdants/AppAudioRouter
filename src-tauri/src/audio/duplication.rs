@@ -1645,8 +1645,10 @@ mod tests {
             .collect();
         apply_gain(&mut bytes, SampleFormat::Float32, 0.5);
         let scaled: Vec<f32> = bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect();
         assert_eq!(scaled, vec![0.5, -0.25, 0.0, 0.125]);
     }
@@ -1659,8 +1661,10 @@ mod tests {
             .collect();
         apply_gain(&mut bytes, SampleFormat::Int(2), 0.5);
         let scaled: Vec<i16> = bytes
-            .chunks_exact(2)
-            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| i16::from_le_bytes(*c))
             .collect();
         // Halving an odd value rounds away from zero, so the top ends at 16384
         // rather than 16383 — the error is one LSB of the quantisation step.
