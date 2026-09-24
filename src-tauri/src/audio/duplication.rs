@@ -47,6 +47,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
+use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::{implement, IUnknown, Interface, HRESULT, PCWSTR, PROPVARIANT};
@@ -94,7 +95,7 @@ const GO_POLL: Duration = Duration::from_millis(2);
 
 /// Generations handed out to engines so a stale thread can never unregister a
 /// newer engine that replaced it for the same PID.
-static NEXT_GENERATION: AtomicU64 = AtomicU64::new(0);
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Why an engine's capture thread exited.
 enum ExitReason {
@@ -370,6 +371,18 @@ struct EngineShared {
     ready_count: AtomicUsize,
 }
 
+/// A live duplication engine and the device list it is currently serving.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveRoute {
+    /// Process ID whose audio is being duplicated.
+    pub pid: u32,
+    /// Engine generation used to reject stale stopped events.
+    pub generation: u64,
+    /// Ordered route targets: primary first, then mirrors.
+    pub device_ids: Vec<String>,
+}
+
 /// Per-process duplication engines, managed as Tauri state.
 pub struct DuplicationManager {
     engines: Mutex<HashMap<u32, Arc<EngineShared>>>,
@@ -492,10 +505,10 @@ impl DuplicationManager {
         primary_device_id: &str,
         mirror_device_ids: Vec<String>,
         app: &AppHandle,
-    ) -> Result<(), AudioError> {
+    ) -> Result<u64, AudioError> {
         self.stop(pid);
         if mirror_device_ids.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         if pid == 0 {
             return Err(AudioError::Api("invalid pid".to_string()));
@@ -556,11 +569,11 @@ impl DuplicationManager {
             .spawn(move || capture_main(shared, app))
         {
             // The engine never started, so no thread will unregister it; drop
-            // the entry here or `active_pids` would report it forever.
+            // the entry here or `active_routes` would report it forever.
             self.unregister(pid, generation);
             return Err(AudioError::Api(format!("spawn capture thread failed: {e}")));
         }
-        Ok(())
+        Ok(generation)
     }
 
     /// Signal the engine for `pid` to stop. Threads clean up asynchronously.
@@ -575,14 +588,21 @@ impl DuplicationManager {
         }
     }
 
-    /// PIDs with a live engine.
-    pub fn active_pids(&self) -> Vec<u32> {
-        self.engines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .copied()
-            .collect()
+    /// Live engines with the exact ordered device list they are serving.
+    pub fn active_routes(&self) -> Vec<ActiveRoute> {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        let mut routes: Vec<ActiveRoute> = engines
+            .values()
+            .map(|engine| ActiveRoute {
+                pid: engine.pid,
+                generation: engine.generation,
+                device_ids: std::iter::once(engine.primary_device_id.clone())
+                    .chain(engine.mirrors.iter().map(|m| m.device_id.clone()))
+                    .collect(),
+            })
+            .collect();
+        routes.sort_by_key(|route| route.pid);
+        routes
     }
 
     /// Remove `pid`'s engine unless a newer engine replaced it. Called by the

@@ -6,7 +6,7 @@ use log::info;
 use tauri::{AppHandle, State};
 
 use crate::audio;
-use crate::audio::duplication::DuplicationManager;
+use crate::audio::duplication::{ActiveRoute, DuplicationManager};
 use crate::config::{AppSettings, DelayConfig, RouteConfig, VolumeConfig};
 
 /// List all active render (playback) devices.
@@ -73,7 +73,7 @@ pub async fn apply_route(
     config: State<'_, RouteConfig>,
     duplications: State<'_, DuplicationManager>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     info!("cmd: apply_route pid={pid} exe={exe_name} devices={device_ids:?} remember={remember}");
     if device_ids.is_empty() {
         return Err("no devices selected".to_string());
@@ -87,17 +87,19 @@ pub async fn apply_route(
     // Mirrors: software duplication to every further device. The engine reads
     // each device's configured delay and volume itself.
     duplications.stop(pid);
-    if device_ids.len() > 1 {
+    let generation = if device_ids.len() > 1 {
         duplications
             .start(pid, &device_ids[0], device_ids[1..].to_vec(), &app)
-            .map_err(|e| e.to_string())?;
-    }
+            .map_err(|e| e.to_string())?
+    } else {
+        0
+    };
 
     if remember {
         config.save_route(&exe_name, &device_ids)?;
         info!("remembered route: {exe_name} -> {device_ids:?}");
     }
-    Ok(())
+    Ok(generation)
 }
 
 /// Stop routing a process: halt any duplication engine and point the process
@@ -119,10 +121,10 @@ pub async fn stop_route(
         .map_err(|e| e.to_string())
 }
 
-/// PIDs with a live duplication engine.
+/// Live duplication engines and their ordered device lists.
 #[tauri::command]
-pub fn get_active_duplications(duplications: State<'_, DuplicationManager>) -> Vec<u32> {
-    duplications.active_pids()
+pub fn get_active_duplications(duplications: State<'_, DuplicationManager>) -> Vec<ActiveRoute> {
+    duplications.active_routes()
 }
 
 /// Set a device's delay compensation (milliseconds, signed) and push it to any

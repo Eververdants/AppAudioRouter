@@ -1,7 +1,7 @@
 /** Tauri invoke wrapper with typed commands. */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { AudioDevice, AudioSession, DeviceDelay } from './types';
+import type { ActiveRoute, AudioDevice, AudioSession, DeviceDelay } from './types';
 
 export async function listDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>('list_devices');
@@ -21,8 +21,8 @@ export async function applyRoute(
   exeName: string,
   deviceIds: string[],
   remember: boolean,
-): Promise<void> {
-  await invoke('apply_route', { pid, exeName, deviceIds, remember });
+): Promise<number> {
+  return invoke<number>('apply_route', { pid, exeName, deviceIds, remember });
 }
 
 /** Stop routing a process: halt duplication and restore the system default. */
@@ -30,8 +30,8 @@ export async function stopRoute(pid: number): Promise<void> {
   await invoke('stop_route', { pid });
 }
 
-export async function getActiveDuplications(): Promise<number[]> {
-  return invoke<number[]>('get_active_duplications');
+export async function getActiveDuplications(): Promise<ActiveRoute[]> {
+  return invoke<ActiveRoute[]>('get_active_duplications');
 }
 
 export async function getDeviceDelays(): Promise<DeviceDelay[]> {

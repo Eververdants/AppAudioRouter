@@ -49,7 +49,6 @@ interface RouterState {
   /** Whether Windows starts this app at sign-in. */
   autostart: boolean;
   logs: LogEntry[];
-  loading: boolean;
   /** True while a route request is in flight, so a rapid double-click cannot
    * dispatch two overlapping routes against the same selection. */
   applying: boolean;
@@ -96,9 +95,42 @@ interface RouterState {
 
 let logId = 0;
 
-/** In-flight guards so concurrent refreshes cannot interleave their set() calls. */
-let devicesInFlight = false;
-let sessionsInFlight = false;
+/**
+ * A refresh gate coalesces concurrent requests instead of dropping them: if a
+ * refresh arrives while one is in flight, one more run is queued.
+ */
+interface RefreshGate {
+  inFlight: boolean;
+  rerun: boolean;
+  rerunViaNotification: boolean;
+}
+
+const deviceRefreshGate: RefreshGate = {
+  inFlight: false,
+  rerun: false,
+  rerunViaNotification: false,
+};
+const sessionRefreshGate: RefreshGate = {
+  inFlight: false,
+  rerun: false,
+  rerunViaNotification: false,
+};
+
+function queueRefresh(gate: RefreshGate, viaNotification: boolean): void {
+  const rerunViaNotification = gate.rerun
+    ? gate.rerunViaNotification && viaNotification
+    : viaNotification;
+  gate.rerun = true;
+  gate.rerunViaNotification = rerunViaNotification;
+}
+
+function runQueuedRefresh(gate: RefreshGate, run: (viaNotification: boolean) => void): void {
+  if (!gate.rerun) return;
+  const viaNotification = gate.rerunViaNotification;
+  gate.rerun = false;
+  gate.rerunViaNotification = false;
+  run(viaNotification);
+}
 
 /** The system default device as a route target, when it is still present. */
 function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
@@ -150,13 +182,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   closeToTray: false,
   autostart: false,
   logs: [],
-  loading: false,
   applying: false,
   engineGenerations: {},
 
   refreshDevices: async (viaNotification = false) => {
-    if (devicesInFlight) return;
-    devicesInFlight = true;
+    if (deviceRefreshGate.inFlight) {
+      queueRefresh(deviceRefreshGate, viaNotification);
+      return;
+    }
+    deviceRefreshGate.inFlight = true;
     try {
       const devices = await api.listDevices();
       const liveIds = new Set(devices.map((d) => d.id));
@@ -168,11 +202,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       set((s) => {
         const selectedDeviceIds = s.selectedDeviceIds.filter((id) => liveIds.has(id));
         const routedPids: Record<number, string[]> = {};
+        const engineGenerations = { ...s.engineGenerations };
         for (const [pid, ids] of Object.entries(s.routedPids)) {
+          const numericPid = Number(pid);
           const remaining = ids.filter((id) => liveIds.has(id));
-          if (remaining.length > 0) routedPids[Number(pid)] = remaining;
+          if (remaining.length > 0) routedPids[numericPid] = remaining;
+          else delete engineGenerations[numericPid];
         }
-        return { selectedDeviceIds, routedPids };
+        return { selectedDeviceIds, routedPids, engineGenerations };
       });
       // Nothing on screen moved, so a notification gets no line at all.
       if (viaNotification && unchanged) return;
@@ -185,17 +222,45 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       get().addLog(i18next.t('log.deviceRefreshFailed', { error: String(e) }), 'error');
     } finally {
-      devicesInFlight = false;
+      deviceRefreshGate.inFlight = false;
+      runQueuedRefresh(deviceRefreshGate, (rerunViaNotification) => {
+        void get().refreshDevices(rerunViaNotification);
+      });
     }
   },
 
   refreshSessions: async (viaNotification = false) => {
-    if (sessionsInFlight) return;
-    sessionsInFlight = true;
+    if (sessionRefreshGate.inFlight) {
+      queueRefresh(sessionRefreshGate, viaNotification);
+      return;
+    }
+    sessionRefreshGate.inFlight = true;
     try {
       const sessions = await api.listSessions();
+      const livePids = new Set(sessions.map((s) => s.pid));
       const unchanged = sessionSignature(sessions) === sessionSignature(get().sessions);
-      set({ sessions });
+      set((s) => {
+        // A single-device route has no duplication engine to report its end, so
+        // the session list is the authoritative signal that its PID is gone.
+        const routedPids: Record<number, string[]> = {};
+        for (const [pid, ids] of Object.entries(s.routedPids)) {
+          const numericPid = Number(pid);
+          if (livePids.has(numericPid)) routedPids[numericPid] = ids;
+        }
+        const selectedPids = s.selectedPids.filter((pid) => livePids.has(pid));
+        const engineGenerations: Record<number, number> = {};
+        for (const [pid, generation] of Object.entries(s.engineGenerations)) {
+          const numericPid = Number(pid);
+          if (livePids.has(numericPid)) engineGenerations[numericPid] = generation;
+        }
+        return {
+          sessions,
+          routedPids,
+          selectedPids,
+          selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
+          engineGenerations,
+        };
+      });
       if (viaNotification && unchanged) return;
       get().addLog(
         viaNotification
@@ -206,7 +271,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       get().addLog(i18next.t('log.sessionsRefreshFailed', { error: String(e) }), 'error');
     } finally {
-      sessionsInFlight = false;
+      sessionRefreshGate.inFlight = false;
+      runQueuedRefresh(sessionRefreshGate, (rerunViaNotification) => {
+        void get().refreshSessions(rerunViaNotification);
+      });
     }
   },
 
@@ -335,8 +403,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const primary = deviceNames[0];
     const extra = ordered.length - 1;
     try {
+      const generations: Record<number, number> = {};
       for (const target of targets) {
-        await api.applyRoute(target.pid, target.exeName, ordered, autoRemember);
+        generations[target.pid] = await api.applyRoute(
+          target.pid,
+          target.exeName,
+          ordered,
+          autoRemember,
+        );
       }
       set((s) => ({
         routedPids: {
@@ -344,10 +418,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           ...Object.fromEntries(targets.map((t) => [t.pid, [...ordered]])),
         },
         selectedDeviceIds: ordered,
-        engineGenerations: {
-          ...s.engineGenerations,
-          ...Object.fromEntries(targets.map((t) => [t.pid, (s.engineGenerations[t.pid] ?? 0) + 1])),
-        },
+        engineGenerations: { ...s.engineGenerations, ...generations },
       }));
       const count = targets.length;
       const key =
@@ -382,6 +453,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // Snapshot before mutating: if the backend rejects the stop the UI must
     // keep showing the route as live instead of silently desyncing from it.
     const previous = get().routedPids[pid];
+    const previousGeneration = get().engineGenerations[pid] ?? 0;
     try {
       // Optimistic: reflect the stop immediately so the UI feels instant.
       set((s) => {
@@ -392,6 +464,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           routedPids,
           selectedPids: s.selectedPids.filter((p) => p !== pid),
           selectedDeviceIds: wasOnlySelection ? [] : s.selectedDeviceIds,
+          engineGenerations: { ...s.engineGenerations, [pid]: 0 },
         };
       });
       await api.stopRoute(pid);
@@ -400,8 +473,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      // Backend didn't actually stop: roll the route back into view.
-      set((s) => ({ routedPids: { ...s.routedPids, [pid]: previous! } }));
+      // Backend didn't actually stop: roll the route and its event identity back.
+      set((s) => ({
+        routedPids: { ...s.routedPids, [pid]: previous! },
+        engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
+      }));
       get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
     }
   },
@@ -413,7 +489,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // didn't. Failed stops must keep their route live rather than desyncing
     // the UI from an engine that is still duplicating.
     const snapshot = { ...get().routedPids };
-    set({ routedPids: {} });
+    const generationSnapshot = { ...get().engineGenerations };
+    set({ routedPids: {}, engineGenerations: {} });
     const failed: number[] = [];
     for (const pid of pids) {
       try {
@@ -425,12 +502,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
     set((s) => {
       const routedPids: Record<number, string[]> = {};
-      for (const pid of failed) routedPids[pid] = snapshot[pid] ?? [];
+      const engineGenerations: Record<number, number> = {};
+      for (const pid of failed) {
+        routedPids[pid] = snapshot[pid] ?? [];
+        engineGenerations[pid] = generationSnapshot[pid] ?? 0;
+      }
       const selectedPids = s.selectedPids.filter((p) => !pids.includes(p) || failed.includes(p));
       return {
         routedPids,
         selectedPids,
         selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
+        engineGenerations,
       };
     });
     get().addLog(
@@ -583,16 +665,19 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // already updated routedPids synchronously — the event may arrive after a
     // newer route was applied, so it must not clear state here.
     if (reason === 'stopped') return;
+    // Reject stale events before logging too: an old engine must not produce a
+    // misleading failure line for a route that has already been replaced.
+    if (generation !== (get().engineGenerations[pid] ?? 0)) return;
     set((s) => {
-      // A stale event from a previous engine (before a re-route) must not
-      // clear the newer engine's state.
-      if (generation !== (s.engineGenerations[pid] ?? 0)) return s;
       const routedPids = { ...s.routedPids };
       delete routedPids[pid];
+      const engineGenerations = { ...s.engineGenerations };
+      delete engineGenerations[pid];
       const selectedPids = s.selectedPids.filter((p) => p !== pid);
       const wasSelected = s.selectedPids.includes(pid);
       return {
         routedPids,
+        engineGenerations,
         selectedPids,
         selectedDeviceIds: wasSelected && selectedPids.length === 0 ? [] : s.selectedDeviceIds,
       };
@@ -605,22 +690,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   reconcileActiveDuplications: async () => {
-    // Routes are persisted by the audio service and a duplication engine can
-    // outlive this process (it dies only when the target process exits or the
-    // user stops it). On boot the frontend would otherwise believe nothing is
-    // routed, so ask the backend what it is still duplicating and mark those
-    // PIDs live. The device list is not reported back, so a reconciled route
-    // shows as active without its device badges until the user re-routes.
+    // The webview can reload while the native process keeps duplication engines
+    // alive, so ask the backend for their exact ordered device lists and restore
+    // the badges with the data the UI needs.
     try {
       const active = await api.getActiveDuplications();
-      const live = new Set(active);
-      if (live.size === 0) return;
+      if (active.length === 0) return;
       set((s) => {
-        const routedPids: Record<number, string[]> = {};
-        for (const pid of live) {
-          routedPids[pid] = s.routedPids[pid] ?? [];
+        const routedPids = { ...s.routedPids };
+        const engineGenerations = { ...s.engineGenerations };
+        for (const route of active) {
+          if (route.deviceIds.length === 0) continue;
+          routedPids[route.pid] = [...route.deviceIds];
+          engineGenerations[route.pid] = route.generation;
         }
-        return { routedPids };
+        return { routedPids, engineGenerations };
       });
     } catch {
       /* enumerating active engines is best-effort; the user can re-route */

@@ -27,6 +27,13 @@ export type RememberedRoute = [exeName: string, deviceIds: string[]];
  * device: positive holds it back, negative makes it the earliest of its group. */
 export type DeviceDelay = [deviceId: string, delayMs: number];
 
+/** A live duplication engine and its ordered route targets. */
+export interface ActiveRoute {
+  pid: number;
+  generation: number;
+  deviceIds: string[];
+}
+
 export type DuplicationStopReason = 'stopped' | 'process-exited' | 'error';
 
 export interface DuplicationStoppedEvent {
