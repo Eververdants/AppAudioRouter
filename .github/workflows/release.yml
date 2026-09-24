@@ -26,7 +26,7 @@ jobs:
           workspaces: src-tauri
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --version 0.20 --locked
+        run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Run cargo audit
         working-directory: src-tauri
