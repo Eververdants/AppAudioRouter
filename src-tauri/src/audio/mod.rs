@@ -7,11 +7,13 @@
 
 pub mod devices;
 pub mod duplication;
+pub mod notifications;
 pub mod routing;
 pub mod sessions;
 
 use serde::Serialize;
 use thiserror::Error;
+use windows::core::PWSTR;
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
@@ -53,6 +55,25 @@ pub fn uninit_com(owned: bool) {
     if owned {
         // SAFETY: Balances a successful CoInitializeEx from init_com.
         unsafe { CoUninitialize() };
+    }
+}
+
+/// Copy a COM-allocated `PWSTR` into an owned `String`.
+///
+/// The caller still owns the allocation and must free it with `CoTaskMemFree`.
+pub fn pwstr_to_string(pwstr: &PWSTR) -> String {
+    if pwstr.is_null() {
+        return String::new();
+    }
+    // SAFETY: a PWSTR from COM is a valid NUL-terminated wide string.
+    unsafe {
+        let mut len = 0;
+        let mut ptr = pwstr.0;
+        while *ptr != 0 {
+            len += 1;
+            ptr = ptr.add(1);
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(pwstr.0, len))
     }
 }
 
