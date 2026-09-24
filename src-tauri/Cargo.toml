@@ -13,6 +13,8 @@ tauri-build = { version = "2.6", features = [] }
 # These requirements are kept in step with the JS packages in package.json:
 # the Tauri CLI refuses to build when the crate and the npm package for the
 # same component disagree on the minor version.
+# `devtools` is deliberately absent: debug builds enable the inspector through
+# `debug_assertions`, while release builds must ship with it disabled.
 tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-store = "2.4"
 serde = { version = "1.0", features = ["derive"] }
