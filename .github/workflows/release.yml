@@ -8,7 +8,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   NODE_VERSION: '20'
-  RUST_VERSION: stable
 
 permissions:
   contents: write
@@ -20,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@${{ env.RUST_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -57,7 +56,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
-      - uses: dtolnay/rust-toolchain@${{ env.RUST_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:

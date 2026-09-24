@@ -12,7 +12,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   NODE_VERSION: '20'
-  RUST_VERSION: stable
 
 jobs:
   frontend-check:
@@ -31,6 +30,7 @@ jobs:
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm fmt:check
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
 
@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@${{ env.RUST_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
