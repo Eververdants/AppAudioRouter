@@ -79,7 +79,7 @@ fn device_info(device: &IMMDevice) -> Result<AudioDevice, AudioError> {
             .GetId()
             .map_err(|e| AudioError::Api(format!("GetId failed: {e}")))?
     };
-    let id = pwstr_to_string(id_pwstr.as_ptr());
+    let id = crate::audio::pwstr_to_string(&id_pwstr);
     unsafe {
         windows::Win32::System::Com::CoTaskMemFree(Some(id_pwstr.as_ptr() as *const _));
     }
@@ -140,26 +140,8 @@ fn extract_friendly_name(var: &windows::core::PROPVARIANT, fallback: &str) -> St
     if vt == VT_LPWSTR {
         // SAFETY: We verified the type; pwszVal is valid.
         let pwstr_ptr = unsafe { inner.Anonymous.Anonymous.Anonymous.pwszVal };
-        pwstr_to_string(pwstr_ptr)
+        crate::audio::pwstr_to_string(&windows::core::PWSTR(pwstr_ptr))
     } else {
         fallback.to_string()
-    }
-}
-
-/// Convert a PWSTR (wide string pointer) to a Rust String.
-fn pwstr_to_string(pwstr: *const u16) -> String {
-    if pwstr.is_null() {
-        return String::new();
-    }
-    // SAFETY: pwstr is a valid NUL-terminated wide string from COM.
-    unsafe {
-        let mut len = 0;
-        let mut ptr = pwstr;
-        while *ptr != 0 {
-            len += 1;
-            ptr = ptr.add(1);
-        }
-        let slice = std::slice::from_raw_parts(pwstr, len);
-        String::from_utf16_lossy(slice)
     }
 }

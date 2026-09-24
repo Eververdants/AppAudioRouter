@@ -5,7 +5,7 @@
 //! for re-routing.
 
 use log::info;
-use windows::core::{Interface, PWSTR};
+use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
     IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
@@ -123,7 +123,7 @@ fn collect_device_sessions(
                 .GetDisplayName()
                 .map_err(|e| AudioError::Api(format!("GetDisplayName({i}) failed: {e}")))?
         };
-        let display_name = pwstr_to_string(&display_pwstr);
+        let display_name = crate::audio::pwstr_to_string(&display_pwstr);
         unsafe {
             windows::Win32::System::Com::CoTaskMemFree(Some(display_pwstr.0 as *const _));
         }
@@ -172,20 +172,4 @@ fn get_process_exe_name(pid: u32) -> Option<String> {
     }
 
     result
-}
-
-fn pwstr_to_string(pwstr: &PWSTR) -> String {
-    if pwstr.is_null() {
-        return String::new();
-    }
-    unsafe {
-        let mut len = 0;
-        let mut ptr = pwstr.0;
-        while *ptr != 0 {
-            len += 1;
-            ptr = ptr.add(1);
-        }
-        let slice = std::slice::from_raw_parts(pwstr.0, len);
-        String::from_utf16_lossy(slice)
-    }
 }
