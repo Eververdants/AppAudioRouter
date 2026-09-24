@@ -180,8 +180,11 @@ export function ConcentricRouter() {
   const isMulti = selectedCount > 1;
   const primarySession = sessions.find((s) => s.pid === selectedPids[0]);
   // Union of devices the selected processes are currently routed to.
-  const activeIds =
-    selectedCount === 0 ? [] : [...new Set(selectedPids.flatMap((pid) => routedPids[pid] ?? []))];
+  const activeIds = useMemo(
+    () =>
+      selectedCount === 0 ? [] : [...new Set(selectedPids.flatMap((pid) => routedPids[pid] ?? []))],
+    [selectedCount, selectedPids, routedPids],
+  );
 
   // Geometry depends only on the device list; memoize so it is recomputed on
   // hotplug, not on every selection/delay/volume change.

@@ -279,7 +279,7 @@ fn role_values(role: Role) -> &'static [i32] {
 /// The assignment is persisted by the audio service per executable and applies
 /// to audio sessions started after this call (identical to the Windows 11
 /// Settings "app volume and device preferences" toggle).
-pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Result<(), AudioError> {
+pub async fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Result<(), AudioError> {
     if pid == 0 {
         return Err(AudioError::Api("invalid pid".to_string()));
     }
@@ -288,7 +288,7 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
     // DllGetActivationFactory of AudioSes returns CLASS_E_CLASSNOTAVAILABLE on
     // an STA thread (Tauri sync commands run on the main thread, which WebView2
     // initializes as STA); run the whole activation on a dedicated MTA thread.
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let com_owned = crate::audio::init_com()?;
 
         let result = (|| -> Result<(), AudioError> {
@@ -319,8 +319,8 @@ pub fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Resu
 
         result
     })
-    .join()
-    .map_err(|_| AudioError::Api("routing thread panicked".to_string()))?
+    .await
+    .map_err(|_| AudioError::Api("routing task failed".to_string()))?
 }
 
 // ---------------------------------------------------------------------------
@@ -436,11 +436,11 @@ impl Drop for PolicyConfig {
 }
 
 /// Set the system default audio device (applies to apps using the default).
-pub fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError> {
+pub async fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError> {
     validate_device_id(device_id)?;
     let device_id = device_id.to_string();
     // Keep both routing channels off the main STA thread for consistency.
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let com_owned = crate::audio::init_com()?;
 
         let result = (|| -> Result<(), AudioError> {
@@ -456,6 +456,6 @@ pub fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError>
 
         result
     })
-    .join()
-    .map_err(|_| AudioError::Api("routing thread panicked".to_string()))?
+    .await
+    .map_err(|_| AudioError::Api("routing task failed".to_string()))?
 }

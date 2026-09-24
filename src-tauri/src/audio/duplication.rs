@@ -50,7 +50,7 @@ use log::{info, warn};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::{implement, IUnknown, Interface, HRESULT, PCWSTR, PROPVARIANT};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     eConsole, eRender, ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation,
     IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
@@ -64,7 +64,7 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemAlloc, CoTaskMemFree, CLSCTX_ALL};
 use windows::Win32::System::Threading::{
-    CreateEventW, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    CreateEventW, GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 use crate::audio::AudioError;
@@ -329,6 +329,8 @@ impl MirrorChannel {
 struct EngineShared {
     pid: u32,
     generation: u64,
+    /// Process creation time as a FILETIME (u64), used to detect PID reuse.
+    creation_time: u64,
     shutdown: AtomicBool,
     mirrors: Vec<Arc<MirrorChannel>>,
     /// Device the OS plays natively, i.e. the one endpoint this engine cannot
@@ -521,9 +523,11 @@ impl DuplicationManager {
             })
             .collect();
 
+        let creation_time = process_creation_time(pid).unwrap_or(0);
         let shared = Arc::new(EngineShared {
             pid,
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
+            creation_time,
             shutdown: AtomicBool::new(false),
             mirrors,
             primary_device_id: primary_device_id.to_string(),
@@ -612,6 +616,7 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
         "duplication-stopped",
         json!({
             "pid": shared.pid,
+            "generation": shared.generation,
             "reason": reason.event_name(),
             "error": reason.error_message(),
         }),
@@ -860,7 +865,7 @@ fn capture_packets_inner(
         if wait == WAIT_TIMEOUT {
             // The loopback event only fires while the process actually plays
             // audio; use idle timeouts to notice process exit.
-            if !process_alive(shared.pid) {
+            if !process_alive(shared.pid, shared.creation_time) {
                 return Ok(ExitReason::ProcessExited);
             }
             continue;
@@ -1319,8 +1324,26 @@ fn default_mix_format() -> Result<(Vec<u8>, usize, u32), AudioError> {
     result
 }
 
-/// Returns true while `pid` still refers to a live process.
-fn process_alive(pid: u32) -> bool {
+/// Process creation time as a FILETIME (u64), or None if unavailable.
+fn process_creation_time(pid: u32) -> Option<u64> {
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()? };
+    let mut creation = FILETIME::default();
+    let mut _exit = FILETIME::default();
+    let mut _kernel = FILETIME::default();
+    let mut _user = FILETIME::default();
+    // SAFETY: valid handle and out params.
+    unsafe {
+        GetProcessTimes(handle, &mut creation, &mut _exit, &mut _kernel, &mut _user).ok()?;
+    }
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
+}
+
+/// Returns true while `pid` still refers to the same process that was alive at
+/// `recorded_time`. Detects PID reuse by comparing creation times.
+fn process_alive(pid: u32, recorded_time: u64) -> bool {
     // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION; handle closed below.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
     match handle {
@@ -1331,7 +1354,14 @@ fn process_alive(pid: u32) -> bool {
             unsafe {
                 let _ = CloseHandle(h);
             }
-            !exited
+            if exited {
+                return false;
+            }
+            // Check PID reuse: if the creation time differs, the PID was recycled.
+            match process_creation_time(pid) {
+                Some(current) => current == recorded_time,
+                None => true, // If we can't get the time, assume it's the same process.
+            }
         }
         // The process was openable when the route was applied, so an
         // OpenProcess failure now means it is gone.
@@ -1361,6 +1391,7 @@ mod tests {
         EngineShared {
             pid: 1,
             generation: 0,
+            creation_time: 0,
             shutdown: AtomicBool::new(false),
             mirrors: mirror_delays
                 .iter()

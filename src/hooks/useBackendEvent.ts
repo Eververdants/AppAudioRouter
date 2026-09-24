@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
 /**
@@ -16,7 +16,7 @@ export function useBackendEvent<P>(name: string, handler: (payload: P) => void):
   const handlerRef = useRef(handler);
   const activeRef = useRef<unknown>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     handlerRef.current = handler;
   });
 

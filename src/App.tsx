@@ -85,14 +85,18 @@ export default function App() {
     // A launch at sign-in carries --hidden, because a background tool that puts a
     // window in front of a user who did not ask for one is not background: the
     // tray is the way in from there.
+    let cancelled = false;
     void isSilentLaunch()
       .catch((error) => {
         console.warn('[window] silent-launch check failed', error);
         return false;
       })
       .then((silent) => {
-        if (!silent) void revealMainWindow();
+        if (!cancelled && !silent) void revealMainWindow();
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

@@ -210,7 +210,7 @@ pnpm tauri build      # installers in src-tauri/target/release/bundle
 Useful checks, all of which also run in CI:
 
 ```bash
-pnpm typecheck                 # tsc --noEmit
+pnpm exec tsc --noEmit         # type check
 pnpm build                     # tsc -b && vite build
 cd src-tauri
 cargo fmt -- --check

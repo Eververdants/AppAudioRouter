@@ -26,11 +26,17 @@ void i18next.use(initReactI18next).init({
   fallbackLng: 'en',
   // React escapes rendered text itself; escaping here would double-encode.
   interpolation: { escapeValue: false },
+}).catch((error) => {
+  console.warn('[i18n] initialization failed', error);
 });
 
 i18next.on('languageChanged', (lng) => {
   document.documentElement.lang = lng;
-  localStorage.setItem(STORAGE_KEY, lng);
+  try {
+    localStorage.setItem(STORAGE_KEY, lng);
+  } catch {
+    /* storage may be unavailable; the preference just does not persist */
+  }
 });
 
 /** The active UI language, normalized for callers outside React. */

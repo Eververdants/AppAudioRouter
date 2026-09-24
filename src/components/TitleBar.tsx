@@ -116,7 +116,7 @@ export function TitleBar({
         <img src={appIcon} alt="" className="h-4 w-4 rounded" />
         <span className="truncate text-xs font-semibold text-text-primary">App Audio Router</span>
         <span className="rounded bg-accent-muted px-1.5 py-px text-[10px] font-medium leading-4 text-accent">
-          v2.1
+          v{__APP_VERSION__}
         </span>
       </div>
 

@@ -30,6 +30,7 @@ export function Switch({ checked, onChange, label, disabled = false }: SwitchPro
       } ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
     >
       <motion.span
+        aria-hidden="true"
         layout
         transition={{ type: 'spring', stiffness: 550, damping: 32 }}
         className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)]"

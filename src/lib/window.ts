@@ -22,6 +22,10 @@ export function isTauri(): boolean {
 function loadWindowModule(): Promise<WindowModule> | null {
   if (!isTauri()) return null;
   modulePromise ??= import('@tauri-apps/api/window');
+  // Reset on failure so a transient error doesn't cache the rejection forever.
+  modulePromise.catch(() => {
+    modulePromise = null;
+  });
   return modulePromise;
 }
 

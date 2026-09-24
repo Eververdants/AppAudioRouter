@@ -25,19 +25,23 @@ pub fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
 
 /// Set the default audio device for a process.
 #[tauri::command]
-pub fn set_route(device_id: String, pid: u32, role: String) -> Result<(), String> {
+pub async fn set_route(device_id: String, pid: u32, role: String) -> Result<(), String> {
     info!("cmd: set_route device={device_id} pid={pid} role={role}");
 
     let role = parse_role(&role);
 
-    audio::routing::set_process_default_device(&device_id, pid, role).map_err(|e| e.to_string())
+    audio::routing::set_process_default_device(&device_id, pid, role)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Set the system-wide default render device.
 #[tauri::command]
-pub fn set_default_device(device_id: String, role: String) -> Result<(), String> {
+pub async fn set_default_device(device_id: String, role: String) -> Result<(), String> {
     info!("cmd: set_default_device device={device_id} role={role}");
-    audio::routing::set_default_device(&device_id, parse_role(&role)).map_err(|e| e.to_string())
+    audio::routing::set_default_device(&device_id, parse_role(&role))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Get the current system default render device.
@@ -61,7 +65,7 @@ pub fn get_default_device() -> Result<audio::AudioDevice, String> {
 // count is fixed by the framework.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn apply_route(
+pub async fn apply_route(
     pid: u32,
     exe_name: String,
     device_ids: Vec<String>,
@@ -77,6 +81,7 @@ pub fn apply_route(
 
     // Primary: the OS-native per-app endpoint.
     audio::routing::set_process_default_device(&device_ids[0], pid, audio::Role::All)
+        .await
         .map_err(|e| e.to_string())?;
 
     // Mirrors: software duplication to every further device. The engine reads
@@ -98,7 +103,7 @@ pub fn apply_route(
 /// Stop routing a process: halt any duplication engine and point the process
 /// back at the current system default device.
 #[tauri::command]
-pub fn stop_route(pid: u32, duplications: State<'_, DuplicationManager>) -> Result<(), String> {
+pub async fn stop_route(pid: u32, duplications: State<'_, DuplicationManager>) -> Result<(), String> {
     info!("cmd: stop_route pid={pid}");
     // Resolve the fallback endpoint before tearing down duplication: if the lookup
     // fails we return early and the app keeps playing to its current device
@@ -107,6 +112,7 @@ pub fn stop_route(pid: u32, duplications: State<'_, DuplicationManager>) -> Resu
     duplications.stop(pid);
 
     audio::routing::set_process_default_device(&default_device.id, pid, audio::Role::All)
+        .await
         .map_err(|e| e.to_string())
 }
 

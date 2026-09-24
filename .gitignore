@@ -14,7 +14,6 @@ target/
 src-tauri/target/
 
 # Tauri
-src-tauri/Cargo.lock
 src-tauri/gen/schemas/
 src-tauri/target/
 
@@ -46,4 +45,3 @@ pnpm-debug.log*
 # Misc
 *.msi
 *.exe
-!src-tauri/icons/

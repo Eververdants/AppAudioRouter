@@ -26,7 +26,7 @@ export function useFitScale(designSize: number, { min = 0.4, max = 1.15 }: FitSc
       const { width, height } = el.getBoundingClientRect();
       if (width <= 0 || height <= 0) return;
       const next = Math.max(Math.min(width / designSize, height / designSize, max), min);
-      setScale(next);
+      setScale((prev) => (prev === next ? prev : next));
     };
 
     update();

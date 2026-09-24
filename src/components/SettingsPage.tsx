@@ -103,6 +103,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Don't close settings when Escape is pressed inside an input (e.g. delay stepper).
+      if (e.target instanceof HTMLInputElement) return;
       if (e.key === 'Escape') onBack();
     };
     window.addEventListener('keydown', onKey);
@@ -360,7 +362,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   App Audio Router
                 </span>
                 <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent">
-                  v2.1.0
+                  v{__APP_VERSION__}
                 </span>
               </div>
               <p className="text-[11px] leading-relaxed text-text-muted">

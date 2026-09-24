@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useRouterStore } from '@/stores/routerStore';
@@ -81,10 +82,16 @@ export function ProcessList() {
 
   /** Playback device a process is associated with: its route's primary device,
    * or the system default it currently plays through. */
+  const deviceNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of devices) map.set(d.id, d.name);
+    return map;
+  }, [devices]);
+
   const associatedName = (pid: number): string | null => {
     const id = routedPids[pid]?.[0] ?? defaultDeviceId;
     if (id === null) return null;
-    return devices.find((d) => d.id === id)?.name ?? null;
+    return deviceNameById.get(id) ?? null;
   };
 
   return (

@@ -53,6 +53,10 @@ interface RouterState {
   /** True while a route request is in flight, so a rapid double-click cannot
    * dispatch two overlapping routes against the same selection. */
   applying: boolean;
+  /** Generation counter per PID, incremented on each applyRoute/stopRoute so a
+   * stale duplication-stopped event from a previous engine cannot clear the
+   * state of a newer one. */
+  engineGenerations: Record<number, number>;
 
   // actions
   /** Pull the device list from the audio engine. `viaNotification` marks a refresh
@@ -91,6 +95,10 @@ interface RouterState {
 }
 
 let logId = 0;
+
+/** In-flight guards so concurrent refreshes cannot interleave their set() calls. */
+let devicesInFlight = false;
+let sessionsInFlight = false;
 
 /** The system default device as a route target, when it is still present. */
 function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
@@ -144,8 +152,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   logs: [],
   loading: false,
   applying: false,
+  engineGenerations: {},
 
   refreshDevices: async (viaNotification = false) => {
+    if (devicesInFlight) return;
+    devicesInFlight = true;
     try {
       const devices = await api.listDevices();
       const liveIds = new Set(devices.map((d) => d.id));
@@ -173,10 +184,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       );
     } catch (e) {
       get().addLog(i18next.t('log.deviceRefreshFailed', { error: String(e) }), 'error');
+    } finally {
+      devicesInFlight = false;
     }
   },
 
   refreshSessions: async (viaNotification = false) => {
+    if (sessionsInFlight) return;
+    sessionsInFlight = true;
     try {
       const sessions = await api.listSessions();
       const unchanged = sessionSignature(sessions) === sessionSignature(get().sessions);
@@ -190,6 +205,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       );
     } catch (e) {
       get().addLog(i18next.t('log.sessionsRefreshFailed', { error: String(e) }), 'error');
+    } finally {
+      sessionsInFlight = false;
     }
   },
 
@@ -327,6 +344,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           ...Object.fromEntries(targets.map((t) => [t.pid, [...ordered]])),
         },
         selectedDeviceIds: ordered,
+        engineGenerations: {
+          ...s.engineGenerations,
+          ...Object.fromEntries(
+            targets.map((t) => [t.pid, (s.engineGenerations[t.pid] ?? 0) + 1]),
+          ),
+        },
       }));
       const count = targets.length;
       const key =
@@ -557,12 +580,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   handleDuplicationStopped: (event) => {
-    const { pid, reason, error } = event;
+    const { pid, generation, reason, error } = event;
     // `stopped` is the ack of an explicit stop or re-route, both of which
     // already updated routedPids synchronously — the event may arrive after a
     // newer route was applied, so it must not clear state here.
     if (reason === 'stopped') return;
     set((s) => {
+      // A stale event from a previous engine (before a re-route) must not
+      // clear the newer engine's state.
+      if (generation !== (s.engineGenerations[pid] ?? 0)) return s;
       const routedPids = { ...s.routedPids };
       delete routedPids[pid];
       const selectedPids = s.selectedPids.filter((p) => p !== pid);

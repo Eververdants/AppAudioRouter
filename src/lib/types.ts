@@ -31,6 +31,7 @@ export type DuplicationStopReason = 'stopped' | 'process-exited' | 'error';
 
 export interface DuplicationStoppedEvent {
   pid: number;
+  generation: number;
   reason: DuplicationStopReason;
   error: string | null;
 }

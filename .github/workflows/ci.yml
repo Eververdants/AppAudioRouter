@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   NODE_VERSION: '20'
@@ -37,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@${{ env.RUST_VERSION }}
         with:
           components: clippy, rustfmt
 
@@ -55,4 +58,8 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy -- -D warnings
+        working-directory: src-tauri
+
+      - name: cargo test
+        run: cargo test
         working-directory: src-tauri
