@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml"><img alt="CI 状态" src="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="版本 2.0.0" src="https://img.shields.io/badge/version-2.0.0-0891b2">
+  <img alt="版本 2.1.0" src="https://img.shields.io/badge/version-2.1.0-0891b2">
   <img alt="平台：Windows 10 与 Windows 11，64 位" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6">
   <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-3da639"></a>
   <img alt="技术栈：Tauri 2、Rust 与 React 19" src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20React%2019-24C8DB">
@@ -32,7 +32,7 @@ App Audio Router（简称 **AAR**）是一个 Windows 每应用音频路由工�
 |---|---|
 | **定位** | Windows 每应用音频路由（一个应用 → 多台设备） |
 | **平台** | Windows 10 / Windows 11，64 位 |
-| **当前版本** | 2.0.0 |
+| **当前版本** | 2.1.0 |
 | **安装包** | 见 [Releases](https://github.com/Eververdants/AppAudioRouter/releases)，MSI 或 NSIS 安装程序 |
 | **许可证** | MIT |
 | **界面语言** | 简体中文、English |
@@ -64,11 +64,18 @@ App Audio Router（简称 **AAR**）是一个 Windows 每应用音频路由工�
 - **音量平衡**——每台设备一个 0–100 % 的值，把该设备相对"同组里最响的那台"做衰减，让轻的耳机和响的音箱拉到同一水平。
 - **数值即控件**——横向拖动、滚轮、方向键（按住 `Shift` 十倍步进），或点击后直接键入精确值。两个数值都挂在设备节点下方，共用同一套操作方式。
 
+### 不占地方
+
+- **列表实时更新**——设备列表与进程列表自己跟着音频引擎走：插上耳机、某个程序开始或停止播放，不用点刷新列表也会跟上。用的是 Core Audio 自己的变更通知，不是定时器。
+- **系统托盘**——运行期间托盘图标常驻：左键显示或隐藏窗口，右键菜单是「显示 / 隐藏」与「退出」。
+- **关闭到托盘**——可选：点关闭只隐藏窗口，路由继续生效，屏幕上不再占一个窗口。此项默认关闭；托盘菜单里的**退出**才是明确停止路由的动作。
+- **开机自动启动**——可选：在你自己的用户下登记一条启动项（`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`），登录时静默进托盘、不弹窗口，不需要管理员权限。同一个开关可以关掉，任务管理器 → 启动应用里也能关掉；开关读的就是注册表本身，所以它显示的永远是实际状态。
+
 ### 界面与开销
 
 - **同心圆路由界面**——进程在中心、设备在外环，连线表示当前已生效的路由，应用路由时有涟漪反馈。
 - **明暗双主题**，中英双语，都在标题栏一键切换；主题与语言在首帧之前就已生效，启动时不会闪一下白屏。
-- **后台开销低**——设备与进程列表按需刷新，不做定时轮询，窗口闲置时不会骚扰音频引擎。
+- **后台开销低**——程序从不轮询音频引擎，只在 Windows 报告「有东西变了」时才重读列表；重读之后如果屏幕上没有任何变化，连日志都不多写一行。
 - **冷启动快**——窗口先隐藏创建、首帧绘制完成后再显示（Rust 侧另有看门狗兜底），设备枚举等到首帧之后的空闲时机才发起，发布配置也针对"体积小、映像紧凑"调过（LTO、单一 codegen unit、剥离符号、`panic = "abort"`）。
 
 ## 与其它方案对比
@@ -165,25 +172,28 @@ AppAudioRouter/
 │   │   ├── ConcentricRouter.tsx  # 同心圆路由盘：设备节点 + 标题
 │   │   ├── DeviceAnnotation.tsx  # 设备节点下方的延迟 / 音量标注行
 │   │   ├── ProcessList.tsx       # 有音频会话的进程
-│   │   ├── SettingsPage.tsx      # 设置页：主题 / 语言 / 路由 / 延迟 / 关于
+│   │   ├── SettingsPage.tsx      # 设置页：主题 / 语言 / 路由 / 后台 / 延迟 / 关于
 │   │   ├── LogPanel.tsx          # 运行日志
 │   │   ├── TitleBar.tsx          # 自制无边框标题栏
 │   │   └── ui/                   # Switch、SegmentedControl、ScrubReadout 等基础控件
-│   ├── hooks/                    # useTheme、useLanguage、useDelayValue、useFitScale
+│   ├── hooks/                    # useTheme、useLanguage、useDelayValue、useBackendEvent、useFitScale
 │   ├── stores/routerStore.ts     # Zustand store
 │   ├── i18n/locales/             # en.json、zh-CN.json
 │   ├── lib/                      # invoke 封装、延迟计算、共享类型
 │   └── styles/index.css          # Tailwind 入口 + 主题 CSS variables
 └── src-tauri/                    # Rust 后端
     └── src/
-        ├── main.rs               # 入口，注册命令
+        ├── main.rs               # 入口，注册命令 + 关闭拦截
         ├── commands.rs           # Tauri 命令（invoke handler）
-        ├── config.rs             # 路由 / 延迟 / 音量持久化
+        ├── config.rs             # 路由 / 延迟 / 音量 / 外壳设置持久化
+        ├── tray.rs               # 托盘图标、菜单与窗口开关
+        ├── autostart.rs          # 开机自启（HKCU Run 项）
         └── audio/
             ├── devices.rs        # IMMDeviceEnumerator 设备枚举
             ├── sessions.rs       # IAudioSessionEnumerator 会话枚举
             ├── routing.rs        # IPolicyConfig 按进程路由
-            └── duplication.rs    # WASAPI 进程回环复制引擎
+            ├── duplication.rs    # WASAPI 进程回环复制引擎
+            └── notifications.rs  # 设备与会话变更回调
 ```
 
 ## 从源码构建
@@ -234,15 +244,23 @@ CI 流程：前端类型检查与构建跑在 Linux 上，`cargo fmt` / `check` 
 
 ### 为什么我的程序没有出现在进程列表里？
 
-程序只有在持有活动音频会话时才会出现，所以先在它里面播放声音，然后点**刷新**。使用 ASIO 或 WASAPI 独占模式的程序不会向系统音频引擎创建会话，因此不会出现在列表里；系统关键进程也被有意排除在路由之外。
+程序只有在持有活动音频会话时才会出现，所以先在它里面播放声音——列表会自己注意到，或者点**刷新**。使用 ASIO 或 WASAPI 独占模式的程序不会向系统音频引擎创建会话，因此不会出现在列表里；系统关键进程也被有意排除在路由之外。
 
 ### 配置保存在哪里？
 
-以纯 JSON 保存在应用数据目录下：`route-memory.json`（可执行文件 → 设备列表）、`device-delays.json`（设备 → 毫秒值与配置的范围）、`device-volumes.json`（设备 → 百分比）。记忆的路由以可执行文件名为键，所以不管程序从哪里启动都适用。
+以纯 JSON 保存在应用数据目录下：`route-memory.json`（可执行文件 → 设备列表）、`device-delays.json`（设备 → 毫秒值与配置的范围）、`device-volumes.json`（设备 → 百分比）以及 `app-settings.json`（关闭按钮是否只隐藏到托盘）。主题与语言属于窗口自己的界面偏好，存在它的 localStorage 里。唯一不在这些文件中的是那条可选的开机启动项，它在 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下——「开机自动启动」开关读的也正是它。记忆的路由以可执行文件名为键，所以不管程序从哪里启动都适用。
 
 ### 它会在后台常驻或轮询音频设备吗？
 
-不会。只有在你刷新列表、调整设备数值或应用路由时才会与音频引擎通信。路由生效期间，对应进程的复制引擎会运行；一旦停止路由，引擎就被拆除。
+不做轮询，也没有后台服务。程序注册的是音频引擎自己的变更通知，只有 Windows 报告「有东西动了」才会重读列表——设备与进程列表的实时更新就是这么来的。除此之外，只有在你刷新列表、调整设备数值或应用路由时才会与音频引擎通信。路由生效期间，对应进程的复制引擎会运行；一旦停止路由，引擎就被拆除。
+
+### 把窗口关掉以后还在路由吗？
+
+默认情况下，关闭窗口就是退出程序，依赖复制引擎的那份声音随之停止。打开**设置 → 后台运行 → 关闭窗口时最小化到托盘**之后，关闭按钮只隐藏窗口：路由继续生效，托盘图标可以把窗口唤回来。托盘菜单里的**退出**无论开关状态都会停止一切。
+
+### 可以开机自动启动吗？
+
+可以。**设置 → 后台运行 → 开机自动启动** 只在你当前用户下的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 写一条值：不碰 `HKLM`，不需要管理员权限，启动时也不弹窗口——直接进托盘，记忆路由在你打开任何程序之前就已就绪。程序是把这条注册表值当作唯一真相来读的，所以你在任务管理器里关掉启动项，设置里的开关也会跟着变。
 
 ### 支持 macOS 或 Linux 吗？
 
@@ -250,7 +268,7 @@ CI 流程：前端类型检查与构建跑在 Linux 上，`cargo fmt` / `check` 
 
 ## 限制与注意事项
 
-- 程序必须在运行且正在发声才会出现在进程列表里，列表按需刷新。
+- 程序必须在运行且正在发声才会出现在进程列表里——路由针对的是活动音频会话，从不发声的程序没有可搬动的东西。
 - 记忆的路由按可执行文件名匹配，不区分完整路径，也不记录 PID。
 - 延迟补偿只能**增加**延迟。组内最早的那台是对齐基准，无法被提前——这也是路由按延迟顺序应用的原因。
 - 镜像是为了稳定而缓冲的（约 100 ms 的管线延迟），目的是让各镜像在同一时刻播放同一个采样。镜像之间的对齐是精确的；镜像相对主设备（由 Windows 原生播放）的这点偏移是"抓取再渲染"本身带来的。

@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Version 2.0.0" src="https://img.shields.io/badge/version-2.0.0-0891b2">
+  <img alt="Version 2.1.0" src="https://img.shields.io/badge/version-2.1.0-0891b2">
   <img alt="Platform: Windows 10 and Windows 11, 64-bit" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-3da639"></a>
   <img alt="Built with Tauri 2, Rust and React 19" src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20React%2019-24C8DB">
@@ -32,7 +32,7 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 |---|---|
 | **What it is** | Per-app audio routing tool for Windows (one app → many devices) |
 | **Platform** | Windows 10 / Windows 11, 64-bit |
-| **Latest version** | 2.0.0 |
+| **Latest version** | 2.1.0 |
 | **Installer** | MSI or NSIS setup from [Releases](https://github.com/Eververdants/AppAudioRouter/releases) |
 | **Licence** | MIT |
 | **UI languages** | English, Simplified Chinese |
@@ -64,11 +64,18 @@ The same route in both themes: `Music.exe` is playing to a Bluetooth headset, an
 - **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest one in the route, so a quiet headset and a loud speaker rig can be brought in line.
 - **Editable in place** — drag sideways, scroll, use the arrow keys (hold `Shift` for ten steps), or click a value and type an exact number. Both values sit under the device node and share one set of gestures.
 
+### Stays out of the way
+
+- **Live lists.** The device list and the process list follow the audio engine on their own — plug in a headset, or start and stop playback in an app, and both lists update without pressing anything. This uses Core Audio's own change notifications, not a polling timer.
+- **System tray.** A tray icon appears while the app runs: left click shows or hides the window, the right-click menu has *Show / hide* and *Quit*.
+- **Close to tray.** Optionally, the close button hides the window instead of quitting, so routing keeps running with no window on screen. Off by default; `Quit` is the action that stops the routes.
+- **Start with Windows.** Optionally registers the app under your user's startup entries (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), launching silently into the tray so remembered routes are ready before you open anything. Turn it back off from the same switch, or from Task Manager → Startup apps.
+
 ### Interface and overhead
 
 - **Concentric router UI** — process at the centre, devices on an outer ring, flow lines that show what is currently routed, ripple feedback when a route is applied.
 - **Light and dark themes**, English and Simplified Chinese, both switchable from the title bar; the preferred theme and language are applied before the first frame paints, so there is no flash on startup.
-- **Low background cost** — device and process lists refresh on demand rather than on a polling timer, so an idle window does not talk to the audio engine.
+- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged.
 - **Fast cold start** — the window is created hidden and is revealed once the first frame is on screen (with a watchdog on the Rust side as a fallback), device enumeration waits for the first paint to be idle, and the release profile is tuned for a small, dense binary (LTO, one codegen unit, symbol stripping, `panic = "abort"`).
 
 ## How it compares to other options
@@ -165,25 +172,28 @@ AppAudioRouter/
 │   │   ├── ConcentricRouter.tsx  # the radial router: device nodes + title
 │   │   ├── DeviceAnnotation.tsx  # the delay / volume line under a device node
 │   │   ├── ProcessList.tsx       # processes with an audio session
-│   │   ├── SettingsPage.tsx      # theme, language, routing, delays, about
+│   │   ├── SettingsPage.tsx      # theme, language, routing, background, delays, about
 │   │   ├── LogPanel.tsx          # activity log
 │   │   ├── TitleBar.tsx          # custom frameless title bar
 │   │   └── ui/                   # Switch, SegmentedControl, ScrubReadout, …
-│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useFitScale
+│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useFitScale
 │   ├── stores/routerStore.ts     # Zustand store
 │   ├── i18n/locales/             # en.json, zh-CN.json
 │   ├── lib/                      # invoke wrapper, delay maths, shared types
 │   └── styles/index.css          # Tailwind entry + theme CSS variables
 └── src-tauri/                    # Rust backend
     └── src/
-        ├── main.rs               # entry point, command registration
+        ├── main.rs               # entry point, command registration, close-to-tray
         ├── commands.rs           # Tauri commands (invoke handlers)
-        ├── config.rs             # route / delay / volume persistence
+        ├── config.rs             # route / delay / volume / shell-settings persistence
+        ├── tray.rs               # tray icon, its menu, show and hide
+        ├── autostart.rs          # HKCU Run entry for start-with-Windows
         └── audio/
             ├── devices.rs        # IMMDeviceEnumerator
             ├── sessions.rs       # IAudioSessionEnumerator
             ├── routing.rs        # IPolicyConfig per-process routing
-            └── duplication.rs    # WASAPI process-loopback duplication engine
+            ├── duplication.rs    # WASAPI process-loopback duplication engine
+            └── notifications.rs  # endpoint + session change callbacks
 ```
 
 ## Build from source
@@ -234,15 +244,23 @@ Yes, that is what delay compensation is for. Measure or estimate how far behind 
 
 ### Why is my application not in the process list?
 
-A program only shows up while it holds an active audio session, so start playback in it and press **Refresh**. Programs that use ASIO or WASAPI exclusive mode never create a session with the system audio engine and will not appear, and system-critical processes are deliberately excluded from routing.
+A program only shows up while it holds an active audio session, so start playback in it — the list notices on its own, or press **Refresh**. Programs that use ASIO or WASAPI exclusive mode never create a session with the system audio engine and will not appear, and system-critical processes are deliberately excluded from routing.
 
 ### Where are the settings stored?
 
-In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range) and `device-volumes.json` (device → percent). Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
+In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent) and `app-settings.json` (whether the close button hides the window to the tray). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
 
 ### Does it run in the background or poll the audio devices?
 
-No. It only talks to the audio engine when you refresh a list, change a device value or apply a route. While a route is active, the duplication engine for that process runs; when you stop routing, the engine is torn down.
+It never polls, and there is no service. The app registers for the audio engine's own change notifications and re-reads a list when Windows reports that something moved — that is how the device and process lists stay current on their own. Otherwise it talks to the audio engine only when you refresh a list, change a device value or apply a route. While a route is active, the duplication engine for that process runs; when you stop routing, the engine is torn down.
+
+### Does the app keep routing after I close the window?
+
+By default, closing the window quits the app, and a route that needed a mirrored copy stops with it. Turn on **Settings → Background → Minimize to tray when closed** and the close button hides the window instead: routing keeps running and the tray icon brings the window back. **Quit** in the tray menu always stops everything, switch on or off.
+
+### Can it start automatically with Windows?
+
+Yes. **Settings → Background → Start with Windows** adds a single value for your own user under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; nothing is written to `HKLM`, no administrator rights are needed, and no window opens — it launches into the tray so remembered routes are ready first. The app reads that registry value back rather than a copy of its own, so if you toggle startup off in Task Manager, the switch shows that.
 
 ### Is macOS or Linux supported?
 
@@ -250,7 +268,7 @@ No. The routing mechanism is built on Windows Core Audio, so the app is Windows-
 
 ## Limitations and notes
 
-- A program must be running and producing sound to appear in the process list; the list is refreshed on demand.
+- A program must be running and producing sound to appear in the process list — routing works on live audio sessions, so a program that never plays any has nothing to move.
 - Remembered routes are matched on executable name, not on a path or a PID.
 - Delay compensation can only *add* latency. The earliest device of the group is the alignment reference and cannot be pulled earlier — that is why routing is applied in delay order.
 - A mirrored copy is buffered for stability (about 100 ms of pipeline latency) so that all mirrors play the same sample at the same moment. Alignment between mirrored devices is exact; the offset to the primary device, which Windows plays natively, is inherent to capturing and re-rendering the stream.

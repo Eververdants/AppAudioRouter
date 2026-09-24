@@ -8,7 +8,7 @@
 
 Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript + TailwindCSS + Motion。
 
-核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度）、自动记忆路由规则。
+核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度）、自动记忆路由规则、两张列表随 Core Audio 变化实时更新、托盘常驻与开机自启。
 
 **硬性约束：无任何第三方 exe 依赖。** 所有音频操作由 Rust 直接调用 Windows Core Audio API。
 
@@ -36,15 +36,18 @@ AppAudioRouter/
 │   ├── Cargo.toml
 │   ├── tauri.conf.json     # Tauri 配置 + capabilities
 │   └── src/
-│       ├── main.rs         # 入口，注册命令
+│       ├── main.rs         # 入口，注册命令 + 窗口关闭拦截（托盘常驻）+ 显示看门狗
 │       ├── commands.rs     # Tauri 命令（invoke handler）
+│       ├── tray.rs         # 托盘图标 + 菜单（左键开关窗口；菜单标签由前端下发以跟随语言）
+│       ├── autostart.rs    # 开机自启：直接读写 HKCU\...\Run，启动时带 --hidden
 │       ├── audio/
 │       │   ├── mod.rs
 │       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
 │       │   ├── routing.rs      # IPolicyConfig 单设备路由设置
-│       │   └── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
-│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %）
+│       │   ├── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
+│       │   └── notifications.rs # 变更通知线程 → audio-changed 事件（设备/会话实时刷新）
+│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %；app-settings.json: close_to_tray）
 ├── src/                    # React 前端
 │   ├── main.tsx
 │   ├── App.tsx
@@ -52,7 +55,7 @@ AppAudioRouter/
 │   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（设备节点 + 节点下方的延迟/音量标注）
 │   │   ├── DeviceAnnotation.tsx  # 挂在设备节点下方的一行标注（延迟 + 音量），顺带管显隐与 hairline 引线
 │   │   ├── ProcessList.tsx
-│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/延迟范围·步进·逐设备设置/关于）
+│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/后台开关/延迟范围·步进·逐设备设置/关于）
 │   │   ├── LogPanel.tsx
 │   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
 │   │   └── ui/             # 基础控件
@@ -67,6 +70,7 @@ AppAudioRouter/
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
 │   │   ├── useDelayValue.ts  # 延迟编辑状态（草稿/提交/步进），两个延迟控件共用
+│   │   ├── useBackendEvent.ts # 后端事件订阅（StrictMode 安全的 token 交接），两个事件共用
 │   │   └── useFitScale.ts  # 适配缩放（同心圆舞台）
 │   ├── stores/             # 状态管理
 │   │   └── routerStore.ts  # Zustand store
@@ -169,7 +173,36 @@ AppAudioRouter/
   前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
   0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
-- 设备列表、进程列表由 store action 管理，支持手动刷新（无自动轮询，避免后台 IPC）
+- 设备列表、进程列表由 store action 管理：后端 `audio-changed` 事件驱动自动同步（见下面「后台常驻与实时刷新」），手动 Refresh 按钮保留作兜底；**没有轮询定时器**
+
+---
+
+## 后台常驻与实时刷新（2.1 起，改动前必读）
+
+### 托盘（`tray.rs`）
+
+- 托盘图标**常驻**：左键开关窗口，右键菜单只有「显示/隐藏」和「退出」。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口。
+- 菜单标签是**原生控件**，读不到 i18next → 由前端在挂载和语言切换时调 `set_tray_labels(t('tray.show'), t('tray.quit'))` 下发。不要指望 Rust 侧自己翻译，也不要用 `set_menu()` 换整个菜单（换完托盘的事件路由就不再认那些条目）。
+- `close_to_tray` 存在 `app_data_dir/app-settings.json`，**默认 false**：发版不该悄悄改掉老用户按 X 的语义。为 true 时 `main.rs` 的 `WindowEvent::CloseRequested` 里 `api.prevent_close()` + `hide()`。
+- 这个判断在 **Rust**，所以设置必须在后端。**只有 Rust 需要知道的设置才进 `app-settings.json`**——主题/语言/步进仍然走 localStorage，别顺手搬过去。
+- 新增 Tauri 命令**不需要**动 `capabilities/`：ACL 只管插件命令，`generate_handler!` 注册的应用自有命令默认可调（`apply_route` 等一直没有权限条目就是证据）。要改的是窗口按钮那类，见「安全注意事项」。
+
+### 开机自启（`autostart.rs`）
+
+- 直接写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `AppAudioRouter` 值，命令行固定带 `--hidden`。**不引入 `tauri-plugin-autostart`**：那要多一个 npm 包、一条 capability 和一次版本锁步（CLI 会因 Cargo/npm 的 minor 不一致直接拒打包），而插件干的也就是同一次注册表写入。
+- `get_autostart` 读注册表而不是配置文件：注册表是唯一真相，用户在任务管理器里删掉启动项，开关必须跟着变。
+- 每次启动调 `repair_if_drifted()`：已注册但路径与当前 exe 不一致（安装目录被移动过）就重写。开机静默失败比报错难查得多。
+- `--hidden` 的语义有**两处**消费者：`main.rs` 跳过显示看门狗，前端 `isSilentLaunch()` 为真时不调 `revealMainWindow()`。只改一边就会出现「开机弹窗口」或「开机后再也打不开」。
+
+### 实时刷新（`audio/notifications.rs`）
+
+- 设备/进程列表由后端事件 `audio-changed`（`{ devices: bool, sessions: bool }`）驱动，仍然**没有轮询**——注册的是 COM 回调，不是定时器。
+- ⚠️ **COM 指针只能活在通知线程里**。windows-rs 0.58 的接口既不是 `Send` 也不是 `Sync`：本模块用「一个 MTA 线程独占所有指针，回调只往 `mpsc` 丢一条消息」来避免 `unsafe impl Send`。想把 `IMMDeviceEnumerator`/`IAudioSessionNotification` 塞进 `app.manage()` 之前先想起这条。
+- 三种回调缺一不可：`IMMNotificationClient`（端点增删/默认切换/属性变化）、`IAudioSessionNotification`（**只报新建**）、`IAudioSessionEvents::OnStateChanged(Expired)`（会话消亡）。少了最后一种，进程列表会永远留着早就停止播放的程序。`Inactive`（暂停但会话还在）**不能**当成退出处理，否则暂停一下就从列表消失。
+- 线程启动时必须先 `sync()` 一次：两种回调都只报「变化」，不给已存在的设备/会话预先挂钩子，启动前就在放音的程序永远不会被通知到。
+- 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
+- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。
+- 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
 
 ---
 
@@ -255,15 +288,18 @@ AppAudioRouter/
   3. 上传 artifact
   4. 若为 tag，创建 GitHub Release 并附 MSI
 - **环境**：`windows-latest`, Rust stable, Node LTS
+- **版本号有五处字面量**：`package.json`、`tauri.conf.json`、`src-tauri/Cargo.toml`、`TitleBar.tsx` 的 `v2.1` 徽标、`SettingsPage.tsx` 关于卡片的 `v2.1.0`。少改一处就是 UI 在说谎；README 两份里的版本徽章/速查表也算，发版时一起看。
 
 ---
 
 ## 安全注意事项
 
-- 所有 Tauri 命令必须在 `tauri.conf.json` 的 `capabilities` 中声明
+- `capabilities/main.json` 只约束**插件命令**（`plugin:window|*`、`store:*`）：调它们之前先确认权限名与命令名对得上（`allow-toggle-maximize` ↔ `toggle_maximize`），失败会被前端吞成 `console.warn`。`generate_handler!` 注册的应用自有命令不受 ACL 约束，加命令不用改能力文件。
+- 能力文件只有 `main.json` 一份：`tauri.conf.json` 的 `capabilities: ["main"]` 是**过滤器**，写了名字之后该目录下其它文件全部静默失效。改完必须 touch `build.rs` 才会重新编译进策略。
 - 禁止在前端拼接 shell 命令
 - Rust 端 COM 调用必须校验输入（device_id 格式、pid 范围）
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
+- 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
 
 ---
 
@@ -301,6 +337,9 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 设备列表正确显示渲染设备
 - [ ] 路由操作成功（进程音频切换到目标设备）
 - [ ] 自动记忆功能正常（重启后保留）
+- [ ] 插上一个新设备 / 让一个新程序开始放音：不点 Refresh，两边列表自己跟上，且日志只在内容真的变化时多一行
+- [ ] 托盘图标常驻，左键开关窗口；开启「关闭窗口时最小化到托盘」后按 X 不退出、路由继续
+- [ ] 开启「开机自动启动」后：注册表 `HKCU\...\Run` 有那一条、重启后只出现托盘图标不弹窗、开关状态仍与注册表一致
 - [ ] Light/Dark 切换流畅
 - [ ] 同心圆动画流畅（60fps）
 - [ ] `pnpm tauri build` 产物可安装运行

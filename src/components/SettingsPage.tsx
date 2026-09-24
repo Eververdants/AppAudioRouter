@@ -360,7 +360,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   App Audio Router
                 </span>
                 <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent">
-                  v2.0.0
+                  v2.1.0
                 </span>
               </div>
               <p className="text-[11px] leading-relaxed text-text-muted">
