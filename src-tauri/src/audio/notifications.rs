@@ -11,7 +11,7 @@
 //! `unsafe impl Send` workarounds entirely: the callbacks, which Windows invokes
 //! on its own RPC threads, do nothing but drop a message in a channel.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Sender};
 
 use log::warn;
@@ -197,6 +197,17 @@ impl IAudioSessionEvents_Impl for SessionEvents_Impl {
     }
 }
 
+/// One registered session watcher.
+///
+/// Both COM interfaces are retained for as long as the watcher is active:
+/// the control keeps the registration authoritative, and the event object is
+/// what the session manager AddRef'd and must later release through
+/// `UnregisterAudioSessionNotification`.
+struct WatchedSession {
+    control: IAudioSessionControl,
+    events: IAudioSessionEvents,
+}
+
 /// Start watching, if the audio graph allows it.
 ///
 /// Failures are logged and swallowed: the lists stay refreshable by hand, which
@@ -247,8 +258,9 @@ fn watch(app: AppHandle) {
 
     let session_client: IAudioSessionNotification = SessionWatcher { tx: tx.clone() }.into();
     // What this thread has already wired up, so a sync only pays for what moved.
-    let mut watched_devices: HashSet<String> = HashSet::new();
-    let mut watched_sessions: HashSet<String> = HashSet::new();
+    // These maps are also the owners that keep the COM registrations alive.
+    let mut watched_managers: HashMap<String, IAudioSessionManager2> = HashMap::new();
+    let mut watched_sessions: HashMap<String, WatchedSession> = HashMap::new();
 
     // Wire the session watchers onto the graph as it already is. Both callbacks
     // only ever report *changes*, so without this pass a session that started
@@ -259,7 +271,7 @@ fn watch(app: AppHandle) {
         &enumerator,
         &session_client,
         &tx,
-        &mut watched_devices,
+        &mut watched_managers,
         &mut watched_sessions,
     );
 
@@ -289,12 +301,27 @@ fn watch(app: AppHandle) {
             &enumerator,
             &session_client,
             &tx,
-            &mut watched_devices,
+            &mut watched_managers,
             &mut watched_sessions,
         );
         let changed = AudioChanged { devices, sessions };
         if let Err(e) = app.emit(AUDIO_CHANGED_EVENT, &changed) {
             warn!("could not deliver {AUDIO_CHANGED_EVENT}: {e}");
+        }
+    }
+
+    for (_, watched) in watched_sessions.drain() {
+        // SAFETY: balances RegisterAudioSessionNotification above.
+        unsafe {
+            let _ = watched
+                .control
+                .UnregisterAudioSessionNotification(&watched.events);
+        }
+    }
+    for (_, manager) in watched_managers.drain() {
+        // SAFETY: balances RegisterSessionNotification above.
+        unsafe {
+            let _ = manager.UnregisterSessionNotification(&session_client);
         }
     }
 
@@ -311,8 +338,8 @@ fn sync(
     enumerator: &IMMDeviceEnumerator,
     session_client: &IAudioSessionNotification,
     tx: &Sender<Msg>,
-    watched_devices: &mut HashSet<String>,
-    watched_sessions: &mut HashSet<String>,
+    watched_managers: &mut HashMap<String, IAudioSessionManager2>,
+    watched_sessions: &mut HashMap<String, WatchedSession>,
 ) {
     let Ok(devices) = active_render_devices(enumerator) else {
         return;
@@ -329,25 +356,29 @@ fn sync(
     for device in &devices {
         live_devices.insert(device.id.clone());
 
-        let manager = match open_session_manager(&device.raw) {
-            Ok(manager) => manager,
-            Err(_) => {
-                complete = false;
-                continue;
+        let manager = match watched_managers.get(&device.id) {
+            Some(manager) => manager.clone(),
+            None => {
+                let manager = match open_session_manager(&device.raw) {
+                    Ok(manager) => manager,
+                    Err(_) => {
+                        complete = false;
+                        continue;
+                    }
+                };
+
+                // SAFETY: manager and session_client are owned and used on this
+                // one notification thread. The manager is kept in the map below,
+                // which is what keeps this registration alive between syncs.
+                match unsafe { manager.RegisterSessionNotification(session_client) } {
+                    Ok(()) => {
+                        watched_managers.insert(device.id.clone(), manager.clone());
+                    }
+                    Err(e) => warn!("could not watch sessions on {}: {e}", device.id),
+                }
+                manager
             }
         };
-
-        if !watched_devices.contains(&device.id) {
-            // SAFETY: `manager` is live and `session_client` outlives it — both
-            // are owned by this thread, and the client is unregistered with the
-            // device itself when it disappears.
-            match unsafe { manager.RegisterSessionNotification(session_client) } {
-                Ok(()) => {
-                    watched_devices.insert(device.id.clone());
-                }
-                Err(e) => warn!("could not watch sessions on {}: {e}", device.id),
-            }
-        }
 
         match sessions_of(&manager) {
             Some(sessions) => {
@@ -360,14 +391,18 @@ fn sync(
                     // this pass is the one that registered its watcher — the
                     // prune below compares against exactly this set.
                     live_sessions.insert(id.clone());
-                    if watched_sessions.contains(&id) {
+                    if watched_sessions.contains_key(&id) {
                         continue;
                     }
                     let events: IAudioSessionEvents = SessionEvents { tx: tx.clone() }.into();
-                    // SAFETY: the callback is kept alive by `watched_sessions`'
-                    // bookkeeping on this thread, and the session is alive here.
+                    let Ok(control) = session.cast::<IAudioSessionControl>() else {
+                        continue;
+                    };
+                    // SAFETY: the callback and the control are kept alive in
+                    // watched_sessions, so this registration remains valid until
+                    // we unregister it during a prune or thread teardown.
                     if unsafe { session.RegisterAudioSessionNotification(&events) }.is_ok() {
-                        watched_sessions.insert(id);
+                        watched_sessions.insert(id, WatchedSession { control, events });
                     }
                 }
             }
@@ -376,9 +411,47 @@ fn sync(
     }
 
     if complete {
-        watched_devices.retain(|id| live_devices.contains(id));
-        watched_sessions.retain(|id| live_sessions.contains(id));
+        prune_watchers(
+            session_client,
+            watched_managers,
+            watched_sessions,
+            &live_devices,
+            &live_sessions,
+        );
     }
+}
+
+/// Drop watchers for devices and sessions that no longer exist, unregistering
+/// each COM callback before its owning interface is released.
+fn prune_watchers(
+    session_client: &IAudioSessionNotification,
+    watched_managers: &mut HashMap<String, IAudioSessionManager2>,
+    watched_sessions: &mut HashMap<String, WatchedSession>,
+    live_devices: &HashSet<String>,
+    live_sessions: &HashSet<String>,
+) {
+    watched_managers.retain(|id, manager| {
+        if live_devices.contains(id) {
+            return true;
+        }
+        // SAFETY: balances the registration recorded in this map.
+        unsafe {
+            let _ = manager.UnregisterSessionNotification(session_client);
+        }
+        false
+    });
+    watched_sessions.retain(|id, watched| {
+        if live_sessions.contains(id) {
+            return true;
+        }
+        // SAFETY: balances the registration recorded in this map.
+        unsafe {
+            let _ = watched
+                .control
+                .UnregisterAudioSessionNotification(&watched.events);
+        }
+        false
+    });
 }
 
 /// One active render endpoint: its id (for the watch lists) and its interface.
@@ -400,13 +473,9 @@ fn active_render_devices(enumerator: &IMMDeviceEnumerator) -> Result<Vec<DeviceR
     let mut devices = Vec::with_capacity(count as usize);
     for i in 0..count {
         // SAFETY: i is within [0, count).
-        let Ok(device) = (unsafe { collection.Item(i) }) else {
-            continue;
-        };
+        let device = (unsafe { collection.Item(i) }).map_err(|_| ())?;
         // SAFETY: GetId returns a PWSTR copied out and freed below.
-        let Ok(pwstr) = (unsafe { device.GetId() }) else {
-            continue;
-        };
+        let pwstr = (unsafe { device.GetId() }).map_err(|_| ())?;
         let id = crate::audio::pwstr_to_string(&pwstr);
         // SAFETY: balances GetId's allocation.
         unsafe { CoTaskMemFree(Some(pwstr.0 as *const _)) };
