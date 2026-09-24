@@ -64,7 +64,8 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemAlloc, CoTaskMemFree, CLSCTX_ALL};
 use windows::Win32::System::Threading::{
-    CreateEventW, GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    CreateEventW, GetProcessTimes, OpenProcess, WaitForSingleObject,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 use crate::audio::AudioError;

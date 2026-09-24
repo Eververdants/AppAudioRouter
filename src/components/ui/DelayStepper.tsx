@@ -32,7 +32,7 @@ export function DelayStepper({
       >
         <line x1="1" y1="5" x2="9" y2="5" />
       </StepButton>
-      <div className="flex h-6 items-center rounded-md border border-border bg-bg-secondary/60 pr-1.5 transition-colors focus-within:border-accent/60">
+      <div className="bg-bg-secondary/60 flex h-6 items-center rounded-md border border-border pr-1.5 transition-colors focus-within:border-accent/60">
         <input
           type="number"
           inputMode="numeric"

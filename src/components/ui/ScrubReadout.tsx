@@ -162,7 +162,7 @@ export function ScrubReadout({
           setEditing(true);
         }
       }}
-      className={`group/scrub relative flex h-4 cursor-ew-resize select-none touch-none items-center justify-center gap-px rounded-sm px-1 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent/60 ${
+      className={`group/scrub relative flex h-4 cursor-ew-resize touch-none select-none items-center justify-center gap-px rounded-sm px-1 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent/60 ${
         dim ? 'opacity-50' : ''
       }`}
     >
@@ -198,7 +198,7 @@ export function ScrubReadout({
         <span
           className={`text-[10px] font-medium tabular-nums transition-[color,transform] duration-100 ${
             neutral
-              ? 'text-text-muted group-hover/scrub:text-accent group-focus-within/scrub:text-accent'
+              ? 'text-text-muted group-focus-within/scrub:text-accent group-hover/scrub:text-accent'
               : 'text-accent'
           } ${scrub === null ? '' : 'scale-110'}`}
         >

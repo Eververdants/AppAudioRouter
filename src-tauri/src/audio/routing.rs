@@ -279,7 +279,11 @@ fn role_values(role: Role) -> &'static [i32] {
 /// The assignment is persisted by the audio service per executable and applies
 /// to audio sessions started after this call (identical to the Windows 11
 /// Settings "app volume and device preferences" toggle).
-pub async fn set_process_default_device(device_id: &str, pid: u32, role: Role) -> Result<(), AudioError> {
+pub async fn set_process_default_device(
+    device_id: &str,
+    pid: u32,
+    role: Role,
+) -> Result<(), AudioError> {
     if pid == 0 {
         return Err(AudioError::Api("invalid pid".to_string()));
     }

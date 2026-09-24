@@ -103,7 +103,10 @@ pub async fn apply_route(
 /// Stop routing a process: halt any duplication engine and point the process
 /// back at the current system default device.
 #[tauri::command]
-pub async fn stop_route(pid: u32, duplications: State<'_, DuplicationManager>) -> Result<(), String> {
+pub async fn stop_route(
+    pid: u32,
+    duplications: State<'_, DuplicationManager>,
+) -> Result<(), String> {
     info!("cmd: stop_route pid={pid}");
     // Resolve the fallback endpoint before tearing down duplication: if the lookup
     // fails we return early and the app keeps playing to its current device
