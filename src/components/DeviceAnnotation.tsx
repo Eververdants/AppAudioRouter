@@ -26,8 +26,8 @@ export function DeviceAnnotation({
   delay?: number;
   volume?: number;
 }) {
-  const showDelay = isSelected || delay !== 0;
-  const showVolume = isSelected || volume !== 100;
+  const showDelay = isSelected || (delay ?? 0) !== 0;
+  const showVolume = isSelected || (volume ?? 100) !== 100;
 
   if (!showDelay && !showVolume) return null;
 
