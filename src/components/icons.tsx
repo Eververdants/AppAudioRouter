@@ -159,3 +159,29 @@ export function ExternalLinkIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function CopyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V6.5A1.5 1.5 0 0 1 6.5 5H15" />
+    </Icon>
+  );
+}
+
+export function CheckIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </Icon>
+  );
+}
+
+export function ArrowUpIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 19V5" />
+      <path d="M5.5 11.5L12 5l6.5 6.5" />
+    </Icon>
+  );
+}

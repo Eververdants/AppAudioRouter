@@ -21,9 +21,14 @@
     "ctaSource": "查看源码",
     "note": "MSI / NSIS 安装程序 · 免费无广告 · 简体中文 / English 界面",
     "illustration": {
-      "label": "界面示意:进程在中心,播放设备在外环",
+      "label": "界面示意:进程在中心,播放设备在外环(可交互,试试点击)",
       "process": "Music.exe",
-      "status": "正在路由到 3 台设备",
+      "apply": "应用或停止路由",
+      "status": {
+        "idle": "未在路由 · 点击设备节点选择目标",
+        "selecting": "已选 {{count}} 台设备 · 点击中心应用",
+        "routing": "正在路由到 {{count}} 台设备"
+      },
       "devices": {
         "bluetooth": "蓝牙耳机",
         "hdmi": "HDMI 输出",
@@ -118,8 +123,13 @@
     "build": {
       "title": "从源码构建",
       "description": "需要 Node.js 20+、pnpm 10 与带 MSVC 目标的 Rust 工具链。",
-      "caption": "终端"
+      "caption": "终端",
+      "copy": "复制命令",
+      "copied": "已复制"
     }
+  },
+  "backToTop": {
+    "label": "回到顶部"
   },
   "faq": {
     "eyebrow": "常见问题",

@@ -21,9 +21,14 @@
     "ctaSource": "View source",
     "note": "MSI / NSIS installer · Free, no ads · English / 简体中文 interface",
     "illustration": {
-      "label": "UI sketch: the process sits in the centre, playback devices on the outer ring",
+      "label": "UI sketch: the process sits in the centre, playback devices on the outer ring (interactive — try clicking)",
       "process": "Music.exe",
-      "status": "Routing to 3 devices",
+      "apply": "Apply or stop the route",
+      "status": {
+        "idle": "Not routing · click a device to pick targets",
+        "selecting": "{{count}} selected · click the centre to apply",
+        "routing": "Routing to {{count}} devices"
+      },
       "devices": {
         "bluetooth": "Bluetooth",
         "hdmi": "HDMI out",
@@ -118,8 +123,13 @@
     "build": {
       "title": "Build from source",
       "description": "Needs Node.js 20+, pnpm 10 and a Rust toolchain with the MSVC target.",
-      "caption": "Terminal"
+      "caption": "Terminal",
+      "copy": "Copy",
+      "copied": "Copied"
     }
+  },
+  "backToTop": {
+    "label": "Back to top"
   },
   "faq": {
     "eyebrow": "FAQ",
