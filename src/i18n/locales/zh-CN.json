@@ -7,6 +7,7 @@
     "features": "功能",
     "scenarios": "使用场景",
     "install": "安装",
+    "faq": "常见问题",
     "github": "GitHub 仓库",
     "theme": "切换明暗主题",
     "language": "切换到 English"
@@ -118,6 +119,33 @@
       "title": "从源码构建",
       "description": "需要 Node.js 20+、pnpm 10 与带 MSVC 目标的 Rust 工具链。",
       "caption": "终端"
+    }
+  },
+  "faq": {
+    "eyebrow": "常见问题",
+    "title": "关于 App Audio Router",
+    "description": "来自项目 FAQ 的直接回答,内容以项目文档为准。",
+    "items": {
+      "free": {
+        "question": "App Audio Router 是免费的吗?",
+        "answer": "是。它以 MIT 许可证开源,没有付费档,也不需要注册账号。"
+      },
+      "driver": {
+        "question": "需要安装 VB-CABLE 这类虚拟声卡驱动吗?",
+        "answer": "不需要。路由、复制、延迟与增益全部由应用本体直接调用 Windows Core Audio API 完成,不会向音频栈安装任何东西,卸载也不留残余。"
+      },
+      "running": {
+        "question": "正在运行的程序能直接改输出设备吗?",
+        "answer": "能。路由直接作用于活动音频会话,程序不需要重启——游戏或浏览器页面会带着声音切换到新设备。"
+      },
+      "bluetooth": {
+        "question": "能修复蓝牙耳机与有线音箱的不同步吗?",
+        "answer": "能,这正是延迟补偿的用途。估计蓝牙设备落后的毫秒数,给快的那台设备加上对应的正值延迟(例如 +180 ms)即可;正值让设备延后,负值标记组内最早的设备。"
+      },
+      "platform": {
+        "question": "支持 macOS 或 Linux 吗?",
+        "answer": "不支持。路由机制构建在 Windows Core Audio 之上,仅支持 Windows 10 / Windows 11(64 位)。"
+      }
     }
   },
   "footer": {

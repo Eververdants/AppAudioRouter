@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '#features', key: 'nav.features' },
   { href: '#scenarios', key: 'nav.scenarios' },
   { href: '#install', key: 'nav.install' },
+  { href: '#faq', key: 'nav.faq' },
 ] as const;
 
 /** Sticky glass header, styled after the app's frameless title bar: icon +

@@ -7,6 +7,7 @@
     "features": "Features",
     "scenarios": "Use cases",
     "install": "Install",
+    "faq": "FAQ",
     "github": "GitHub repository",
     "theme": "Toggle light / dark theme",
     "language": "切换到简体中文"
@@ -118,6 +119,33 @@
       "title": "Build from source",
       "description": "Needs Node.js 20+, pnpm 10 and a Rust toolchain with the MSVC target.",
       "caption": "Terminal"
+    }
+  },
+  "faq": {
+    "eyebrow": "FAQ",
+    "title": "About App Audio Router",
+    "description": "Direct answers from the project FAQ; the project documentation is authoritative.",
+    "items": {
+      "free": {
+        "question": "Is App Audio Router free?",
+        "answer": "Yes. It is open source under the MIT licence, with no paid tier and no account."
+      },
+      "driver": {
+        "question": "Does it need a virtual audio driver such as VB-CABLE?",
+        "answer": "No. Routing, duplication, delay and gain are all done by the app itself, calling the Windows Core Audio API directly. Nothing is installed into the audio stack and uninstalling leaves nothing behind."
+      },
+      "running": {
+        "question": "Can it change the output of a program that is already running?",
+        "answer": "Yes. Routing applies to the live audio session, so the program does not need to be restarted — a game or a browser tab keeps playing while it moves to the new device."
+      },
+      "bluetooth": {
+        "question": "Can it fix the desync between a Bluetooth headset and wired speakers?",
+        "answer": "Yes — that is what delay compensation is for. Estimate how far the Bluetooth device lags and give the faster device that value as a positive delay (for example +180 ms). Positive values hold a device back; a negative one marks the earliest device in the route."
+      },
+      "platform": {
+        "question": "Is macOS or Linux supported?",
+        "answer": "No. The routing mechanism is built on Windows Core Audio, so the app is Windows-only (Windows 10 and 11, 64-bit)."
+      }
     }
   },
   "footer": {
