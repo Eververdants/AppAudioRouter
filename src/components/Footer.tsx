@@ -58,7 +58,7 @@ export function Footer() {
                     href={link.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-sm text-text-secondary transition-colors hover:text-accent"
+                    className="inline-block text-sm text-text-secondary transition-all duration-200 hover:translate-x-0.5 hover:text-accent"
                   >
                     {t(link.key)}
                   </a>
@@ -76,7 +76,7 @@ export function Footer() {
                     href={link.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-sm text-text-secondary transition-colors hover:text-accent"
+                    className="inline-block text-sm text-text-secondary transition-all duration-200 hover:translate-x-0.5 hover:text-accent"
                   >
                     {t(link.key)}
                   </a>

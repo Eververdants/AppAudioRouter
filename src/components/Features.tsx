@@ -1,6 +1,6 @@
-import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Section } from '@/components/Section';
+import { SpotlightCard } from '@/components/SpotlightCard';
 import { DelayIcon, MemoryIcon, NoDriverIcon, RouteIcon, VolumeIcon } from '@/components/icons';
 
 const FEATURE_KEYS = ['routing', 'delay', 'volume', 'native', 'memory'] as const;
@@ -29,15 +29,8 @@ export function Features() {
         {FEATURE_KEYS.map((key, index) => {
           const FeatureIcon = FEATURE_ICONS[key];
           return (
-            <motion.article
-              key={key}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: '-60px' }}
-              transition={{ duration: 0.45, delay: index * 0.06, ease: 'easeOut' }}
-              className="rounded-2xl border border-glass bg-glass p-6 shadow-glass backdrop-blur-xl transition-shadow hover:shadow-glow-lg"
-            >
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-muted text-accent">
+            <SpotlightCard key={key} delay={index * 0.06} className="p-6">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-muted text-accent transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110">
                 <FeatureIcon className="h-6 w-6" />
               </span>
               <h3 className="mt-4 text-base font-semibold text-text-primary">
@@ -46,19 +39,13 @@ export function Features() {
               <p className="mt-2 text-sm leading-relaxed text-text-secondary">
                 {t(`features.items.${key}.description`)}
               </p>
-            </motion.article>
+            </SpotlightCard>
           );
         })}
 
         {/* Requirements card fills the 3×2 grid's last cell without padding the
             copy: it restates what the README lists under Requirements. */}
-        <motion.aside
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-60px' }}
-          transition={{ duration: 0.45, delay: 0.3, ease: 'easeOut' }}
-          className="rounded-2xl border border-glass bg-glass p-6 shadow-glass backdrop-blur-xl"
-        >
+        <SpotlightCard delay={0.3} className="p-6">
           <h3 className="text-base font-semibold text-text-primary">
             {t('install.requirements.title')}
           </h3>
@@ -76,7 +63,7 @@ export function Features() {
               {t('install.requirements.noDriver')}
             </li>
           </ul>
-        </motion.aside>
+        </SpotlightCard>
       </div>
     </Section>
   );

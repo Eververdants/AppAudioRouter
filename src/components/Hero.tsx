@@ -35,24 +35,32 @@ export function Hero() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
+            <motion.a
               href={RELEASES_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-glow transition-colors hover:bg-accent-hover dark:text-bg-primary"
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.97 }}
+              className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-glow transition-colors hover:bg-accent-hover dark:text-bg-primary"
             >
-              <DownloadIcon className="h-4 w-4" />
+              <DownloadIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-y-0.5" />
               {t('hero.ctaDownload')}
-            </a>
-            <a
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 -translate-x-[110%] bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-[110%]"
+              />
+            </motion.a>
+            <motion.a
               href={REPO_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-glass px-6 py-3 text-sm font-semibold text-text-primary transition-colors hover:bg-bg-tertiary"
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.97 }}
+              className="group inline-flex items-center gap-2 rounded-full border border-border bg-glass px-6 py-3 text-sm font-semibold text-text-primary transition-colors hover:bg-bg-tertiary"
             >
-              <ExternalLinkIcon className="h-4 w-4" />
+              <ExternalLinkIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:text-accent" />
               {t('hero.ctaSource')}
-            </a>
+            </motion.a>
           </div>
 
           <p className="mt-4 text-xs text-text-muted">{t('hero.note')}</p>
