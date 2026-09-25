@@ -36,4 +36,4 @@ Allow: /
 User-agent: *
 Allow: /
 
-Sitemap: https://eververdants.github.io/AppAudioRouter-Website/sitemap.xml
+Sitemap: https://eververdants.github.io/AppAudioRouter/sitemap.xml

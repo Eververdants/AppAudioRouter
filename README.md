@@ -21,7 +21,7 @@ App Audio Router 桌面应用的落地页(landing page),与主项目
 
 ```bash
 pnpm install        # 或 npm install
-pnpm dev            # 开发服务器 http://localhost:5173/AppAudioRouter-Website/
+pnpm dev            # 开发服务器 http://localhost:5173/AppAudioRouter/
 pnpm build          # 产物输出到 dist/(tsc -b && vite build)
 pnpm preview        # 本地预览 dist/(同样带子路径前缀)
 ```
@@ -72,7 +72,7 @@ AppAudioRouter-Website/
 - **待补充位置**:尚无公开的更新日志页 / 演示视频 / 下载镜像,如后续提供,
   在 `src/lib/site.ts` 中标注的 `TODO(placeholder)` 处添加即可。
 - **站点地址**:部署在 GitHub Pages 项目子路径
-  `https://eververdants.github.io/AppAudioRouter-Website/`(见下文「部署」)。
+  `https://eververdants.github.io/AppAudioRouter/`(见下文「部署」)。
   canonical / og:url / sitemap / llms.txt / JSON-LD 与 Vite `base` 都以此为
   准;改用自定义域名或根路径时,需同步更新 `src/lib/site.ts` 的 `SITE_URL`、
   `public/robots.txt`、`public/sitemap.xml`、`public/llms.txt`、
@@ -120,14 +120,13 @@ AppAudioRouter-Website/
 
 ## 部署(GitHub Pages)
 
-- 仓库:`https://github.com/Eververdants/AppAudioRouter-Website`,默认分支
-  `website`。
-- 每次推送到 `website` 分支,`.github/workflows/deploy.yml` 会自动
-  `npm ci && npm run build`,并把 `dist/` 通过 `actions/deploy-pages` 发布到
-  https://eververdants.github.io/AppAudioRouter-Website/ 。
-- 首次启用前提:仓库 Settings → Pages → Build and deployment → Source 选
+- 网站代码位于主仓库 **`Eververdants/AppAudioRouter` 的 `website` 分支**。
+- 每次推送到 `website` 分支,该分支自带的 `.github/workflows/deploy.yml` 会
+  自动 `npm ci && npm run build`,并把 `dist/` 通过 `actions/deploy-pages`
+  发布到 https://eververdants.github.io/AppAudioRouter/ 。
+- 首次启用前提:主仓库 Settings → Pages → Build and deployment → Source 选
   **GitHub Actions**(等价 API:`build_type=workflow`)。
-- Vite `base` 固定为 `/AppAudioRouter-Website/`;组件内的图标与截图路径用
+- Vite `base` 固定为 `/AppAudioRouter/`;组件内的图标与截图路径用
   `import.meta.env.BASE_URL` 拼接,保证子路径下资源可用。
 
 ## 与主项目的视觉一致性

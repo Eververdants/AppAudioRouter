@@ -13,7 +13,7 @@ Key facts, all from the project documentation:
 
 ## Links
 
-- [Landing page](https://eververdants.github.io/AppAudioRouter-Website/): product overview, features, use cases and install steps.
+- [Landing page](https://eververdants.github.io/AppAudioRouter/): product overview, features, use cases and install steps.
 - [GitHub repository](https://github.com/Eververdants/AppAudioRouter): source code (Rust + React), issue tracker.
 - [Releases](https://github.com/Eververdants/AppAudioRouter/releases): MSI and NSIS installers.
 - [README (English)](https://github.com/Eververdants/AppAudioRouter/blob/main/README.md): full documentation, comparison table, FAQ.

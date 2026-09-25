@@ -5,10 +5,11 @@ import { resolve } from 'node:path';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // GitHub Pages project site: https://eververdants.github.io/AppAudioRouter-Website/
-  // Keep in sync with SITE_URL in src/lib/site.ts. Local dev/preview then
-  // serves under the same prefix (http://localhost:5173/AppAudioRouter-Website/).
-  base: '/AppAudioRouter-Website/',
+  // GitHub Pages project site of the main repository:
+  // https://eververdants.github.io/AppAudioRouter/ — keep in sync with
+  // SITE_URL in src/lib/site.ts. Local dev/preview then serves under the
+  // same prefix (http://localhost:5173/AppAudioRouter/).
+  base: '/AppAudioRouter/',
   server: {
     port: 5173,
     strictPort: true,

@@ -6,12 +6,11 @@
  */
 export const VERSION = '2.1.0';
 
-// TODO(placeholder): final production URL. This assumes GitHub Pages at the
-// default project-site address; if the page is deployed elsewhere (custom
-// domain or a root deployment), update it here and in `public/robots.txt`,
-// `public/sitemap.xml` and `public/llms.txt` — canonical, og:url and the
-// structured data all point at it.
-export const SITE_URL = 'https://eververdants.github.io/AppAudioRouter-Website/';
+// GitHub Pages project site of the main repository. Keep in sync with
+// `vite.config.ts` (`base`), `public/robots.txt`, `public/sitemap.xml`,
+// `public/llms.txt` and the static tags in `index.html` if the domain or
+// path ever changes.
+export const SITE_URL = 'https://eververdants.github.io/AppAudioRouter/';
 
 export const REPO_URL = 'https://github.com/Eververdants/AppAudioRouter';
 export const RELEASES_URL = `${REPO_URL}/releases`;
