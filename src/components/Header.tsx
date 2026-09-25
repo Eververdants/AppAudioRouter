@@ -41,7 +41,7 @@ export function Header() {
     >
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <a href="#top" className="flex min-w-0 items-center gap-2.5">
-          <img src="/icon.png" alt="" className="h-7 w-7 rounded" />
+          <img src={`${import.meta.env.BASE_URL}icon.png`} alt="" className="h-7 w-7 rounded" />
           <span className="truncate text-sm font-semibold text-text-primary">App Audio Router</span>
           <span className="hidden rounded bg-accent-muted px-1.5 py-px text-[10px] font-medium leading-4 text-accent sm:inline">
             v2.1.0

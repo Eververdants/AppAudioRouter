@@ -32,7 +32,7 @@ export function Footer() {
         <div className="grid gap-10 md:grid-cols-[1.5fr_1fr_1fr]">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <img src="/icon.png" alt="" className="h-8 w-8 rounded" />
+              <img src={`${import.meta.env.BASE_URL}icon.png`} alt="" className="h-8 w-8 rounded" />
               <span className="text-base font-semibold text-text-primary">App Audio Router</span>
             </div>
             <p className="mt-3 max-w-sm text-sm leading-relaxed text-text-secondary">

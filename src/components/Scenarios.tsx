@@ -66,7 +66,7 @@ export function Scenarios() {
               className="group overflow-hidden rounded-2xl border border-glass shadow-glass-lg transition-shadow duration-300 hover:shadow-glow"
             >
               <img
-                src={`/screenshots/app-audio-router-${variant}.png`}
+                src={`${import.meta.env.BASE_URL}screenshots/app-audio-router-${variant}.png`}
                 alt={t(`scenarios.screenshotAlt.${variant}`)}
                 loading="lazy"
                 decoding="async"
