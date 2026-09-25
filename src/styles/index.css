@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens — copied from the desktop app's styles/index.css so the landing
+   page and the app share one palette. Keep the RGB channel mirrors in sync with
+   the hex/rgba values above them. */
+:root {
+  --bg-primary: #fafafa;
+  --bg-secondary: #f3f3f5;
+  --bg-tertiary: #e8e8ec;
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-muted: #71717a;
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-muted: rgba(8, 145, 178, 0.12);
+  --accent-glow: rgba(8, 145, 178, 0.32);
+  --border: #e4e4e7;
+  --success: #10b981;
+  --error: #ef4444;
+
+  --accent-rgb: 8 145 178;
+  --error-rgb: 239 68 68;
+  --border-rgb: 228 228 231;
+  --bg-tertiary-rgb: 232 232 236;
+  --text-muted-rgb: 113 113 122;
+
+  /* Liquid-glass surfaces. Translucent panels pick up the ambient gradient
+     and the drifting orbs rendered behind them, which is what sells the glass. */
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.65);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-edge: rgba(24, 24, 27, 0.06);
+  --glass-shadow: rgba(24, 24, 27, 0.14);
+
+  /* Ambient wash painted by the body gradient. */
+  --ambient-a: rgba(8, 145, 178, 0.1);
+  --ambient-b: rgba(59, 130, 246, 0.09);
+  --ambient-c: rgba(20, 184, 166, 0.07);
+}
+
+.dark {
+  --bg-primary: #09090b;
+  --bg-secondary: #18181b;
+  --bg-tertiary: #27272a;
+  --text-primary: #fafafa;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --accent: #22d3ee;
+  --accent-hover: #06b6d4;
+  --accent-muted: rgba(34, 211, 238, 0.14);
+  --accent-glow: rgba(34, 211, 238, 0.28);
+  --border: #27272a;
+  --success: #34d399;
+  --error: #f87171;
+
+  --accent-rgb: 34 211 238;
+  --error-rgb: 248 113 113;
+  --border-rgb: 39 39 42;
+  --bg-tertiary-rgb: 39 39 42;
+  --text-muted-rgb: 161 161 170;
+
+  --glass-bg: rgba(24, 24, 27, 0.5);
+  --glass-bg-strong: rgba(28, 28, 32, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-highlight: rgba(255, 255, 255, 0.08);
+  --glass-edge: rgba(255, 255, 255, 0.06);
+  --glass-shadow: rgba(0, 0, 0, 0.55);
+
+  --ambient-a: rgba(34, 211, 238, 0.15);
+  --ambient-b: rgba(59, 130, 246, 0.1);
+  --ambient-c: rgba(45, 212, 191, 0.09);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Anchored sections stop below the sticky header instead of under it. */
+section[id] {
+  scroll-margin-top: 5rem;
+}
+
+body {
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  background-color: var(--bg-primary);
+  /* Fixed ambient wash: the glass panels blur colours "behind" the window. */
+  background-image:
+    radial-gradient(1100px 700px at 85% -10%, var(--ambient-a), transparent 65%),
+    radial-gradient(900px 620px at -10% 110%, var(--ambient-b), transparent 62%),
+    radial-gradient(760px 560px at 55% 45%, var(--ambient-c), transparent 70%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+/* Flow animation for the router illustration's route curves. */
+@keyframes route-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .route-flow {
+    animation: route-flow 1.4s linear infinite;
+  }
+
+  /* Ripple feedback on live nodes, mirroring the app's route-applied pulse. */
+  @keyframes node-ripple {
+    0% {
+      transform: scale(1);
+      opacity: 0.5;
+    }
+    100% {
+      transform: scale(1.45);
+      opacity: 0;
+    }
+  }
+
+  .node-ripple {
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: node-ripple 2.4s ease-out infinite;
+  }
+}

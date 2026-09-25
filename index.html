@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="App Audio Router 是一款 Windows 10 / 11 的免费开源每应用音频路由工具:把一个程序的音频同时送到多台播放设备,每台设备独立延迟补偿与音量平衡,无需虚拟声卡驱动。"
+    />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafafa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#09090b" />
+    <meta property="og:title" content="App Audio Router" />
+    <meta
+      property="og:description"
+      content="Windows 每应用音频路由:一个应用 → 多台设备,逐设备延迟补偿与音量平衡,免驱动,MIT 开源。"
+    />
+    <meta property="og:image" content="/screenshots/app-audio-router-light.png" />
+    <meta property="og:type" content="website" />
+    <title>App Audio Router</title>
+    <!--
+      Boot script + critical CSS, inlined on purpose (same pattern as the
+      desktop app's index.html, with website-specific storage keys).
+
+      Running them before the module script makes the very first paint already
+      carry the correct background, text colour and language, so there is no
+      flash while the bundle loads.
+    -->
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme;
+        try {
+          theme = localStorage.getItem('aar-website-theme');
+        } catch (error) {
+          /* storage may be unavailable; fall through to the system preference */
+        }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        root.classList.toggle('dark', theme === 'dark');
+        root.dataset.theme = theme;
+
+        // Match the language the bundle is about to render in, so CJK text is
+        // not laid out with the wrong font on the first frame.
+        try {
+          var language = localStorage.getItem('aar-website-language');
+          if (language === 'zh-CN' || language === 'en') root.lang = language;
+        } catch (error) {
+          /* ignore */
+        }
+      })();
+    </script>
+    <style>
+      /* Critical shell. The two custom properties below are duplicated verbatim
+         in styles/index.css, which loads later and simply re-declares them. */
+      :root {
+        --bg-primary: #fafafa;
+        --text-primary: #18181b;
+      }
+      .dark {
+        --bg-primary: #09090b;
+        --text-primary: #fafafa;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      #root {
+        min-height: 100vh;
+      }
+      body {
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
