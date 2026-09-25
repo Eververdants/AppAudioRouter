@@ -71,6 +71,32 @@ AppAudioRouter-Website/
   README 同步修改。
 - **待补充位置**:尚无公开的更新日志页 / 演示视频 / 下载镜像,如后续提供,
   在 `src/lib/site.ts` 中标注的 `TODO(placeholder)` 处添加即可。
+- **站点地址为占位**:canonical / og:url / sitemap / robots 中的 URL 假设
+  部署在 GitHub Pages 项目页(`src/lib/site.ts` 的 `SITE_URL` 及
+  `public/robots.txt`、`public/sitemap.xml`、`public/llms.txt`、
+  `index.html` 中的静态写法)。确定正式域名后请同步替换这五处;若部署在
+  子路径,还需给 Vite 配置 `base`。
+
+## SEO 与 GEO
+
+页面同时面向传统搜索引擎与生成式引擎(Answer Engine Optimization)做了优化:
+
+- **静态元信息**(不依赖 JS,`index.html`):含关键词的标题与描述、
+  `robots` 指令、canonical、Open Graph(含 `og:locale` 双语声明)与
+  Twitter Card、绝对地址的分享图,以及语言无关的
+  `SoftwareApplication` 结构化数据(名称/系统/版本/许可证/价格/功能列表)。
+- **FAQPage 结构化数据**(`src/components/Faq.tsx`):由 FAQ 区块渲染所用的
+  同一份 i18n 文案生成,随语言切换同步,保证结构化数据与可见内容一致。
+- **FAQ 区块**:5 组问答全部改写自主项目 README 的 FAQ,用原生
+  `<details>/<summary>` 实现——不展开也在 DOM 里,爬虫与 AI 引擎可直接引用。
+- **`public/robots.txt`**:显式允许 Googlebot / Bingbot / Baiduspider,以及
+  GPTBot、OAI-SearchBot、ClaudeBot、PerplexityBot 等生成式引擎爬虫。
+- **`public/llms.txt`**:按 llms.txt 约定提供产品事实摘要与权威链接,
+  便于回答引擎引用而不必解析整个页面。
+- **`public/sitemap.xml`**:单页 sitemap。
+- **无 JS 兜底**:`<noscript>` 中静态给出产品定位与下载链接。
+- 截图 `<img>` 带固定 `width/height`(1800×1360)+ `loading="lazy"`,
+  避免 CLS;页面为单屏语义化结构(每节一个 `<h2>`,卡片 `<h3>`)。
 
 ## 与主项目的视觉一致性
 

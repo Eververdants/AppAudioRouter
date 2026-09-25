@@ -1,0 +1,21 @@
+# App Audio Router
+
+> Free, open-source per-app audio routing for Windows 10 / 11 (64-bit): send one program's audio to several playback devices at once, each with its own signed-millisecond delay compensation and its own 0–100 % volume balance. Built as a single native binary on Windows Core Audio — no virtual audio driver, no helper executable, nothing left behind on uninstall. MIT licensed, version 2.1.0, UI in English and Simplified Chinese.
+
+Key facts, all from the project documentation:
+
+- One application → many playback devices simultaneously; the first device is the native Windows endpoint, every further device receives a real-time mirrored copy via WASAPI process-loopback.
+- Applies to already-running programs immediately, no restart; stopping returns the program to the system default device.
+- Per-device delay compensation (signed milliseconds, configurable range and step) aligns fast devices with slow ones, e.g. wired speakers against a Bluetooth headset.
+- Per-device volume balance (0–100 %, relative to the loudest device in the route).
+- Routing rules are remembered per executable name and restored automatically; tray-resident with optional close-to-tray and start-with-Windows; device/process lists follow the audio engine's change notifications, never polling.
+- Windows-only (Windows 10 / 11, 64-bit); requires only the WebView2 runtime. Not available on macOS or Linux.
+
+## Links
+
+- [Landing page](https://eververdants.github.io/AppAudioRouter-Website/): product overview, features, use cases and install steps.
+- [GitHub repository](https://github.com/Eververdants/AppAudioRouter): source code (Rust + React), issue tracker.
+- [Releases](https://github.com/Eververdants/AppAudioRouter/releases): MSI and NSIS installers.
+- [README (English)](https://github.com/Eververdants/AppAudioRouter/blob/main/README.md): full documentation, comparison table, FAQ.
+- [README (简体中文)](https://github.com/Eververdants/AppAudioRouter/blob/main/README.zh-CN.md): 完整中文文档与 FAQ。
+- [License](https://github.com/Eververdants/AppAudioRouter/blob/main/LICENSE): MIT.

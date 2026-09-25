@@ -5,20 +5,90 @@
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <title>App Audio Router — Windows 分应用音频路由,一个应用同时输出到多台设备</title>
     <meta
       name="description"
       content="App Audio Router 是一款 Windows 10 / 11 的免费开源每应用音频路由工具:把一个程序的音频同时送到多台播放设备,每台设备独立延迟补偿与音量平衡,无需虚拟声卡驱动。"
     />
+    <meta name="robots" content="index, follow" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafafa" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#09090b" />
-    <meta property="og:title" content="App Audio Router" />
+    <!-- TODO(placeholder): add search-console verification tags here once the
+         production domain is confirmed (Google Search Console / Bing
+         Webmaster / Baidu 站长平台各一行 meta)。 -->
+    <link rel="canonical" href="https://eververdants.github.io/AppAudioRouter-Website/" />
+
+    <!-- Open Graph / Twitter: absolute image URLs per the OG spec. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="App Audio Router" />
+    <meta
+      property="og:title"
+      content="App Audio Router — Windows 分应用音频路由,一个应用同时输出到多台设备"
+    />
     <meta
       property="og:description"
-      content="Windows 每应用音频路由:一个应用 → 多台设备,逐设备延迟补偿与音量平衡,免驱动,MIT 开源。"
+      content="Windows 10 / 11 免费开源的每应用音频路由工具:一个应用 → 多台设备,逐设备延迟补偿与音量平衡,无需虚拟声卡驱动。"
     />
-    <meta property="og:image" content="/screenshots/app-audio-router-light.png" />
-    <meta property="og:type" content="website" />
-    <title>App Audio Router</title>
+    <meta property="og:url" content="https://eververdants.github.io/AppAudioRouter-Website/" />
+    <meta
+      property="og:image"
+      content="https://eververdants.github.io/AppAudioRouter-Website/screenshots/app-audio-router-light.png"
+    />
+    <meta property="og:image:width" content="1800" />
+    <meta property="og:image:height" content="1360" />
+    <meta
+      property="og:image:alt"
+      content="App Audio Router 把 Music.exe 同时路由到蓝牙耳机、HDMI 输出与 USB 耳机,每台设备下方显示各自的延迟与音量"
+    />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="App Audio Router — Windows 分应用音频路由,一个应用同时输出到多台设备"
+    />
+    <meta
+      name="twitter:description"
+      content="Windows 10 / 11 免费开源的每应用音频路由工具:一个应用 → 多台设备,逐设备延迟补偿与音量平衡,无需虚拟声卡驱动。"
+    />
+    <meta
+      name="twitter:image"
+      content="https://eververdants.github.io/AppAudioRouter-Website/screenshots/app-audio-router-light.png"
+    />
+
+    <!-- Structured data: the language-neutral product facts. The FAQPage graph
+         is emitted from src/components/Faq.tsx so it always mirrors the
+         visible i18n copy. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "App Audio Router",
+        "alternateName": "AAR",
+        "url": "https://eververdants.github.io/AppAudioRouter-Website/",
+        "downloadUrl": "https://github.com/Eververdants/AppAudioRouter/releases",
+        "operatingSystem": "Windows 10, Windows 11 (64-bit)",
+        "applicationCategory": "MultimediaApplication",
+        "softwareVersion": "2.1.0",
+        "license": "https://github.com/Eververdants/AppAudioRouter/blob/main/LICENSE",
+        "isAccessibleForFree": true,
+        "inLanguage": ["zh-CN", "en"],
+        "description": "免费开源的 Windows 每应用音频路由工具:把一个程序的音频同时送到多台播放设备,每台设备独立延迟补偿与音量平衡,无需虚拟声卡驱动。Free and open source.",
+        "featureList": [
+          "一个应用同时输出到多台播放设备(one app → many devices)",
+          "逐设备延迟补偿(per-device delay compensation)",
+          "逐设备音量平衡(per-device volume balance)",
+          "无需虚拟声卡驱动(no virtual audio driver)",
+          "按程序自动记忆路由(auto-remember routes per executable)"
+        ],
+        "author": {
+          "@type": "Organization",
+          "name": "Eververdants",
+          "url": "https://github.com/Eververdants"
+        },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
     <!--
       Boot script + critical CSS, inlined on purpose (same pattern as the
       desktop app's index.html, with website-specific storage keys).
@@ -88,6 +158,34 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Static fallback for non-JS clients: everything below mirrors the
+         hero's facts so crawlers without JS still see the essentials. -->
+    <noscript>
+      <div
+        style="
+          max-width: 42rem;
+          margin: 4rem auto;
+          padding: 0 1rem;
+          font-family: system-ui, sans-serif;
+        "
+      >
+        <h1>App Audio Router</h1>
+        <p>
+          Windows 10 / 11 免费开源的每应用音频路由工具:把一个程序的音频同时送到多台播放设备,
+          每台设备独立延迟补偿与音量平衡,无需虚拟声卡驱动。
+        </p>
+        <p>
+          Per-app audio routing for Windows: one app → many devices, with per-device delay
+          compensation and volume balance. No virtual audio driver required. MIT licensed.
+        </p>
+        <p>
+          下载 / Download:
+          <a href="https://github.com/Eververdants/AppAudioRouter/releases">GitHub Releases</a>
+          ·
+          <a href="https://github.com/Eververdants/AppAudioRouter">GitHub 仓库 / Repository</a>
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "App Audio Router — Send one app's audio to several devices at once",
+    "title": "App Audio Router — Per-app audio routing for Windows: one app, many devices",
     "description": "Free, open-source per-app audio routing for Windows 10 / 11: one application → many playback devices, with per-device delay compensation and volume balance. No virtual audio driver required."
   },
   "nav": {

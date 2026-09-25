@@ -73,7 +73,10 @@ export function Scenarios() {
                 src={`/screenshots/app-audio-router-${variant}.png`}
                 alt={t(`scenarios.screenshotAlt.${variant}`)}
                 loading="lazy"
-                className="w-full"
+                decoding="async"
+                width="1800"
+                height="1360"
+                className="h-auto w-full"
               />
             </div>
           ))}

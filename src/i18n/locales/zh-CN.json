@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "App Audio Router — 把一个程序的音频同时送到多台设备",
+    "title": "App Audio Router — Windows 分应用音频路由,一个应用同时输出到多台设备",
     "description": "Windows 10 / 11 免费开源的每应用音频路由工具:一个应用 → 多台设备,逐设备延迟补偿与音量平衡,无需虚拟声卡驱动。"
   },
   "nav": {
