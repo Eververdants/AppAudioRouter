@@ -1,0 +1,140 @@
+{
+  "meta": {
+    "title": "App Audio Router — Send one app's audio to several devices at once",
+    "description": "Free, open-source per-app audio routing for Windows 10 / 11: one application → many playback devices, with per-device delay compensation and volume balance. No virtual audio driver required."
+  },
+  "nav": {
+    "features": "Features",
+    "scenarios": "Use cases",
+    "install": "Install",
+    "github": "GitHub repository",
+    "theme": "Toggle light / dark theme",
+    "language": "切换到简体中文"
+  },
+  "hero": {
+    "badge": "v{{version}} · MIT licensed · Windows 10 / 11",
+    "title": "One program's sound, headed for many devices at once",
+    "tagline": "Per-app audio routing for Windows: send one program's sound to several playback devices at once, each with its own delay compensation and its own volume.",
+    "description": "Free and open source. The whole app is a single native binary calling the Windows Core Audio API directly — there is no virtual audio driver to install and no helper executable. Routing applies to running programs immediately, no restart needed.",
+    "ctaDownload": "Download for Windows",
+    "ctaSource": "View source",
+    "note": "MSI / NSIS installer · Free, no ads · English / 简体中文 interface",
+    "illustration": {
+      "label": "UI sketch: the process sits in the centre, playback devices on the outer ring",
+      "process": "Music.exe",
+      "status": "Routing to 3 devices",
+      "devices": {
+        "bluetooth": "Bluetooth",
+        "hdmi": "HDMI out",
+        "usb": "USB headset"
+      }
+    }
+  },
+  "features": {
+    "eyebrow": "What it does",
+    "title": "Route, align, balance",
+    "description": "No mixer graph, no virtual cable: pick a program, pick devices, click once. Every capability comes from the Windows Core Audio API — nothing is installed into the audio stack.",
+    "items": {
+      "routing": {
+        "title": "One app → many devices",
+        "description": "Select one or more processes and one or more playback devices; the audio is mirrored to all of them live. A running program never needs a restart, and stopping sends it back to the system default."
+      },
+      "delay": {
+        "title": "Per-device delay compensation",
+        "description": "A signed millisecond value per device: positive holds a fast device back, negative marks the earliest one. Wired speakers and a Bluetooth headset sound at the same moment, with configurable range and step."
+      },
+      "volume": {
+        "title": "Per-device volume balance",
+        "description": "A 0–100 % value per device, attenuating it relative to the loudest one in the route. Changes are pushed to running routes and are audible immediately."
+      },
+      "native": {
+        "title": "No driver · no dependencies",
+        "description": "Routing, duplication, delay and gain are all done by the app itself — no virtual audio driver, no third-party executable, and nothing left behind on uninstall."
+      },
+      "memory": {
+        "title": "Auto-remember · tray resident",
+        "description": "Routing rules are stored per executable name and restored when the program plays again. The tray icon keeps it out of the way, with optional close-to-tray and start-with-Windows; device and process lists follow the audio engine on their own."
+      }
+    }
+  },
+  "scenarios": {
+    "eyebrow": "Typical use cases",
+    "title": "The moments it was built for",
+    "description": "Every scenario below is a combination of the real capabilities above — nothing invented.",
+    "screenshotCaption": "The same route in both themes: Music.exe playing to a Bluetooth headset, an HDMI output and USB headphones, with a delay and a volume under each device.",
+    "screenshotAlt": {
+      "light": "App Audio Router in the light theme, routing Music.exe to a Bluetooth headset, an HDMI output and USB headphones, with a per-device delay and volume under each device",
+      "dark": "The same multi-device audio route displayed in the dark theme"
+    },
+    "items": {
+      "sibling": {
+        "tag": "One app → many devices",
+        "title": "Keep your headphones on, let others hear too",
+        "description": "The headset is yours, the speakers are for everyone else: route the player to both at once, and nobody has to take the headphones off or crowd around."
+      },
+      "sync": {
+        "tag": "Delay compensation",
+        "title": "The Bluetooth headset no longer lags",
+        "description": "Bluetooth codecs add inherent latency, so wired speakers and a headset never line up on their own. Give the fast path a millisecond delay and both devices sound at the same moment."
+      },
+      "balance": {
+        "tag": "Volume balance",
+        "title": "Headset too quiet, speakers too loud",
+        "description": "A percentage volume per device, attenuated relative to the loudest one. The first device is driven natively by Windows; every mirrored path is tuned separately."
+      },
+      "remember": {
+        "tag": "Auto-remember · live lists",
+        "title": "Plug, unplug, restart — the route keeps up",
+        "description": "Device and process lists follow the audio engine on their own, no refresh button; routes remembered per program are restored the next time that program plays."
+      }
+    }
+  },
+  "install": {
+    "eyebrow": "Install",
+    "title": "Three steps and you are routing",
+    "description": "The installed build only needs Windows itself: no driver, no service.",
+    "ctaReleases": "Open GitHub Releases",
+    "steps": {
+      "one": {
+        "title": "Open the Releases page",
+        "description": "Head to the GitHub Releases and find the newest release."
+      },
+      "two": {
+        "title": "Download the installer",
+        "description": "Grab the .msi installer, or the NSIS .exe setup."
+      },
+      "three": {
+        "title": "Install and launch",
+        "description": "Run it, launch App Audio Router, and play something in the program you want to route."
+      }
+    },
+    "requirements": {
+      "title": "Requirements",
+      "os": "Windows 10 / 11, 64-bit",
+      "webview": "WebView2 runtime (bundled with Win11; present on any Win10 with Edge)",
+      "noDriver": "No audio driver, no service, no third-party executable"
+    },
+    "build": {
+      "title": "Build from source",
+      "description": "Needs Node.js 20+, pnpm 10 and a Rust toolchain with the MSVC target.",
+      "caption": "Terminal"
+    }
+  },
+  "footer": {
+    "tagline": "Per-app audio routing for Windows: one app → many devices, with per-device delay compensation and volume balance.",
+    "project": {
+      "title": "Project",
+      "repo": "GitHub repository",
+      "releases": "Releases download",
+      "issues": "Issue tracker"
+    },
+    "docs": {
+      "title": "Documentation",
+      "readmeEn": "README (English)",
+      "readmeZh": "README (简体中文)",
+      "license": "MIT license"
+    },
+    "meta": "© 2026 Eververdants · MIT License · v{{version}} · Windows 10 / 11 (64-bit)",
+    "note": "Copy on this page is distilled from the project README (v{{version}}); the project documentation is authoritative."
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "meta": {
+    "title": "App Audio Router — 把一个程序的音频同时送到多台设备",
+    "description": "Windows 10 / 11 免费开源的每应用音频路由工具:一个应用 → 多台设备,逐设备延迟补偿与音量平衡,无需虚拟声卡驱动。"
+  },
+  "nav": {
+    "features": "功能",
+    "scenarios": "使用场景",
+    "install": "安装",
+    "github": "GitHub 仓库",
+    "theme": "切换明暗主题",
+    "language": "切换到 English"
+  },
+  "hero": {
+    "badge": "v{{version}} · MIT 开源 · Windows 10 / 11",
+    "title": "一个程序的声音,同时去往多台设备",
+    "tagline": "Windows 每应用音频路由工具:把某个程序的音频同时送到多台播放设备,每台设备独立设置延迟补偿与音量。",
+    "description": "免费开源,整个应用是直接调用 Windows Core Audio API 的单一原生程序——不需要虚拟声卡驱动,也没有辅助进程。正在运行的程序即时生效,无需重启。",
+    "ctaDownload": "下载 Windows 安装包",
+    "ctaSource": "查看源码",
+    "note": "MSI / NSIS 安装程序 · 免费无广告 · 简体中文 / English 界面",
+    "illustration": {
+      "label": "界面示意:进程在中心,播放设备在外环",
+      "process": "Music.exe",
+      "status": "正在路由到 3 台设备",
+      "devices": {
+        "bluetooth": "蓝牙耳机",
+        "hdmi": "HDMI 输出",
+        "usb": "USB 耳机"
+      }
+    }
+  },
+  "features": {
+    "eyebrow": "核心能力",
+    "title": "路由、对齐、拉平",
+    "description": "没有混音矩阵,没有虚拟声卡:选程序、选设备、点一下,声音就到位。全部能力都来自 Windows Core Audio API,而不是往音频栈里装东西。",
+    "items": {
+      "routing": {
+        "title": "一个应用 → 多台设备",
+        "description": "选中一个或多个进程,再选一台或多台播放设备,声音实时镜像到全部设备;正在运行的程序无需重启,停止后回到系统默认输出。"
+      },
+      "delay": {
+        "title": "逐设备延迟补偿",
+        "description": "每台设备一个有符号毫秒值:正数把快设备留后,负数标记最早的一台。让有线音箱与蓝牙耳机同一时刻出声,范围与步进均可配置。"
+      },
+      "volume": {
+        "title": "逐设备音量平衡",
+        "description": "每台设备一个 0–100 % 的值,相对同组里最响的一台做衰减;改动即时推送到正在运行的路由,立刻可闻。"
+      },
+      "native": {
+        "title": "免驱动 · 零外部依赖",
+        "description": "路由、复制、延迟与增益全部由应用本体完成——不安装虚拟声卡,没有第三方可执行文件,卸载也不留残余。"
+      },
+      "memory": {
+        "title": "自动记忆 · 后台常驻",
+        "description": "路由规则按可执行文件名保存,程序下次出声自动恢复;托盘常驻,可选关闭到托盘与开机自启,设备与进程列表自动跟随音频引擎。"
+      }
+    }
+  },
+  "scenarios": {
+    "eyebrow": "典型使用场景",
+    "title": "它解决的是这些时刻",
+    "description": "以下场景全部由上面的真实能力组合而来,不含任何脑补功能。",
+    "screenshotCaption": "同一组路由在两种主题下的样子:Music.exe 同时输出到蓝牙耳机、HDMI 输出与 USB 耳机,每台设备下方是各自的延迟与音量。",
+    "screenshotAlt": {
+      "light": "明亮主题下的 App Audio Router:把 Music.exe 同时路由到蓝牙耳机、HDMI 输出与 USB 耳机,每台设备下方显示各自的延迟与音量",
+      "dark": "深色主题下的同一条多设备音频路由"
+    },
+    "items": {
+      "sibling": {
+        "tag": "一个应用 → 多台设备",
+        "title": "戴上耳机,也让身边的人听见",
+        "description": "耳机归你,音箱留给家人或同事:把播放器同时路由到耳机与音箱,你不必摘耳机,对方也不必凑过来。"
+      },
+      "sync": {
+        "tag": "延迟补偿",
+        "title": "蓝牙耳机不再慢半拍",
+        "description": "蓝牙编解码自带延迟,和有线音箱一起放必然不同步。给快的那一路加上毫秒级延迟补偿,两台设备同一时刻出声。"
+      },
+      "balance": {
+        "tag": "音量平衡",
+        "title": "耳机太轻,音箱太响",
+        "description": "每台设备一个百分比音量,相对最响的一台衰减拉平;第一台设备由 Windows 原生播放,其余各路独立可调。"
+      },
+      "remember": {
+        "tag": "自动记忆 · 实时列表",
+        "title": "插拔设备、开关程序,路由跟得上",
+        "description": "设备与进程列表跟着音频引擎自动更新,不用点刷新;按程序名记忆的路由在该程序下次出声时自动恢复。"
+      }
+    }
+  },
+  "install": {
+    "eyebrow": "安装",
+    "title": "三步开始使用",
+    "description": "安装版只需要 Windows 本身,不装驱动、不装服务。",
+    "ctaReleases": "前往 GitHub Releases",
+    "steps": {
+      "one": {
+        "title": "打开 Releases 页面",
+        "description": "前往 GitHub 上的 Releases,找到最新发布的版本。"
+      },
+      "two": {
+        "title": "下载安装包",
+        "description": "下载 .msi 安装包,或 NSIS .exe 安装程序。"
+      },
+      "three": {
+        "title": "安装并启动",
+        "description": "运行安装程序,启动 App Audio Router,在要路由的程序里放点声音即可开始。"
+      }
+    },
+    "requirements": {
+      "title": "系统要求",
+      "os": "Windows 10 / 11,64 位",
+      "webview": "WebView2 运行时(Win11 自带,装有 Edge 的 Win10 基本都有)",
+      "noDriver": "无需声卡驱动、无需服务、无第三方可执行文件"
+    },
+    "build": {
+      "title": "从源码构建",
+      "description": "需要 Node.js 20+、pnpm 10 与带 MSVC 目标的 Rust 工具链。",
+      "caption": "终端"
+    }
+  },
+  "footer": {
+    "tagline": "Windows 每应用音频路由:一个应用 → 多台设备,逐设备延迟补偿与音量平衡。",
+    "project": {
+      "title": "项目",
+      "repo": "GitHub 仓库",
+      "releases": "Releases 下载",
+      "issues": "问题反馈"
+    },
+    "docs": {
+      "title": "文档",
+      "readmeEn": "README(English)",
+      "readmeZh": "README(简体中文)",
+      "license": "MIT 许可证"
+    },
+    "meta": "© 2026 Eververdants · MIT License · v{{version}} · Windows 10 / 11(64 位)",
+    "note": "本落地页文案基于项目 README(v{{version}})整理,功能以项目文档为准。"
+  }
+}
