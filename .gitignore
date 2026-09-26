@@ -45,3 +45,8 @@ pnpm-debug.log*
 # Misc
 *.msi
 *.exe
+
+promo/
+
+# Local tooling state
+.mimosa/
