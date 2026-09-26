@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DelayStepper } from '@/components/ui/DelayStepper';
@@ -66,6 +66,46 @@ function DelayRow({
   );
 }
 
+/** One remembered route: the app's exe, the devices it maps to, and a delete. */
+function MemoryRow({ exeName, deviceNames }: { exeName: string; deviceNames: string }) {
+  const { t } = useTranslation();
+  const clearRememberedRoute = useRouterStore((s) => s.clearRememberedRoute);
+  return (
+    <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-medium text-text-secondary" title={exeName}>
+          {exeName}
+        </div>
+        <div className="truncate text-[10px] text-text-muted" title={deviceNames}>
+          {deviceNames}
+        </div>
+      </div>
+      <motion.button
+        whileHover={{ scale: 1.15 }}
+        whileTap={{ scale: 0.9 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+        onClick={() => void clearRememberedRoute(exeName)}
+        title={t('settings.memoryDelete')}
+        aria-label={t('settings.memoryDelete')}
+        className="flex-none rounded-full p-1 text-text-muted transition-colors hover:bg-error/10 hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50"
+      >
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <line x1="1" y1="1" x2="9" y2="9" />
+          <line x1="9" y1="1" x2="1" y2="9" />
+        </svg>
+      </motion.button>
+    </div>
+  );
+}
+
 const SunIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="5" />
@@ -89,13 +129,15 @@ const MoonIcon = (
 /**
  * Settings as a full page (not a modal): slides in over the content area from
  * the title-bar gear and slides back out. Owns everything app-level — theme,
- * language, auto-remember, latency sync and the per-device delay sliders.
+ * language, auto-remember, route memory, latency sync and the per-device delay
+ * sliders.
  */
 export function SettingsPage({ onBack }: { onBack: () => void }) {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const { language, setLanguage } = useLanguage();
   const devices = useRouterStore((s) => s.devices);
+  const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
   const delaySync = useRouterStore((s) => s.delaySync);
@@ -118,6 +160,18 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onBack]);
+
+  // Route memory rows, alphabetically so the list does not reshuffle when the
+  // backend map's iteration order changes. Device ids resolve to names here;
+  // ids whose device is unplugged are counted and rendered as a muted suffix.
+  const memoryEntries = useMemo(
+    () =>
+      Object.entries(rememberedRoutes)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([exeName, ids]) => [exeName, ids] as const),
+    [rememberedRoutes],
+  );
+  const deviceNameById = useMemo(() => new Map(devices.map((d) => [d.id, d.name])), [devices]);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -259,6 +313,47 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
+                strokeLinejoin="round"
+              >
+                <path d="M6 3h12v18l-6-4-6 4V3z" />
+              </svg>
+            }
+            label={t('settings.routeMemory')}
+          >
+            {memoryEntries.length === 0 ? (
+              <p className="px-3 py-4 text-center text-xs text-text-muted">
+                {t('settings.memoryEmpty')}
+              </p>
+            ) : (
+              memoryEntries.map(([exeName, ids]) => {
+                const names: string[] = [];
+                let missing = 0;
+                for (const id of ids) {
+                  const name = deviceNameById.get(id);
+                  if (name === undefined) missing += 1;
+                  else names.push(name);
+                }
+                let summary = names.join(' · ');
+                if (missing > 0) {
+                  const gone = t('settings.memoryMissing', { n: missing });
+                  summary = summary.length > 0 ? `${summary} · ${gone}` : gone;
+                }
+                return <MemoryRow key={exeName} exeName={exeName} deviceNames={summary} />;
+              })
+            )}
+          </SectionCard>
+        </motion.div>
+
+        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.16 }}>
+          <SectionCard
+            icon={
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
@@ -286,7 +381,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           </SectionCard>
         </motion.div>
 
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.16 }}>
+        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.2 }}>
           <SectionCard
             icon={
               <svg
@@ -347,7 +442,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           </SectionCard>
         </motion.div>
 
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.2 }}>
+        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.24 }}>
           <SectionCard
             icon={
               <svg

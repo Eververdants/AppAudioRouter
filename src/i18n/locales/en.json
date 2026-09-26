@@ -33,6 +33,10 @@
     "routing": "Routing",
     "autoRemember": "Auto-remember",
     "autoRememberDesc": "Remember each process's device routing and restore it automatically",
+    "routeMemory": "Route memory",
+    "memoryEmpty": "Nothing remembered yet. Route a process with auto-remember on and it shows up here.",
+    "memoryMissing": "{{n}} unplugged",
+    "memoryDelete": "Forget this route",
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
     "background": "Background",
@@ -112,6 +116,9 @@
     "autostartOn": "Registered as a Windows startup app",
     "autostartOff": "Removed from Windows startup",
     "autostartFailed": "Failed to change the startup entry: {{error}}",
-    "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}"
+    "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}",
+    "routeMemoryFailed": "Failed to load route memory: {{error}}",
+    "routeMemoryCleared": "Cleared the remembered route of {{process}}",
+    "routeMemoryClearFailed": "Failed to clear the remembered route: {{error}}"
   }
 }

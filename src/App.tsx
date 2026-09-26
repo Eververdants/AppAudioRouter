@@ -75,6 +75,7 @@ export default function App() {
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
   const loadDeviceVolumes = useRouterStore((s) => s.loadDeviceVolumes);
   const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
+  const loadRememberedRoutes = useRouterStore((s) => s.loadRememberedRoutes);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const [view, setView] = useState<'router' | 'settings'>('router');
 
@@ -124,6 +125,10 @@ export default function App() {
       void refreshDevices();
       void loadDefaultDevice();
       void refreshSessions();
+      // Route memory is the read-back half of auto-remember: without it the
+      // persisted exe -> devices map is write-only. Cheap, so it rides along
+      // with the first enumeration.
+      void loadRememberedRoutes();
       // Routes can outlast the process (the audio service persists them), so
       // on boot the backend may already be duplicating for some PIDs while the
       // store still thinks nothing is routed. Reconcile before first paint so
@@ -137,6 +142,7 @@ export default function App() {
     refreshDevices,
     loadDefaultDevice,
     refreshSessions,
+    loadRememberedRoutes,
     reconcileActiveDuplications,
     loadShellSettings,
   ]);

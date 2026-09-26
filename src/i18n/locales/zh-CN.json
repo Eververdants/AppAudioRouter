@@ -33,6 +33,10 @@
     "routing": "路由",
     "autoRemember": "自动记忆",
     "autoRememberDesc": "记住每个进程的设备路由，下次自动恢复",
+    "routeMemory": "路由记忆",
+    "memoryEmpty": "还没有记忆。开启「自动记忆」后路由一个进程，它就会出现在这里。",
+    "memoryMissing": "{{n}} 台已断开",
+    "memoryDelete": "忘记这条路由",
     "delaySync": "延迟同步",
     "delaySyncDesc": "补偿较快的设备以对齐较慢（蓝牙）设备",
     "background": "后台运行",
@@ -112,6 +116,9 @@
     "autostartOn": "已注册为开机启动应用",
     "autostartOff": "已移除开机启动项",
     "autostartFailed": "修改开机启动项失败：{{error}}",
-    "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}"
+    "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}",
+    "routeMemoryFailed": "加载路由记忆失败：{{error}}",
+    "routeMemoryCleared": "已清除 {{process}} 的记忆路由",
+    "routeMemoryClearFailed": "清除记忆路由失败：{{error}}"
   }
 }

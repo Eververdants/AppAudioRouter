@@ -48,6 +48,10 @@ interface RouterState {
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
   autostart: boolean;
+  /** Remembered routes, keyed by exe name, in route order (first = primary).
+   * The read-back mirror of `route-memory.json`: selecting a process prefills
+   * its devices from here instead of leaving the memory write-only. */
+  rememberedRoutes: Record<string, string[]>;
   logs: LogEntry[];
   /** True while a route request is in flight, so a rapid double-click cannot
    * dispatch two overlapping routes against the same selection. */
@@ -74,6 +78,10 @@ interface RouterState {
   toggleAutoRemember: () => void;
   /** Read the close-to-tray preference and the startup registry entry. */
   loadShellSettings: () => Promise<void>;
+  /** Pull the persisted exe -> devices route memory into the store. */
+  loadRememberedRoutes: () => Promise<void>;
+  /** Forget one app's remembered route (the settings-page delete). */
+  clearRememberedRoute: (exeName: string) => Promise<void>;
   toggleCloseToTray: () => Promise<void>;
   toggleAutostart: () => Promise<void>;
   applyRoute: () => Promise<void>;
@@ -116,6 +124,19 @@ const sessionRefreshGate: RefreshGate = {
   rerunViaNotification: false,
 };
 
+/** localStorage key of the auto-remember preference, like the theme and the
+ * delay step: a UI preference the Rust side does not need to know about. */
+const AUTO_REMEMBER_STORAGE_KEY = 'aar-auto-remember';
+
+function readAutoRemember(): boolean {
+  try {
+    return localStorage.getItem(AUTO_REMEMBER_STORAGE_KEY) === 'true';
+  } catch {
+    /* storage may be unavailable; the preference just starts at its default */
+    return false;
+  }
+}
+
 function queueRefresh(gate: RefreshGate, viaNotification: boolean): void {
   const rerunViaNotification = gate.rerun
     ? gate.rerunViaNotification && viaNotification
@@ -136,6 +157,25 @@ function runQueuedRefresh(gate: RefreshGate, run: (viaNotification: boolean) => 
 function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
   const id = state.defaultDeviceId;
   return id !== null && state.devices.some((d) => d.id === id) ? [id] : [];
+}
+
+/**
+ * The exe's remembered route, filtered to devices that still exist.
+ *
+ * A memory pointing only at unplugged hardware must not prefill an unroutable
+ * selection — the apply would fail and the stage would show dead badges — so
+ * that case falls back to `null` and the caller uses its own default.
+ */
+function rememberedTargets(
+  state: Pick<RouterState, 'sessions' | 'rememberedRoutes' | 'devices'>,
+  pid: number,
+): string[] | null {
+  const exeName = state.sessions.find((s) => s.pid === pid)?.exe_name;
+  if (exeName === undefined) return null;
+  const ids = state.rememberedRoutes[exeName];
+  if (ids === undefined || ids.length === 0) return null;
+  const live = ids.filter((id) => state.devices.some((d) => d.id === id));
+  return live.length > 0 ? live : null;
 }
 
 /**
@@ -178,9 +218,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
   delaySync: false,
-  autoRemember: false,
+  autoRemember: readAutoRemember(),
   closeToTray: false,
   autostart: false,
+  rememberedRoutes: {},
   logs: [],
   applying: false,
   engineGenerations: {},
@@ -299,10 +340,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   selectProcess: (pid) =>
     set((s) => ({
-      // Single selection starts fresh from that process's active targets, or
-      // from the system default endpoint it already plays through.
+      // Single selection starts fresh from that process's active targets, its
+      // remembered route, or the system default endpoint it already plays
+      // through — in that order.
       selectedPids: [pid],
-      selectedDeviceIds: s.routedPids[pid] ?? defaultTargets(s),
+      selectedDeviceIds: s.routedPids[pid] ?? rememberedTargets(s, pid) ?? defaultTargets(s),
     })),
 
   toggleProcessSelection: (pid) =>
@@ -326,7 +368,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       return { selectedDeviceIds: next };
     }),
 
-  toggleAutoRemember: () => set((s) => ({ autoRemember: !s.autoRemember })),
+  toggleAutoRemember: () => {
+    const next = !get().autoRemember;
+    set({ autoRemember: next });
+    try {
+      localStorage.setItem(AUTO_REMEMBER_STORAGE_KEY, String(next));
+    } catch {
+      /* storage may be unavailable; the preference just does not persist */
+    }
+  },
 
   loadShellSettings: async () => {
     // Both come from the native side: the close-to-tray preference sits with the
@@ -340,6 +390,37 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       set({ closeToTray, autostart });
     } catch (e) {
       get().addLog(i18next.t('log.shellSettingsFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  loadRememberedRoutes: async () => {
+    try {
+      const routes = await api.getRememberedRoutes();
+      set({
+        rememberedRoutes: Object.fromEntries(routes.map(([exe, ids]) => [exe, [...ids]])),
+      });
+    } catch (e) {
+      get().addLog(i18next.t('log.routeMemoryFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  clearRememberedRoute: async (exeName) => {
+    // Optimistic: the row leaves the settings list immediately; if the backend
+    // could not persist the removal it goes back, matching the switch pattern.
+    const previous = get().rememberedRoutes[exeName];
+    set((s) => {
+      const rememberedRoutes = { ...s.rememberedRoutes };
+      delete rememberedRoutes[exeName];
+      return { rememberedRoutes };
+    });
+    try {
+      await api.clearRoute(exeName);
+      get().addLog(i18next.t('log.routeMemoryCleared', { process: exeName }), 'info');
+    } catch (e) {
+      set((s) => ({
+        rememberedRoutes: { ...s.rememberedRoutes, [exeName]: previous ?? [] },
+      }));
+      get().addLog(i18next.t('log.routeMemoryClearFailed', { error: String(e) }), 'error');
     }
   },
 
@@ -420,6 +501,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         selectedDeviceIds: ordered,
         engineGenerations: { ...s.engineGenerations, ...generations },
       }));
+      // The backend persisted the memory; mirror it so a later selection of the
+      // same app prefills these devices without another round-trip.
+      if (autoRemember) {
+        set((s) => {
+          const rememberedRoutes = { ...s.rememberedRoutes };
+          for (const target of targets) rememberedRoutes[target.exeName] = [...ordered];
+          return { rememberedRoutes };
+        });
+      }
       const count = targets.length;
       const key =
         count > 1
