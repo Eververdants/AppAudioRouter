@@ -6,6 +6,7 @@ mod autostart;
 mod commands;
 mod config;
 mod install;
+mod single_instance;
 mod tray;
 
 use std::time::Duration;
@@ -40,6 +41,16 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            // Before anything else: two instances would race on the config files
+            // and the audio devices, and every later step assumes it owns both.
+            // A second launch lands in `acquire`'s `None` branch — it has already
+            // asked the running instance to show its window — and exits quietly.
+            let Some(guard) = single_instance::acquire(app.handle().clone()) else {
+                app.exit(0);
+                return Ok(());
+            };
+            app.manage(guard);
+
             let route_config = config::RouteConfig::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(route_config);
