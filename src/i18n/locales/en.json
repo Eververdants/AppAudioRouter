@@ -33,6 +33,8 @@
     "routing": "Routing",
     "autoRemember": "Auto-remember",
     "autoRememberDesc": "Remember each process's device routing and restore it automatically",
+    "autoApplyMemory": "Auto-route new sessions",
+    "autoApplyMemoryDesc": "When an app starts playing and has a remembered route, apply it right away — no click needed",
     "routeMemory": "Route memory",
     "memoryEmpty": "Nothing remembered yet. Route a process with auto-remember on and it shows up here.",
     "memoryMissing": "{{n}} unplugged",
@@ -119,6 +121,9 @@
     "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}",
     "routeMemoryFailed": "Failed to load route memory: {{error}}",
     "routeMemoryCleared": "Cleared the remembered route of {{process}}",
-    "routeMemoryClearFailed": "Failed to clear the remembered route: {{error}}"
+    "routeMemoryClearFailed": "Failed to clear the remembered route: {{error}}",
+    "autoRouted": "Auto-routed {{process}} to {{device}} (remembered)",
+    "autoRoutedMulti": "Auto-routed {{process}} to {{device}} (+{{m}} copies, remembered)",
+    "autoRouteFailed": "Auto-routing {{process}} failed: {{error}}"
   }
 }

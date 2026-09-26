@@ -44,6 +44,9 @@ interface RouterState {
   /** Whether delay compensation is applied by the engine. */
   delaySync: boolean;
   autoRemember: boolean;
+  /** Whether a session that appears while the app runs gets its remembered
+   * route applied immediately, with no click. */
+  autoApplyMemory: boolean;
   /** Whether the close button hides the window to the tray instead of quitting. */
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
@@ -76,6 +79,11 @@ interface RouterState {
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
   toggleAutoRemember: () => void;
+  toggleAutoApplyMemory: () => void;
+  /** Apply remembered routes to sessions that just appeared. Skips pids that
+   * already carry a route and exes without a memory or with one whose devices
+   * are all gone; each apply is logged on its own. */
+  autoApplyRememberedRoutes: (fresh: AudioSession[]) => Promise<void>;
   /** Read the close-to-tray preference and the startup registry entry. */
   loadShellSettings: () => Promise<void>;
   /** Pull the persisted exe -> devices route memory into the store. */
@@ -136,6 +144,29 @@ function readAutoRemember(): boolean {
     return false;
   }
 }
+
+/** localStorage key of the auto-route preference. Unlike auto-remember this
+ * defaults to on: applying an already-saved route when an app starts playing
+ * is the point of remembering it, and the settings switch is the opt-out. */
+const AUTO_APPLY_STORAGE_KEY = 'aar-auto-apply-memory';
+
+function readAutoApplyMemory(): boolean {
+  try {
+    return localStorage.getItem(AUTO_APPLY_STORAGE_KEY) !== 'false';
+  } catch {
+    /* storage may be unavailable; the preference just starts at its default */
+    return true;
+  }
+}
+
+/**
+ * Whether the first session enumeration has completed.
+ *
+ * Every session already playing before it is a pre-existing app the window
+ * simply has not met yet — auto-routing all of them at once would be a bulk
+ * surprise. Only sessions that show up after the baseline are genuinely new.
+ */
+let sessionsBaselineReady = false;
 
 function queueRefresh(gate: RefreshGate, viaNotification: boolean): void {
   const rerunViaNotification = gate.rerun
@@ -219,6 +250,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   deviceVolumes: {},
   delaySync: false,
   autoRemember: readAutoRemember(),
+  autoApplyMemory: readAutoApplyMemory(),
   closeToTray: false,
   autostart: false,
   rememberedRoutes: {},
@@ -278,6 +310,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     sessionRefreshGate.inFlight = true;
     try {
       const sessions = await api.listSessions();
+      const previousPids = new Set(get().sessions.map((s) => s.pid));
       const livePids = new Set(sessions.map((s) => s.pid));
       const unchanged = sessionSignature(sessions) === sessionSignature(get().sessions);
       set((s) => {
@@ -302,6 +335,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           engineGenerations,
         };
       });
+      // The first enumeration is the baseline; afterwards, a session that was
+      // not there before is a genuinely new one and gets its remembered route
+      // applied without a click (fire-and-forget: applying may take a moment
+      // per session and must not hold the refresh gate hostage).
+      const isBaselineRun = !sessionsBaselineReady;
+      sessionsBaselineReady = true;
+      if (!isBaselineRun) {
+        const fresh = sessions.filter((s) => !previousPids.has(s.pid));
+        if (fresh.length > 0) void get().autoApplyRememberedRoutes(fresh);
+      }
       if (viaNotification && unchanged) return;
       get().addLog(
         viaNotification
@@ -375,6 +418,55 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       localStorage.setItem(AUTO_REMEMBER_STORAGE_KEY, String(next));
     } catch {
       /* storage may be unavailable; the preference just does not persist */
+    }
+  },
+
+  toggleAutoApplyMemory: () => {
+    const next = !get().autoApplyMemory;
+    set({ autoApplyMemory: next });
+    try {
+      localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(next));
+    } catch {
+      /* storage may be unavailable; the preference just does not persist */
+    }
+  },
+
+  autoApplyRememberedRoutes: async (fresh) => {
+    if (!get().autoApplyMemory) return;
+    for (const session of fresh) {
+      // A pid that already carries a route keeps it: re-applying would tear
+      // down and restart its engine for the same devices.
+      if (get().routedPids[session.pid] !== undefined) continue;
+      const remembered = get().rememberedRoutes[session.exe_name];
+      if (remembered === undefined || remembered.length === 0) continue;
+      // Only devices that are still connected can be routed to; a memory
+      // pointing solely at unplugged hardware is silently skipped so a silent
+      // error line does not fire for every launch of that app.
+      const live = remembered.filter((id) => get().devices.some((d) => d.id === id));
+      if (live.length === 0) continue;
+      const ordered = orderByDelay(live, get().deviceDelays);
+      const primaryId = ordered[0];
+      if (primaryId === undefined) continue;
+      const primary = get().devices.find((d) => d.id === primaryId)?.name ?? primaryId;
+      try {
+        // The route is already in the memory, so `remember` stays off — no
+        // point rewriting the file with the values it was read from.
+        const generation = await api.applyRoute(session.pid, session.exe_name, ordered, false);
+        set((s) => ({
+          routedPids: { ...s.routedPids, [session.pid]: [...ordered] },
+          engineGenerations: { ...s.engineGenerations, [session.pid]: generation },
+        }));
+        const key = ordered.length > 1 ? 'log.autoRoutedMulti' : 'log.autoRouted';
+        get().addLog(
+          i18next.t(key, { process: session.exe_name, device: primary, m: ordered.length - 1 }),
+          'success',
+        );
+      } catch (e) {
+        get().addLog(
+          i18next.t('log.autoRouteFailed', { process: session.exe_name, error: String(e) }),
+          'error',
+        );
+      }
     }
   },
 

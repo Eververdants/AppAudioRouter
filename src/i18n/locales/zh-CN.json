@@ -33,6 +33,8 @@
     "routing": "路由",
     "autoRemember": "自动记忆",
     "autoRememberDesc": "记住每个进程的设备路由，下次自动恢复",
+    "autoApplyMemory": "新会话自动路由",
+    "autoApplyMemoryDesc": "有记忆路由的程序一开播就自动应用，无需手动点击",
     "routeMemory": "路由记忆",
     "memoryEmpty": "还没有记忆。开启「自动记忆」后路由一个进程，它就会出现在这里。",
     "memoryMissing": "{{n}} 台已断开",
@@ -119,6 +121,9 @@
     "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}",
     "routeMemoryFailed": "加载路由记忆失败：{{error}}",
     "routeMemoryCleared": "已清除 {{process}} 的记忆路由",
-    "routeMemoryClearFailed": "清除记忆路由失败：{{error}}"
+    "routeMemoryClearFailed": "清除记忆路由失败：{{error}}",
+    "autoRouted": "已按记忆自动将 {{process}} 路由到 {{device}}",
+    "autoRoutedMulti": "已按记忆自动将 {{process}} 路由到 {{device}}（+{{m}} 台复制）",
+    "autoRouteFailed": "自动路由 {{process}} 失败：{{error}}"
   }
 }

@@ -140,6 +140,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
+  const autoApplyMemory = useRouterStore((s) => s.autoApplyMemory);
+  const toggleAutoApplyMemory = useRouterStore((s) => s.toggleAutoApplyMemory);
   const delaySync = useRouterStore((s) => s.delaySync);
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
@@ -291,6 +293,13 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 checked={autoRemember}
                 onChange={toggleAutoRemember}
                 label={t('settings.autoRemember')}
+              />
+            </Row>
+            <Row title={t('settings.autoApplyMemory')} desc={t('settings.autoApplyMemoryDesc')}>
+              <Switch
+                checked={autoApplyMemory}
+                onChange={toggleAutoApplyMemory}
+                label={t('settings.autoApplyMemory')}
               />
             </Row>
             <Row title={t('settings.delaySync')} desc={t('settings.delaySyncDesc')}>
