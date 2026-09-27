@@ -1,7 +1,7 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { DeviceAnnotation } from '@/components/DeviceAnnotation';
+import { DeviceAnnotation, type EngineRole } from '@/components/DeviceAnnotation';
 import { useFitScale } from '@/hooks/useFitScale';
 import { FADE, SPRING_GLIDE, SPRING_ROUTE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
@@ -53,6 +53,7 @@ interface DeviceNodeProps {
   isSelected: boolean;
   isPrimary: boolean;
   isLive: boolean;
+  engineRole: EngineRole;
   isDefault: boolean;
   delayRangeMs: number;
   onToggle: (deviceId: string) => void;
@@ -66,6 +67,7 @@ const DeviceNode = memo(function DeviceNode({
   isSelected,
   isPrimary,
   isLive,
+  engineRole,
   isDefault,
   delayRangeMs,
   onToggle,
@@ -144,6 +146,7 @@ const DeviceNode = memo(function DeviceNode({
           name={device.name}
           rangeMs={delayRangeMs}
           isSelected={isSelected}
+          engineRole={engineRole}
           delay={delay}
           volume={volume}
         />
@@ -186,6 +189,24 @@ export function ConcentricRouter() {
       selectedCount === 0 ? [] : [...new Set(selectedPids.flatMap((pid) => routedPids[pid] ?? []))],
     [selectedCount, selectedPids, routedPids],
   );
+
+  // Each device's live engine role across ALL routed processes: mirrors are
+  // driven by the engine (their delay/volume applies), the primary of a
+  // multi-device route is played by the OS (its values only anchor the group),
+  // and everything else — unrouted devices, single-device routes — has no
+  // engine path, so its values currently do nothing. A device that is a
+  // mirror of any route counts as a mirror: there its values are applied.
+  const engineRoles = useMemo(() => {
+    const roles = new Map<string, EngineRole>();
+    for (const ids of Object.values(routedPids)) {
+      if (ids.length < 2) continue;
+      ids.forEach((id, index) => {
+        if (index > 0) roles.set(id, 'mirror');
+        else if (!roles.has(id)) roles.set(id, 'primary');
+      });
+    }
+    return roles;
+  }, [routedPids]);
 
   // Geometry depends only on the device list; memoize so it is recomputed on
   // hotplug, not on every selection/delay/volume change.
@@ -338,6 +359,7 @@ export function ConcentricRouter() {
                     isSelected={isSelected}
                     isPrimary={isPrimary}
                     isLive={isLive}
+                    engineRole={engineRoles.get(device.id) ?? 'inactive'}
                     isDefault={device.id === defaultDeviceId}
                     delayRangeMs={delayRangeMs}
                     onToggle={toggleDeviceSelection}

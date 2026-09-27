@@ -15,14 +15,18 @@
   },
   "deviceVolume": {
     "valueLabel": "Volume of {{device}}, relative to the loudest device, in percent",
-    "hint": "Attenuates this device relative to the loudest one in its group. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value"
+    "hint": "Attenuates this device relative to the loudest one in its group. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value",
+    "inactive": "Not applied right now: volume balancing only runs in multi-device duplication routes",
+    "primary": "The system plays this device directly, so software cannot attenuate it; its value anchors the group's loudest level"
   },
   "deviceDelay": {
     "valueLabel": "Delay compensation of {{device}} in milliseconds",
     "hint": "Drag sideways, or scroll / press arrows for {{step}} a time (hold Shift for ten); click to type an exact value",
     "stepUp": "{{step}} later",
     "stepDown": "{{step}} earlier",
-    "syncOff": "Latency sync is off, so these values are not applied; enable it in the settings"
+    "syncOff": "Latency sync is off, so these values are not applied; enable it in the settings",
+    "inactive": "Not applied right now: delay compensation only runs in multi-device duplication routes; a single-device route is played by the system directly",
+    "primary": "The system plays this device directly (the route's anchor); its value only shifts the alignment reference of the whole group"
   },
   "settings": {
     "title": "Settings",
@@ -48,7 +52,7 @@
     "autostart": "Start with Windows",
     "autostartDesc": "Launches into the tray with no window at sign-in, so remembered routes are ready before you open anything.",
     "delays": "Delay compensation",
-    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number under a device node, or scroll it.",
+    "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number under a device node, or scroll it. Delay and volume only apply in multi-device duplication routes; a single-device route is played by the system directly, with no engine in between.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
     "delayStep": "Step size",

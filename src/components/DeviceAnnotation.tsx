@@ -2,6 +2,18 @@ import { DelayReadout } from '@/components/ui/DelayReadout';
 import { VolumeReadout } from '@/components/ui/VolumeReadout';
 
 /**
+ * Whether (and how) a device's delay/volume values are currently applied.
+ *
+ * - `mirror`: the duplication engine drives this device, so its values take
+ *   effect directly.
+ * - `primary`: the system plays this device natively — software can neither
+ *   delay nor attenuate that path, so its values only anchor the group.
+ * - `inactive`: no engine path involves this device (unrouted, or the sole
+ *   target of a single-device route), so its values do nothing right now.
+ */
+export type EngineRole = 'mirror' | 'primary' | 'inactive';
+
+/**
  * The annotations hanging under one device node: its delay and its volume.
  *
  * The values are owned by the parent DeviceNode, which subscribes to them
@@ -16,6 +28,7 @@ export function DeviceAnnotation({
   name,
   rangeMs,
   isSelected,
+  engineRole,
   delay,
   volume,
 }: {
@@ -23,6 +36,7 @@ export function DeviceAnnotation({
   name: string;
   rangeMs: number;
   isSelected: boolean;
+  engineRole: EngineRole;
   delay?: number;
   volume?: number;
 }) {
@@ -39,11 +53,13 @@ export function DeviceAnnotation({
         aria-hidden="true"
         className="absolute -top-1.5 left-1/2 h-1.5 w-px -translate-x-1/2 bg-accent/30"
       />
-      {showDelay && <DelayReadout deviceId={deviceId} name={name} rangeMs={rangeMs} />}
+      {showDelay && (
+        <DelayReadout deviceId={deviceId} name={name} rangeMs={rangeMs} engineRole={engineRole} />
+      )}
       {showDelay && showVolume && (
         <span aria-hidden="true" className="h-2.5 w-px flex-none bg-border" />
       )}
-      {showVolume && <VolumeReadout deviceId={deviceId} name={name} />}
+      {showVolume && <VolumeReadout deviceId={deviceId} name={name} engineRole={engineRole} />}
     </div>
   );
 }
