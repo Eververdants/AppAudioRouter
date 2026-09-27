@@ -10,17 +10,26 @@ use crate::audio::duplication::{ActiveRoute, DuplicationManager};
 use crate::config::{AppSettings, DelayConfig, RouteConfig, VolumeConfig};
 
 /// List all active render (playback) devices.
+///
+/// Async so the walk runs on a blocking thread instead of the WebView2 main
+/// thread, which a sync command would hold for the whole enumeration.
 #[tauri::command]
-pub fn list_devices() -> Result<Vec<audio::AudioDevice>, String> {
+pub async fn list_devices() -> Result<Vec<audio::AudioDevice>, String> {
     info!("cmd: list_devices");
-    audio::devices::enumerate_render_devices().map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(audio::devices::enumerate_render_devices)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// List all active audio sessions (processes with audio).
 #[tauri::command]
-pub fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
+pub async fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
     info!("cmd: list_sessions");
-    audio::sessions::enumerate_sessions().map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(audio::sessions::enumerate_sessions)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// Set the default audio device for a process.
@@ -46,9 +55,12 @@ pub async fn set_default_device(device_id: String, role: String) -> Result<(), S
 
 /// Get the current system default render device.
 #[tauri::command]
-pub fn get_default_device() -> Result<audio::AudioDevice, String> {
+pub async fn get_default_device() -> Result<audio::AudioDevice, String> {
     info!("cmd: get_default_device");
-    audio::devices::get_default_render_device().map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(audio::devices::get_default_render_device)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// Route a process to an ordered list of devices.
@@ -113,7 +125,10 @@ pub async fn stop_route(
     // Resolve the fallback endpoint before tearing down duplication: if the lookup
     // fails we return early and the app keeps playing to its current device
     // instead of being left with no active route at all.
-    let default_device = audio::devices::get_default_render_device().map_err(|e| e.to_string())?;
+    let default_device = tokio::task::spawn_blocking(audio::devices::get_default_render_device)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     duplications.stop(pid);
 
     audio::routing::set_process_default_device(&default_device.id, pid, audio::Role::All)

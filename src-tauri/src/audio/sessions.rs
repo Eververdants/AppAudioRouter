@@ -4,7 +4,7 @@
 //! default one — apps already routed to a non-default device must stay visible
 //! for re-routing.
 
-use log::info;
+use log::debug;
 use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
@@ -130,7 +130,7 @@ fn collect_device_sessions(
 
         let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
 
-        info!("session: {exe_name} (PID {pid}) display={display_name}");
+        debug!("session: {exe_name} (PID {pid}) display={display_name}");
         sessions.push(AudioSession {
             pid,
             exe_name,
