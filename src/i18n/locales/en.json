@@ -3,6 +3,8 @@
   "processList": {
     "title": "Processes",
     "refresh": "Refresh",
+    "search": "Search processes",
+    "noMatch": "No process matches the search",
     "empty": "No processes with audio sessions found",
     "emptyHint": "Play sound in the target app, then refresh",
     "routedBadge": "Routed to {{n}} device(s)",

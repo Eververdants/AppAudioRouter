@@ -1,13 +1,7 @@
 /** Tauri invoke wrapper with typed commands. */
 
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  ActiveRoute,
-  AudioDevice,
-  AudioSession,
-  DeviceDelay,
-  RememberedRoute,
-} from './types';
+import type { ActiveRoute, AudioDevice, AudioSession, DeviceDelay, RememberedRoute } from './types';
 
 export async function listDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>('list_devices');

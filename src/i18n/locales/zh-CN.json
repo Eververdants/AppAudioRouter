@@ -3,6 +3,8 @@
   "processList": {
     "title": "进程列表",
     "refresh": "刷新",
+    "search": "搜索进程",
+    "noMatch": "没有匹配的进程",
     "empty": "未检测到有音频会话的进程",
     "emptyHint": "让目标程序发出声音后刷新",
     "routedBadge": "已路由到 {{n}} 台设备",
