@@ -11,13 +11,13 @@
 //! as `autostart`: the plugin would add a version-locked npm/Cargo pair for
 //! what two kernel objects do in one small file.
 
-use std::os::windows::io::OwnedHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use tauri::{AppHandle, Manager};
-use windows::core::{PCWSTR, w};
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, WAIT_OBJECT_0};
+use windows::core::{w, PCWSTR};
+use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
-    CreateEventW, CreateMutexW, INFINITE, SetEvent, WaitForSingleObject,
+    CreateEventW, CreateMutexW, SetEvent, WaitForSingleObject, INFINITE,
 };
 
 /// Per-session mutex naming this app. `Local\` leaves other logon sessions
