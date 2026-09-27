@@ -31,9 +31,12 @@ pub enum AudioError {
 
 /// Initialize COM on the calling thread for the duration of a command.
 ///
-/// Tauri runs sync commands on the main thread, which is already COM STA
-/// (WebView2). Requesting COINIT_MULTITHREADED there fails with
-/// RPC_E_CHANGED_MODE; the apartment is already initialized, so we reuse it.
+/// Audio work runs on threads this project owns — `spawn_blocking` workers for
+/// the enumeration and routing commands, the notification thread, one capture
+/// and one render thread per engine — so the multithreaded apartment is usually
+/// free and we get it. The request can still fail with `RPC_E_CHANGED_MODE` on
+/// an apartment initialized by someone else (Tauri runs sync commands on the
+/// WebView2 STA main thread); the apartment is already usable, so reuse it.
 ///
 /// Returns `true` when the caller must balance with `CoUninitialize()`.
 pub fn init_com() -> Result<bool, AudioError> {
