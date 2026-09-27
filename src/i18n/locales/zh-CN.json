@@ -92,6 +92,7 @@
     "deviceVolumeFailed": "设置设备音量失败：{{error}}",
     "deviceVolumesFailed": "加载设备音量失败：{{error}}",
     "routeFailed": "路由失败：{{error}}",
+    "routePartiallyFailed": "已路由 {{n}} 个进程中的 {{ok}} 个，其余失败：{{error}}",
     "routeStopped": "已停止 {{process}} 的路由，恢复系统默认",
     "stopRouteFailed": "停止路由失败：{{error}}",
     "duplicationFailed": "进程 {{pid}} 复制路由失败：{{error}}",

@@ -92,6 +92,7 @@
     "deviceVolumeFailed": "Failed to set device volume: {{error}}",
     "deviceVolumesFailed": "Failed to load device volumes: {{error}}",
     "routeFailed": "Routing failed: {{error}}",
+    "routePartiallyFailed": "Routed {{ok}} of {{n}} processes, the rest failed: {{error}}",
     "routeStopped": "Stopped routing {{process}}, back to system default",
     "stopRouteFailed": "Failed to stop routing: {{error}}",
     "duplicationFailed": "Duplication failed for PID {{pid}}: {{error}}",
