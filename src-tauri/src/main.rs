@@ -46,7 +46,8 @@ fn main() {
             // A second launch lands in `acquire`'s `None` branch — it has already
             // asked the running instance to show its window — and exits quietly.
             let Some(guard) = single_instance::acquire(app.handle().clone()) else {
-                app.exit(0);
+                // `exit` lives on the handle, not on `App` itself.
+                app.handle().exit(0);
                 return Ok(());
             };
             app.manage(guard);
