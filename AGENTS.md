@@ -148,6 +148,8 @@ AppAudioRouter/
 
 - 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
 - 进程选择是有序集合（`selectedPids`）：单击单选，Ctrl+点击多选；一次路由操作应用到全部选中进程
+- 多进程的一次路由**并发下发**（`applyRoute` / `stopAllRoutes` 用 `Promise.allSettled`，每个 PID 一路 `apply_route`）：后端本来就按进程独立处理，串行 await 只是把 N 次往返加总。
+  结果必须**逐进程**判定——只有后端接受的那些才拿到徽标、引擎代号和记忆路由，部分失败另记一条 `log.routePartiallyFailed`，不要让整批看起来都成功了
 - 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
 - 系统默认渲染设备由 `get_default_device` 取得并存入 `defaultDeviceId`；进程无可记忆路由时以它作为默认关联设备（选中进程即自动选中），进程列表每行显示该进程当前播放到的设备
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
@@ -158,7 +160,9 @@ AppAudioRouter/
 - 延迟入口在**设备节点胶囊下方**（`DeviceAnnotation` 里的 `DelayReadout`，绝对定位，不参与胶囊布局）：
   hairline 引线 + 签名数值 + 小号 `ms`，**没有任何 ± 按钮**，胶囊本身只写设备名。
   横向拖动按配置步进连续调节（4px 一步），滚轮 / 方向键步进（Shift 十倍），点击键入精确值。
-  拖动期间只更新本地预览、松手一次性提交（一次手势只留一条日志）；步进与键入即时提交。
+  拖动期间只更新本地预览、松手一次性提交（一次手势只留一条日志）；滚轮/方向键的连续步进同样先更新本地预览、静默 300ms
+  （`STEP_COMMIT_MS`）后只提交一次——一次 flick 必须是一条日志，而且每一步都要真的累加（同帧到达的多格如果各自从 `value` 起步，会互相吃掉）。
+  进入拖动或键入前先冲掉待提交的步进值，控件卸载时也必须冲掉，别把改动丢在地上。
   零值渲染为弱化色，非零或交互中才用 accent。标注显隐规则：**选中 或 延迟≠0**
   （后者保证舞台不会隐藏一个已生效的偏移）。
   **胶囊宽度恒定**——悬停/编辑都不改变任何宽度（历史上那套「胶囊内嵌步进器 + 悬停展开」的方案已废弃，不要再复活）。
@@ -198,6 +202,8 @@ AppAudioRouter/
 
 - 设备/进程列表由后端事件 `audio-changed`（`{ devices: bool, sessions: bool }`）驱动，仍然**没有轮询**——注册的是 COM 回调，不是定时器。
 - ⚠️ **COM 指针只能活在通知线程里**。windows-rs 0.58 的接口既不是 `Send` 也不是 `Sync`：本模块用「一个 MTA 线程独占所有指针，回调只往 `mpsc` 丢一条消息」来避免 `unsafe impl Send`。想把 `IMMDeviceEnumerator`/`IAudioSessionNotification` 塞进 `app.manage()` 之前先想起这条。
+- ⚠️ **枚举不许回到主线程**。`list_devices` / `list_sessions` / `get_default_device` 是 async 命令 + `tokio::task::spawn_blocking`（和 `routing.rs` 那套一致），因此每条 `audio-changed` 触发的遍历都发生在 blocking 线程的 MTA 里。
+  把它们改回同步 = 每次插拔设备/新程序出声时，在 WebView2 主线程上走完「所有渲染设备 × 所有会话 × 每 PID 一次 `OpenProcess`」，窗口会当场卡一下；逐条 `debug!`（设备 id、窗口标题）也一样别升回 `info!`，一次通知批次会刷几十行。
 - 三种回调缺一不可：`IMMNotificationClient`（端点增删/默认切换/属性变化）、`IAudioSessionNotification`（**只报新建**）、`IAudioSessionEvents::OnStateChanged(Expired)`（会话消亡）。少了最后一种，进程列表会永远留着早就停止播放的程序。`Inactive`（暂停但会话还在）**不能**当成退出处理，否则暂停一下就从列表消失。
 - 线程启动时必须先 `sync()` 一次：两种回调都只报「变化」，不给已存在的设备/会话预先挂钩子，启动前就在放音的程序永远不会被通知到。
 - 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
