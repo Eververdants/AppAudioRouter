@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
@@ -80,6 +80,20 @@ export function ProcessList() {
   // The first selected process owns the sliding pill, so a plain click on
   // another row carries the highlight across instead of blinking.
   const anchorPid: number | null = selectedPids[0] ?? null;
+  const [query, setQuery] = useState('');
+
+  /** The rows on screen: filtered by what was typed, routed processes floated
+   * to the top. A stable sort keeps the enumeration order within each group,
+   * so rows do not reshuffle among themselves while audio comes and goes. */
+  const visibleSessions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? sessions.filter((s) => s.exe_name.toLowerCase().includes(q))
+      : sessions;
+    return [...filtered].sort(
+      (a, b) => (routedPids[b.pid]?.length ?? 0) - (routedPids[a.pid]?.length ?? 0),
+    );
+  }, [sessions, query, routedPids]);
 
   /** Playback device a process is associated with: its route's primary device,
    * or the system default it currently plays through. */
@@ -147,35 +161,76 @@ export function ProcessList() {
         </div>
       </div>
 
+      {sessions.length > 0 && (
+        <div className="relative mb-2 flex-none">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="20" y1="20" x2="16.5" y2="16.5" />
+          </svg>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape clears and returns the focus to nowhere in particular,
+              // matching how search boxes behave everywhere else.
+              if (e.key === 'Escape') {
+                setQuery('');
+                e.currentTarget.blur();
+              }
+            }}
+            placeholder={t('processList.search')}
+            aria-label={t('processList.search')}
+            className="bg-bg-secondary/60 w-full rounded-lg border border-transparent py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-accent/50 focus:bg-bg-secondary"
+          />
+        </div>
+      )}
+
       <motion.div
         variants={container}
         initial="hidden"
         animate="show"
         className="flex-1 space-y-1.5 overflow-y-auto"
       >
-        {sessions.length === 0 ? (
+        {visibleSessions.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="text-text-muted/60"
-            >
-              <path d="M11 5 6 9H2v6h4l5 4V5z" />
-              <line x1="22" y1="9" x2="16" y2="15" />
-              <line x1="16" y1="9" x2="22" y2="15" />
-            </svg>
+            {query.trim() === '' && (
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="text-text-muted/60"
+              >
+                <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                <line x1="22" y1="9" x2="16" y2="15" />
+                <line x1="16" y1="9" x2="22" y2="15" />
+              </svg>
+            )}
             <p className="text-xs leading-relaxed text-text-muted">
-              {t('processList.empty')}
-              <br />
-              <span className="text-[10px]">{t('processList.emptyHint')}</span>
+              {query.trim() === '' ? t('processList.empty') : t('processList.noMatch')}
+              {query.trim() === '' && (
+                <>
+                  <br />
+                  <span className="text-[10px]">{t('processList.emptyHint')}</span>
+                </>
+              )}
             </p>
           </div>
         ) : (
-          sessions.map((session) => {
+          visibleSessions.map((session) => {
             const routedCountForPid = routedPids[session.pid]?.length ?? 0;
             const isSelected = selectedPids.includes(session.pid);
             const deviceName = associatedName(session.pid);
