@@ -576,33 +576,54 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const primary = deviceNames[0];
     const extra = ordered.length - 1;
     try {
-      const generations: Record<number, number> = {};
-      for (const target of targets) {
-        generations[target.pid] = await api.applyRoute(
-          target.pid,
-          target.exeName,
-          ordered,
-          autoRemember,
+      // One invoke per process, all of them in flight together: the backend
+      // routes each PID on its own, so awaiting them in a loop simply added
+      // their latencies up — a ten-process selection cost ten times one.
+      const results = await Promise.allSettled(
+        targets.map((target) => api.applyRoute(target.pid, target.exeName, ordered, autoRemember)),
+      );
+      const applied: { pid: number; exeName: string; generation: number }[] = [];
+      const errors: string[] = [];
+      results.forEach((result, index) => {
+        const target = targets[index];
+        if (target === undefined) return;
+        if (result.status === 'fulfilled') {
+          applied.push({ ...target, generation: result.value });
+        } else {
+          errors.push(String(result.reason));
+        }
+      });
+      if (applied.length === 0) {
+        get().addLog(
+          i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }),
+          'error',
         );
+        return;
       }
+
+      // Only the processes the backend actually accepted keep a badge, an engine
+      // identity and a memory; a partial apply must not claim the rest.
       set((s) => ({
         routedPids: {
           ...s.routedPids,
-          ...Object.fromEntries(targets.map((t) => [t.pid, [...ordered]])),
+          ...Object.fromEntries(applied.map((t) => [t.pid, [...ordered]])),
         },
         selectedDeviceIds: ordered,
-        engineGenerations: { ...s.engineGenerations, ...generations },
+        engineGenerations: {
+          ...s.engineGenerations,
+          ...Object.fromEntries(applied.map((t) => [t.pid, t.generation])),
+        },
       }));
       // The backend persisted the memory; mirror it so a later selection of the
       // same app prefills these devices without another round-trip.
       if (autoRemember) {
         set((s) => {
           const rememberedRoutes = { ...s.rememberedRoutes };
-          for (const target of targets) rememberedRoutes[target.exeName] = [...ordered];
+          for (const target of applied) rememberedRoutes[target.exeName] = [...ordered];
           return { rememberedRoutes };
         });
       }
-      const count = targets.length;
+      const count = applied.length;
       const key =
         count > 1
           ? autoRemember
@@ -614,12 +635,18 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(
         i18next.t(key, {
           n: count,
-          process: targets[0]?.exeName ?? '',
+          process: applied[0]?.exeName ?? '',
           device: primary,
           m: extra,
         }),
         'success',
       );
+      if (errors.length > 0) {
+        get().addLog(
+          i18next.t('log.routePartiallyFailed', { ok: count, n: targets.length, error: errors[0] }),
+          'error',
+        );
+      }
     } catch (e) {
       get().addLog(i18next.t('log.routeFailed', { error: String(e) }), 'error');
     } finally {
@@ -673,15 +700,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const snapshot = { ...get().routedPids };
     const generationSnapshot = { ...get().engineGenerations };
     set({ routedPids: {}, engineGenerations: {} });
+    const results = await Promise.allSettled(pids.map((pid) => api.stopRoute(pid)));
     const failed: number[] = [];
-    for (const pid of pids) {
-      try {
-        await api.stopRoute(pid);
-      } catch (e) {
+    results.forEach((result, index) => {
+      const pid = pids[index];
+      if (pid === undefined) return;
+      if (result.status === 'rejected') {
         failed.push(pid);
-        get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
+        get().addLog(i18next.t('log.stopRouteFailed', { error: String(result.reason) }), 'error');
       }
-    }
+    });
     set((s) => {
       const routedPids: Record<number, string[]> = {};
       const engineGenerations: Record<number, number> = {};
