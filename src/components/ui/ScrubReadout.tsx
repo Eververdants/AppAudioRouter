@@ -3,6 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 /** Travel after which a press counts as a scrub rather than a click. */
 const DRAG_SLOP_PX = 3;
 
+/**
+ * Quiet period before a stepped value is written. A wheel flick or a held arrow
+ * key is one gesture, so it should cost one round-trip, one file write and one
+ * log line — the same rule a scrub already follows.
+ */
+const STEP_COMMIT_MS = 300;
+
 export interface ScrubReadoutProps {
   /** Committed value, owned by the store. */
   value: number;
@@ -39,7 +46,9 @@ export interface ScrubReadoutProps {
  *
  * A scrub reports its value locally and commits once, when the pointer is
  * released: a gesture should leave one entry in the log, not one per pixel.
- * Stepping and typing commit right away, so the engine follows along.
+ * A run of steps commits the same way — as soon as the wheel or the arrow keys
+ * go quiet — while typing commits on Enter or blur, because the figure is only
+ * meaningful once it is finished.
  */
 export function ScrubReadout({
   value,
@@ -60,13 +69,39 @@ export function ScrubReadout({
   const [draft, setDraft] = useState<string | null>(null);
   /** Value shown mid-scrub; `null` when the field mirrors the store. */
   const [scrub, setScrub] = useState<number | null>(null);
+  /** Stepped value waiting for the quiet period; `null` once written. */
+  const [stepped, setStepped] = useState<number | null>(null);
   const hostRef = useRef<HTMLSpanElement>(null);
   const drag = useRef<{ x: number; from: number; moved: boolean } | null>(null);
   /** Set by Escape so the blur it triggers reverts instead of committing. */
   const reverting = useRef(false);
+  /** `stepped` as the timer and the unmount cleanup see it. */
+  const steppedRef = useRef<number | null>(null);
+  const stepTimer = useRef<number | null>(null);
 
   const clamp = (raw: number) => Math.max(min, Math.min(max, Math.round(raw)));
-  const shown = scrub ?? value;
+  const shown = scrub ?? stepped ?? value;
+
+  const rememberStep = (next: number | null) => {
+    steppedRef.current = next;
+    setStepped(next);
+  };
+
+  /**
+   * Write a stepped value now. Called when the quiet period ends, when the
+   * pointer takes over the number, and when the control goes away — a pending
+   * step must never be dropped on the floor.
+   */
+  const flushSteps = () => {
+    if (stepTimer.current !== null) {
+      window.clearTimeout(stepTimer.current);
+      stepTimer.current = null;
+    }
+    const next = steppedRef.current;
+    if (next === null) return;
+    rememberStep(null);
+    onCommit(next);
+  };
 
   const commit = () => {
     const raw = draft;
@@ -83,21 +118,37 @@ export function ScrubReadout({
 
   const stepBy = (direction: 1 | -1, times = 1) => {
     const typed = draft !== null && draft.trim() !== '' ? Number(draft) : Number.NaN;
-    const base = Number.isFinite(typed) ? typed : value;
+    // Step from the pending figure rather than from the store: a burst of wheel
+    // notches all arrive before React re-renders, so `value` would still be the
+    // old one for every single of them.
+    const base = Number.isFinite(typed) ? typed : (steppedRef.current ?? value);
     setDraft(null);
     // Snap first, so a value left behind by a coarser step lands on the grid.
     const snapped = Math.round(base / step) * step;
-    onCommit(clamp(snapped + direction * step * times));
+    rememberStep(clamp(snapped + direction * step * times));
+    if (stepTimer.current !== null) window.clearTimeout(stepTimer.current);
+    stepTimer.current = window.setTimeout(() => {
+      stepTimer.current = null;
+      latest.current.flushSteps();
+    }, STEP_COMMIT_MS);
   };
 
   // React registers `wheel` passively, where `preventDefault` is ignored — the
   // listener has to be attached by hand to keep a scroll over the stage from
   // also scrolling whatever is behind it. The handler reads the latest closure
   // through a ref, so re-subscribing per render is not needed.
-  const latest = useRef({ stepBy, editing });
+  const latest = useRef({ stepBy, editing, flushSteps });
   useEffect(() => {
-    latest.current = { stepBy, editing };
+    latest.current = { stepBy, editing, flushSteps };
   });
+  useEffect(
+    () => () => {
+      // The control can disappear with a step still pending — a device unplugged
+      // mid-scroll, or the view switching away. Write it rather than lose it.
+      latest.current.flushSteps();
+    },
+    [],
+  );
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -136,6 +187,9 @@ export function ScrubReadout({
       title={hint}
       onPointerDown={(e) => {
         if (editing || e.button !== 0) return;
+        // Settle a pending step first: the scrub continues from the number on
+        // screen, and its own release is the next write.
+        flushSteps();
         drag.current = { x: e.clientX, from: shown, moved: false };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
@@ -159,6 +213,7 @@ export function ScrubReadout({
           stepBy(-1, e.shiftKey ? 10 : 1);
         } else if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
+          flushSteps();
           setEditing(true);
         }
       }}
