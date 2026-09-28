@@ -22,7 +22,10 @@
 //! Each engine is a capture thread plus one render thread per mirror. Threads
 //! watch a shared `shutdown` flag and, when it is set — or when the target
 //! process exits — they clean up, unregister the engine, and notify the
-//! frontend via the `duplication-stopped` event.
+//! frontend via the `duplication-stopped` event. A single mirror that cannot be
+//! opened or that errors out later does not take the engine down: it is dropped
+//! from the route and reported on its own through `duplication-mirror-failed`,
+//! so the remaining devices keep playing and the UI can say which one went quiet.
 //!
 //! Synchronization: render clients do not start independently. The capture
 //! thread opens a gate once every device is initialized and every ring holds
@@ -617,7 +620,7 @@ impl DuplicationManager {
 
 /// Entry point of an engine's capture thread.
 fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
-    let reason = run_capture(&shared);
+    let reason = run_capture(&shared, &app);
     // Release the render threads regardless of how the capture loop ended.
     shared.shutdown.store(true, Ordering::Relaxed);
     match &reason {
@@ -645,24 +648,24 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
 }
 
 /// Activate the capture client and pump captured frames into the mirror rings.
-fn run_capture(shared: &Arc<EngineShared>) -> ExitReason {
+fn run_capture(shared: &Arc<EngineShared>, app: &AppHandle) -> ExitReason {
     let com_owned = match crate::audio::init_com() {
         Ok(owned) => owned,
         Err(e) => return ExitReason::Error(e),
     };
-    let result = capture_loop(shared);
+    let result = capture_loop(shared, app);
     crate::audio::uninit_com(com_owned);
     result
 }
 
-fn capture_loop(shared: &Arc<EngineShared>) -> ExitReason {
-    match capture_stream(shared) {
+fn capture_loop(shared: &Arc<EngineShared>, app: &AppHandle) -> ExitReason {
+    match capture_stream(shared, app) {
         Ok(reason) => reason,
         Err(e) => ExitReason::Error(e),
     }
 }
 
-fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> {
+fn capture_stream(shared: &Arc<EngineShared>, app: &AppHandle) -> Result<ExitReason, AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
     let client = activate_process_loopback(shared.pid)?;
@@ -727,9 +730,10 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
     for mirror in &shared.mirrors {
         let mirror = mirror.clone();
         let shared = shared.clone();
+        let app = app.clone();
         // Render threads report their own errors via `enabled`, so the join
         // result is ignored on purpose.
-        render_threads.push(std::thread::spawn(move || render_main(shared, mirror)));
+        render_threads.push(std::thread::spawn(move || render_main(shared, mirror, app)));
     }
 
     let mut gate = StartGate {
@@ -928,12 +932,11 @@ fn capture_packets_inner(
 }
 
 /// Entry point of one mirror's render thread.
-fn render_main(shared: Arc<EngineShared>, mirror: Arc<MirrorChannel>) {
+fn render_main(shared: Arc<EngineShared>, mirror: Arc<MirrorChannel>, app: AppHandle) {
     let com_owned = match crate::audio::init_com() {
         Ok(owned) => owned,
         Err(e) => {
-            warn!("mirror device {}: {e}", mirror.device_id);
-            mirror.enabled.store(false, Ordering::Relaxed);
+            fail_mirror(&shared, &mirror, &app, e);
             // A failed mirror must not hold the synchronized-start gate open.
             shared.ready_count.fetch_add(1, Ordering::Relaxed);
             return;
@@ -943,16 +946,36 @@ fn render_main(shared: Arc<EngineShared>, mirror: Arc<MirrorChannel>) {
     match open_render_session(&shared, &mirror) {
         Ok(session) => {
             shared.ready_count.fetch_add(1, Ordering::Relaxed);
-            render_run(&shared, &mirror, session);
+            render_run(&shared, &mirror, session, &app);
         }
         Err(e) => {
-            warn!("mirror device {} failed: {e}", mirror.device_id);
-            mirror.enabled.store(false, Ordering::Relaxed);
+            fail_mirror(&shared, &mirror, &app, e);
             shared.ready_count.fetch_add(1, Ordering::Relaxed);
         }
     }
 
     crate::audio::uninit_com(com_owned);
+}
+
+/// Take one mirror out of service and tell the frontend why.
+///
+/// The engine keeps running for the devices that did open, so nothing else
+/// reports this — and a `warn!` in a release build goes to a stderr the window
+/// subsystem discards. Without the event a route that lost one of its targets
+/// still shows as fully applied, which is indistinguishable from the app being
+/// broken: the second device is silent and there is nothing on screen to say so.
+fn fail_mirror(shared: &EngineShared, mirror: &MirrorChannel, app: &AppHandle, error: AudioError) {
+    warn!("mirror device {} failed: {error}", mirror.device_id);
+    mirror.enabled.store(false, Ordering::Relaxed);
+    let _ = app.emit(
+        "duplication-mirror-failed",
+        json!({
+            "pid": shared.pid,
+            "generation": shared.generation,
+            "deviceId": mirror.device_id,
+            "error": error.to_string(),
+        }),
+    );
 }
 
 /// A fully initialized render client, not yet started.
@@ -1058,7 +1081,12 @@ fn open_render_session(
 }
 
 /// Wait for the synchronized-start gate, then run the render loop.
-fn render_run(shared: &EngineShared, mirror: &MirrorChannel, session: RenderSession) {
+fn render_run(
+    shared: &EngineShared,
+    mirror: &MirrorChannel,
+    session: RenderSession,
+    app: &AppHandle,
+) {
     // A slow device (e.g. Bluetooth connecting for the first time) holds the
     // gate closed; the other mirrors wait for it instead of running ahead.
     while !shared.go.load(Ordering::Relaxed) {
@@ -1072,8 +1100,12 @@ fn render_run(shared: &EngineShared, mirror: &MirrorChannel, session: RenderSess
     }
     // SAFETY: Start on a fully initialized client.
     if let Err(e) = unsafe { session.client.Start() } {
-        warn!("mirror device {} failed to start: {e}", mirror.device_id);
-        mirror.enabled.store(false, Ordering::Relaxed);
+        fail_mirror(
+            shared,
+            mirror,
+            app,
+            AudioError::Api(format!("Start(render) failed: {e}")),
+        );
         return;
     }
 
@@ -1083,8 +1115,7 @@ fn render_run(shared: &EngineShared, mirror: &MirrorChannel, session: RenderSess
         let _ = session.client.Stop();
     }
     if let Err(e) = result {
-        warn!("mirror device {} failed: {e}", mirror.device_id);
-        mirror.enabled.store(false, Ordering::Relaxed);
+        fail_mirror(shared, mirror, app, e);
     }
 }
 
