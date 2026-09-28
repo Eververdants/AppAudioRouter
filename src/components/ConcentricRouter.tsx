@@ -2,6 +2,7 @@ import { memo, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DeviceAnnotation, type EngineRole } from '@/components/DeviceAnnotation';
+import { useDecorativeMotion } from '@/hooks/useDecorativeMotion';
 import { useFitScale } from '@/hooks/useFitScale';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -55,6 +56,8 @@ interface DeviceNodeProps {
   engineRole: EngineRole;
   isDefault: boolean;
   delayRangeMs: number;
+  /** Whether the live-route pulse may loop; see `useDecorativeMotion`. */
+  awake: boolean;
   onToggle: (deviceId: string) => void;
 }
 
@@ -69,6 +72,7 @@ const DeviceNode = memo(function DeviceNode({
   engineRole,
   isDefault,
   delayRangeMs,
+  awake,
   onToggle,
 }: DeviceNodeProps) {
   const { t } = useTranslation();
@@ -96,8 +100,16 @@ const DeviceNode = memo(function DeviceNode({
           <motion.span
             aria-hidden="true"
             className="absolute inset-0 rounded-full border border-accent/40"
-            animate={{ scale: [1, 1.35], opacity: [0.5, 0] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
+            // Frozen, the ring stays as a faint static halo: the device is still
+            // live, it just is not worth repainting the stage over.
+            animate={
+              awake ? { scale: [1, 1.35], opacity: [0.5, 0] } : { scale: 1.1, opacity: 0.25 }
+            }
+            transition={
+              awake
+                ? { duration: 2.4, repeat: Infinity, ease: 'easeOut' }
+                : { duration: 0.4, ease: 'easeOut' }
+            }
           />
         )}
         <div
@@ -175,6 +187,7 @@ export function ConcentricRouter() {
   const applyRoute = useRouterStore((s) => s.applyRoute);
   const applying = useRouterStore((s) => s.applying);
   const { ref, scale } = useFitScale(STAGE_SIZE);
+  const awake = useDecorativeMotion();
   const [rippleKey, setRippleKey] = useState(0);
   const [showRipple, setShowRipple] = useState(false);
   const latestRippleKey = useRef(0);
@@ -253,8 +266,12 @@ export function ConcentricRouter() {
         <motion.div
           className="pointer-events-none absolute"
           style={orbitBox}
-          animate={{ rotate: 360 }}
-          transition={{ duration: 80, repeat: Infinity, ease: 'linear' }}
+          animate={{ rotate: awake ? 360 : 0 }}
+          transition={
+            awake
+              ? { duration: 80, repeat: Infinity, ease: 'linear' }
+              : { duration: 0.6, ease: 'easeOut' }
+          }
         >
           <span className="absolute left-1/2 top-0 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/50" />
         </motion.div>
@@ -305,11 +322,15 @@ export function ConcentricRouter() {
                   strokeDasharray="2 7"
                   style={isLive ? { filter: 'drop-shadow(0 0 5px var(--accent-glow))' } : undefined}
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: 1, strokeDashoffset: [0, -18] }}
+                  animate={{ opacity: 1, strokeDashoffset: awake ? [0, -18] : 0 }}
                   exit={{ opacity: 0, transition: { duration: 0.25 } }}
                   transition={{
                     opacity: { duration: 0.4, delay: routeIndex * 0.05 },
-                    strokeDashoffset: { duration: 1.8, repeat: Infinity, ease: 'linear' },
+                    // A dash offset is not compositor-friendly: every step
+                    // repaints the path, and the glow filter repaints with it.
+                    strokeDashoffset: awake
+                      ? { duration: 1.8, repeat: Infinity, ease: 'linear' }
+                      : { duration: 0.3 },
                   }}
                 />
               );
@@ -341,6 +362,7 @@ export function ConcentricRouter() {
                     engineRole={engineRoles.get(device.id) ?? 'inactive'}
                     isDefault={device.id === defaultDeviceId}
                     delayRangeMs={delayRangeMs}
+                    awake={awake}
                     onToggle={toggleDeviceSelection}
                   />
                 );
@@ -358,8 +380,16 @@ export function ConcentricRouter() {
             <motion.div
               aria-hidden="true"
               className="absolute -inset-2 rounded-full border border-accent/30"
-              animate={{ opacity: [0.15, 0.4, 0.15], scale: [1, 1.03, 1] }}
-              transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
+              animate={
+                awake
+                  ? { opacity: [0.15, 0.4, 0.15], scale: [1, 1.03, 1] }
+                  : { opacity: 0.25, scale: 1 }
+              }
+              transition={
+                awake
+                  ? { duration: 3.6, repeat: Infinity, ease: 'easeInOut' }
+                  : { duration: 0.4, ease: 'easeOut' }
+              }
             />
           )}
           <motion.button

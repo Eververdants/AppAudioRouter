@@ -7,6 +7,7 @@ import { LogPanel } from '@/components/LogPanel';
 import { SettingsPage } from '@/components/SettingsPage';
 import { TitleBar } from '@/components/TitleBar';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
+import { useDecorativeMotion } from '@/hooks/useDecorativeMotion';
 import { useRouterStore } from '@/stores/routerStore';
 import type { AudioChangedEvent, DuplicationStoppedEvent, MirrorFailedEvent } from '@/lib/types';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
@@ -41,27 +42,61 @@ function afterFirstPaint(task: () => void): () => void {
 }
 
 /**
+ * One drifting light blob. The drift is the expensive part of the whole window:
+ * a 110px blur moving behind frosted glass has to be re-rasterized every frame,
+ * so it stops when nobody is looking (see `useDecorativeMotion`) — but the blob
+ * keeps its colour, which is what the glass above it refracts.
+ */
+function AmbientBlob({
+  className,
+  drift,
+  seconds,
+  awake,
+}: {
+  className: string;
+  drift: { x: number[]; y: number[] };
+  seconds: number;
+  awake: boolean;
+}) {
+  return (
+    <motion.div
+      className={className}
+      animate={awake ? drift : { x: 0, y: 0 }}
+      transition={
+        awake
+          ? { duration: seconds, repeat: Infinity, ease: 'easeInOut' }
+          : { duration: 0.6, ease: 'easeOut' }
+      }
+    />
+  );
+}
+
+/**
  * Ambient light blobs drifting behind the glass panels. Pure atmosphere —
  * the backdrop-blur on the panels turns them into the colour the glass
  * "refracts". Mirror easing keeps each drift seamless.
  */
 function AmbientLight() {
+  const awake = useDecorativeMotion();
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <motion.div
+      <AmbientBlob
+        awake={awake}
+        seconds={26}
         className="absolute -top-32 right-[6%] h-80 w-80 rounded-full bg-accent/15 blur-[110px]"
-        animate={{ x: [0, -36, 12, 0], y: [0, 26, -16, 0] }}
-        transition={{ duration: 26, repeat: Infinity, ease: 'easeInOut' }}
+        drift={{ x: [0, -36, 12, 0], y: [0, 26, -16, 0] }}
       />
-      <motion.div
+      <AmbientBlob
+        awake={awake}
+        seconds={32}
         className="absolute -bottom-24 left-[2%] h-72 w-72 rounded-full bg-[#3b82f6]/15 blur-[110px]"
-        animate={{ x: [0, 28, -22, 0], y: [0, -22, 14, 0] }}
-        transition={{ duration: 32, repeat: Infinity, ease: 'easeInOut' }}
+        drift={{ x: [0, 28, -22, 0], y: [0, -22, 14, 0] }}
       />
-      <motion.div
+      <AmbientBlob
+        awake={awake}
+        seconds={38}
         className="absolute left-[44%] top-[34%] h-64 w-64 rounded-full bg-[#2dd4bf]/10 blur-[100px]"
-        animate={{ x: [0, -24, 26, 0], y: [0, 18, -14, 0] }}
-        transition={{ duration: 38, repeat: Infinity, ease: 'easeInOut' }}
+        drift={{ x: [0, -24, 26, 0], y: [0, 18, -14, 0] }}
       />
     </div>
   );
