@@ -43,6 +43,16 @@ export interface DuplicationStoppedEvent {
   error: string | null;
 }
 
+/** One mirror device of a live route could not be opened, or errored out later.
+ * The engine keeps serving the other devices, so this arrives on its own channel
+ * instead of with the engine-level stop. */
+export interface MirrorFailedEvent {
+  pid: number;
+  generation: number;
+  deviceId: string;
+  error: string;
+}
+
 /** A Core Audio change reported by the backend's notification thread: which
  * half of the lists are now stale. */
 export interface AudioChangedEvent {

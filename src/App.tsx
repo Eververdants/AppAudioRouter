@@ -8,7 +8,7 @@ import { SettingsPage } from '@/components/SettingsPage';
 import { TitleBar } from '@/components/TitleBar';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useRouterStore } from '@/stores/routerStore';
-import type { AudioChangedEvent, DuplicationStoppedEvent } from '@/lib/types';
+import type { AudioChangedEvent, DuplicationStoppedEvent, MirrorFailedEvent } from '@/lib/types';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
 
@@ -151,6 +151,12 @@ export default function App() {
   // this backend event so the badges stay honest.
   useBackendEvent<DuplicationStoppedEvent>('duplication-stopped', (payload) => {
     useRouterStore.getState().handleDuplicationStopped(payload);
+  });
+
+  // A single mirror that could not be opened leaves the rest of the route
+  // running, so it is reported apart from the engine-level stop above.
+  useBackendEvent<MirrorFailedEvent>('duplication-mirror-failed', (payload) => {
+    useRouterStore.getState().handleMirrorFailed(payload);
   });
 
   // Core Audio says something moved — a device was plugged in, an app started or

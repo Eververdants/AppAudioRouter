@@ -6,6 +6,7 @@ import type {
   AudioSession,
   DuplicationStoppedEvent,
   LogEntry,
+  MirrorFailedEvent,
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import {
@@ -103,6 +104,9 @@ interface RouterState {
   setDelayStep: (stepMs: number) => void;
   toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
+  /** One mirror of a live route went quiet. The rest of the route keeps playing,
+   * so only that device leaves the badge set — and the log says which one and why. */
+  handleMirrorFailed: (event: MirrorFailedEvent) => void;
   /** On boot, ask the backend which PIDs it is still duplicating (routes
    *  survive a restart) and reconcile the UI so its badges match reality. */
   reconcileActiveDuplications: () => Promise<void>;
@@ -897,6 +901,25 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } else {
       get().addLog(i18next.t('log.duplicationProcessExited', { pid }), 'info');
     }
+  },
+
+  handleMirrorFailed: (event) => {
+    const { pid, generation, deviceId, error } = event;
+    // The same staleness guard as the engine-level event: a mirror belonging to
+    // a route that has already been replaced must not edit the current one.
+    if (generation !== (get().engineGenerations[pid] ?? 0)) return;
+    const routed = get().routedPids[pid];
+    if (routed === undefined || !routed.includes(deviceId)) return;
+    // The device is not playing anything, so it must not keep the live badge and
+    // pulse that say otherwise. The rest of the route is unaffected.
+    set((s) => ({
+      routedPids: { ...s.routedPids, [pid]: routed.filter((id) => id !== deviceId) },
+    }));
+    const device = get().devices.find((d) => d.id === deviceId);
+    get().addLog(
+      i18next.t('log.mirrorFailed', { device: device?.name ?? deviceId, error }),
+      'error',
+    );
   },
 
   reconcileActiveDuplications: async () => {
