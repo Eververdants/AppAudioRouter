@@ -1006,6 +1006,10 @@ fn open_render_session(
     // default device's mix format; auto-convert adapts it to this device.
     let format = unsafe { &*(shared.format.as_ptr() as *const WAVEFORMATEX) };
     // SAFETY: shared-mode event-driven render; periodicity must be 0.
+    // AUTOCONVERTPCM lets the shared capture format stand in for this device's
+    // own engine mix; an endpoint that rejects the conversion path still works
+    // without it, so fall back exactly as the capture side does — a mirror that
+    // fails to initialize is a device the user hears nothing from.
     unsafe {
         client
             .Initialize(
@@ -1018,6 +1022,16 @@ fn open_render_session(
                 format,
                 None,
             )
+            .or_else(|_| {
+                client.Initialize(
+                    AUDCLNT_SHAREMODE_SHARED,
+                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                    STREAM_BUFFER_DURATION,
+                    0,
+                    format,
+                    None,
+                )
+            })
             .map_err(|e| com_err("Initialize(render)", e))?;
         client
             .SetEventHandle(event)
