@@ -137,6 +137,7 @@
     "stopRouteFailed": "停止路由失败：{{error}}",
     "duplicationFailed": "进程 {{pid}} 复制路由失败：{{error}}",
     "duplicationProcessExited": "进程 {{pid}} 已退出，复制路由停止",
+    "mirrorFailed": "{{device}} 无法镜像，该设备没有声音：{{error}}",
     "delaySet": "已将 {{device}} 的延迟补偿设为 {{n}} ms",
     "delaySetFailed": "设置延迟失败：{{error}}",
     "delayRangeSet": "延迟范围已设为 ±{{n}} 秒",

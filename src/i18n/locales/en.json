@@ -137,6 +137,7 @@
     "stopRouteFailed": "Failed to stop routing: {{error}}",
     "duplicationFailed": "Duplication failed for PID {{pid}}: {{error}}",
     "duplicationProcessExited": "PID {{pid}} exited, duplication stopped",
+    "mirrorFailed": "{{device}} could not be mirrored and stays silent: {{error}}",
     "delaySet": "Delay compensation for {{device}} set to {{n}} ms",
     "delaySetFailed": "Failed to set delay: {{error}}",
     "delayRangeSet": "Delay range set to ±{{n}} s",
