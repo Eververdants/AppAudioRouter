@@ -176,7 +176,7 @@ AppAudioRouter/
   **不要**再回到「按 exe 压会话音量」那套（`ISimpleAudioVolume` / `set_session_volume` / session-volumes.json 已于 2026-09-19 整体移除）。
   前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
   0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
-- 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
+- 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态；单台镜像设备打不开或中途出错**不会**拖垮整条路由，它走另一个事件 `duplication-mirror-failed`（pid / generation / deviceId / error），前端把该设备从徽标集合里摘掉并记一条 error 日志——release 构建的 `warn!` 没人看得到，静默无声是这里最不能接受的结果
 - 设备列表、进程列表由 store action 管理：后端 `audio-changed` 事件驱动自动同步（见下面「后台常驻与实时刷新」），手动 Refresh 按钮保留作兜底；**没有轮询定时器**
 
 ---
@@ -282,6 +282,7 @@ AppAudioRouter/
 - 激活状态：`scale(1.05)` + `box-shadow` 扩散
 - 路由动画：spring stiffness=300, damping=20
 - 视觉体系：液态玻璃（`--glass-*` tokens + backdrop-blur + shadow-glass），body 环境渐变 + App 内漂移光晕为玻璃提供"折射"色彩；所有微动效统一走 Motion，不手写 @keyframes
+- **装饰性无限循环动画必须过 `useDecorativeMotion`**：窗口不可见、未聚焦、或系统要求 `prefers-reduced-motion` 时全部停摆。这不是审美问题——`backdrop-blur` 面板后面每帧重绘是 WebView2 GPU 进程的持续开销，一条无限循环就足以让帧循环永远不停，后台常驻时风扇会转，而任务管理器里主进程占用看起来却很低（开销在 `msedgewebview2.exe` 里）。冻结时保留静态形态（光晕留颜色、live 环留淡光环），传达状态的动效（选中、路由涟漪、入场）不受此门控。两条 reveal 路径（`revealMainWindow`、tray `reveal`）都 `set_focus`，所以启动/托盘唤起的窗口一定是醒着的
 
 ---
 

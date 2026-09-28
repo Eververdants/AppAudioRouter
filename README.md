@@ -146,7 +146,7 @@ Delay fixes *when* the audio arrives; the volume value fixes *how loud* each dev
 | 4 | For each further device, a **WASAPI process-loopback** capture client for that PID feeds an `IAudioClient` render client on the target device. Delay is implemented as ring-buffer backlog (silence is prepended, never appended, so raising a delay never lets a burst of audio through first); volume is a per-sample gain applied before the samples are written. |
 | 5 | Sample formats are parsed from the endpoint's `WAVEFORMATEX` — float32, float64 and PCM 16/24/32 are scaled; anything unrecognised is passed through untouched rather than mangled. A gain of exactly 1.0 short-circuits, so at 100 % the path costs nothing. |
 | 6 | Routing rules, delays and volumes are persisted as JSON in the application data directory (`route-memory.json`, `device-delays.json`, `device-volumes.json`). |
-| 7 | Each duplication engine reports its end (stopped by the user, the process exited, or an error) through a `duplication-stopped` event, and routes that outlived an app restart are reconciled on boot so the badges match reality. |
+| 7 | Each duplication engine reports its end (stopped by the user, the process exited, or an error) through a `duplication-stopped` event; a single mirror that cannot be opened reports itself through `duplication-mirror-failed`, so the UI names the device that went quiet instead of showing the route as fully applied. Routes that outlived an app restart are reconciled on boot so the badges match reality. |
 
 Routing rules are keyed by **executable name**, not by PID, so a remembered route survives restarts.
 
@@ -230,6 +230,14 @@ Yes. It is open source under the MIT licence, and there is no paid tier or accou
 
 Yes — that is the main reason the app exists. Select several devices on the router ring and apply; the first device is driven natively by Windows and every additional device gets a mirrored copy of the same stream in real time.
 
+### Isn't this just the Windows volume mixer's per-app output setting?
+
+No. The volume mixer (Settings → System → Sound → Volume mixer) points each application at **one** output device, and that is all it does. App Audio Router starts where that stops: one application to **several** devices at once, held in time by per-device delay compensation, balanced by per-device volume, and remembered per program. The per-app output setting is in fact one of the mechanisms this app uses for the first device of a route — the mirroring, the alignment and the memory are what it adds.
+
+### Windows 11 has a native audio-sharing feature — is this the same thing?
+
+Not quite. The built-in sharing pairs **two Bluetooth headsets** and needs both the PC's radio and the headsets to support Bluetooth LE Audio, so wired, USB, HDMI and older Bluetooth devices cannot join. App Audio Router duplicates through the Core Audio API instead: any render endpoint the system can see is a valid target, and nothing depends on the radio or on a particular chipset.
+
 ### Does it need a virtual audio driver such as VB-CABLE?
 
 No. All routing, duplication, delay and gain is done by calling the Windows Core Audio API directly from the app's Rust binary. Nothing is installed into the audio stack, and uninstalling the app leaves no driver behind.
@@ -242,9 +250,17 @@ Yes. Routing is applied to the live audio session, so the program does not need 
 
 Yes, that is what delay compensation is for. Measure or estimate how far behind the Bluetooth device is, then give the faster device that value as a positive delay (for example `+180 ms`). Positive values hold a device back; a negative value marks it as the earliest device in the route.
 
+### Is the latency low enough for games?
+
+For the primary device, yes without qualification: Windows plays it natively, so a single-device route carries no extra latency at all and behaves exactly like choosing that device in the volume mixer. Only the *mirrored* copies pass through the duplication engine, which keeps about 100 ms of buffer between capture and playback so that every mirror plays the same sample at the same moment. There is no virtual sound card and no extra resampling step in that path — the buffer is the whole cost. For competitive play, treat a mirrored device as a secondary output; for film, music and shared listening across several devices, that buffer is precisely what keeps them in agreement.
+
 ### Why is my application not in the process list?
 
 A program only shows up while it holds an active audio session, so start playback in it — the list notices on its own, or press **Refresh**. Programs that use ASIO or WASAPI exclusive mode never create a session with the system audio engine and will not appear, and system-critical processes are deliberately excluded from routing.
+
+### Is there a cap on how many apps or devices I can route at once?
+
+No artificial one. The process list shows every program that currently holds an audio session and the ring shows every active render endpoint Windows reports — neither is a capped subset. Each routed process costs one capture thread plus one render thread per mirrored device beyond the first, so the practical ceiling is whatever your machine's CPU comfortably sustains rather than a number the app enforces.
 
 ### Where are the settings stored?
 
