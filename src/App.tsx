@@ -75,6 +75,7 @@ export default function App() {
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
   const loadDeviceVolumes = useRouterStore((s) => s.loadDeviceVolumes);
   const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
+  const loadRememberedRoutes = useRouterStore((s) => s.loadRememberedRoutes);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const [view, setView] = useState<'router' | 'settings'>('router');
 
@@ -129,6 +130,11 @@ export default function App() {
       // store still thinks nothing is routed. Reconcile before first paint so
       // the badges match reality from the moment the window shows.
       void reconcileActiveDuplications();
+      // The routes an earlier session wrote down. Loading them is also what
+      // asks for them to be put back, so a program that is already playing when
+      // the app starts is on its remembered device without the user doing
+      // anything — which is the whole point of launching into the tray.
+      void loadRememberedRoutes();
       // The tray preference and the startup registry entry are only read by the
       // settings page, so they wait for the first paint like the rest.
       void loadShellSettings();
@@ -138,6 +144,7 @@ export default function App() {
     loadDefaultDevice,
     refreshSessions,
     reconcileActiveDuplications,
+    loadRememberedRoutes,
     loadShellSettings,
   ]);
 

@@ -6,6 +6,7 @@ import type {
   AudioDevice,
   AudioSession,
   DeviceDelay,
+  RememberedRoute,
   ResetOutcome,
   StopOutcome,
 } from './types';
@@ -54,6 +55,16 @@ export async function releaseStaleRoutes(): Promise<string[]> {
 
 export async function getActiveDuplications(): Promise<ActiveRoute[]> {
   return invoke<ActiveRoute[]>('get_active_duplications');
+}
+
+/** Every remembered route as `(exe_name, device_ids)`, ids in route order. */
+export async function getRememberedRoutes(): Promise<RememberedRoute[]> {
+  return invoke<RememberedRoute[]>('get_remembered_routes');
+}
+
+/** Forget one executable's remembered route. */
+export async function clearRoute(exeName: string): Promise<void> {
+  await invoke('clear_route', { exeName });
 }
 
 export async function getDeviceDelays(): Promise<DeviceDelay[]> {

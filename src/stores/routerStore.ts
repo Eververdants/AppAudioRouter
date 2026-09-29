@@ -6,6 +6,7 @@ import type {
   AudioSession,
   DuplicationStoppedEvent,
   LogEntry,
+  RememberedRouteEntry,
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import {
@@ -51,7 +52,11 @@ interface RouterState {
   deviceVolumes: Record<string, number>;
   /** Whether delay compensation is applied by the engine. */
   delaySync: boolean;
+  /** Whether a route is written to the memory as it is applied, and restored
+   * from it when the program plays again. */
   autoRemember: boolean;
+  /** Routes the backend remembers, one entry per executable name. */
+  rememberedRoutes: RememberedRouteEntry[];
   /** Whether the close button hides the window to the tray instead of quitting. */
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
@@ -72,6 +77,14 @@ interface RouterState {
   refreshDevices: (viaNotification?: boolean) => Promise<void>;
   /** Pull the process list, with the same logging rule as [`refreshDevices`]. */
   refreshSessions: (viaNotification?: boolean) => Promise<void>;
+  /** Read the remembered routes the backend persisted for earlier sessions. */
+  loadRememberedRoutes: () => Promise<void>;
+  /** Put the remembered route of every process that has no route back on.
+   * A no-op until the device list, the process list and the memory have all
+   * arrived, which is why every one of them calls it. */
+  restoreRememberedRoutes: () => Promise<void>;
+  /** Forget one executable's remembered route. */
+  forgetRememberedRoute: (exeName: string) => Promise<void>;
   /** Fold one Core Audio change notification into the UI: refresh whatever moved
    * and quietly, since the user did not ask for this. */
   syncFromNotification: (changed: AudioChangedEvent) => Promise<void>;
@@ -175,9 +188,122 @@ function deviceSignature(devices: AudioDevice[]): string {
   return devices.map((d) => `${d.id}|${d.name}`).join('\n');
 }
 
-/** Same idea for the process list; a session's title is not part of its identity. */
+/** Same idea for the process list. */
 function sessionSignature(sessions: AudioSession[]): string {
   return sessions.map((s) => `${s.pid}|${s.exe_name}`).join('\n');
+}
+
+/**
+ * List order for the process panel: by executable name, then by PID for the
+ * processes that share one.
+ *
+ * The backend hands the list back in the order the device walk produced it, so
+ * it shuffles whenever any session anywhere comes or goes — rows jumped under
+ * the cursor between two refreshes of an unchanged machine.
+ */
+function compareSessions(a: AudioSession, b: AudioSession): number {
+  const byName = a.exe_name.localeCompare(b.exe_name, undefined, { sensitivity: 'base' });
+  return byName !== 0 ? byName : a.pid - b.pid;
+}
+
+/** localStorage key holding the auto-remember switch, next to the other
+ * webview-side preferences. */
+const AUTO_REMEMBER_STORAGE_KEY = 'aar-auto-remember';
+
+function readAutoRemember(): boolean {
+  try {
+    return localStorage.getItem(AUTO_REMEMBER_STORAGE_KEY) === '1';
+  } catch {
+    /* storage may be unavailable; the preference just does not persist */
+    return false;
+  }
+}
+
+/**
+ * PIDs this run already decided about, so a restore is attempted at most once
+ * per process.
+ *
+ * Without it, a program the user stopped by hand would be put straight back on
+ * the next refresh, and one whose restore failed would retry — and log — every
+ * time Core Audio moved. Never pruned against the live list: a PID leaving it
+ * is exactly the case that must not be retried.
+ */
+const autoRestoreDecided = new Set<number>();
+
+/** A device's name for the log, or its id when it is not in the list. */
+function deviceName(deviceId: string | undefined, devices: AudioDevice[]): string {
+  if (deviceId === undefined) return '';
+  return devices.find((device) => device.id === deviceId)?.name ?? deviceId;
+}
+
+/**
+ * The targets remembered for an executable.
+ *
+ * Matched on the lowercased name: the memory is keyed by image name, and an
+ * image name carries whatever case the launch used, so two launches of the same
+ * program can differ in it.
+ */
+function rememberedFor(entries: RememberedRouteEntry[], exeName: string): string[] | undefined {
+  const wanted = exeName.toLowerCase();
+  return entries.find((entry) => entry.exeName.toLowerCase() === wanted)?.deviceIds;
+}
+
+/** The remembered list with every one of `exeNames` pointing at `deviceIds`. */
+function rememberTargets(
+  entries: RememberedRouteEntry[],
+  exeNames: string[],
+  deviceIds: string[],
+): RememberedRouteEntry[] {
+  const claimed = new Set(exeNames.map((name) => name.toLowerCase()));
+  const next = entries.filter((entry) => !claimed.has(entry.exeName.toLowerCase()));
+  for (const exeName of exeNames) next.push({ exeName, deviceIds: [...deviceIds] });
+  return next;
+}
+
+/** One process whose remembered route is due to be put back. */
+interface RestorableProcess {
+  pid: number;
+  exeName: string;
+  deviceIds: string[];
+}
+
+/**
+ * The processes a remembered route should be restored on.
+ *
+ * One per executable, lowest PID: the assignment Windows stores is per
+ * executable, so a browser with a dozen processes needs one route rather than a
+ * dozen engines duplicating the same audio. A target that has been unplugged
+ * since is dropped, and a memory whose devices are all gone is left alone —
+ * which is also what keeps the boot pass from misreading a device list that has
+ * not arrived yet.
+ */
+function pickRestorable(
+  sessions: AudioSession[],
+  remembered: RememberedRouteEntry[],
+  routedPids: Record<number, string[]>,
+  devices: AudioDevice[],
+): RestorableProcess[] {
+  if (devices.length === 0) return [];
+  const liveDeviceIds = new Set(devices.map((device) => device.id));
+  const firstPidByExe = new Map<string, number>();
+  for (const session of sessions) {
+    const key = session.exe_name.toLowerCase();
+    const known = firstPidByExe.get(key);
+    if (known === undefined || session.pid < known) firstPidByExe.set(key, session.pid);
+  }
+
+  const targets: RestorableProcess[] = [];
+  for (const session of sessions) {
+    if (firstPidByExe.get(session.exe_name.toLowerCase()) !== session.pid) continue;
+    if (autoRestoreDecided.has(session.pid)) continue;
+    if (routedPids[session.pid] !== undefined) continue;
+    const deviceIds = rememberedFor(remembered, session.exe_name)?.filter((id) =>
+      liveDeviceIds.has(id),
+    );
+    if (deviceIds === undefined || deviceIds.length === 0) continue;
+    targets.push({ pid: session.pid, exeName: session.exe_name, deviceIds });
+  }
+  return targets;
 }
 
 export const useRouterStore = create<RouterState>((set, get) => ({
@@ -193,7 +319,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
   delaySync: false,
-  autoRemember: false,
+  autoRemember: readAutoRemember(),
+  rememberedRoutes: [],
   closeToTray: false,
   autostart: false,
   logs: [],
@@ -226,6 +353,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { selectedDeviceIds, routedPids, engineGenerations };
       });
+      // The device list is one of the three inputs a restore needs, and at boot
+      // it is just as likely to be the last of them to arrive.
+      void get().restoreRememberedRoutes();
       // Nothing on screen moved, so a notification gets no line at all.
       if (viaNotification && unchanged) return;
       get().addLog(
@@ -251,7 +381,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
     sessionRefreshGate.inFlight = true;
     try {
-      const sessions = await api.listSessions();
+      const sessions = (await api.listSessions()).sort(compareSessions);
       const livePids = new Set(sessions.map((s) => s.pid));
       const unchanged = sessionSignature(sessions) === sessionSignature(get().sessions);
       const routedBefore = Object.keys(get().routedPids).map(Number);
@@ -282,9 +412,18 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // device and ignore the system default, with no route on screen to explain
       // it. Ask the backend to hand that assignment to the program's next
       // process instead of leaving it behind.
-      if (routedBefore.some((pid) => !livePids.has(pid))) {
-        void get().releaseStaleRoutes();
-      }
+      //
+      // The sweep and the restore below are ordered rather than concurrent: both
+      // can touch the same executable's assignment — the sweep through the
+      // program's new process, the restore by writing one — and run together the
+      // sweep can win and undo a route that was just applied.
+      const swept = routedBefore.some((pid) => !livePids.has(pid))
+        ? get().releaseStaleRoutes()
+        : Promise.resolve();
+      // A program that has just started playing is the moment its remembered
+      // route is due; the same pass picks up everything that was already running
+      // when the app launched.
+      void swept.then(() => get().restoreRememberedRoutes());
       if (viaNotification && unchanged) return;
       get().addLog(
         viaNotification
@@ -372,7 +511,119 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
-  toggleAutoRemember: () => set((s) => ({ autoRemember: !s.autoRemember })),
+  toggleAutoRemember: () => {
+    const next = !get().autoRemember;
+    set({ autoRemember: next });
+    try {
+      localStorage.setItem(AUTO_REMEMBER_STORAGE_KEY, next ? '1' : '0');
+    } catch {
+      /* storage may be unavailable; the preference just does not persist */
+    }
+    // Turning it on asks for the routes that are already remembered, not for a
+    // promise about the next time something happens to move in the audio graph.
+    if (next) void get().restoreRememberedRoutes();
+  },
+
+  loadRememberedRoutes: async () => {
+    try {
+      const routes = await api.getRememberedRoutes();
+      set({
+        rememberedRoutes: routes.map(([exeName, deviceIds]) => ({ exeName, deviceIds })),
+      });
+    } catch (e) {
+      get().addLog(i18next.t('log.rememberedRoutesFailed', { error: String(e) }), 'error');
+      return;
+    }
+    // The device list, the process list and the memory arrive in no particular
+    // order, and a restore needs all three — so whichever lands last is the one
+    // that can actually do something, and each of them asks.
+    void get().restoreRememberedRoutes();
+  },
+
+  restoreRememberedRoutes: async () => {
+    const {
+      autoRemember,
+      applying,
+      rememberedRoutes,
+      routedPids,
+      devices,
+      deviceDelays,
+      sessions,
+    } = get();
+    if (!autoRemember || rememberedRoutes.length === 0) return;
+    // A route the user is applying right now already owns these processes.
+    // Nothing is claimed here, so the next pass picks them up again.
+    if (applying) return;
+    const targets = pickRestorable(sessions, rememberedRoutes, routedPids, devices);
+    if (targets.length === 0) return;
+    // Claimed before the first await: a refresh landing while these are in
+    // flight must not start a second engine for the same process.
+    for (const target of targets) autoRestoreDecided.add(target.pid);
+
+    const results = await Promise.allSettled(
+      targets.map(async (target) => {
+        // Delay order, exactly as a manual route applies it: the earliest device
+        // is the one the OS plays natively and the reference every copy is held
+        // back from. Not re-remembered — it came out of the memory.
+        const ordered = orderByDelay(target.deviceIds, deviceDelays);
+        const generation = await api.applyRoute(target.pid, target.exeName, ordered, false);
+        return { target, ordered, generation };
+      }),
+    );
+
+    const restored: Record<number, string[]> = {};
+    const generations: Record<number, number> = {};
+    results.forEach((result, index) => {
+      const target = targets[index];
+      if (result.status === 'fulfilled') {
+        const { ordered, generation } = result.value;
+        if (target === undefined) return;
+        restored[target.pid] = [...ordered];
+        generations[target.pid] = generation;
+        const copies = ordered.length - 1;
+        get().addLog(
+          i18next.t(copies > 0 ? 'log.routeRestoredMulti' : 'log.routeRestored', {
+            process: target.exeName,
+            device: deviceName(ordered[0], devices),
+            m: copies,
+          }),
+          'info',
+        );
+      } else {
+        // Left claimed: retrying on every refresh would fill the log with the
+        // same failure, and the program can still be routed by hand.
+        get().addLog(
+          i18next.t('log.routeRestoreFailed', {
+            process: target?.exeName ?? '',
+            error: String(result.reason),
+          }),
+          'error',
+        );
+      }
+    });
+    if (Object.keys(restored).length === 0) return;
+    set((s) => ({
+      routedPids: { ...s.routedPids, ...restored },
+      engineGenerations: { ...s.engineGenerations, ...generations },
+    }));
+  },
+
+  forgetRememberedRoute: async (exeName) => {
+    const previous = get().rememberedRoutes;
+    set({ rememberedRoutes: previous.filter((entry) => entry.exeName !== exeName) });
+    try {
+      await api.clearRoute(exeName);
+      get().addLog(i18next.t('log.rememberedRouteCleared', { process: exeName }), 'info');
+    } catch (e) {
+      // The file still carries it, so the list must too: showing a route as
+      // forgotten while the next launch restores it is the worse lie.
+      set({ rememberedRoutes: previous });
+      get().addLog(
+        i18next.t('log.rememberedRouteClearedFailed', { process: exeName, error: String(e) }),
+        'error',
+      );
+    }
+  },
 
   loadShellSettings: async () => {
     // Both come from the native side: the close-to-tray preference sits with the
@@ -485,20 +736,37 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // The targets are now what the user chose and what was applied, so a
         // later click on another device adds a copy instead of replacing them.
         deviceSelectionPrefilled: false,
+        // Mirrored locally so a program that plays again in this same session is
+        // restored from what was just written, not from the boot-time copy.
+        rememberedRoutes: autoRemember
+          ? rememberTargets(
+              s.rememberedRoutes,
+              applied.map((t) => t.exeName),
+              ordered,
+            )
+          : s.rememberedRoutes,
         engineGenerations: {
           ...s.engineGenerations,
           ...Object.fromEntries(applied.map((t) => [t.pid, t.generation])),
         },
       }));
       const count = applied.length;
+      // Both counts say something: how many programs went, and how many devices
+      // each of them got. A route to three devices is not "routed to Speakers"
+      // just because only one program was selected — the two copies are the
+      // part worth reading about.
       const key =
         count > 1
           ? autoRemember
             ? 'log.routedMultiProcessRemembered'
             : 'log.routedMultiProcess'
-          : autoRemember
-            ? 'log.routedRemembered'
-            : 'log.routed';
+          : extra > 0
+            ? autoRemember
+              ? 'log.routedMultiRemembered'
+              : 'log.routedMulti'
+            : autoRemember
+              ? 'log.routedRemembered'
+              : 'log.routed';
       get().addLog(
         i18next.t(key, {
           n: count,
@@ -526,6 +794,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   stopRoute: async (pid) => {
     const session = get().sessions.find((s) => s.pid === pid);
     if (!get().routedPids[pid]) return;
+    // The user just took this one off; a restore must not put it straight back.
+    autoRestoreDecided.add(pid);
     // Snapshot before mutating: if the backend rejects the stop the UI must
     // keep showing the route as live instead of silently desyncing from it.
     const previous = get().routedPids[pid];
@@ -576,6 +846,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   stopAllRoutes: async () => {
     const pids = Object.keys(get().routedPids).map(Number);
     if (pids.length === 0) return;
+    // Same rule as a single stop: none of these may be restored under the user.
+    for (const pid of pids) autoRestoreDecided.add(pid);
     const names = new Map(get().sessions.map((s) => [s.pid, s.exe_name] as const));
     // Optimistic: assume every stop succeeds, then put back the ones that
     // didn't. Failed stops must keep their route live rather than desyncing

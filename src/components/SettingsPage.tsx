@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
+import type { AudioDevice, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
 const cardEnter = {
@@ -66,6 +67,57 @@ function DelayRow({
   );
 }
 
+/**
+ * One remembered route: the executable it belongs to, and the ✕ that forgets it.
+ *
+ * Auto-restore is a decision the app makes on the user's behalf, so it has to be
+ * revocable from the same place it is switched on — without this, un-remembering
+ * a route meant editing a JSON file by hand.
+ */
+function RememberedChip({
+  entry,
+  devices,
+  onForget,
+}: {
+  entry: RememberedRouteEntry;
+  devices: AudioDevice[];
+  onForget: (exeName: string) => void;
+}) {
+  const { t } = useTranslation();
+  const label = t('settings.forgetRoute', { process: entry.exeName });
+  const target = entry.deviceIds
+    .map((id) => devices.find((device) => device.id === id)?.name ?? id)
+    .join(' · ');
+  return (
+    <span
+      title={`${entry.exeName} → ${target}`}
+      className="flex max-w-full items-center gap-1 rounded-full border border-glass bg-glass px-2 py-0.5 text-[11px] text-text-secondary"
+    >
+      <span className="truncate">{entry.exeName}</span>
+      <button
+        type="button"
+        onClick={() => onForget(entry.exeName)}
+        aria-label={label}
+        title={label}
+        className="-mr-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-full text-text-muted outline-none transition-colors hover:bg-error/10 hover:text-error focus-visible:ring-2 focus-visible:ring-error/50"
+      >
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <line x1="1" y1="1" x2="9" y2="9" />
+          <line x1="9" y1="1" x2="1" y2="9" />
+        </svg>
+      </button>
+    </span>
+  );
+}
+
 const SunIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="5" />
@@ -98,6 +150,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const devices = useRouterStore((s) => s.devices);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
+  const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
+  const forgetRememberedRoute = useRouterStore((s) => s.forgetRememberedRoute);
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
   const delaySync = useRouterStore((s) => s.delaySync);
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
@@ -240,6 +294,23 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 label={t('settings.autoRemember')}
               />
             </Row>
+            {rememberedRoutes.length > 0 && (
+              <div className="px-3 pb-3 pt-1">
+                <div className="mb-1.5 text-[11px] text-text-muted">
+                  {t('settings.rememberedRoutes')}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {rememberedRoutes.map((entry) => (
+                    <RememberedChip
+                      key={entry.exeName}
+                      entry={entry}
+                      devices={devices}
+                      onForget={forgetRememberedRoute}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             <Row title={t('settings.delaySync')} desc={t('settings.delaySyncDesc')}>
               <Switch
                 checked={delaySync}
