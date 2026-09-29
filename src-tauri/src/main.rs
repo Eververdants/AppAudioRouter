@@ -31,7 +31,6 @@ fn main() {
         .init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             let route_config = config::RouteConfig::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;

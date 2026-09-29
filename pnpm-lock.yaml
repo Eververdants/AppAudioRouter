@@ -11,12 +11,6 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.10.0
         version: 2.11.1
-      '@tauri-apps/plugin-shell':
-        specifier: ^2.2.0
-        version: 2.3.6
-      '@tauri-apps/plugin-store':
-        specifier: ^2.2.0
-        version: 2.4.4
       framer-motion:
         specifier: ^11.15.0
         version: 11.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -576,12 +570,6 @@ packages:
     resolution: {integrity: sha512-R8xGtMpwyetawSqm9kYOuMmEqkhUbvcUy8n0aNXIxollKBLESUu5f4Fx+64hgASYm1H+jSWq6jCW6zqTnH6hqQ==}
     engines: {node: '>= 10'}
     hasBin: true
-
-  '@tauri-apps/plugin-shell@2.3.6':
-    resolution: {integrity: sha512-C2AG+QmBJPK0E3gccLXfRdjTfGBC9DgwzGi/PfYa61ieAZbYvhvOss4OdSGfn/D28N3THGhJZEhf3lozOh/Uqw==}
-
-  '@tauri-apps/plugin-store@2.4.4':
-    resolution: {integrity: sha512-oxSMaj/QpVfJcBMYX5aOQV94fWvga0MwQMfD6TLlbK2dh+ShPWAzefd8HWXhvOKjPRJdGVAkW7ZGO76JzzjaDA==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -1532,14 +1520,6 @@ snapshots:
       '@tauri-apps/cli-win32-arm64-msvc': 2.11.4
       '@tauri-apps/cli-win32-ia32-msvc': 2.11.4
       '@tauri-apps/cli-win32-x64-msvc': 2.11.4
-
-  '@tauri-apps/plugin-shell@2.3.6':
-    dependencies:
-      '@tauri-apps/api': 2.11.1
-
-  '@tauri-apps/plugin-store@2.4.4':
-    dependencies:
-      '@tauri-apps/api': 2.11.1
 
   '@types/babel__core@7.20.5':
     dependencies:
