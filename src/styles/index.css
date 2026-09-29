@@ -36,8 +36,6 @@
      and the drifting orbs rendered behind them, which is what sells the glass. */
   --glass-bg: rgba(255, 255, 255, 0.55);
   --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  /* Modals must stay legible over arbitrary content: more opaque than panels. */
-  --glass-bg-modal: rgba(252, 252, 253, 0.92);
   --glass-border: rgba(255, 255, 255, 0.65);
   --glass-highlight: rgba(255, 255, 255, 0.9);
   --glass-edge: rgba(24, 24, 27, 0.06);
@@ -72,7 +70,6 @@
 
   --glass-bg: rgba(24, 24, 27, 0.5);
   --glass-bg-strong: rgba(28, 28, 32, 0.78);
-  --glass-bg-modal: rgba(24, 24, 27, 0.94);
   --glass-border: rgba(255, 255, 255, 0.09);
   --glass-highlight: rgba(255, 255, 255, 0.08);
   --glass-edge: rgba(255, 255, 255, 0.06);
@@ -138,47 +135,6 @@ body {
 ::selection {
   background: var(--accent-muted);
   color: var(--text-primary);
-}
-
-/* Range slider (settings → delay compensation). The filled portion is drawn
-   by an inline linear-gradient the component computes from the current value. */
-input[type='range'] {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border);
-  outline: none;
-  cursor: pointer;
-}
-input[type='range']::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: none;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
-  transition: transform 0.15s ease;
-}
-input[type='range']::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-}
-input[type='range']::-webkit-slider-thumb:active {
-  transform: scale(1.1);
-}
-input[type='range']::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: none;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
-  transition: transform 0.15s ease;
-}
-input[type='range']:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 /* Number input (the delay value field). The stepper's own ± buttons and the

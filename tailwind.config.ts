@@ -29,7 +29,6 @@ const config: Config = {
         glass: {
           DEFAULT: 'var(--glass-bg)',
           strong: 'var(--glass-bg-strong)',
-          modal: 'var(--glass-bg-modal)',
         },
       },
       borderColor: {
