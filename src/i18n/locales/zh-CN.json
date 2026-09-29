@@ -55,6 +55,20 @@
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
   },
+  "startup": {
+    "upgradeTitle": "检测到你装过旧版本",
+    "upgradeBody": "旧版本可能把某些程序的输出设备固定住了：这些程序不再跟随你在 Windows 里切换的播放设备，重启电脑也不会恢复。如果遇到了，用下面的按钮清理一次；没遇到就不用管。",
+    "upgradeBodyVersion": "上次在这台电脑上运行的是 {{version}}，它可能把某些程序的输出设备固定住了：这些程序不再跟随你在 Windows 里切换的播放设备，重启电脑也不会恢复。如果遇到了，用下面的按钮清理一次；没遇到就不用管。",
+    "resetHint": "会清理当前正在运行的程序，包括你自己在音量合成器里设过的；没在运行的程序要等它下次运行时才清得掉。",
+    "resetAction": "重置每应用音频输出",
+    "resetting": "正在清理…",
+    "resetDone": "已清除 {{n}} 个程序的固定输出设备。",
+    "resetRemaining": "{{processes}} 还没清掉——让它放一声再试一次。",
+    "dismiss": "知道了",
+    "firstRunTitle": "欢迎使用 {{product}}",
+    "firstRunBody": "左边选一个正在出声的程序，右边点一台设备，再按中间的圆钮，声音就切过去了；多选几台设备＝同时输出。哪天有程序在系统里切不动播放设备，设置里的「重置每应用音频输出」能解开。",
+    "startAction": "开始使用"
+  },
   "titleBar": {
     "minimize": "最小化",
     "maximize": "最大化",
@@ -133,6 +147,8 @@
     "autostartOn": "已注册为开机启动应用",
     "autostartOff": "已移除开机启动项",
     "autostartFailed": "修改开机启动项失败：{{error}}",
-    "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}"
+    "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}",
+    "startupNoticeFailed": "读取启动提示失败：{{error}}",
+    "startupNoticeAckFailed": "记录启动提示状态失败：{{error}}"
   }
 }

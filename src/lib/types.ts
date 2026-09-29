@@ -22,6 +22,14 @@ export interface LogEntry {
 /** `(exe_name, device_ids)` — ids in route order, first is the primary. */
 export type RememberedRoute = [exeName: string, deviceIds: string[]];
 
+/** What the window should say about this install on launch. */
+export interface StartupNotice {
+  /** A fresh install, or an earlier version that may have left assignments. */
+  kind: 'first-run' | 'upgrade';
+  /** Version that ran here last, when the install recorded one. */
+  previous_version: string | null;
+}
+
 /** One executable's remembered route, as the store keeps it. */
 export interface RememberedRouteEntry {
   /** Executable name, exactly as the backend stored it. */

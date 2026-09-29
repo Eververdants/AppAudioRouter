@@ -8,6 +8,7 @@ import type {
   DeviceDelay,
   RememberedRoute,
   ResetOutcome,
+  StartupNotice,
   StopOutcome,
 } from './types';
 
@@ -131,4 +132,15 @@ export async function isSilentLaunch(): Promise<boolean> {
 /** Localize the native tray menu, which cannot reach the frontend's i18n itself. */
 export async function setTrayLabels(show: string, quit: string): Promise<void> {
   await invoke('set_tray_labels', { show, quit });
+}
+
+/** What this install should be told about itself: a first run, or an update
+ * whose earlier version may have left per-app endpoint assignments behind. */
+export async function getStartupNotice(): Promise<StartupNotice | null> {
+  return invoke<StartupNotice | null>('get_startup_notice');
+}
+
+/** Record that this version has run, so the notice is not shown again. */
+export async function ackStartupNotice(): Promise<void> {
+  await invoke('ack_startup_notice');
 }

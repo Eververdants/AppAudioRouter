@@ -5,6 +5,7 @@ mod audio;
 mod autostart;
 mod commands;
 mod config;
+mod install;
 mod tray;
 
 use std::time::Duration;
@@ -30,8 +31,15 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
         .init();
 
+    // Read before the window is built: the webview profile of *this* launch
+    // would otherwise look like proof that a version has run here before.
+    let context = tauri::generate_context!();
+    let version = context.package_info().version.to_string();
+    let startup_notice =
+        install::StartupNoticeState::new(context.config().identifier.as_str(), version.as_str());
+
     tauri::Builder::default()
-        .setup(|app| {
+        .setup(move |app| {
             let route_config = config::RouteConfig::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(route_config);
@@ -52,6 +60,10 @@ fn main() {
             // the assignment after this process is gone, and a program left
             // pinned ignores the device the user picks afterwards.
             app.manage(audio::routing::PinnedRoutes::new());
+            // Whether this is a first run or an update, and therefore whether the
+            // window should say something about assignments an older version may
+            // have left behind.
+            app.manage(startup_notice);
 
             // The window is a control panel; the tray is what keeps the app
             // reachable while it steers audio in the background.
@@ -106,8 +118,10 @@ fn main() {
             commands::set_autostart,
             commands::is_silent_launch,
             commands::set_tray_labels,
+            commands::get_startup_notice,
+            commands::ack_startup_notice,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             // Quitting is the last chance to give the user's programs back: the

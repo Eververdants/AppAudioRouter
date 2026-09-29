@@ -11,6 +11,7 @@ use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
 use crate::config::{AppSettings, DelayConfig, RouteConfig, VolumeConfig};
+use crate::install::{StartupNotice, StartupNoticeState};
 
 /// What a stop left behind.
 #[derive(Debug, Serialize)]
@@ -543,4 +544,24 @@ pub fn is_silent_launch() -> bool {
 #[tauri::command]
 pub fn set_tray_labels(show: String, quit: String, app: AppHandle) -> Result<(), String> {
     crate::tray::set_labels(&app, &show, &quit)
+}
+
+// ---------------------------------------------------------------- launch notice
+
+/// What the window should say about this install, if anything.
+///
+/// Either it is the first launch of a fresh install, or an earlier version ran
+/// here and may have left per-app endpoint assignments behind — the leftovers
+/// 2.1.1 fixes, which nothing in the app can tell apart from assignments the user
+/// made by hand.
+#[tauri::command]
+pub fn get_startup_notice(state: State<'_, StartupNoticeState>) -> Option<StartupNotice> {
+    state.notice()
+}
+
+/// Record that this version has run, so the notice is not shown again.
+#[tauri::command]
+pub fn ack_startup_notice(state: State<'_, StartupNoticeState>) -> Result<(), String> {
+    info!("cmd: ack_startup_notice");
+    state.ack()
 }

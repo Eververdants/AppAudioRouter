@@ -55,6 +55,20 @@
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."
   },
+  "startup": {
+    "upgradeTitle": "An earlier version ran on this PC",
+    "upgradeBody": "It may have left some programs fixed to one output device: they no longer follow the device you switch to in Windows, and a reboot does not bring them back. If you hit one, clear it with the button below; if not, there is nothing to do.",
+    "upgradeBodyVersion": "The last version to run on this PC was {{version}}, and it may have left some programs fixed to one output device: they no longer follow the device you switch to in Windows, and a reboot does not bring them back. If you hit one, clear it with the button below; if not, there is nothing to do.",
+    "resetHint": "This clears every program that is running now, including a device you set by hand in the volume mixer. A program that is not running keeps its device until it starts.",
+    "resetAction": "Reset per-app output",
+    "resetting": "Clearing…",
+    "resetDone": "Cleared the fixed output device of {{n}} program(s).",
+    "resetRemaining": "{{processes}} could not be cleared — let it play a sound and try again.",
+    "dismiss": "Got it",
+    "firstRunTitle": "Welcome to {{product}}",
+    "firstRunBody": "Pick a program that is playing on the left, click a device on the right, then press the button in the middle and the sound moves there. Pick several devices to play on all of them at once. If a program ever stops following the devices you switch to in Windows, the reset in Settings releases it.",
+    "startAction": "Start routing"
+  },
   "titleBar": {
     "minimize": "Minimize",
     "maximize": "Maximize",
@@ -133,6 +147,8 @@
     "autostartOn": "Registered as a Windows startup app",
     "autostartOff": "Removed from Windows startup",
     "autostartFailed": "Failed to change the startup entry: {{error}}",
-    "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}"
+    "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}",
+    "startupNoticeFailed": "Could not read the startup notice: {{error}}",
+    "startupNoticeAckFailed": "Could not record the startup notice: {{error}}"
   }
 }

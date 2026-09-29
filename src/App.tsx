@@ -5,6 +5,7 @@ import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { SettingsPage } from '@/components/SettingsPage';
+import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useRouterStore } from '@/stores/routerStore';
@@ -78,6 +79,7 @@ export default function App() {
   const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
   const loadRememberedRoutes = useRouterStore((s) => s.loadRememberedRoutes);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
+  const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
 
   useEffect(() => {
@@ -139,6 +141,9 @@ export default function App() {
       // The tray preference and the startup registry entry are only read by the
       // settings page, so they wait for the first paint like the rest.
       void loadShellSettings();
+      // Whether this install is fresh or an update, and what to say about the
+      // assignments an earlier version may have left behind.
+      void loadStartupNotice();
     });
   }, [
     refreshDevices,
@@ -147,6 +152,7 @@ export default function App() {
     reconcileActiveDuplications,
     loadRememberedRoutes,
     loadShellSettings,
+    loadStartupNotice,
   ]);
 
   // Duplication engines report their end (user stop, process exit, error) through
@@ -242,6 +248,10 @@ export default function App() {
           </motion.div>
         )}
       </div>
+
+      {/* Last child, so it covers both views: what this install is told about
+          itself once (a welcome, or the leftovers of an earlier version). */}
+      <StartupNoticeDialog />
     </div>
   );
 }

@@ -1,0 +1,120 @@
+import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
+import { SPRING_GLIDE } from '@/lib/motion';
+import type { ResetOutcome } from '@/lib/types';
+import { useRouterStore } from '@/stores/routerStore';
+
+/**
+ * What this install is told about itself, once.
+ *
+ * Windows keeps a per-app endpoint assignment after the program that wrote it is
+ * gone, so a version that stopped a route without releasing it (2.1.1 and
+ * earlier) can leave a program stuck on one device — the system default no
+ * longer moves it, and a reboot does not help. Nothing in the app can tell such
+ * a leftover from an assignment the user made by hand in the volume mixer, so
+ * the launch after an update offers the reset instead of running it silently.
+ *
+ * A fresh install gets the two lines it needs to start routing, and one about
+ * the reset, which is the answer if a program ever stops following the system
+ * default.
+ */
+export function StartupNoticeDialog() {
+  const { t } = useTranslation();
+  const notice = useRouterStore((s) => s.startupNotice);
+  const dismiss = useRouterStore((s) => s.dismissStartupNotice);
+  const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
+  const [result, setResult] = useState<ResetOutcome | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (notice === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') void dismiss();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [notice, dismiss]);
+
+  if (notice === null) return null;
+  const upgrade = notice.kind === 'upgrade';
+
+  const runReset = async () => {
+    setBusy(true);
+    try {
+      setResult(await resetPinnedEndpoints());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="startup-notice-title"
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={SPRING_GLIDE}
+        className="w-full max-w-md rounded-2xl border border-glass bg-glass-strong p-5 shadow-glass backdrop-blur-xl"
+      >
+        <h2 id="startup-notice-title" className="text-[15px] font-semibold text-text-primary">
+          {upgrade
+            ? t('startup.upgradeTitle')
+            : t('startup.firstRunTitle', { product: t('productName') })}
+        </h2>
+        <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
+          {upgrade
+            ? notice.previous_version === null
+              ? t('startup.upgradeBody')
+              : t('startup.upgradeBodyVersion', { version: notice.previous_version })
+            : t('startup.firstRunBody')}
+        </p>
+
+        {upgrade && (
+          <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
+            {t('startup.resetHint')}
+          </p>
+        )}
+
+        {result !== null && (
+          <p
+            className={`mt-3 rounded-xl px-3 py-2 text-[11px] leading-relaxed ${
+              result.still_pinned.length === 0
+                ? 'bg-accent-muted text-accent'
+                : 'bg-accent-muted text-text-secondary'
+            }`}
+          >
+            {t('startup.resetDone', { n: result.released })}
+            {result.still_pinned.length > 0 &&
+              ` ${t('startup.resetRemaining', { processes: result.still_pinned.join(', ') })}`}
+          </p>
+        )}
+
+        <div className="mt-4 flex items-center justify-end gap-2">
+          {upgrade && (
+            <button
+              type="button"
+              onClick={() => void runReset()}
+              disabled={busy}
+              className="rounded-full bg-accent px-3.5 py-1.5 text-[11px] font-medium text-white outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+            >
+              {busy ? t('startup.resetting') : t('startup.resetAction')}
+            </button>
+          )}
+          <button
+            type="button"
+            autoFocus
+            onClick={() => void dismiss()}
+            className="rounded-full border border-glass bg-glass px-3.5 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/40 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+          >
+            {upgrade ? t('startup.dismiss') : t('startup.startAction')}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}

@@ -7,6 +7,8 @@ import type {
   DuplicationStoppedEvent,
   LogEntry,
   RememberedRouteEntry,
+  ResetOutcome,
+  StartupNotice,
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import {
@@ -61,6 +63,10 @@ interface RouterState {
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
   autostart: boolean;
+  /** What the window says about this install: a welcome on a first run, or a
+   * word about the assignments an earlier version may have left behind. Null
+   * once acknowledged. */
+  startupNotice: StartupNotice | null;
   logs: LogEntry[];
   /** True while a route request is in flight, so a rapid double-click cannot
    * dispatch two overlapping routes against the same selection. */
@@ -95,14 +101,19 @@ interface RouterState {
   toggleAutoRemember: () => void;
   /** Read the close-to-tray preference and the startup registry entry. */
   loadShellSettings: () => Promise<void>;
+  /** Read what this install should be told about itself (first run / update). */
+  loadStartupNotice: () => Promise<void>;
+  /** Take the notice down and record that this version has run. */
+  dismissStartupNotice: () => Promise<void>;
   toggleCloseToTray: () => Promise<void>;
   toggleAutostart: () => Promise<void>;
   applyRoute: () => Promise<void>;
   stopRoute: (pid: number) => Promise<void>;
   stopAllRoutes: () => Promise<void>;
   /** Release the fixed output device of every program no live route is using.
-   * The way out for programs an earlier version of this app left pinned. */
-  resetPinnedEndpoints: () => Promise<void>;
+   * The way out for programs an earlier version of this app left pinned. The
+   * outcome is returned so the launch notice can report what it cleared. */
+  resetPinnedEndpoints: () => Promise<ResetOutcome | null>;
   /** Release assignments whose program exited while it was routed, so its next
    * launch follows the system default again instead of the old device. */
   releaseStaleRoutes: () => Promise<void>;
@@ -323,6 +334,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   rememberedRoutes: [],
   closeToTray: false,
   autostart: false,
+  startupNotice: null,
   logs: [],
   applying: false,
   engineGenerations: {},
@@ -640,6 +652,28 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
+  loadStartupNotice: async () => {
+    // Decided on the Rust side, before the window existed: either this is the
+    // first launch of a fresh install, or an earlier version ran here and may
+    // have left per-app endpoint assignments behind (see `install.rs`).
+    try {
+      set({ startupNotice: await api.getStartupNotice() });
+    } catch (e) {
+      get().addLog(i18next.t('log.startupNoticeFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  dismissStartupNotice: async () => {
+    set({ startupNotice: null });
+    try {
+      await api.ackStartupNotice();
+    } catch (e) {
+      // The notice is gone for this session either way; the file simply did not
+      // record it, so the next launch shows it once more.
+      get().addLog(i18next.t('log.startupNoticeAckFailed', { error: String(e) }), 'error');
+    }
+  },
+
   toggleCloseToTray: async () => {
     const next = !get().closeToTray;
     set({ closeToTray: next });
@@ -912,8 +946,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           'error',
         );
       }
+      return outcome;
     } catch (e) {
       get().addLog(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }), 'error');
+      return null;
     }
   },
 
