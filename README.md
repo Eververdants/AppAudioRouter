@@ -243,6 +243,10 @@ Yes. Routing is applied to the live audio session, so the program does not need 
 
 Yes, and that is the point of 2.1.1. While a program is routed, Windows has a fixed output device stored for it — that is the mechanism that moves a running program's audio — and that stored device outranks the system default. Stopping the route, quitting the app and **Settings → Reset per-app output** each release it, so the program follows the default device again, including every device you pick afterwards. If Windows refuses to release it, the log says which device the program is still fixed to instead of pretending the route is gone; the volume mixer's own **Reset** for that app clears it too. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device — or ignore your device switches — until the reset was done.
 
+### What does the app say on the first launch after an update?
+
+One thing, once. Windows stores a program's output device per executable and keeps that stored device after the program exits, so a version that stopped a route without handing it back (2.1.1 and earlier) can leave a program fixed to one device — it stops following the devices you switch to in Windows, and no reboot helps. Nothing in the app can tell such a leftover from an assignment you made by hand in the volume mixer, so rather than clearing anything on its own, the app says so on the first launch after the update and offers **Reset per-app output** right there. Ignore it if no program is misbehaving. A fresh install gets a two-line welcome instead, which points at the reset as well. Each notice appears once per version — the version that last ran is recorded in `install-state.json` — and both are written to the log.
+
 ### Can it fix the delay between a Bluetooth headset and wired speakers?
 
 Yes, that is what delay compensation is for. Measure or estimate how far behind the Bluetooth device is, then give the faster device that value as a positive delay (for example `+180 ms`). Positive values hold a device back; a negative value marks it as the earliest device in the route.
@@ -253,7 +257,7 @@ A program only shows up while it holds an active audio session, so start playbac
 
 ### Where are the settings stored?
 
-In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent) and `app-settings.json` (whether the close button hides the window to the tray). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
+In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
 
 ### Does it run in the background or poll the audio devices?
 
