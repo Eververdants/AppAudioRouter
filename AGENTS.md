@@ -40,6 +40,7 @@ AppAudioRouter/
 │       ├── commands.rs     # Tauri 命令（invoke handler）
 │       ├── tray.rs         # 托盘图标 + 菜单（左键开关窗口；菜单标签由前端下发以跟随语言）
 │       ├── autostart.rs    # 开机自启：直接读写 HKCU\...\Run，启动时带 --hidden
+│       ├── install.rs      # 启动提示：全新安装 / 装过旧版本（建窗口之前判定，install-state.json 记版本）
 │       ├── audio/
 │       │   ├── mod.rs
 │       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
@@ -58,6 +59,7 @@ AppAudioRouter/
 │   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/已记忆路由列表/每应用音频重置/后台开关/延迟范围·步进·逐设备设置/关于）
 │   │   ├── LogPanel.tsx
 │   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
+│   │   ├── StartupNoticeDialog.tsx  # 启动提示弹窗（欢迎语 / 旧版本提示 + 就地重置）
 │   │   └── ui/             # 基础控件
 │   │       ├── Switch.tsx              # 动画开关
 │   │       ├── SegmentedControl.tsx    # 滑动胶囊分段控件
@@ -230,6 +232,16 @@ AppAudioRouter/
 - 新增任何"改变某程序输出"的代码路径，都要把这一套接上：写 → 登记 → 停止时归还。少一步就是把用户锁在错误的设备上，而且界面上没有任何东西能解释为什么。
 - 系统关键进程在 `set_process_default_device` 入口被 `is_protected_process` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径。
 
+### 启动提示（`install.rs`，2.1.1 起）
+
+首次启动和升级后的首次启动各要说一句话：全新安装给两行欢迎语，装过旧版本则在弹窗里直接提供「重置每应用音频输出」。旧版本可能在 Windows 里留下固定端点（见上一节），而应用分不出「旧版本留下的」和「用户在音量合成器里手设的」——所以既不静默清理，也不装作没事，而是问一次。
+
+- ⚠️ **判定必须在建窗口之前完成**（`main.rs` 里 `tauri::Builder` 之前），依据是本应用自己的两个目录：`%APPDATA%\<identifier>`（配置文件，只有存过东西才存在）和 `%LOCALAPPDATA%\<identifier>\EBWebView`（WebView2 档案，任何版本跑过一次就有）。挪进 `setup()` 就晚了：这一次启动自己会建出 EBWebView，全新安装会被认成升级。
+- 目录取自环境变量而不是 `app.path()`，因为判定时机在 App 存在之前；`identifier` 从 `generate_context!().config()` 读，别手抄字面量（会和 `tauri.conf.json` 漂移）。
+- 「上次运行的版本」记在 `app_data_dir/install-state.json`，**在用户点掉提示时写**（`ack_startup_notice`），所以同一版本只提示一次、下次升级会再提示。写失败只记日志，不能让提示卡在那里。
+- `StartupNotice { kind, previous_version }` 的 `kind`（kebab-case）是前后端契约，`src/lib/types.ts` 的联合类型按字面量认它，`install.rs` 里有测试钉住；新增第三种之前先想清楚前端怎么显示。
+- 弹窗里那个重置按钮复用 `resetPinnedEndpoints`，不要再写一条清理路径；文案必须写明「会清掉当前正在运行的程序」，否则用户会以为它只清旧版本留下的东西。
+
 ---
 
 ## 主题系统
@@ -367,6 +379,7 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 停止路由后程序跟随系统默认设备：之后手动切换默认输出，它也一起走（2.1.1 的回归点）
 - [ ] 路由期间直接退出应用：程序不再被固定在旧设备上
 - [ ] 设置 →「重置每应用音频输出」能清掉旧版本留下的固定记录，且不动正在路由的进程
+- [ ] 启动提示：装过旧版本的机器第一次打开弹「检测到你装过旧版本」且能就地重置；全新安装弹欢迎语；点掉后同一版本不再弹（版本记在 `install-state.json`）
 - [ ] 选中一个进程后点击另一台设备：只输出到那一台，不再两台一起响
 - [ ] 自动记忆：开启后路由一个程序，重启本应用或让该程序重新出声，路由自动恢复且日志各留一行；手动停止过的不会被装回去；设置页能列出并「忘记」某条记忆
 - [ ] 插上一个新设备 / 让一个新程序开始放音：不点 Refresh，两边列表自己跟上，且日志只在内容真的变化时多一行
