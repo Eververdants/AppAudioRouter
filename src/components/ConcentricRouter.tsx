@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DeviceAnnotation } from '@/components/DeviceAnnotation';
 import { useFitScale } from '@/hooks/useFitScale';
+import { FADE, SPRING_GLIDE, SPRING_ROUTE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
 /** Fixed design size of the router stage; the whole stage is scaled to fit. */
@@ -79,7 +80,7 @@ const DeviceNode = memo(function DeviceNode({
       initial="hidden"
       animate="show"
       exit="hidden"
-      transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+      transition={SPRING_GLIDE}
       style={{ x, y }}
       className="absolute left-1/2 top-1/2 focus-within:z-10 hover:z-10"
     >
@@ -94,8 +95,8 @@ const DeviceNode = memo(function DeviceNode({
           <motion.span
             aria-hidden="true"
             className="absolute inset-0 rounded-full border border-accent/40"
-            animate={{ scale: [1, 1.35], opacity: [0.5, 0] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
+            animate={{ scale: [1, 1.3], opacity: [0.4, 0] }}
+            transition={{ duration: 2.8, repeat: Infinity, ease: 'easeOut' }}
           />
         )}
         <div
@@ -115,7 +116,7 @@ const DeviceNode = memo(function DeviceNode({
               if (e.detail > 0) e.currentTarget.blur();
             }}
             whileTap={{ scale: 0.94 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+            transition={SPRING_TAP}
             title={device.name}
             className="flex min-w-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           >
@@ -126,7 +127,7 @@ const DeviceNode = memo(function DeviceNode({
               key={selectionIndex}
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
-              transition={{ type: 'spring', stiffness: 500, damping: 24 }}
+              transition={SPRING_TAP}
               className={`absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold leading-none ${
                 isPrimary ? 'bg-accent text-white' : 'bg-accent/80 text-white'
               }`}
@@ -257,8 +258,9 @@ export function ConcentricRouter() {
           )}
         </AnimatePresence>
 
-        {/* Flowing links: centre → each selected device; the segment passing
-            under the frosted hub diffuses into it like light through glass */}
+        {/* Links: centre → each selected device. The dashes crawl only while the
+            route is live, so a moving line means audio is flowing; the segment
+            under the frosted hub diffuses into it like light through glass. */}
         <svg
           className="pointer-events-none absolute inset-0"
           width={STAGE_SIZE}
@@ -267,30 +269,49 @@ export function ConcentricRouter() {
           fill="none"
           aria-hidden="true"
         >
+          <defs>
+            {/* A blurred copy underneath, not a drop-shadow on the dashes: a
+                filter on the animated path would be recomputed every frame. */}
+            <filter id="route-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" />
+            </filter>
+          </defs>
           <AnimatePresence>
             {selectedDeviceIds.map((id, routeIndex) => {
               const deviceIndex = devices.findIndex((d) => d.id === id);
               if (deviceIndex < 0) return null;
               const { x, y } = offsets[deviceIndex] ?? { x: 0, y: 0 };
               const isLive = activeIds.includes(id);
+              const d = routePath(x, y);
               return (
-                <motion.path
+                <motion.g
                   key={id}
-                  d={routePath(x, y)}
-                  stroke="var(--accent)"
-                  strokeOpacity={isLive ? 0.75 : 0.3}
-                  strokeWidth={isLive ? 2 : 1.5}
-                  strokeLinecap="round"
-                  strokeDasharray="2 7"
-                  style={isLive ? { filter: 'drop-shadow(0 0 5px var(--accent-glow))' } : undefined}
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: 1, strokeDashoffset: [0, -18] }}
-                  exit={{ opacity: 0, transition: { duration: 0.25 } }}
-                  transition={{
-                    opacity: { duration: 0.4, delay: routeIndex * 0.05 },
-                    strokeDashoffset: { duration: 1.8, repeat: Infinity, ease: 'linear' },
-                  }}
-                />
+                  animate={{ opacity: 1, transition: { duration: 0.4, delay: routeIndex * 0.05 } }}
+                  exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                >
+                  <motion.path
+                    d={d}
+                    stroke="var(--accent)"
+                    strokeWidth={6}
+                    strokeLinecap="round"
+                    filter="url(#route-glow)"
+                    animate={{ opacity: isLive ? 0.18 : 0 }}
+                    transition={FADE}
+                  />
+                  <motion.path
+                    d={d}
+                    stroke="var(--accent)"
+                    strokeOpacity={isLive ? 0.75 : 0.3}
+                    strokeWidth={isLive ? 2 : 1.5}
+                    strokeLinecap="round"
+                    strokeDasharray="2 7"
+                    animate={isLive ? { strokeDashoffset: [0, -18] } : undefined}
+                    transition={
+                      isLive ? { duration: 1.8, repeat: Infinity, ease: 'linear' } : undefined
+                    }
+                  />
+                </motion.g>
               );
             })}
           </AnimatePresence>
@@ -336,8 +357,8 @@ export function ConcentricRouter() {
             <motion.div
               aria-hidden="true"
               className="absolute -inset-2 rounded-full border border-accent/30"
-              animate={{ opacity: [0.15, 0.4, 0.15], scale: [1, 1.03, 1] }}
-              transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
+              animate={{ opacity: [0.12, 0.34, 0.12], scale: [1, 1.025, 1] }}
+              transition={{ duration: 4.2, repeat: Infinity, ease: 'easeInOut' }}
             />
           )}
           <motion.button
@@ -355,10 +376,14 @@ export function ConcentricRouter() {
             }
             whileHover={canRoute && !applying ? { scale: 1.04 } : undefined}
             whileTap={canRoute && !applying ? { scale: 0.97 } : undefined}
-            transition={{ type: 'spring', stiffness: 380, damping: 24 }}
-            className={`relative flex h-36 w-36 flex-col items-center justify-center rounded-full border outline-none backdrop-blur-2xl transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-accent/60 ${
+            transition={SPRING_ROUTE}
+            className={`relative flex h-36 w-36 flex-col items-center justify-center rounded-full border outline-none backdrop-blur-2xl transition-[color,background-color,border-color,box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-accent/60 ${
               canRoute
-                ? 'cursor-pointer border-accent/40 bg-white/50 shadow-glow dark:bg-white/[0.07]'
+                ? // The button is disabled for the whole round-trip, so it has to
+                  // look busy rather than merely inert.
+                  `border-accent/40 bg-white/50 shadow-glow dark:bg-white/[0.07] ${
+                    applying ? 'cursor-progress opacity-70' : 'cursor-pointer'
+                  }`
                 : 'cursor-default border-white/60 bg-white/40 shadow-glass dark:border-white/10 dark:bg-white/[0.05]'
             }`}
           >
@@ -374,7 +399,7 @@ export function ConcentricRouter() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  transition={SPRING_GLIDE}
                   className="flex flex-col items-center gap-2 px-5 text-center"
                 >
                   <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-accent text-white shadow-glow">

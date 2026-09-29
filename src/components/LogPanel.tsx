@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { FADE } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
 export function LogPanel() {
@@ -19,16 +20,12 @@ export function LogPanel() {
     <div className="flex h-full flex-col rounded-2xl border border-glass bg-glass p-4 shadow-glass backdrop-blur-xl">
       <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-text-primary">
         {t('logPanel.title')}
-        {/* live dot: subtle heartbeat so the panel reads as "recording" */}
-        <motion.span
-          aria-hidden="true"
-          className="h-1.5 w-1.5 rounded-full bg-success"
-          animate={{ opacity: [1, 0.3, 1] }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-        />
+        {/* Still on purpose: a dot that pulses forever sits at the edge of
+            vision and is the first thing that makes a panel tiring. */}
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
       </h2>
 
-      <div className="flex-1 overflow-y-auto font-mono text-[11px]">
+      <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-4">
         <AnimatePresence initial={false}>
           {logs.map((log) => (
             <motion.div
@@ -36,7 +33,8 @@ export function LogPanel() {
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className={`py-0.5 ${
+              transition={FADE}
+              className={`py-0.5 [overflow-wrap:anywhere] ${
                 log.level === 'success'
                   ? 'text-success'
                   : log.level === 'error'
@@ -44,7 +42,7 @@ export function LogPanel() {
                     : 'text-text-secondary'
               }`}
             >
-              <span className="text-text-muted">[{log.timestamp}]</span> {log.message}
+              <span className="tabular-nums text-text-muted">[{log.timestamp}]</span> {log.message}
             </motion.div>
           ))}
         </AnimatePresence>
