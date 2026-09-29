@@ -8,7 +8,6 @@ export interface AudioDevice {
 export interface AudioSession {
   pid: number;
   exe_name: string;
-  display_name: string;
 }
 
 export type Role = 'all' | 'console' | 'multimedia' | 'communications';
@@ -22,6 +21,14 @@ export interface LogEntry {
 
 /** `(exe_name, device_ids)` — ids in route order, first is the primary. */
 export type RememberedRoute = [exeName: string, deviceIds: string[]];
+
+/** One executable's remembered route, as the store keeps it. */
+export interface RememberedRouteEntry {
+  /** Executable name, exactly as the backend stored it. */
+  exeName: string;
+  /** Targets in route order; the first is the primary endpoint. */
+  deviceIds: string[];
+}
 
 /** `(device_id, delay_ms)` — signed software delay compensation for that
  * device: positive holds it back, negative makes it the earliest of its group. */
