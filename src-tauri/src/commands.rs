@@ -209,7 +209,10 @@ async fn pin_to_default(pid: u32, device_id: &str, pins: &PinnedRoutes) -> StopO
     match audio::routing::set_process_default_device(device_id, pid, audio::Role::All).await {
         Ok(()) => {
             let exe_name = audio::sessions::get_process_exe_name(pid).unwrap_or_default();
-            pins.mark(pid, &exe_name, device_id);
+            // Recorded as handed back, not as a route: nothing is routing this
+            // program, and the reset in the settings page has to be able to
+            // clear the assignment Windows would not release here.
+            pins.mark_returned(pid, &exe_name, device_id);
             StopOutcome {
                 released: false,
                 pinned_device: Some(device_id.to_string()),
@@ -248,11 +251,15 @@ pub async fn reset_pinned_endpoints(
         .into_iter()
         .map(|route| route.pid)
         .collect();
-    let ours: HashSet<u32> = pins.pids().into_iter().collect();
+    // Only a live route is holding its assignment on purpose. A program this run
+    // handed back to the default — because Windows refused to release it at stop
+    // time — is exactly the case the user is asking about, and nothing else can
+    // reach it.
+    let live_routes: HashSet<u32> = pins.routed_pids().into_iter().collect();
     let pids: Vec<u32> = sessions
         .iter()
         .map(|session| session.pid)
-        .filter(|pid| !routed.contains(pid) && !ours.contains(pid))
+        .filter(|pid| !routed.contains(pid) && !live_routes.contains(pid))
         .collect();
 
     let names: HashMap<u32, String> = sessions
@@ -268,7 +275,13 @@ pub async fn reset_pinned_endpoints(
     let mut still_pinned = Vec::new();
     for (pid, outcome) in outcomes {
         match outcome {
-            ReleaseOutcome::Released => released += 1,
+            ReleaseOutcome::Released => {
+                // Nothing pins this program any more, so its bookkeeping goes
+                // too — including the entry of a route that was handed back at
+                // stop time and is only now really released.
+                pins.forget(pid);
+                released += 1;
+            }
             _ => still_pinned.push(
                 names
                     .get(&pid)
@@ -318,7 +331,21 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
     }
     // Snapshot, not the live map: the sweep below drops entries as it goes, and
     // a PID it drops is never the one it is about to hand the assignment to.
-    let ours: HashSet<u32> = pins.pids().into_iter().collect();
+    // Only a live route counts as ours here: an entry handed back to the default
+    // has nothing left to protect.
+    let ours: HashSet<u32> = pins.routed_pids().into_iter().collect();
+    // The assignment is stored per executable, and the PID it would be handed to
+    // need not be the PID of ours — a browser plays through whichever of its
+    // processes Windows lists first. What decides is whether that *executable*
+    // still has a live route of ours: clearing it through any of its processes
+    // would take that route's primary endpoint away, leaving the mirrors playing
+    // while the program quietly fell back to the system default.
+    let mut routed_exes: HashSet<String> = HashSet::new();
+    for (pid, exe_name, _) in &pinned {
+        if ours.contains(pid) && live_pids.contains(pid) {
+            routed_exes.insert(exe_name.to_ascii_lowercase());
+        }
+    }
 
     let mut released: Vec<String> = Vec::new();
     for (pid, exe_name, _device) in pinned {
@@ -334,7 +361,7 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         // *right now* — the mirrors would keep playing while the primary
         // silently fell back to the system default. That route owns the
         // assignment now; only the stale bookkeeping is ours to drop.
-        if ours.contains(&relaunched_pid) {
+        if ours.contains(&relaunched_pid) || routed_exes.contains(&exe_name.to_ascii_lowercase()) {
             pins.forget(pid);
             continue;
         }

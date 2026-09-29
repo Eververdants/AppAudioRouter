@@ -432,12 +432,26 @@ pub enum ReleaseOutcome {
     Unknown,
 }
 
+/// Why this run is holding an endpoint assignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinKind {
+    /// A live route: the program is pointed at the devices the user chose.
+    Route,
+    /// The program's route was stopped, but Windows would not let the assignment
+    /// go, so it was pointed at the current default device instead. Nothing is
+    /// routing it — the entry is only here so that assignment stays ours to
+    /// release later.
+    ReturnedToDefault,
+}
+
 /// A process this run has pointed at an explicit endpoint.
 pub struct PinnedRoute {
     /// Executable name, so a relaunch of the same program can be found again.
     pub exe_name: String,
     /// Endpoint the process was pointed at.
     pub device_id: String,
+    /// Whether a route of ours — as opposed to a handed-back program — owns it.
+    pub kind: PinKind,
 }
 
 /// The processes this run has pointed at an explicit endpoint.
@@ -461,14 +475,25 @@ impl PinnedRoutes {
         Self::default()
     }
 
-    /// Record that this app pointed `pid` at `device_id`.
+    /// Record that this app pointed `pid` at `device_id` for a live route.
     pub fn mark(&self, pid: u32, exe_name: &str, device_id: &str) {
+        self.insert(pid, exe_name, device_id, PinKind::Route);
+    }
+
+    /// Record that `pid` was handed back to the current default device, because
+    /// Windows would not release the assignment its route left behind.
+    pub fn mark_returned(&self, pid: u32, exe_name: &str, device_id: &str) {
+        self.insert(pid, exe_name, device_id, PinKind::ReturnedToDefault);
+    }
+
+    fn insert(&self, pid: u32, exe_name: &str, device_id: &str, kind: PinKind) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.insert(
             pid,
             PinnedRoute {
                 exe_name: exe_name.to_string(),
                 device_id: device_id.to_string(),
+                kind,
             },
         );
     }
@@ -479,10 +504,14 @@ impl PinnedRoutes {
         inner.remove(&pid);
     }
 
-    /// The PIDs this run has pinned.
-    pub fn pids(&self) -> Vec<u32> {
+    /// The PIDs a live route of ours owns, whose assignments must be left alone.
+    pub fn routed_pids(&self) -> Vec<u32> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.keys().copied().collect()
+        inner
+            .iter()
+            .filter(|(_, route)| route.kind == PinKind::Route)
+            .map(|(pid, _)| *pid)
+            .collect()
     }
 
     /// Whether this app is holding an assignment for `pid`.
@@ -797,4 +826,33 @@ pub async fn set_default_device(device_id: &str, role: Role) -> Result<(), Audio
     })
     .await
     .map_err(|_| AudioError::Api("routing task failed".to_string()))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A program handed back to the default is not a live route: the settings
+    /// reset has to be able to clear that assignment, while only a route keeps
+    /// one on purpose.
+    #[test]
+    fn a_handed_back_program_is_not_a_live_route() {
+        let pins = PinnedRoutes::new();
+        pins.mark(1, "game.exe", "device-a");
+        pins.mark_returned(2, "browser.exe", "device-b");
+
+        assert_eq!(pins.routed_pids(), vec![1]);
+        assert!(pins.holds(2));
+
+        pins.forget(1);
+        assert!(pins.routed_pids().is_empty());
+        // Shutdown releases everything, handed-back entries included.
+        assert_eq!(pins.take_all(), vec![2]);
+    }
+
+    #[test]
+    fn system_processes_are_protected() {
+        assert!(is_protected_process(0));
+        assert!(is_protected_process(4));
+    }
 }
