@@ -327,6 +327,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // from the system default endpoint it already plays through.
       selectedPids: [pid],
       selectedDeviceIds: s.routedPids[pid] ?? defaultTargets(s),
+      // Whatever came out of that is a guess about where the process plays, not
+      // something the user asked for yet.
+      deviceSelectionPrefilled: true,
     })),
 
   toggleProcessSelection: (pid) =>
@@ -335,20 +338,39 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         ? s.selectedPids.filter((p) => p !== pid)
         : [...s.selectedPids, pid];
       // Device targets stay shared across a multi-selection; clear them only
-      // when the last process was deselected.
+      // when the last process was deselected. Either way the target list is no
+      // longer one process's prefilled guess.
       const selectedDeviceIds = selectedPids.length === 0 ? [] : s.selectedDeviceIds;
-      return { selectedPids, selectedDeviceIds };
+      return { selectedPids, selectedDeviceIds, deviceSelectionPrefilled: false };
     }),
 
-  toggleDeviceSelection: (deviceId) =>
-    set((s) => {
-      const index = s.selectedDeviceIds.indexOf(deviceId);
-      const next =
-        index >= 0
-          ? s.selectedDeviceIds.filter((id) => id !== deviceId)
-          : [...s.selectedDeviceIds, deviceId];
-      return { selectedDeviceIds: next };
-    }),
+  toggleDeviceSelection: (deviceId) => {
+    const { selectedDeviceIds, deviceSelectionPrefilled, devices, selectedPids, sessions } = get();
+    // The first click on a device while the target list is still the app's own
+    // single-device guess *replaces* it: "play through that one instead". Adding
+    // to the guess is what used to turn a device switch into a second copy of
+    // the audio on a device the user did not mean to use.
+    const replacesGuess =
+      deviceSelectionPrefilled &&
+      selectedDeviceIds.length === 1 &&
+      !selectedDeviceIds.includes(deviceId);
+    const next = replacesGuess
+      ? [deviceId]
+      : selectedDeviceIds.includes(deviceId)
+        ? selectedDeviceIds.filter((id) => id !== deviceId)
+        : [...selectedDeviceIds, deviceId];
+    set({ selectedDeviceIds: next, deviceSelectionPrefilled: false });
+    if (replacesGuess) {
+      const device = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+      const process = sessions.find((s) => s.pid === selectedPids[0])?.exe_name;
+      get().addLog(
+        process === undefined
+          ? i18next.t('log.deviceSwitched', { device })
+          : i18next.t('log.deviceSwitchedProcess', { process, device }),
+        'info',
+      );
+    }
+  },
 
   toggleAutoRemember: () => set((s) => ({ autoRemember: !s.autoRemember })),
 
