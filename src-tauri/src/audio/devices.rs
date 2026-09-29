@@ -1,6 +1,6 @@
 //! Render device enumeration via IMMDeviceEnumerator.
 
-use log::info;
+use log::{info, warn};
 use windows::Win32::Media::Audio::{
     eConsole, eRender, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
     DEVICE_STATE_ACTIVE,
@@ -57,10 +57,17 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
                     .map_err(|e| AudioError::Api(format!("Item({i}) failed: {e}")))?
             };
 
-            let device = device_info(&device)?;
-
-            info!("render device: {} [{}]", device.name, device.id);
-            devices.push(device);
+            // One endpoint that will not open — a driver in a bad state, an
+            // endpoint that denies its property store — must not take the rest
+            // of the list with it: "every device but that one" is usable, "no
+            // devices at all" leaves the user with nothing to route to.
+            match device_info(&device) {
+                Ok(device) => {
+                    info!("render device: {} [{}]", device.name, device.id);
+                    devices.push(device);
+                }
+                Err(e) => warn!("skipping render device {i}: {e}"),
+            }
         }
 
         Ok(devices)
