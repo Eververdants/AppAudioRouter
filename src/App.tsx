@@ -9,6 +9,7 @@ import { TitleBar } from '@/components/TitleBar';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useRouterStore } from '@/stores/routerStore';
 import type { AudioChangedEvent, DuplicationStoppedEvent } from '@/lib/types';
+import { FADE, SPRING_GLIDE } from '@/lib/motion';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
 
@@ -27,7 +28,7 @@ const AUDIO_SYNC_DEBOUNCE_MS = 400;
 const panelEnter = {
   initial: { opacity: 0, y: 6 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.18, ease: 'easeOut' },
+  transition: FADE,
 } as const;
 
 /** Runs `task` once the browser is idle, falling back to a task tick. */
@@ -204,7 +205,7 @@ export default function App() {
             key="router"
             initial={{ opacity: 0, x: -24 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+            transition={SPRING_GLIDE}
             className="flex min-h-0 flex-1 gap-3"
           >
             {/* Left panel: process list (narrower below lg to leave room for the router) */}
@@ -217,7 +218,7 @@ export default function App() {
                 column. */}
             <motion.main
               {...panelEnter}
-              className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-glass bg-glass p-3 shadow-glass backdrop-blur-xl"
+              className="flex min-w-0 flex-1 flex-col rounded-2xl border border-glass bg-glass p-3 shadow-glass backdrop-blur-xl"
             >
               <div className="min-h-0 w-full flex-1">
                 <ConcentricRouter />
@@ -234,7 +235,7 @@ export default function App() {
             key="settings"
             initial={{ opacity: 0, x: 36 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+            transition={SPRING_GLIDE}
             className="min-h-0 flex-1"
           >
             <SettingsPage onBack={() => setView('router')} />

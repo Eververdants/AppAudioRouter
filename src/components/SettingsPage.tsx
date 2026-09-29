@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
+import { SPRING_TAP } from '@/lib/motion';
 import type { AudioDevice, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -184,7 +185,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             onClick={onBack}
             whileHover={{ x: -3 }}
             whileTap={{ scale: 0.96 }}
-            transition={{ type: 'spring', stiffness: 450, damping: 26 }}
+            transition={SPRING_TAP}
             className="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium text-text-secondary outline-none transition-colors hover:bg-bg-tertiary/60 hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <svg

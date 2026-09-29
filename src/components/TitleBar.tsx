@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import appIcon from '@/assets/app-icon.png';
+import { SPRING_TAP } from '@/lib/motion';
 import {
   closeWindow,
   isWindowMaximized,
@@ -127,9 +128,9 @@ export function TitleBar({
           aria-label={t('settings.title')}
           title={t('settings.title')}
           aria-pressed={settingsOpen}
-          whileHover={{ rotate: 30, scale: 1.1 }}
+          whileHover={{ rotate: 30, scale: 1.08 }}
           whileTap={{ scale: 0.9 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+          transition={SPRING_TAP}
           className={`mr-1 flex h-7 w-7 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
             settingsOpen
               ? 'bg-accent-muted text-accent'

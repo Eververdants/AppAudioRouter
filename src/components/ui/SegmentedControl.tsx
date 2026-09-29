@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
+import { SPRING_TAP } from '@/lib/motion';
 
 export interface SegmentedOption<T extends string> {
   value: T;
@@ -52,7 +53,7 @@ export function SegmentedControl<T extends string>({
               <motion.span
                 layoutId={layoutId}
                 className="absolute inset-0 rounded-full bg-accent shadow-glow"
-                transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+                transition={SPRING_TAP}
               />
             )}
             <span className="relative">{option.label}</span>
