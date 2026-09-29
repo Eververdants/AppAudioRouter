@@ -182,8 +182,8 @@ export function ScrubReadout({
       aria-label={label}
       aria-valuemin={min}
       aria-valuemax={max}
-      aria-valuenow={value}
-      aria-valuetext={`${shown}${unit}`}
+      aria-valuenow={shown}
+      aria-valuetext={`${format(shown)}${unit}`}
       title={hint}
       onPointerDown={(e) => {
         if (editing || e.button !== 0) return;
