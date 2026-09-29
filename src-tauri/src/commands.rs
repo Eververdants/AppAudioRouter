@@ -293,7 +293,9 @@ pub async fn reset_pinned_endpoints(
 /// outlives it: the next launch would play to the old device and ignore the
 /// system default, with no route on screen to explain why. The API addresses
 /// programs by PID, so a stale assignment is handed to the program's new
-/// process; one that is not running yet keeps its entry for a later sweep.
+/// process; one that is not running yet keeps its entry for a later sweep. A
+/// new process that is itself being routed right now already owns that
+/// assignment, so it is left alone.
 ///
 /// Returns the executable names that were released, for the log.
 #[tauri::command]
@@ -314,8 +316,11 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
             .entry(session.exe_name.to_ascii_lowercase())
             .or_insert(session.pid);
     }
+    // Snapshot, not the live map: the sweep below drops entries as it goes, and
+    // a PID it drops is never the one it is about to hand the assignment to.
+    let ours: HashSet<u32> = pins.pids().into_iter().collect();
 
-    let mut released = Vec::new();
+    let mut released: Vec<String> = Vec::new();
     for (pid, exe_name, _device) in pinned {
         if live_pids.contains(&pid) {
             // Still the process we pinned; its route is live.
@@ -324,6 +329,15 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         let Some(&relaunched_pid) = live_by_exe.get(&exe_name.to_ascii_lowercase()) else {
             continue;
         };
+        // The service stores the assignment per executable, so clearing it
+        // through the new process would also clear one this app is routing
+        // *right now* — the mirrors would keep playing while the primary
+        // silently fell back to the system default. That route owns the
+        // assignment now; only the stale bookkeeping is ours to drop.
+        if ours.contains(&relaunched_pid) {
+            pins.forget(pid);
+            continue;
+        }
         let outcomes =
             audio::routing::release_process_default_devices(vec![relaunched_pid], audio::Role::All)
                 .await
@@ -334,7 +348,11 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         {
             pins.forget(pid);
             info!("released the assignment {exe_name} was left on by an earlier route");
-            released.push(exe_name);
+            // Several stale PIDs can share one executable; the log wants the
+            // name once, not once per PID.
+            if !released.contains(&exe_name) {
+                released.push(exe_name);
+            }
         }
     }
     Ok(released)
