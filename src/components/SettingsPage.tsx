@@ -98,6 +98,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const devices = useRouterStore((s) => s.devices);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
+  const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
   const delaySync = useRouterStore((s) => s.delaySync);
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
@@ -245,6 +246,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 onChange={() => void toggleDelaySync()}
                 label={t('settings.delaySync')}
               />
+            </Row>
+            <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
+              <button
+                type="button"
+                onClick={() => void resetPinnedEndpoints()}
+                className="shrink-0 rounded-full border border-glass bg-glass px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/40 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                {t('settings.resetEndpointsAction')}
+              </button>
             </Row>
           </SectionCard>
         </motion.div>

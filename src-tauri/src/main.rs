@@ -14,6 +14,10 @@ use tauri::{AppHandle, Manager, WindowEvent};
 /// How long to wait for the frontend to reveal the window before forcing it.
 const REVEAL_FALLBACK: Duration = Duration::from_secs(5);
 
+/// How long a shutdown waits for the audio service to release the endpoint
+/// assignments this run wrote.
+const RELEASE_ON_EXIT_TIMEOUT: Duration = Duration::from_millis(1500);
+
 fn main() {
     // Release defaults to `warn` so per-session/device enumeration (which dumps
     // window titles and endpoint ids) never lands in a shipped log file; debug
@@ -44,6 +48,11 @@ fn main() {
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(settings);
             app.manage(audio::duplication::DuplicationManager::new(delays, volumes));
+            // Every per-app endpoint assignment this app writes is written down
+            // here, so it can be taken back on stop and on quit: Windows keeps
+            // the assignment after this process is gone, and a program left
+            // pinned ignores the device the user picks afterwards.
+            app.manage(audio::routing::PinnedRoutes::new());
 
             // The window is a control panel; the tray is what keeps the app
             // reachable while it steers audio in the background.
@@ -79,6 +88,8 @@ fn main() {
             commands::get_default_device,
             commands::apply_route,
             commands::stop_route,
+            commands::reset_pinned_endpoints,
+            commands::release_stale_routes,
             commands::get_active_duplications,
             commands::set_device_delay,
             commands::get_device_delays,
@@ -97,8 +108,45 @@ fn main() {
             commands::is_silent_launch,
             commands::set_tray_labels,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Quitting is the last chance to give the user's programs back: the
+            // endpoint assignment this run wrote outlives the process, and one
+            // left behind would keep a program on the device this app chose even
+            // though the user switched to another one afterwards. (`ExitRequested`
+            // covers both the tray's Quit and closing the last window.)
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                release_pinned_routes(app);
+            }
+        });
+}
+
+/// Release every endpoint assignment this run wrote, before the app goes away.
+///
+/// Best effort with a bounded wait, on a thread of its own: a slow audio service
+/// must not keep the window from closing.
+fn release_pinned_routes(app: &AppHandle) {
+    let Some(pins) = app.try_state::<audio::routing::PinnedRoutes>() else {
+        return;
+    };
+    // Taken, not copied: nothing will retry once the process is gone.
+    let pids = pins.take_all();
+    if pids.is_empty() {
+        return;
+    }
+    let outcomes = audio::routing::release_pinned_blocking(pids, RELEASE_ON_EXIT_TIMEOUT);
+    let stuck: Vec<String> = outcomes
+        .iter()
+        .filter(|(_, outcome)| *outcome != audio::routing::ReleaseOutcome::Released)
+        .map(|(pid, _)| pid.to_string())
+        .collect();
+    if !stuck.is_empty() {
+        log::warn!(
+            "these processes still carry an endpoint assignment: {}",
+            stuck.join(", ")
+        );
+    }
 }
 
 /// Guarantees the window eventually becomes visible.

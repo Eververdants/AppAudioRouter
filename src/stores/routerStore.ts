@@ -25,6 +25,14 @@ interface RouterState {
   selectedPids: number[];
   /** Devices targeted by the current selection, in route order (first = primary). */
   selectedDeviceIds: string[];
+  /**
+   * Whether `selectedDeviceIds` is still the app's own guess (the process's
+   * live route, its remembered route, or the system default it already plays
+   * through) rather than something the user picked. A guess is replaced by the
+   * first device clicked, so choosing a device cannot silently keep the guessed
+   * one playing alongside it.
+   */
+  deviceSelectionPrefilled: boolean;
   /** Devices each process is currently routed to, keyed by PID. */
   routedPids: Record<number, string[]>;
   /**
@@ -79,6 +87,12 @@ interface RouterState {
   applyRoute: () => Promise<void>;
   stopRoute: (pid: number) => Promise<void>;
   stopAllRoutes: () => Promise<void>;
+  /** Release the fixed output device of every program no live route is using.
+   * The way out for programs an earlier version of this app left pinned. */
+  resetPinnedEndpoints: () => Promise<void>;
+  /** Release assignments whose program exited while it was routed, so its next
+   * launch follows the system default again instead of the old device. */
+  releaseStaleRoutes: () => Promise<void>;
   loadDelaySettings: () => Promise<void>;
   loadDeviceVolumes: () => Promise<void>;
   setDeviceVolume: (deviceId: string, percent: number) => Promise<void>;
@@ -171,6 +185,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   sessions: [],
   selectedPids: [],
   selectedDeviceIds: [],
+  deviceSelectionPrefilled: false,
   routedPids: {},
   defaultDeviceId: null,
   deviceDelays: {},
@@ -239,6 +254,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const sessions = await api.listSessions();
       const livePids = new Set(sessions.map((s) => s.pid));
       const unchanged = sessionSignature(sessions) === sessionSignature(get().sessions);
+      const routedBefore = Object.keys(get().routedPids).map(Number);
       set((s) => {
         // A single-device route has no duplication engine to report its end, so
         // the session list is the authoritative signal that its PID is gone.
@@ -261,6 +277,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           engineGenerations,
         };
       });
+      // A routed program can exit on its own, and the fixed output device
+      // Windows took then outlives it: the next launch would play to the old
+      // device and ignore the system default, with no route on screen to explain
+      // it. Ask the backend to hand that assignment to the program's next
+      // process instead of leaving it behind.
+      if (routedBefore.some((pid) => !livePids.has(pid))) {
+        void get().releaseStaleRoutes();
+      }
       if (viaNotification && unchanged) return;
       get().addLog(
         viaNotification
@@ -436,6 +460,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           ...Object.fromEntries(applied.map((t) => [t.pid, [...ordered]])),
         },
         selectedDeviceIds: ordered,
+        // The targets are now what the user chose and what was applied, so a
+        // later click on another device adds a copy instead of replacing them.
+        deviceSelectionPrefilled: false,
         engineGenerations: {
           ...s.engineGenerations,
           ...Object.fromEntries(applied.map((t) => [t.pid, t.generation])),
@@ -481,6 +508,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // keep showing the route as live instead of silently desyncing from it.
     const previous = get().routedPids[pid];
     const previousGeneration = get().engineGenerations[pid] ?? 0;
+    const process = session?.exe_name ?? `PID ${pid}`;
     try {
       // Optimistic: reflect the stop immediately so the UI feels instant.
       set((s) => {
@@ -494,11 +522,25 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           engineGenerations: { ...s.engineGenerations, [pid]: 0 },
         };
       });
-      await api.stopRoute(pid);
-      get().addLog(
-        i18next.t('log.routeStopped', { process: session?.exe_name ?? `PID ${pid}` }),
-        'info',
-      );
+      const outcome = await api.stopRoute(pid);
+      if (outcome.released) {
+        get().addLog(i18next.t('log.routeStopped', { process }), 'info');
+      } else {
+        // The program plays on the current default again, but Windows still
+        // holds a fixed output device for it, and that has to be said out loud:
+        // switching devices by hand will not move the program until the
+        // assignment is released, and only the settings page can do that.
+        const device = outcome.pinned_device;
+        get().addLog(
+          device === null
+            ? i18next.t('log.routeStoppedUnreleased', { process })
+            : i18next.t('log.routeStoppedStillPinned', {
+                process,
+                device: get().devices.find((d) => d.id === device)?.name ?? device,
+              }),
+          'error',
+        );
+      }
     } catch (e) {
       // Backend didn't actually stop: roll the route and its event identity back.
       set((s) => ({
@@ -512,6 +554,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   stopAllRoutes: async () => {
     const pids = Object.keys(get().routedPids).map(Number);
     if (pids.length === 0) return;
+    const names = new Map(get().sessions.map((s) => [s.pid, s.exe_name] as const));
     // Optimistic: assume every stop succeeds, then put back the ones that
     // didn't. Failed stops must keep their route live rather than desyncing
     // the UI from an engine that is still duplicating.
@@ -520,12 +563,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     set({ routedPids: {}, engineGenerations: {} });
     const results = await Promise.allSettled(pids.map((pid) => api.stopRoute(pid)));
     const failed: number[] = [];
+    const stillPinned: string[] = [];
     results.forEach((result, index) => {
       const pid = pids[index];
       if (pid === undefined) return;
       if (result.status === 'rejected') {
         failed.push(pid);
         get().addLog(i18next.t('log.stopRouteFailed', { error: String(result.reason) }), 'error');
+      } else if (!result.value.released) {
+        // Stopped, but the program keeps a fixed output device: one line for the
+        // whole batch is enough, the single-stop case names the device.
+        stillPinned.push(names.get(pid) ?? `PID ${pid}`);
       }
     });
     set((s) => {
@@ -547,6 +595,46 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       i18next.t('log.stoppedAll', { n: pids.length - failed.length }),
       failed.length > 0 ? 'error' : 'info',
     );
+    if (stillPinned.length > 0) {
+      get().addLog(
+        i18next.t('log.stoppedAllStillPinned', {
+          n: stillPinned.length,
+          processes: stillPinned.join(', '),
+        }),
+        'error',
+      );
+    }
+  },
+
+  resetPinnedEndpoints: async () => {
+    try {
+      const outcome = await api.resetPinnedEndpoints();
+      get().addLog(i18next.t('log.pinnedEndpointsReset', { n: outcome.released }), 'info');
+      if (outcome.still_pinned.length > 0) {
+        get().addLog(
+          i18next.t('log.pinnedEndpointsRemaining', {
+            processes: outcome.still_pinned.join(', '),
+          }),
+          'error',
+        );
+      }
+    } catch (e) {
+      get().addLog(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  releaseStaleRoutes: async () => {
+    try {
+      const released = await api.releaseStaleRoutes();
+      if (released.length > 0) {
+        get().addLog(
+          i18next.t('log.staleAssignmentReleased', { processes: released.join(', ') }),
+          'info',
+        );
+      }
+    } catch {
+      /* best effort: the sweep runs again after the next session refresh */
+    }
   },
 
   loadDelaySettings: async () => {

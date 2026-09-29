@@ -142,7 +142,10 @@ fn collect_device_sessions(
 }
 
 /// Get the executable name for a PID.
-fn get_process_exe_name(pid: u32) -> Option<String> {
+///
+/// Shared with `routing.rs`, which needs the name to tell a system-critical
+/// process from a routable one.
+pub(crate) fn get_process_exe_name(pid: u32) -> Option<String> {
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::System::ProcessStatus::GetProcessImageFileNameA;
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};

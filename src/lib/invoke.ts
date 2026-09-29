@@ -1,7 +1,14 @@
 /** Tauri invoke wrapper with typed commands. */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { ActiveRoute, AudioDevice, AudioSession, DeviceDelay } from './types';
+import type {
+  ActiveRoute,
+  AudioDevice,
+  AudioSession,
+  DeviceDelay,
+  ResetOutcome,
+  StopOutcome,
+} from './types';
 
 export async function listDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>('list_devices');
@@ -25,9 +32,24 @@ export async function applyRoute(
   return invoke<number>('apply_route', { pid, exeName, deviceIds, remember });
 }
 
-/** Stop routing a process: halt duplication and restore the system default. */
-export async function stopRoute(pid: number): Promise<void> {
-  await invoke('stop_route', { pid });
+/** Stop routing a process: halt duplication and hand it back to the system
+ * default device. The outcome says whether the program's fixed output device
+ * could be released, because one left in place would keep the program on the
+ * old device no matter what the user picks afterwards. */
+export async function stopRoute(pid: number): Promise<StopOutcome> {
+  return invoke<StopOutcome>('stop_route', { pid });
+}
+
+/** Release the fixed output device of every program no live route is using.
+ * The way out for programs an earlier version left pinned. */
+export async function resetPinnedEndpoints(): Promise<ResetOutcome> {
+  return invoke<ResetOutcome>('reset_pinned_endpoints');
+}
+
+/** Release assignments whose program exited while it was routed. Returns the
+ * executable names that were released. */
+export async function releaseStaleRoutes(): Promise<string[]> {
+  return invoke<string[]>('release_stale_routes');
 }
 
 export async function getActiveDuplications(): Promise<ActiveRoute[]> {

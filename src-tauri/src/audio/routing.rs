@@ -18,8 +18,21 @@
 //!      symlink: `\\?\SWD#MMDEVAPI#{<endpoint id>}#{e6327cad-…}`.
 //!    - One call per ERole; the audio service persists the assignment per
 //!      executable and applies it to sessions started afterwards (same
-//!      behavior as the Settings UI).
+//!      behavior as the Settings UI). Because the audio service owns that
+//!      record, it outlives this process: an app that was pointed somewhere
+//!      stays pointed there until something releases it, which is why slots 25
+//!      (with a null HSTRING) and 26 below matter as much as the write.
+//!    - Vtable slot 26 is `GetPersistedDefaultAudioEndpoint(processId: u32,
+//!      flow: i32, role: i32, deviceId: HSTRING*)`; it fails with
+//!      `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)` when the process carries no
+//!      override, i.e. it follows the system default again.
+//!    - Vtable slot 25 with a **null** HSTRING drops the override for that
+//!      role, putting the process back on whatever the system default is now.
+//!      The Windows volume mixer's own "Default" entry does the same thing.
 //!    - Vtable slot 27 is `ClearAllPersistedApplicationDefaultEndpoints()`.
+//!      Deliberately unused: it would also drop the assignments the user made
+//!      by hand in the volume mixer. Releasing one process at a time covers
+//!      everything this app writes.
 //!
 //! 2. System-wide default — `CPolicyConfigClient` coclass with interface
 //!    `{4495581a-…}` (the object the OS volume mixer uses); vtable slot 13 is
@@ -55,6 +68,11 @@ const ROLE_COMMUNICATIONS: i32 = 2;
 
 // Vtable slots of IAudioPolicyConfigFactory (0-based incl. IUnknown/IInspectable).
 const SLOT_SET_PERSISTED_DEFAULT: usize = 25;
+const SLOT_GET_PERSISTED_DEFAULT: usize = 26;
+
+/// `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)`, the audio service's answer when a
+/// process has no persisted endpoint at all.
+const HR_ERROR_NOT_FOUND: i32 = 0x80070490u32 as i32;
 
 type SetPersistedDefaultAudioEndpointFn = unsafe extern "system" fn(
     this: *mut core::ffi::c_void,
@@ -224,6 +242,65 @@ impl AudioPolicyConfig {
             )
         }
     }
+
+    /// Drop a process's persisted render endpoint for one role.
+    ///
+    /// A null HSTRING is the service's "no assignment" value: after this call
+    /// the process plays to whatever the system default is, now and later.
+    fn clear_persisted_default(&self, process_id: u32, role: i32) -> windows::core::HRESULT {
+        let f: SetPersistedDefaultAudioEndpointFn = unsafe {
+            core::mem::transmute(*((self.vtable + SLOT_SET_PERSISTED_DEFAULT * 8) as *const usize))
+        };
+        // SAFETY: COM call on a live object; a null HSTRING is a documented
+        // input for this parameter and outlives nothing.
+        unsafe { f(self.obj, process_id, E_RENDER, role, 0) }
+    }
+
+    /// Read a process's persisted render endpoint for one role.
+    ///
+    /// `Ok(None)` means the process carries no assignment and follows the
+    /// system default; `Ok(Some(id))` is the endpoint id it is pinned to.
+    fn get_persisted_default(
+        &self,
+        process_id: u32,
+        role: i32,
+    ) -> Result<Option<String>, AudioError> {
+        type GetPersistedDefaultAudioEndpointFn =
+            unsafe extern "system" fn(
+                this: *mut core::ffi::c_void,
+                process_id: u32,
+                data_flow: i32,
+                role: i32,
+                device_id: *mut HSTRING, // HSTRING out
+            ) -> windows::core::HRESULT;
+
+        let f: GetPersistedDefaultAudioEndpointFn = unsafe {
+            core::mem::transmute(*((self.vtable + SLOT_GET_PERSISTED_DEFAULT * 8) as *const usize))
+        };
+        // An empty HSTRING is both a valid out parameter and what the service
+        // leaves in it when the process carries no assignment; dropping it hands
+        // the returned string back.
+        let mut device_id = HSTRING::new();
+        // SAFETY: COM call on a live object; the out HSTRING is owned here.
+        let hr = unsafe { f(self.obj, process_id, E_RENDER, role, &mut device_id) };
+        if hr.0 == HR_ERROR_NOT_FOUND {
+            return Ok(None);
+        }
+        if hr.is_err() {
+            return Err(AudioError::Api(format!(
+                "GetPersistedDefaultAudioEndpoint failed: 0x{:08X}",
+                hr.0
+            )));
+        }
+        if device_id.is_empty() {
+            return Ok(None);
+        }
+        let value = device_id.to_string_lossy();
+        if value.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(unwrap_device_id(&value)))
+    }
 }
 
 impl Drop for AudioPolicyConfig {
@@ -244,6 +321,16 @@ fn wrap_device_id(device_id: &str) -> String {
         return device_id.to_string();
     }
     format!("{MMDEVAPI_TOKEN}{device_id}{RENDER_DEVICE_INTERFACE}")
+}
+
+/// Turn a device-interface symlink back into the plain endpoint id the rest of
+/// the app (and the Windows volume mixer) uses.
+fn unwrap_device_id(device_id: &str) -> String {
+    let trimmed = device_id.strip_prefix(MMDEVAPI_TOKEN).unwrap_or(device_id);
+    trimmed
+        .strip_suffix(RENDER_DEVICE_INTERFACE)
+        .unwrap_or(trimmed)
+        .to_string()
 }
 
 /// Validate a device id before it reaches any COM call.
@@ -272,6 +359,193 @@ fn role_values(role: Role) -> &'static [i32] {
         Role::Communications => &[ROLE_COMMUNICATIONS],
         Role::All => &[ROLE_CONSOLE, ROLE_MULTIMEDIA, ROLE_COMMUNICATIONS],
     }
+}
+
+// ---------------------------------------------------------------------------
+// Releasing an assignment again
+// ---------------------------------------------------------------------------
+
+/// What a release attempt left behind for one process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    /// The process carries no assignment and follows the system default again.
+    Released,
+    /// The assignment is still there and points at this endpoint id.
+    StillPinned(String),
+    /// The audio service would not answer for this process.
+    Unknown,
+}
+
+/// A process this run has pointed at an explicit endpoint.
+pub struct PinnedRoute {
+    /// Executable name, so a relaunch of the same program can be found again.
+    pub exe_name: String,
+    /// Endpoint the process was pointed at.
+    pub device_id: String,
+}
+
+/// The processes this run has pointed at an explicit endpoint.
+///
+/// Windows keeps a per-app endpoint assignment after the program that wrote it
+/// is gone, and that assignment outranks any later change of the system default
+/// device — an app left pinned stops following the user's device switches, which
+/// is exactly the complaint 2.1.1 answers. So every assignment this app writes
+/// has to be released again: when its route stops, when the app quits, and when
+/// the routed program is relaunched after having exited while pinned.
+///
+/// Tracking them is also what keeps the release honest: an assignment the user
+/// made by hand in the volume mixer is none of our business and must survive.
+#[derive(Default)]
+pub struct PinnedRoutes {
+    inner: std::sync::Mutex<std::collections::HashMap<u32, PinnedRoute>>,
+}
+
+impl PinnedRoutes {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that this app pointed `pid` at `device_id`.
+    pub fn mark(&self, pid: u32, exe_name: &str, device_id: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.insert(
+            pid,
+            PinnedRoute {
+                exe_name: exe_name.to_string(),
+                device_id: device_id.to_string(),
+            },
+        );
+    }
+
+    /// Forget `pid`; its assignment is gone.
+    pub fn forget(&self, pid: u32) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.remove(&pid);
+    }
+
+    /// The PIDs this run has pinned.
+    pub fn pids(&self) -> Vec<u32> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.keys().copied().collect()
+    }
+
+    /// Whether this app is holding an assignment for `pid`.
+    #[allow(dead_code)]
+    pub fn holds(&self, pid: u32) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.contains_key(&pid)
+    }
+
+    /// Take the pinned PIDs and a copy of the entries, for a sweep that will
+    /// decide which of them to put back.
+    pub fn snapshot(&self) -> Vec<(u32, String, String)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .iter()
+            .map(|(pid, route)| (*pid, route.exe_name.clone(), route.device_id.clone()))
+            .collect()
+    }
+
+    /// Take every pinned PID, leaving the registry empty. Used on shutdown,
+    /// where nothing will retry afterwards.
+    pub fn take_all(&self) -> Vec<u32> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let pids = inner.keys().copied().collect();
+        inner.clear();
+        pids
+    }
+}
+
+/// Release several processes from their per-app endpoint assignment.
+///
+/// One entry per PID, in no particular order. An error means the policy object
+/// itself was unavailable, so nothing was released.
+pub fn release_default_endpoints(
+    pids: &[u32],
+    role: Role,
+) -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
+    let com_owned = crate::audio::init_com()?;
+
+    let result = (|| -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
+        let policy = AudioPolicyConfig::activate()?;
+        let mut outcomes = Vec::with_capacity(pids.len());
+        for &pid in pids {
+            if pid == 0 {
+                continue;
+            }
+            let mut cleared = false;
+            for &r in role_values(role) {
+                if policy.clear_persisted_default(pid, r).is_ok() {
+                    cleared = true;
+                }
+            }
+            if !cleared {
+                outcomes.push((pid, ReleaseOutcome::Unknown));
+                continue;
+            }
+            // Read the assignment back instead of assuming the write worked:
+            // this outcome is what the user is told, and "the program follows
+            // the system default again" is a promise that has to hold.
+            let mut still = ReleaseOutcome::Released;
+            for &r in role_values(role) {
+                match policy.get_persisted_default(pid, r) {
+                    Ok(Some(device_id)) => {
+                        still = ReleaseOutcome::StillPinned(device_id);
+                        break;
+                    }
+                    Ok(None) => {}
+                    // The service had no answer for this role; a clear that was
+                    // accepted stays accepted, so this is not a failure.
+                    Err(e) => log::debug!("reading the assignment of PID {pid} failed: {e}"),
+                }
+            }
+            outcomes.push((pid, still));
+        }
+        Ok(outcomes)
+    })();
+
+    crate::audio::uninit_com(com_owned);
+
+    result
+}
+
+/// Release several processes from a thread this module owns.
+///
+/// The policy factory needs an MTA thread, and the shutdown path runs on the
+/// WebView2 main thread (STA), so the work moves here. The wait is bounded: a
+/// shutdown must never hang on the audio service.
+pub fn release_pinned_blocking(
+    pids: Vec<u32>,
+    timeout: std::time::Duration,
+) -> Vec<(u32, ReleaseOutcome)> {
+    if pids.is_empty() {
+        return Vec::new();
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(release_default_endpoints(&pids, Role::All));
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(outcomes)) => outcomes,
+        Ok(Err(e)) => {
+            log::warn!("releasing pinned endpoints failed: {e}");
+            Vec::new()
+        }
+        Err(_) => {
+            log::warn!("timed out releasing pinned endpoints");
+            Vec::new()
+        }
+    }
+}
+
+/// Async form of [`release_default_endpoints`] for the command layer.
+pub async fn release_process_default_devices(
+    pids: Vec<u32>,
+    role: Role,
+) -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
+    tokio::task::spawn_blocking(move || release_default_endpoints(&pids, role))
+        .await
+        .map_err(|_| AudioError::Api("release task failed".to_string()))?
 }
 
 /// Set the default audio device for a single process (by PID).

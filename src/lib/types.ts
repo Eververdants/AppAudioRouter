@@ -43,6 +43,25 @@ export interface DuplicationStoppedEvent {
   error: string | null;
 }
 
+/** What `stop_route` left behind.
+ *
+ * `released` is false when the program is still fixed to an endpoint: Windows
+ * applies that fixed endpoint before the system default, so the program ignores
+ * later device switches until the assignment is cleared. */
+export interface StopOutcome {
+  released: boolean;
+  /** Endpoint the program is still pinned to; `null` when it was unreadable. */
+  pinned_device: string | null;
+}
+
+/** Result of clearing the per-app output assignments no live route uses. */
+export interface ResetOutcome {
+  /** Programs whose fixed output device was released. */
+  released: number;
+  /** Executable names the audio service would not let go. */
+  still_pinned: string[];
+}
+
 /** A Core Audio change reported by the backend's notification thread: which
  * half of the lists are now stale. */
 export interface AudioChangedEvent {
