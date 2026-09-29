@@ -1,6 +1,6 @@
 [package]
 name = "app-audio-router"
-version = "2.1.0"
+version = "2.1.1"
 description = "Per-app audio routing tool for Windows"
 authors = ["Eververdants"]
 license = "MIT"
