@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { MotionConfig } from 'framer-motion';
 import '@/i18n';
 import { installProductionGuards } from '@/lib/productionGuards';
 import App from './App';
@@ -15,8 +16,12 @@ if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__routerStore = useRouterStore;
 }
 
+// `reducedMotion="user"` follows the OS setting: transforms and layout
+// animations drop out, while the opacity changes that carry state still play.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <MotionConfig reducedMotion="user">
+      <App />
+    </MotionConfig>
   </StrictMode>,
 );
