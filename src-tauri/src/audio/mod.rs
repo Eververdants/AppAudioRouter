@@ -96,8 +96,6 @@ pub struct AudioSession {
     pub pid: u32,
     /// Executable name (e.g. `chrome.exe`).
     pub exe_name: String,
-    /// Display name from audio session (often the window title or app name).
-    pub display_name: String,
 }
 
 /// Role for default endpoint selection.

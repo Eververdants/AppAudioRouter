@@ -618,7 +618,9 @@ impl DuplicationManager {
 /// Entry point of an engine's capture thread.
 fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
     let reason = run_capture(&shared);
-    // Release the render threads regardless of how the capture loop ended.
+    // `capture_session` sets this itself before it joins; this covers the paths
+    // that failed before any render thread existed, so no exit route can leave
+    // the flag unset.
     shared.shutdown.store(true, Ordering::Relaxed);
     match &reason {
         ExitReason::Stopped => info!(
@@ -671,10 +673,30 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
     }
 
     let event = unsafe {
-        // SAFETY: no security attributes, unnamed auto-reset event; closed at
-        // the end of this function after the audio client is released.
+        // SAFETY: no security attributes, unnamed auto-reset event; closed below
+        // once the client that was driven by it is gone.
         CreateEventW(None, false, false, None).map_err(|e| com_err("CreateEventW", e))?
     };
+    // The client is moved in so that every path — including the ones that fail
+    // before the stream ever started — releases it before this closes the event
+    // handle it was given.
+    let result = capture_session(shared, client, event);
+    // SAFETY: balances CreateEventW above; no client references the handle now.
+    unsafe {
+        let _ = CloseHandle(event);
+    }
+    result
+}
+
+/// Initialize the capture client, run one render thread per mirror, and pump
+/// frames between them until the engine is over.
+fn capture_session(
+    shared: &Arc<EngineShared>,
+    client: IAudioClient,
+    event: HANDLE,
+) -> Result<ExitReason, AudioError> {
+    let com_err =
+        |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
     // SAFETY: format is a complete WAVEFORMATEX(EXTENSIBLE) copied from the
     // default device's mix format.
     let format = unsafe { &*(shared.format.as_ptr() as *const WAVEFORMATEX) };
@@ -737,16 +759,18 @@ fn capture_stream(shared: &Arc<EngineShared>) -> Result<ExitReason, AudioError> 
         opened: false,
     };
     let reason = capture_packets(shared, &capture, event, &mut gate);
+    // Release the render threads before waiting for them. This flag is the only
+    // thing `pump_render` returns on, and a process exit or a capture error ends
+    // the loop above without `stop()` ever having been called — joining first
+    // would wait forever on threads that are happily playing silence, leaking the
+    // engine, its threads and the mirror devices they hold open.
+    shared.shutdown.store(true, Ordering::Relaxed);
     // SAFETY: Stop on a started client; errors during shutdown are ignored.
     unsafe {
         let _ = client.Stop();
     }
     for handle in render_threads {
         let _ = handle.join();
-    }
-    // SAFETY: the capture client has been stopped and released by now.
-    unsafe {
-        let _ = CloseHandle(event);
     }
     Ok(reason)
 }
@@ -1361,17 +1385,23 @@ fn default_mix_format() -> Result<(Vec<u8>, usize, u32), AudioError> {
 
 /// Process creation time as a FILETIME (u64), or None if unavailable.
 fn process_creation_time(pid: u32) -> Option<u64> {
+    // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION; the handle is closed
+    // on both exits below, so a failed query does not leak it.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()? };
     let mut creation = FILETIME::default();
     let mut _exit = FILETIME::default();
     let mut _kernel = FILETIME::default();
     let mut _user = FILETIME::default();
     // SAFETY: valid handle and out params.
-    unsafe {
-        GetProcessTimes(handle, &mut creation, &mut _exit, &mut _kernel, &mut _user).ok()?;
-    }
+    let read =
+        unsafe { GetProcessTimes(handle, &mut creation, &mut _exit, &mut _kernel, &mut _user) }
+            .is_ok();
+    // SAFETY: balances OpenProcess.
     unsafe {
         let _ = CloseHandle(handle);
+    }
+    if !read {
+        return None;
     }
     Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
 }
@@ -1391,6 +1421,12 @@ fn process_alive(pid: u32, recorded_time: u64) -> bool {
             }
             if exited {
                 return false;
+            }
+            // No recorded creation time means there is nothing to compare
+            // against: reading 0 as a timestamp would call a live process a
+            // recycled one on the first idle poll and tear the engine down.
+            if recorded_time == 0 {
+                return true;
             }
             // Check PID reuse: if the creation time differs, the PID was recycled.
             match process_creation_time(pid) {

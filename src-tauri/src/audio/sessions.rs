@@ -4,7 +4,7 @@
 //! default one — apps already routed to a non-default device must stay visible
 //! for re-routing.
 
-use log::debug;
+use log::{debug, warn};
 use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
@@ -51,7 +51,12 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
                     .map_err(|e| AudioError::Api(format!("Item({d}) failed: {e}")))?
             };
 
-            collect_device_sessions(&device, &mut sessions, &mut seen_pids)?;
+            // One endpoint whose session manager will not activate must not
+            // empty the process list: "every process but the ones on that
+            // device" is usable, "no processes at all" is not.
+            if let Err(e) = collect_device_sessions(&device, &mut sessions, &mut seen_pids) {
+                warn!("skipping the sessions of device {d}: {e}");
+            }
         }
 
         Ok(sessions)
@@ -89,56 +94,48 @@ fn collect_device_sessions(
     };
 
     for i in 0..count {
-        // SAFETY: i in [0, count).
-        let session_control: IAudioSessionControl = unsafe {
-            session_enum
-                .GetSession(i)
-                .map_err(|e| AudioError::Api(format!("GetSession({i}) failed: {e}")))?
-        };
-
-        // SAFETY: cast to IAudioSessionControl2.
-        let session2: IAudioSessionControl2 = session_control
-            .cast::<IAudioSessionControl2>()
-            .map_err(|e| AudioError::Api(format!("cast(IAudioSessionControl2) failed: {e}")))?;
-
-        let pid = unsafe {
-            session2
-                .GetProcessId()
-                .map_err(|e| AudioError::Api(format!("GetProcessId({i}) failed: {e}")))?
-        };
-
-        if pid == 0 {
+        // One session that will not open is skipped rather than fatal, for the
+        // same reason a whole device is: it must not cost the user every other
+        // process on this endpoint.
+        let Some(session) = read_session(&session_enum, i) else {
             continue;
-        }
-
+        };
         // One process can own sessions on several devices; the router is
         // per-process, so list each PID once.
-        if !seen_pids.insert(pid) {
-            continue;
+        if seen_pids.insert(session.pid) {
+            sessions.push(session);
         }
-
-        // SAFETY: GetDisplayName returns a PWSTR we must free.
-        let display_pwstr = unsafe {
-            session2
-                .GetDisplayName()
-                .map_err(|e| AudioError::Api(format!("GetDisplayName({i}) failed: {e}")))?
-        };
-        let display_name = crate::audio::pwstr_to_string(&display_pwstr);
-        unsafe {
-            windows::Win32::System::Com::CoTaskMemFree(Some(display_pwstr.0 as *const _));
-        }
-
-        let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
-
-        debug!("session: {exe_name} (PID {pid}) display={display_name}");
-        sessions.push(AudioSession {
-            pid,
-            exe_name,
-            display_name,
-        });
     }
 
     Ok(())
+}
+
+/// Read one session of an enumerator into a listing entry, or `None` when it
+/// carries nothing routable.
+fn read_session(session_enum: &IAudioSessionEnumerator, index: i32) -> Option<AudioSession> {
+    // SAFETY: index is within [0, count).
+    let session_control: IAudioSessionControl = match unsafe { session_enum.GetSession(index) } {
+        Ok(control) => control,
+        Err(e) => {
+            warn!("skipping session {index}: {e}");
+            return None;
+        }
+    };
+    // SAFETY: cast to IAudioSessionControl2 on a live session control.
+    let session2: IAudioSessionControl2 = session_control.cast().ok()?;
+    // SAFETY: GetProcessId on a live session.
+    let pid = match unsafe { session2.GetProcessId() } {
+        // PID 0 is the system-sounds session, which routing refuses anyway.
+        Ok(0) => return None,
+        Ok(pid) => pid,
+        Err(e) => {
+            warn!("skipping session {index}: {e}");
+            return None;
+        }
+    };
+    let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
+    debug!("session: {exe_name} (PID {pid})");
+    Some(AudioSession { pid, exe_name })
 }
 
 /// Get the executable name for a PID.

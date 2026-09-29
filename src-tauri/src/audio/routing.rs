@@ -93,6 +93,20 @@ fn hstring_handle(h: &HSTRING) -> isize {
 // Per-app routing
 // ---------------------------------------------------------------------------
 
+/// Release one reference to a raw COM object through its own vtable.
+///
+/// # Safety
+/// `obj` must point at a live COM object, and this call must own exactly one
+/// reference to it — the object is invalid once that reference was its last.
+unsafe fn release_com(obj: *mut core::ffi::c_void) {
+    // SAFETY: a COM object starts with a pointer to its vtable, whose slot 2 is
+    // IUnknown::Release; the caller owns the reference being dropped.
+    let vtable = *(obj as *const usize);
+    let release: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32 =
+        core::mem::transmute(*((vtable + 2 * 8) as *const usize));
+    release(obj);
+}
+
 /// Handle to the activated `IAudioPolicyConfigFactory` interface.
 struct AudioPolicyConfig {
     obj: *mut core::ffi::c_void,
@@ -136,7 +150,8 @@ impl AudioPolicyConfig {
 
         let class_hstring = HSTRING::from(AUDIO_POLICY_CONFIG_CLASS);
         let mut raw: *mut core::ffi::c_void = std::ptr::null_mut();
-        // SAFETY: valid HSTRING and out pointer; factory released in Drop.
+        // SAFETY: valid HSTRING and out pointer; the reference it hands back is
+        // released below, whichever way the discovery and the QI go.
         let hr = unsafe { dll_get_factory(hstring_handle(&class_hstring), &mut raw) };
         if hr.is_err() || raw.is_null() {
             return Err(AudioError::Api(format!(
@@ -146,8 +161,15 @@ impl AudioPolicyConfig {
         }
 
         let vtable = unsafe { *(raw as *const usize) };
-        let target_iid = Self::discover_interface_iid(raw, vtable)?;
-        Self::query_interface(raw, &target_iid)
+        let activated = Self::discover_interface_iid(raw, vtable)
+            .and_then(|target_iid| Self::query_interface(raw, &target_iid));
+        // The interface used from here on carries the reference the QI took, so
+        // the factory's own has to go: a long-lived background app activates
+        // this on every route and every release, and each one left behind here
+        // is an object that never dies.
+        // SAFETY: `raw` is the live factory this call owns one reference to.
+        unsafe { release_com(raw) };
+        activated
     }
 
     /// Discover the build-specific factory IID via `IInspectable::GetIids`,
@@ -305,12 +327,9 @@ impl AudioPolicyConfig {
 
 impl Drop for AudioPolicyConfig {
     fn drop(&mut self) {
-        // SAFETY: Release balances the QI reference taken in query_interface.
-        unsafe {
-            let release: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32 =
-                core::mem::transmute(*((self.vtable + 2 * 8) as *const usize));
-            release(self.obj);
-        }
+        // SAFETY: balances the QI reference taken in query_interface; `obj` is
+        // live and this is the last reference this wrapper holds.
+        unsafe { release_com(self.obj) };
     }
 }
 
