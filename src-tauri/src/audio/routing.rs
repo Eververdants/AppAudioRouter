@@ -362,6 +362,43 @@ fn role_values(role: Role) -> &'static [i32] {
 }
 
 // ---------------------------------------------------------------------------
+// Safety rails
+// ---------------------------------------------------------------------------
+
+/// Executables whose audio belongs to Windows itself.
+///
+/// Moving one of these is refused rather than half-applied: the audio service
+/// is a system-critical process, and a wrong endpoint on it is the kind of
+/// mistake that leaves a machine without sound.
+const PROTECTED_EXES: [&str; 9] = [
+    "system",
+    "registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "services.exe",
+    "lsass.exe",
+    "winlogon.exe",
+    "audiodg.exe",
+];
+
+/// Whether routing this PID has to be refused.
+///
+/// PID 0 (the system-sounds session) and PID 4 (`System`) are protected by
+/// identity, everything else by executable name.
+pub fn is_protected_process(pid: u32) -> bool {
+    if pid == 0 || pid == 4 {
+        return true;
+    }
+    match crate::audio::sessions::get_process_exe_name(pid) {
+        Some(name) => PROTECTED_EXES
+            .iter()
+            .any(|protected| name.eq_ignore_ascii_case(protected)),
+        None => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Releasing an assignment again
 // ---------------------------------------------------------------------------
 
@@ -560,6 +597,11 @@ pub async fn set_process_default_device(
 ) -> Result<(), AudioError> {
     if pid == 0 {
         return Err(AudioError::Api("invalid pid".to_string()));
+    }
+    if is_protected_process(pid) {
+        return Err(AudioError::Api(format!(
+            "PID {pid} is a system-critical process; routing it is refused"
+        )));
     }
     validate_device_id(device_id)?;
     let device_id = device_id.to_string();
