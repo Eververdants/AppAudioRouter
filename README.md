@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Version 2.1.0" src="https://img.shields.io/badge/version-2.1.0-0891b2">
+  <img alt="Version 2.1.1" src="https://img.shields.io/badge/version-2.1.1-0891b2">
   <img alt="Platform: Windows 10 and Windows 11, 64-bit" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-3da639"></a>
   <img alt="Built with Tauri 2, Rust and React 19" src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20React%2019-24C8DB">
@@ -32,7 +32,7 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 |---|---|
 | **What it is** | Per-app audio routing tool for Windows (one app → many devices) |
 | **Platform** | Windows 10 / Windows 11, 64-bit |
-| **Latest version** | 2.1.0 |
+| **Latest version** | 2.1.1 |
 | **Installer** | MSI or NSIS setup from [Releases](https://github.com/Eververdants/AppAudioRouter/releases) |
 | **Licence** | MIT |
 | **UI languages** | English, Simplified Chinese |
@@ -55,7 +55,8 @@ The same route in both themes: `Music.exe` is playing to a Bluetooth headset, an
 - **One app → many devices.** Select one or more processes (`click`, or `Ctrl`+`click` for several) and one or more devices; the audio is mirrored to all of them at once.
 - **Applies immediately.** A running program is re-pointed to the selected devices without a restart or a settings dialog reboot.
 - **Ordered targets.** The first device becomes the program's native endpoint, handled by Windows itself; every further device receives a real-time copy of the stream.
-- **Stop on demand.** Stop routing and the program returns to the current system default device.
+- **Stop on demand.** Stop routing and the program is handed back to the system default device — the fixed output device Windows took while the route was live is released again, so switching the default device by hand keeps moving that program.
+- **Nothing left behind.** The only trace of a route is an output device Windows fixes for the program while it is routed. Stopping the route, quitting the app and **Settings → Reset per-app output** each give it back, and a program that exited while routed gets its device back the next time it plays.
 - **Auto-remember.** Routing rules are stored per executable name and restored when that program plays again.
 
 ### Per-device fine-tuning
@@ -236,7 +237,11 @@ No. All routing, duplication, delay and gain is done by calling the Windows Core
 
 ### Will it work with a program that is already running?
 
-Yes. Routing is applied to the live audio session, so the program does not need to be restarted — a game or a browser tab keeps playing while it moves to the new device.
+Yes. Routing is applied to the live audio session, so the program does not need to be restarted — a game or browser tab keeps playing while it moves to the new device.
+
+### After I stop a route, does the program follow the system default again?
+
+Yes, and that is the point of 2.1.1. While a program is routed, Windows has a fixed output device stored for it — that is the mechanism that moves a running program's audio — and that stored device outranks the system default. Stopping the route, quitting the app and **Settings → Reset per-app output** each release it, so the program follows the default device again, including every device you pick afterwards. If Windows refuses to release it, the log says which device the program is still fixed to instead of pretending the route is gone; the volume mixer's own **Reset** for that app clears it too. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device — or ignore your device switches — until the reset was done.
 
 ### Can it fix the delay between a Bluetooth headset and wired speakers?
 
@@ -256,7 +261,7 @@ It never polls, and there is no service. The app registers for the audio engine'
 
 ### Does the app keep routing after I close the window?
 
-By default, closing the window quits the app, and a route that needed a mirrored copy stops with it. Turn on **Settings → Background → Minimize to tray when closed** and the close button hides the window instead: routing keeps running and the tray icon brings the window back. **Quit** in the tray menu always stops everything, switch on or off.
+By default, closing the window quits the app, and a route that needed a mirrored copy stops with it — every program the app had fixed to a device is handed back to the system default on the way out. Turn on **Settings → Background → Minimize to tray when closed** and the close button hides the window instead: routing keeps running and the tray icon brings the window back. **Quit** in the tray menu always stops everything, switch on or off.
 
 ### Can it start automatically with Windows?
 
@@ -274,6 +279,8 @@ No. The routing mechanism is built on Windows Core Audio, so the app is Windows-
 - A mirrored copy is buffered for stability (about 100 ms of pipeline latency) so that all mirrors play the same sample at the same moment. Alignment between mirrored devices is exact; the offset to the primary device, which Windows plays natively, is inherent to capturing and re-rendering the stream.
 - Volume can only attenuate, so the loudest device in the group is the reference and cannot be pushed below the level the application produced on it.
 - Routes for system-critical processes are refused rather than half-applied.
+- A routed program carries a **fixed output device** while its route is live, and Windows keeps that device stored per executable — even after the program exits. It is given back when the route stops, when the app quits, when the program is next seen playing after having exited while routed, or by **Settings → Reset per-app output**. A program that an earlier version left fixed keeps ignoring the system default until one of those happens (the volume mixer's own **Reset** for that app works too).
+- Releasing a fixed output device needs the program to be running, because the audio service is addressed by process; a program that is closed keeps its device until it plays again.
 
 ## Contributing
 
