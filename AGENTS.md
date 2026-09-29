@@ -36,7 +36,7 @@ AppAudioRouter/
 │   ├── Cargo.toml
 │   ├── tauri.conf.json     # Tauri 配置 + capabilities
 │   └── src/
-│       ├── main.rs         # 入口，注册命令 + 窗口关闭拦截（托盘常驻）+ 显示看门狗
+│       ├── main.rs         # 入口，注册命令 + 窗口关闭拦截（托盘常驻）+ 显示看门狗 + 退出前交还端点分配
 │       ├── commands.rs     # Tauri 命令（invoke handler）
 │       ├── tray.rs         # 托盘图标 + 菜单（左键开关窗口；菜单标签由前端下发以跟随语言）
 │       ├── autostart.rs    # 开机自启：直接读写 HKCU\...\Run，启动时带 --hidden
@@ -44,7 +44,7 @@ AppAudioRouter/
 │       │   ├── mod.rs
 │       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
-│       │   ├── routing.rs      # IPolicyConfig 单设备路由设置
+│       │   ├── routing.rs      # 每应用端点：槽 25/26 写入·释放·读回（null HSTRING = 清除）+ 系统关键进程拦截 + PinnedRoutes（本进程写过的分配，停止/退出/重置时归还）
 │       │   ├── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
 │       │   └── notifications.rs # 变更通知线程 → audio-changed 事件（设备/会话实时刷新）
 │       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %；app-settings.json: close_to_tray）
@@ -55,7 +55,7 @@ AppAudioRouter/
 │   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（设备节点 + 节点下方的延迟/音量标注）
 │   │   ├── DeviceAnnotation.tsx  # 挂在设备节点下方的一行标注（延迟 + 音量），顺带管显隐与 hairline 引线
 │   │   ├── ProcessList.tsx
-│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/后台开关/延迟范围·步进·逐设备设置/关于）
+│   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/每应用音频重置/后台开关/延迟范围·步进·逐设备设置/关于）
 │   │   ├── LogPanel.tsx
 │   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
 │   │   └── ui/             # 基础控件
@@ -149,6 +149,7 @@ AppAudioRouter/
 - 前端使用 Zustand store（`stores/routerStore.ts`）集中管理设备、进程、选中状态、日志
 - 进程选择是有序集合（`selectedPids`）：单击单选，Ctrl+点击多选；一次路由操作应用到全部选中进程
 - 路由选择是有序集合（`selectedDeviceIds`）：第一个为主设备，其余为复制目标
+- 选中一个进程会**预填**目标设备（`deviceSelectionPrefilled`：当前路由 → 系统默认设备），这是程序自己的猜测，不是用户的选择：这一状态下第一次点另一台设备是**替换**（"改成只输出这一台"）并留一行 `deviceSwitched` 日志，之后才恢复追加/取消的语义。2.1.1 修的就是这里——以前"换个设备"会变成两台一起响，声音出现在用户正想离开的那台设备上。
 - 系统默认渲染设备由 `get_default_device` 取得并存入 `defaultDeviceId`；进程无可记忆路由时以它作为默认关联设备（选中进程即自动选中），进程列表每行显示该进程当前播放到的设备
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
 - 延迟是**每台设备各自相对系统音频的绝对值**（不是相对某台主设备）：每台设备都可设，主设备（系统直连那台）也能设；
@@ -173,6 +174,7 @@ AppAudioRouter/
   前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
   0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
+- `stop_route` 返回 `StopOutcome`（`released` / `pinned_device`）：没释放成功时前端写一条 error 日志点名那台设备，而不是报"已恢复系统默认"；设置页的「重置每应用音频输出」、以及 `refreshSessions` 发现被路由的 pid 消失后调用的 `releaseStaleRoutes()`，都归到同一套端点归还逻辑（见下面「每应用端点分配的生命周期」）
 - 设备列表、进程列表由 store action 管理：后端 `audio-changed` 事件驱动自动同步（见下面「后台常驻与实时刷新」），手动 Refresh 按钮保留作兜底；**没有轮询定时器**
 
 ---
@@ -181,7 +183,7 @@ AppAudioRouter/
 
 ### 托盘（`tray.rs`）
 
-- 托盘图标**常驻**：左键开关窗口，右键菜单只有「显示/隐藏」和「退出」。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口。
+- 托盘图标**常驻**：左键开关窗口，右键菜单只有「显示/隐藏」和「退出」。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口；退出都会经过 `RunEvent::ExitRequested`，在那里交还本进程写过的端点分配（见「每应用端点分配的生命周期」）。
 - 菜单标签是**原生控件**，读不到 i18next → 由前端在挂载和语言切换时调 `set_tray_labels(t('tray.show'), t('tray.quit'))` 下发。不要指望 Rust 侧自己翻译，也不要用 `set_menu()` 换整个菜单（换完托盘的事件路由就不再认那些条目）。
 - `close_to_tray` 存在 `app_data_dir/app-settings.json`，**默认 false**：发版不该悄悄改掉老用户按 X 的语义。为 true 时 `main.rs` 的 `WindowEvent::CloseRequested` 里 `api.prevent_close()` + `hide()`。
 - 这个判断在 **Rust**，所以设置必须在后端。**只有 Rust 需要知道的设置才进 `app-settings.json`**——主题/语言/步进仍然走 localStorage，别顺手搬过去。
@@ -203,6 +205,17 @@ AppAudioRouter/
 - 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
 - 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
+
+### 每应用端点分配的生命周期（2.1.1 起，改动前必读）
+
+路由期间 `routing.rs` 写下的不是一条"临时路由"，而是音频服务为**可执行文件**保存的一条 Per-app 默认端点记录：程序退出、本应用退出、乃至卸载之后它都还在，并且**优先于系统默认设备**。2.1.0 的「停止路由」是把这条记录改写成当时的默认设备再留在那儿，于是用户之后手动切默认设备对这个程序失效（现场表现就是"停止之后就切不了播放设备了"）。规则：
+
+- 写入 = 槽 25 `SetPersistedDefaultAudioEndpoint`；同槽传 **null HSTRING 即清除这条记录**（音量合成器里的「默认」走的就是同一条路）；槽 26 `GetPersistedDefaultAudioEndpoint` 读回，没有记录时返回 `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)` = `0x80070490`。槽 27 的 `ClearAllPersistedApplicationDefaultEndpoints` **禁止使用**：它会连用户在音量合成器里手设的分配一起清掉。
+- **任何写端点的路径都必须同时 `PinnedRoutes::mark`**（pid → exe + 设备）。登记是唯一能把"我们钉的"和"用户自己钉的"区分开的东西，清除时靠它决定谁该死。
+- 清除后必须**读回校验**（`release_default_endpoints` 已这么做），并把结果回给前端；Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
+- 四条归还路径缺一不可，各自覆盖一种"分配比路由活得久"的情形：停止路由（`stop_route`）、退出应用（`main.rs` 的 `RunEvent::ExitRequested` → `release_pinned_blocking`，独立线程 + 有界等待，绝不能让音频服务卡住退出）、程序在路由期间退出后下次出声（`release_stale_routes`；音频服务按 pid 寻址，所以只能借它新的进程去释放）、设置页「重置每应用音频输出」（`reset_pinned_endpoints`，清旧版本留下的，跳过仍在路由的 pid）。
+- 新增任何"改变某程序输出"的代码路径，都要把这一套接上：写 → 登记 → 停止时归还。少一步就是把用户锁在错误的设备上，而且界面上没有任何东西能解释为什么。
+- 系统关键进程在 `set_process_default_device` 入口被 `is_protected_process` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径。
 
 ---
 
@@ -288,7 +301,7 @@ AppAudioRouter/
   3. 上传 artifact
   4. 若为 tag，创建 GitHub Release 并附 MSI
 - **环境**：`windows-latest`, Rust stable, Node LTS
-- **版本号有五处字面量**：`package.json`、`tauri.conf.json`、`src-tauri/Cargo.toml`、`TitleBar.tsx` 的 `v2.1` 徽标、`SettingsPage.tsx` 关于卡片的 `v2.1.0`。少改一处就是 UI 在说谎；README 两份里的版本徽章/速查表也算，发版时一起看。
+- **版本号有三处字面量**：`package.json`、`tauri.conf.json`、`src-tauri/Cargo.toml`（锁文件跟着走）。UI 显示的版本来自 `vite.config.ts` 注入的 `__APP_VERSION__`——取自 `package.json`，所以前端没有第二处要改；两份 README 里的版本徽章/速查表也算，发版时一起看。
 
 ---
 
@@ -298,6 +311,8 @@ AppAudioRouter/
 - 能力文件只有 `main.json` 一份：`tauri.conf.json` 的 `capabilities: ["main"]` 是**过滤器**，写了名字之后该目录下其它文件全部静默失效。改完必须 touch `build.rs` 才会重新编译进策略。
 - 禁止在前端拼接 shell 命令
 - Rust 端 COM 调用必须校验输入（device_id 格式、pid 范围）
+- 每应用端点分配的清除只走槽 25 的 null HSTRING（单进程）；槽 27 的 `ClearAll...` 会连用户手设的一起清，禁止使用
+- 系统关键进程的路由必须在 `audio::routing::set_process_default_device` 被拒（`is_protected_process`），别在别处另开写入路径
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
 
@@ -336,6 +351,10 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 进程列表正确显示有音频会话的进程
 - [ ] 设备列表正确显示渲染设备
 - [ ] 路由操作成功（进程音频切换到目标设备）
+- [ ] 停止路由后程序跟随系统默认设备：之后手动切换默认输出，它也一起走（2.1.1 的回归点）
+- [ ] 路由期间直接退出应用：程序不再被固定在旧设备上
+- [ ] 设置 →「重置每应用音频输出」能清掉旧版本留下的固定记录，且不动正在路由的进程
+- [ ] 选中一个进程后点击另一台设备：只输出到那一台，不再两台一起响
 - [ ] 自动记忆功能正常（重启后保留）
 - [ ] 插上一个新设备 / 让一个新程序开始放音：不点 Refresh，两边列表自己跟上，且日志只在内容真的变化时多一行
 - [ ] 托盘图标常驻，左键开关窗口；开启「关闭窗口时最小化到托盘」后按 X 不退出、路由继续
