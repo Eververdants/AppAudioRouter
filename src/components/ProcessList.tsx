@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
 const container: Variants = {
@@ -13,7 +14,7 @@ const container: Variants = {
 
 const item: Variants = {
   hidden: { opacity: 0, x: -8 },
-  show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
+  show: { opacity: 1, x: 0, transition: SPRING_GLIDE },
 };
 
 /**
@@ -48,7 +49,7 @@ function SelectionPill({ selected, sliding }: { selected: boolean; sliding: bool
     <motion.span
       key="sliding"
       layoutId={SELECTION_PILL_LAYOUT_ID}
-      transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+      transition={SPRING_GLIDE}
       className={SELECTION_PILL_CLASS}
     />
   ) : (
@@ -56,7 +57,7 @@ function SelectionPill({ selected, sliding }: { selected: boolean; sliding: bool
       key="static"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.15 }}
+      transition={FADE}
       className={SELECTION_PILL_CLASS}
     />
   );
@@ -109,7 +110,7 @@ export function ProcessList() {
                 exit={{ opacity: 0, scale: 0.7 }}
                 whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.9 }}
-                transition={{ type: 'spring', stiffness: 480, damping: 24 }}
+                transition={SPRING_TAP}
                 onClick={() => void stopAllRoutes()}
                 title={t('processList.stopAll')}
                 aria-label={t('processList.stopAll')}
@@ -138,7 +139,7 @@ export function ProcessList() {
             onClick={() => void refreshSessions()}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.92 }}
-            transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+            transition={SPRING_TAP}
             className="rounded-md px-2 py-1 text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             {t('processList.refresh')}
@@ -193,9 +194,13 @@ export function ProcessList() {
                       }
                     }}
                     whileTap={{ scale: 0.97 }}
-                    transition={{ type: 'spring', stiffness: 500, damping: 28 }}
+                    transition={SPRING_TAP}
                     title={t('processList.multiSelectHint')}
-                    className="relative w-full rounded-lg px-3 py-2 pr-9 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60"
+                    className={`relative w-full rounded-lg px-3 py-2 pr-9 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                      // A selected row already carries the accent pill; a hover
+                      // wash on top would only muddy it.
+                      isSelected ? '' : 'hover:bg-bg-tertiary/40'
+                    }`}
                   >
                     <span
                       className={`relative flex items-center gap-1.5 font-medium ${
@@ -220,7 +225,7 @@ export function ProcessList() {
                     {/* PID and the device the process plays through share one
                         muted line: a row of its own made the list feel dense
                         for a detail that is only reference information. */}
-                    <span className="relative flex items-center gap-1 text-[10px] text-text-muted">
+                    <span className="relative flex items-center gap-1 text-[10px] tabular-nums text-text-muted">
                       <span className="flex-none">PID {session.pid}</span>
                       {deviceName !== null && (
                         <>
@@ -243,6 +248,7 @@ export function ProcessList() {
                         exit={{ opacity: 0, scale: 0.6 }}
                         whileHover={{ scale: 1.15 }}
                         whileTap={{ scale: 0.9 }}
+                        transition={SPRING_TAP}
                         onClick={() => void stopRoute(session.pid)}
                         title={t('processList.stopRoute')}
                         aria-label={t('processList.stopRoute')}

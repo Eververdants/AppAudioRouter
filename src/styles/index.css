@@ -115,7 +115,8 @@ body {
     color 0.3s ease;
 }
 
-/* Scrollbar */
+/* Scrollbar. The thumb is a slice of the muted text colour rather than
+   --border, which in dark mode is all but the panel colour behind it. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -124,11 +125,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgb(var(--text-muted-rgb) / 0.28);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: rgb(var(--text-muted-rgb) / 0.5);
 }
 
 /* Selection */
