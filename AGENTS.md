@@ -8,7 +8,7 @@
 
 Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript + TailwindCSS + Motion。
 
-核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度）、自动记忆路由规则、两张列表随 Core Audio 变化实时更新、托盘常驻与开机自启。
+核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度）、自动记忆路由规则、两张列表随 Core Audio 变化实时更新、托盘常驻与开机自启、单实例（再次启动只唤出已有窗口）。
 
 **硬性约束：无任何第三方 exe 依赖。** 所有音频操作由 Rust 直接调用 Windows Core Audio API。
 
@@ -41,6 +41,7 @@ AppAudioRouter/
 │       ├── tray.rs         # 托盘图标 + 菜单（左键开关窗口；菜单标签由前端下发以跟随语言）
 │       ├── autostart.rs    # 开机自启：直接读写 HKCU\...\Run，启动时带 --hidden
 │       ├── install.rs      # 启动提示：全新安装 / 装过旧版本（建窗口之前判定，install-state.json 记版本）
+│       ├── single_instance.rs  # 单实例：命名互斥 + 命名事件（第二次启动唤出已有窗口后自行退出）
 │       ├── audio/
 │       │   ├── mod.rs
 │       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
@@ -72,7 +73,8 @@ AppAudioRouter/
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
 │   │   ├── useDelayValue.ts  # 延迟编辑状态（草稿/提交/步进），两个延迟控件共用
-│   │   ├── useBackendEvent.ts # 后端事件订阅（StrictMode 安全的 token 交接），两个事件共用
+│   │   ├── useBackendEvent.ts # 后端事件订阅（StrictMode 安全的 token 交接），三个事件共用
+│   │   ├── useDecorativeMotion.ts # 装饰性循环该不该跑（窗口可见 + 有焦点 + 未要求减少动效）
 │   │   └── useFitScale.ts  # 适配缩放（同心圆舞台）
 │   ├── stores/             # 状态管理
 │   │   └── routerStore.ts  # Zustand store
@@ -118,7 +120,8 @@ AppAudioRouter/
 6. **Tailwind**：优先 utility class，禁止自定义 CSS 类（除非通过 `@apply` 或 CSS variables）
 7. **动画**：统一使用 Motion 组件，禁止手写 `@keyframes`（除非 Motion 无法实现）。spring 与时长一律取 `lib/motion.ts` 的四条共享曲线——`SPRING_TAP`（微交互）/ `SPRING_GLIDE`（有位移的元素）/ `SPRING_ROUTE`（路由动作本身）/ `FADE`（纯透明度），**不要在调用点现调参数**：邻居之间弹得不一样看着像 bug，不像设计。`main.tsx` 的 `MotionConfig reducedMotion="user"` 已全局跟随系统「减少动态效果」，新增动画不必各自判断。
 8. **动效只用来报告状态**：常驻的循环动画要有含义（已生效的路由在流动、可路由时中心圆呼吸），纯装饰的无限循环会被砍掉——日志面板那颗心跳点就是因为一直在眼角闪而改成静止的。
-9. **导入顺序**：React → 第三方 → 别名 → 相对路径，各组间空行
+9. **没人看的时候循环要停**：剩下的装饰性循环（背景漂移光晕、80s 轨道环、设备脉冲环、已生效连线的流动虚线）统一由 `useDecorativeMotion()` 把关——窗口不可见、失去焦点、或系统要求减少动效时冻结成一帧静止状态，而不是继续重绘。一个后台窗口里的 backdrop-blur + 滤镜每帧重算，代价落在 WebView2 的 GPU 进程上，而任务管理器里那一条没人会算到这个程序头上。**动效层面的 `matchMedia` / `visibilitychange` 判断只此一处**，不要在组件里各写一份（`useTheme` 读 `prefers-color-scheme` 是配色的事，与此无关）。`reducedMotion="user"`（见上条）管的是入场与交互动画，这条管的是常驻循环，两者不重叠、都要留。
+10. **导入顺序**：React → 第三方 → 别名 → 相对路径，各组间空行
 
 ### Rust
 
@@ -187,7 +190,15 @@ AppAudioRouter/
   **不要**再回到「按 exe 压会话音量」那套（`ISimpleAudioVolume` / `set_session_volume` / session-volumes.json 已于 2026-09-19 整体移除）。
   前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
   0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
+- 两个读数都靠 `EngineRole`（`mirror` / `primary` / `inactive`）说明**这个值此刻到底生不生效**，因为改得动不等于改了就有效：
+  - `mirror` = 引擎在驱动这台设备，值直接生效；
+  - `primary` = 系统直连播放，软件既加不了延迟也压不了音量，它的值只作为整组的基准，所以提示里要写明"只影响对齐参考 / 只作为响度基准"；
+  - `inactive` = 没有任何引擎路径涉及它（未路由，或是单设备路由——单设备根本不启动引擎），此时读数**变淡**并提示原因。
+  `ConcentricRouter` 从 `routedPids` 推导角色，**跳过长度 < 2 的路由**（单设备路由没有引擎），且 `mirror` 优先于 `primary`——一台设备同时是某条路由的镜像和另一条的基准时，它的值是在生效的。
+  提示的优先级是"最具体的原因先赢"：同步关闭 > 未生效 > 主设备基准。**不要**给单设备路由也照常显示一个看起来很有效的数值：用户会以为调了有用。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
+- **单个镜像失败走自己的事件，不并进 `duplication-stopped`**：`duplication.rs` 的 `fail_mirror()` 发 `duplication-mirror-failed`（pid / generation / deviceId / error），引擎继续为其余设备播放。前端 `handleMirrorFailed` 用与引擎级事件**同一套 generation 守卫**（过期的镜像不得改动已经被替换掉的路由），再把该设备从 `routedPids[pid]` 里摘掉并写一条 error 日志点名它。
+  修的是这个观感问题：以前只 `warn!` 到 release 会丢弃的 stderr，界面上整条路由看起来完整生效，但有一台设备根本没声音——和"程序坏了"没法区分。**不要把它并回 `duplication-stopped`**：那条会拆掉整个引擎，而这里其余设备还在正常出声。
 - `stop_route` 返回 `StopOutcome`（`released` / `pinned_device`）：没释放成功时前端写一条 error 日志点名那台设备，而不是报"已恢复系统默认"；设置页的「重置每应用音频输出」、以及 `refreshSessions` 发现被路由的 pid 消失后调用的 `releaseStaleRoutes()`，都归到同一套端点归还逻辑（见下面「每应用端点分配的生命周期」）
 - 设备列表、进程列表由 store action 管理：后端 `audio-changed` 事件驱动自动同步（见下面「后台常驻与实时刷新」），手动 Refresh 按钮保留作兜底；**没有轮询定时器**
 
@@ -202,6 +213,17 @@ AppAudioRouter/
 - `close_to_tray` 存在 `app_data_dir/app-settings.json`，**默认 false**：发版不该悄悄改掉老用户按 X 的语义。为 true 时 `main.rs` 的 `WindowEvent::CloseRequested` 里 `api.prevent_close()` + `hide()`。
 - 这个判断在 **Rust**，所以设置必须在后端。**只有 Rust 需要知道的设置才进 `app-settings.json`**——主题/语言/步进仍然走 localStorage，别顺手搬过去。
 - 新增 Tauri 命令**不需要**动 `capabilities/`：ACL 只管插件命令，`generate_handler!` 注册的应用自有命令默认可调（`apply_route` 等一直没有权限条目就是证据）。要改的是窗口按钮那类，见「安全注意事项」。
+
+### 单实例（`single_instance.rs`）
+
+第二个实例会和第一个抢配置文件与音频设备，而后面每一步都假设自己独占这两样。
+
+- 两个内核对象：`Local\AppAudioRouter.SingleInstance` 命名互斥判"是否已经在运行"，`Local\AppAudioRouter.ShowWindow` 命名事件让第二次启动**请求已有窗口显示出来**。用 `Local\` 是因为它是每个登录会话一份，RDP 的另一个会话各跑一个互不干扰——音频引擎本来就是按会话走的。
+- 守卫在 `setup()` 里**最先**执行（读配置、建托盘、起通知线程之前），拿不到互斥就 `app.handle().exit(0)` 并直接返回：第二次启动不能碰任何配置或音频状态。返回的 guard 交给 `app.manage()` 持有到进程结束。
+- 第二次启动的语义是"把窗口叫出来"，不是"没反应"——托盘常驻的应用没有别的答案。第一个实例的 watcher 线程等到事件后调 `tray::reveal()`。
+- 事件**先于**互斥创建：`CreateEventW` 是按名字打开已有对象的，所以和第一个实例抢跑的那次启动依然唤得到同一个对象。判定依据是 `CreateMutexW` 成功但 `GetLastError() == ERROR_ALREADY_EXISTS`（`Ok` 路径不会动 getLastError，所以这里可靠）。
+- 创建互斥失败只 `warn!` 并**以无守卫方式继续启动**：单实例是防打架，不是安全边界，绝不能因为一个内核对象建不出来就拒绝启动。
+- 手写而不用 `tauri-plugin-single-instance`，理由与 `autostart` 同款：插件为一次 `CreateMutexW` 带来一对需要版本锁步的 npm/Cargo 依赖。**不要把插件加回来。**
 
 ### 开机自启（`autostart.rs`）
 
@@ -290,7 +312,7 @@ AppAudioRouter/
 ## 同心圆 UI 规范
 
 - 中心圆：当前选中进程，显示进程名 + 目标设备数（点击路由到选中的设备集合）；液态玻璃质感（accent 渐变 + 顶部高光 + 内圈描边），可路由时有呼吸光晕；`applying` 期间按钮禁用并降到 70% 不透明度 + `cursor-progress`（禁用了却毫无变化看着像坏了）
-- 中环：涟漪动画，路由操作时触发（单道柔波）；慢速旋转装饰环含轨道点（80s 一圈，是舞台上唯一的常驻装饰动效）
+- 中环：涟漪动画，路由操作时触发（单道柔波）；慢速旋转装饰环含轨道点（80s 一圈，是舞台上唯一的常驻装饰动效，窗口没人看时冻结——见「代码规范 · 动画」第 9 条）
 - 音频流连线：中心到每个选中设备的虚线曲线（统一顺时针弧度）。**虚线只在路由已生效时流动**——选中但未路由的连线是静止的，动的那条才代表音频真的在走；已生效的连线更亮更粗，下面垫一条同色的模糊 halo（`<filter>` 在 `<defs>` 里，只作用于这条静止的 halo）。不要给会动的虚线路径挂 `drop-shadow`：滤镜会跟着每一帧重算
 - 外环：设备列表（**多选**），每个设备为一个玻璃胶囊节点
   - 第 1 个选中设备 = 主设备（实心 accent 徽标 "1"）
@@ -307,13 +329,18 @@ AppAudioRouter/
   - 标注行绝对定位在 `top-full` 居中处，宽度随数值自然变化也**不会推动任何东西**；
     每个读数各自的悬停反馈是一根 `absolute` hairline 下划线（`group/scrub`），不占宽度。两个读数之间的分隔用 1px 竖 hairline。
   - 标注显隐：**选中 或 该读数非中性**（延迟≠0 / 音量<100）——已生效的偏移绝不能被藏起来，没动的设备也不该无谓地占视觉。
+    读数另按 `EngineRole` 变淡并在 tooltip 里说明"当前未生效"的原因（单设备路由没有引擎、主设备只作基准），见「状态管理」。
   - 点击名称按钮选中设备后要 `blur()`（仅指针点击，`e.detail > 0`）：否则按钮保持焦点，下一个 Space 会静默取消刚做的选择。
     键盘激活（`detail === 0`）必须保留焦点。
 - 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）；未选中的行悬停才有 `bg-bg-tertiary/40` 浅底——已选中的行不加，免得盖住那颗胶囊；每行第二行是 `PID xxx · 当前播放设备`（同一行内，不要再单开一行显示设备）
+  - 列表顶部有搜索框：`query` 是**组件本地 `useState`**，不进 store（它是视图状态，不是应用状态）；按 `exe_name` 过滤（`display_name` 已被后端移除，别再引用），`Escape` 清空并失焦。
+  - 已路由的进程**排到最前**：按 `routedPids` 长度做**稳定**排序，让组内保持枚举顺序——否则行会在每次刷新时互相换位，鼠标底下的目标就跑了。
+  - 无匹配时显示 `processList.noMatch`，**不要**复用 `processList.empty`：「没有进程在放音」和「你的搜索词没匹配上」是两件事，后者提示"让程序发声"是答非所问。
 - 舞台底部不放常驻面板：延迟在设备节点上改，其余设置都在设置页
 - 激活状态：`scale(1.05)` + `box-shadow` 扩散
 - 路由动画：`SPRING_ROUTE`（spring stiffness=300, damping=20），中心圆的悬停/按下走这条；其余动效一律取 `lib/motion.ts` 的共享曲线（见「代码规范 · 动画」）
 - 视觉体系：液态玻璃（`--glass-*` tokens + backdrop-blur + shadow-glass），body 环境渐变 + App 内漂移光晕为玻璃提供"折射"色彩；所有微动效统一走 Motion，不手写 @keyframes
+- 漂移光晕、脉冲环、流动虚线、轨道环这几处循环全部由 `useDecorativeMotion()` 把关（见「代码规范 · 动画」第 9 条）：窗口不可见或失焦时**冻结成静止一帧**。冻结时光晕**保留颜色**只停位移——玻璃面板的"折射"观感靠的就是那点色，停掉动画不该让整块背景变灰
 
 ---
 
@@ -385,6 +412,11 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 插上一个新设备 / 让一个新程序开始放音：不点 Refresh，两边列表自己跟上，且日志只在内容真的变化时多一行
 - [ ] 托盘图标常驻，左键开关窗口；开启「关闭窗口时最小化到托盘」后按 X 不退出、路由继续
 - [ ] 开启「开机自动启动」后：注册表 `HKCU\...\Run` 有那一条、重启后只出现托盘图标不弹窗、开关状态仍与注册表一致
+- [ ] 单实例：程序已经在运行时再次启动它，只把已有窗口唤到前台，不出现第二个托盘图标，也不重复起一份复制引擎
+- [ ] 进程列表搜索：输入即时过滤，已路由的排在最前且组内顺序稳定；`Escape` 清空并失焦；无匹配时的提示与「没有进程在放音」不是同一句
+- [ ] 镜像设备失败：让一台正在镜像的设备打不开，该设备从路由徽标里消失并留一行点名它的 error 日志，其余设备继续出声
+- [ ] 延迟/音量的生效提示：单设备路由时读数变淡并说明不生效；主设备的提示写明它只作基准
+- [ ] 窗口失焦或最小化后舞台上的循环动效停住（GPU 占用回落），窗口恢复后又动起来
 - [ ] Light/Dark 切换流畅
 - [ ] 同心圆动画流畅（60fps）
 - [ ] `pnpm tauri build` 产物可安装运行
