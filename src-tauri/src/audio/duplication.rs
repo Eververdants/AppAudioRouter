@@ -263,6 +263,10 @@ struct MirrorChannel {
     /// Cleared when the device fails to open or errors out; pushes and pops
     /// become no-ops so the remaining mirrors keep playing.
     enabled: AtomicBool,
+    /// How many times this mirror's render loop has woken up. Diagnostic: it is
+    /// what lets an idle engine's cost in scheduler wakeups be attributed to a
+    /// route at all (see `capture_main`).
+    wakeups: AtomicU64,
 }
 
 impl MirrorChannel {
@@ -372,6 +376,12 @@ struct EngineShared {
     go: AtomicBool,
     /// Render threads that finished device initialization (success or failure).
     ready_count: AtomicUsize,
+    /// How many times the capture loop has woken up. Diagnostic, as the mirror
+    /// counterpart is.
+    capture_wakeups: AtomicU64,
+    /// When the engine was created. Origin for the wake summary below and, once
+    /// a mirror parks, for how long the source has been quiet.
+    started: Instant,
 }
 
 /// A live duplication engine and the device list it is currently serving.
@@ -536,6 +546,7 @@ impl DuplicationManager {
                     ring: Mutex::new(VecDeque::new()),
                     capacity: ring_capacity,
                     enabled: AtomicBool::new(true),
+                    wakeups: AtomicU64::new(0),
                 })
             })
             .collect();
@@ -559,6 +570,8 @@ impl DuplicationManager {
             sync_delays: AtomicBool::new(self.delay_sync.load(Ordering::Relaxed)),
             go: AtomicBool::new(false),
             ready_count: AtomicUsize::new(0),
+            capture_wakeups: AtomicU64::new(0),
+            started: Instant::now(),
         });
         self.engines
             .lock()
@@ -636,6 +649,18 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
         }
         ExitReason::Error(e) => warn!("duplication for PID {} failed: {e}", shared.pid),
     }
+    let mirror_wakes: u64 = shared
+        .mirrors
+        .iter()
+        .map(|m| m.wakeups.load(Ordering::Relaxed))
+        .sum();
+    info!(
+        "engine for PID {} ran {:?}: {} capture waits, {} mirror waits",
+        shared.pid,
+        shared.started.elapsed(),
+        shared.capture_wakeups.load(Ordering::Relaxed),
+        mirror_wakes
+    );
     app.state::<DuplicationManager>()
         .unregister(shared.pid, shared.generation);
     let _ = app.emit(
@@ -908,6 +933,7 @@ fn capture_packets_inner(
     loop {
         // SAFETY: valid event handle owned by this thread.
         let wait = unsafe { WaitForSingleObject(event, CAPTURE_WAIT_MS) };
+        shared.capture_wakeups.fetch_add(1, Ordering::Relaxed);
         if shared.shutdown.load(Ordering::Relaxed) {
             return Ok(ExitReason::Stopped);
         }
@@ -1164,6 +1190,7 @@ fn pump_render(
     loop {
         // SAFETY: valid event handle owned by this thread.
         let wait = unsafe { WaitForSingleObject(session.event, RENDER_WAIT_MS) };
+        mirror.wakeups.fetch_add(1, Ordering::Relaxed);
         if shared.shutdown.load(Ordering::Relaxed) {
             return Ok(());
         }
@@ -1484,6 +1511,7 @@ mod tests {
             delay_ms: AtomicI32::new(0),
             volume_percent: AtomicU32::new(100),
             enabled: AtomicBool::new(true),
+            wakeups: AtomicU64::new(0),
         }
     }
 
@@ -1506,6 +1534,7 @@ mod tests {
                         delay_ms: AtomicI32::new(delay),
                         volume_percent: AtomicU32::new(100),
                         enabled: AtomicBool::new(true),
+                        wakeups: AtomicU64::new(0),
                     })
                 })
                 .collect(),
@@ -1521,6 +1550,8 @@ mod tests {
             sync_delays: AtomicBool::new(sync),
             go: AtomicBool::new(false),
             ready_count: AtomicUsize::new(0),
+            capture_wakeups: AtomicU64::new(0),
+            started: Instant::now(),
         }
     }
 
