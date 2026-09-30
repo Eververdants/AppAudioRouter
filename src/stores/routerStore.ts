@@ -42,6 +42,15 @@ interface RouterState {
   /** Devices each process is currently routed to, keyed by PID. */
   routedPids: Record<number, string[]>;
   /**
+   * What each device is really playing at, in milliseconds, keyed by device id:
+   * the pipeline the engine holds for that device plus the endpoint's own
+   * reported stream latency. Only mirrors appear — Windows plays the primary
+   * itself, so there is no stream of ours there to measure. Rebuilt from the
+   * running engines on every reconciliation, so a device that stops being
+   * mirrored loses its reading instead of keeping a stale one.
+   */
+  deviceLatencyMs: Record<string, number>;
+  /**
    * System default render device. It is the endpoint a process plays through
    * until it gets an explicit route, so selecting a process falls back to it.
    */
@@ -154,8 +163,10 @@ interface RouterState {
   /** One mirror of a live route went quiet. The rest of the route keeps playing,
    * so only that device leaves the badge set — and the log says which one and why. */
   handleMirrorFailed: (event: MirrorFailedEvent) => void;
-  /** On boot, ask the backend which PIDs it is still duplicating (routes
-   *  survive a restart) and reconcile the UI so its badges match reality. */
+  /** Ask the backend which PIDs it is still duplicating — routes survive a
+   *  restart — and reconcile the badges and the per-device latency readings with
+   *  it. Runs at boot, and once whenever a route appears, so a fresh route needs
+   *  no Core Audio change to be measured. */
   reconcileActiveDuplications: () => Promise<void>;
   addLog: (message: string, level?: LogEntry['level']) => void;
 }
@@ -353,6 +364,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   selectedDeviceIds: [],
   deviceSelectionPrefilled: false,
   routedPids: {},
+  deviceLatencyMs: {},
   defaultDeviceId: null,
   deviceDelays: {},
   delayRangeMs: DEFAULT_DELAY_RANGE_MS,
@@ -648,6 +660,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       routedPids: { ...s.routedPids, ...restored },
       engineGenerations: { ...s.engineGenerations, ...generations },
     }));
+    // A restored route starts an engine just like a manual one, and the boot
+    // reconciliation ran alongside this pass rather than after it — so without
+    // this, routes restored at launch would carry no reading until the user
+    // happened to apply something by hand.
+    await get().reconcileActiveDuplications();
   },
 
   forgetRememberedRoute: async (exeName) => {
@@ -874,6 +891,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           'error',
         );
       }
+      // The engines are up now, and this is the only pass that asks each of them
+      // how far behind its device plays. The badges above say what was applied;
+      // this is what makes the readings appear with the route instead of waiting
+      // for the next route, or for Core Audio to move.
+      await get().reconcileActiveDuplications();
     } catch (e) {
       get().addLog(i18next.t('log.routeFailed', { error: String(e) }), 'error');
     } finally {
@@ -917,6 +939,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         failure ??= String(e);
       }
     }
+    // What this put back is duplicating now, so its readings are due for the
+    // same reason a freshly applied route's are.
+    await get().reconcileActiveDuplications();
     if (failure === null) {
       get().addLog(i18next.t('log.routeUndone', { n: snapshot.entries.length }), 'info');
     } else {
@@ -1268,16 +1293,34 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // the badges with the data the UI needs.
     try {
       const active = await api.getActiveDuplications();
-      if (active.length === 0) return;
+      if (active.length === 0) {
+        // Nothing is being duplicated, so nothing is being measured: a reading
+        // that outlived its route would sit under a device describing a stream
+        // that does not exist.
+        set({ deviceLatencyMs: {} });
+        return;
+      }
       set((s) => {
         const routedPids = { ...s.routedPids };
         const engineGenerations = { ...s.engineGenerations };
+        // Rebuilt rather than merged, like the badges above: only the devices an
+        // engine is driving right now keep a reading.
+        const deviceLatencyMs: Record<string, number> = {};
         for (const route of active) {
           if (route.deviceIds.length === 0) continue;
           routedPids[route.pid] = [...route.deviceIds];
           engineGenerations[route.pid] = route.generation;
+          // Index 0 is the primary, which Windows plays natively and which
+          // reports `null` because there is no stream of ours to ask. Every
+          // entry past it is a mirror, and its reading is what the stage shows.
+          for (let index = 1; index < route.deviceIds.length; index += 1) {
+            const deviceId = route.deviceIds[index];
+            const latencyMs = route.latencyMs[index];
+            if (deviceId === undefined || latencyMs === undefined || latencyMs === null) continue;
+            deviceLatencyMs[deviceId] = latencyMs;
+          }
         }
-        return { routedPids, engineGenerations };
+        return { routedPids, engineGenerations, deviceLatencyMs };
       });
     } catch {
       /* enumerating active engines is best-effort; the user can re-route */
