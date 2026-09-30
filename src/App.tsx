@@ -112,6 +112,7 @@ export default function App() {
   const loadDefaultDevice = useRouterStore((s) => s.loadDefaultDevice);
   const loadDelaySettings = useRouterStore((s) => s.loadDelaySettings);
   const loadDeviceVolumes = useRouterStore((s) => s.loadDeviceVolumes);
+  const loadSourceVolumes = useRouterStore((s) => s.loadSourceVolumes);
   const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
   const loadRememberedRoutes = useRouterStore((s) => s.loadRememberedRoutes);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
@@ -142,7 +143,8 @@ export default function App() {
   useEffect(() => {
     void loadDelaySettings();
     void loadDeviceVolumes();
-  }, [loadDelaySettings, loadDeviceVolumes]);
+    void loadSourceVolumes();
+  }, [loadDelaySettings, loadDeviceVolumes, loadSourceVolumes]);
 
   useEffect(() => {
     // The tray menu is a native control and cannot read i18next, so its labels

@@ -3,11 +3,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   ActiveRoute,
+  AlignOutcome,
   AudioDevice,
   AudioSession,
   DeviceDelay,
   RememberedRoute,
   ResetOutcome,
+  SourceVolume,
   StartupNotice,
   StopOutcome,
 } from './types';
@@ -104,6 +106,23 @@ export async function setDeviceVolume(deviceId: string, percent: number): Promis
 /** All configured device volumes as `(device_id, percent)` pairs. */
 export async function getDeviceVolumes(): Promise<[string, number][]> {
   return invoke<[string, number][]>('get_device_volumes');
+}
+
+/** All stored per-program levels as `(exe_name, percent)` pairs. */
+export async function getSourceVolumes(): Promise<SourceVolume[]> {
+  return invoke<SourceVolume[]>('get_source_volumes');
+}
+
+/** Set one program's own level (percent, 0–400, where 100 leaves the audio as
+ * the program produced it). Rejected when the value is out of range. */
+export async function setSourceVolume(exeName: string, percent: number): Promise<void> {
+  await invoke('set_source_volume', { exeName, percent });
+}
+
+/** Bring every routed program that is playing up to the loudest one's level, in
+ * one action, and report which programs that covered and which it left alone. */
+export async function alignSourceLevels(): Promise<AlignOutcome> {
+  return invoke<AlignOutcome>('align_source_levels');
 }
 
 /** Whether the close button hides the window to the tray instead of quitting. */

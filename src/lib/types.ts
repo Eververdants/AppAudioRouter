@@ -42,6 +42,25 @@ export interface RememberedRouteEntry {
  * device: positive holds it back, negative makes it the earliest of its group. */
 export type DeviceDelay = [deviceId: string, delayMs: number];
 
+/**
+ * `(exe_name, percent)` — the level this app applies to one program's audio on
+ * its way to the routed devices.
+ *
+ * 100 is the audio as the program produced it, and the middle of the range
+ * rather than its top: below attenuates, above amplifies. Nothing here is the
+ * program's own volume, and none of it is stored by Windows.
+ */
+export type SourceVolume = [exeName: string, percent: number];
+
+/** What one run of the level alignment did. */
+export interface AlignOutcome {
+  /** Programs whose level was set, as `(exe_name, percent)`. */
+  aligned: SourceVolume[];
+  /** Routed programs that had nothing playing to measure, so they were left
+   * exactly as they were: aligning against silence aligns against nothing. */
+  leftAlone: string[];
+}
+
 /** One program's route as it stood before a route replaced it. */
 export interface ReplacedRoute {
   pid: number;

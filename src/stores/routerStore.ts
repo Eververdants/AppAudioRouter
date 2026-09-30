@@ -64,6 +64,16 @@ interface RouterState {
   delayStepMs: number;
   /** Per-device volume in percent (100 = the level the app produced). */
   deviceVolumes: Record<string, number>;
+  /**
+   * The level this app applies to each program's audio on its way to the routed
+   * devices, in percent, keyed by executable name — the same ownership rule the
+   * routing assignments use, since one program can hold several sessions and the
+   * level belongs to the program. 100 is the audio as the program produced it
+   * and the middle of the range: below attenuates, above amplifies. A missing
+   * entry is that neutral 100, which is also what the backend stores as "no
+   * level".
+   */
+  sourceVolumes: Record<string, number>;
   /** Whether delay compensation is applied by the engine. */
   delaySync: boolean;
   /** Whether a route is written to the memory as it is applied, and restored
@@ -155,6 +165,13 @@ interface RouterState {
   loadDelaySettings: () => Promise<void>;
   loadDeviceVolumes: () => Promise<void>;
   setDeviceVolume: (deviceId: string, percent: number) => Promise<void>;
+  /** Read the stored per-program levels the engines apply. */
+  loadSourceVolumes: () => Promise<void>;
+  /** Set one program's own level (percent, 0–400, 100 = unchanged). */
+  setSourceVolume: (exeName: string, percent: number) => Promise<void>;
+  /** Bring every routed program that is playing up to the loudest one's level,
+   * in one action, and re-read the values that wrote. */
+  alignSourceLevels: () => Promise<void>;
   setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
   setDelayRange: (rangeMs: number) => Promise<void>;
   setDelayStep: (stepMs: number) => void;
@@ -370,6 +387,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayRangeMs: DEFAULT_DELAY_RANGE_MS,
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
+  sourceVolumes: {},
   delaySync: false,
   autoRemember: readAutoRemember(),
   rememberedRoutes: [],
@@ -1163,6 +1181,75 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       });
       get().addLog(i18next.t('log.deviceVolumeFailed', { error: String(e) }), 'error');
     }
+  },
+
+  loadSourceVolumes: async () => {
+    try {
+      const pairs = await api.getSourceVolumes();
+      const sourceVolumes: Record<string, number> = {};
+      for (const [exeName, percent] of pairs) {
+        sourceVolumes[exeName] = percent;
+      }
+      set({ sourceVolumes });
+    } catch (e) {
+      get().addLog(i18next.t('log.sourceVolumesFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  setSourceVolume: async (exeName, percent) => {
+    const current = get().sourceVolumes[exeName] ?? 100;
+    if (current === percent) return;
+    set((s) => {
+      const sourceVolumes = { ...s.sourceVolumes };
+      // Only an exact 100 is dropped: it is this range's neutral point rather
+      // than its top, so 101 and up are levels in their own right and have to
+      // survive as entries. The backend stores by the same rule.
+      if (percent === 100) {
+        delete sourceVolumes[exeName];
+      } else {
+        sourceVolumes[exeName] = percent;
+      }
+      return { sourceVolumes };
+    });
+    try {
+      await api.setSourceVolume(exeName, percent);
+      get().addLog(i18next.t('log.sourceVolumeSet', { process: exeName, n: percent }), 'info');
+    } catch (e) {
+      // The backend rejected the value; undo the optimistic update so the UI
+      // keeps matching what the engine actually applies and persists.
+      set((s) => {
+        const sourceVolumes = { ...s.sourceVolumes };
+        if (current === 100) {
+          delete sourceVolumes[exeName];
+        } else {
+          sourceVolumes[exeName] = current;
+        }
+        return { sourceVolumes };
+      });
+      get().addLog(i18next.t('log.sourceVolumeFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  alignSourceLevels: async () => {
+    try {
+      const { aligned, leftAlone } = await api.alignSourceLevels();
+      // One line for the whole action, and it says both halves: what it changed
+      // and what it walked past. A program that was not making a sound is not a
+      // failure, but it is the reason the numbers on screen moved unevenly.
+      get().addLog(
+        i18next.t(
+          leftAlone.length === 0 ? 'log.sourceLevelsAligned' : 'log.sourceLevelsAlignedSome',
+          { n: aligned.length, processes: leftAlone.join(', ') },
+        ),
+        'info',
+      );
+    } catch (e) {
+      get().addLog(i18next.t('log.sourceLevelsAlignFailed', { error: String(e) }), 'error');
+    }
+    // Read the levels back rather than trusting the ones this side could have
+    // predicted: the backend rounds each gain and bounds it by that program's
+    // own measured peak, and a run that failed halfway has still written some.
+    await get().loadSourceVolumes();
   },
 
   setDeviceDelayValue: async (deviceId, delayMs) => {
