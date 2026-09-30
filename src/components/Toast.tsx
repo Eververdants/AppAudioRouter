@@ -68,7 +68,12 @@ export function Toast() {
             role="status"
             aria-live="polite"
             initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
+            // `pointerEvents` is named on the way in as well as on the way out,
+            // and it is not decoration: the exit sets it to `none` inline, and
+            // framer keeps an inline value it has no target for. Without this, a
+            // new offer arriving during the previous one's exit (~0.2 s) would
+            // re-mount a card whose Undo button is dead.
+            animate={{ opacity: 1, y: 0, pointerEvents: 'auto' }}
             // `pointerEvents` is not animatable, so it is applied as the exit
             // begins rather than animated: without it the card goes on taking
             // clicks for as long as it is fading out, and the click that follows
