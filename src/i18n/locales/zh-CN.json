@@ -10,6 +10,7 @@
     "routedBadge": "已路由到 {{n}} 台设备",
     "stopRoute": "停止该进程的路由",
     "stopAll": "停止全部路由",
+    "stopAllConfirm": "再点一次即停止全部路由",
     "multiSelectHint": "点击选择；Ctrl+点击可多选，一起路由",
     "associatedDevice": "该进程播放到的设备：{{device}}"
   },
@@ -46,6 +47,10 @@
     "resetEndpoints": "重置每应用音频输出",
     "resetEndpointsDesc": "把各程序自己的输出设备交还给它，正在被路由的除外。旧版本固定在某一台设备上的程序，在重置之前不会跟随系统默认设备。",
     "resetEndpointsAction": "重置",
+    "stopAllRoutes": "停止全部路由",
+    "stopAllRoutesDesc": "一次把所有已路由的程序交还系统默认设备；没有路由的程序不受影响。",
+    "stopAllRoutesAction": "全部停止",
+    "stopAllRoutesConfirm": "确认？",
     "background": "后台运行",
     "closeToTray": "关闭窗口时最小化到托盘",
     "closeToTrayDesc": "点关闭只隐藏窗口，所有路由继续生效；从托盘图标可唤回窗口。关闭此项后，关闭窗口会退出程序并一并停止路由。",

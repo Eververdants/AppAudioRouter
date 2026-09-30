@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -116,32 +117,39 @@ export function ProcessList() {
         <div className="flex flex-none items-center">
           <AnimatePresence initial={false}>
             {routedCount > 0 && (
-              <motion.button
+              <motion.span
+                key="stop-all"
                 initial={{ opacity: 0, scale: 0.7 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.7 }}
-                whileHover={{ scale: 1.08 }}
-                whileTap={{ scale: 0.9 }}
                 transition={SPRING_TAP}
-                onClick={() => void stopAllRoutes()}
-                title={t('processList.stopAll')}
-                aria-label={t('processList.stopAll')}
-                className="mr-0.5 flex h-6 w-6 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-error/10 hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50"
+                className="flex"
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="12" r="9" />
-                  <rect x="9" y="9" width="6" height="6" rx="1" />
-                </svg>
-              </motion.button>
+                {/* Stops every routed program at once, so it asks first: one
+                    click on this icon otherwise takes the audio of programs the
+                    user was not even looking at. */}
+                <ConfirmButton
+                  variant="icon"
+                  label={t('processList.stopAll')}
+                  confirmLabel={t('processList.stopAllConfirm')}
+                  onConfirm={() => void stopAllRoutes()}
+                  icon={
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <rect x="9" y="9" width="6" height="6" rx="1" />
+                    </svg>
+                  }
+                />
+              </motion.span>
             )}
           </AnimatePresence>
           <motion.button

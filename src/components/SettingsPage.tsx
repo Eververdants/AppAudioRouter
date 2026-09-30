@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { DelayStepper } from '@/components/ui/DelayStepper';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
@@ -154,6 +155,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
   const forgetRememberedRoute = useRouterStore((s) => s.forgetRememberedRoute);
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
+  const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
+  const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
   const delaySync = useRouterStore((s) => s.delaySync);
   const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
@@ -327,6 +330,17 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               >
                 {t('settings.resetEndpointsAction')}
               </button>
+            </Row>
+            {/* The same action as the process list header, and the same reason it
+                asks first: it reaches every routed program, not just the one the
+                user has in mind. */}
+            <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
+              <ConfirmButton
+                label={t('settings.stopAllRoutesAction')}
+                confirmLabel={t('settings.stopAllRoutesConfirm')}
+                onConfirm={() => void stopAllRoutes()}
+                disabled={routedCount === 0}
+              />
             </Row>
           </SectionCard>
         </motion.div>

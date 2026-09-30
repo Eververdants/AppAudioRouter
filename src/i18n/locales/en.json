@@ -10,6 +10,7 @@
     "routedBadge": "Routed to {{n}} device(s)",
     "stopRoute": "Stop routing this process",
     "stopAll": "Stop all routing",
+    "stopAllConfirm": "Click again to stop all routing",
     "multiSelectHint": "Click to select; Ctrl+click to pick several and route them together",
     "associatedDevice": "Plays through {{device}}"
   },
@@ -46,6 +47,10 @@
     "resetEndpoints": "Reset per-app output",
     "resetEndpointsDesc": "Gives every program its own output device back, except the ones a route is using right now. A program an earlier version left fixed to a device ignores the system default until this is done.",
     "resetEndpointsAction": "Reset",
+    "stopAllRoutes": "Stop all routing",
+    "stopAllRoutesDesc": "Returns every routed program to the system default at once. The programs a route is not using are left alone.",
+    "stopAllRoutesAction": "Stop all",
+    "stopAllRoutesConfirm": "Confirm?",
     "background": "Background",
     "closeToTray": "Minimize to tray when closed",
     "closeToTrayDesc": "The close button hides the window while every route keeps running, and the tray icon brings the window back. Turned off, closing quits the app and stops the routes with it.",
