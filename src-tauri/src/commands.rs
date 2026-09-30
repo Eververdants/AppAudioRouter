@@ -46,6 +46,12 @@ pub struct AlignOutcome {
     /// was playing in them to measure. Aligning against silence would be
     /// aligning against nothing.
     pub left_alone: Vec<String>,
+    /// How many routed programs had a live reading at all.
+    ///
+    /// Reported because an empty `aligned` has two different reasons behind it —
+    /// nothing was playing, or only one program was, and one program cannot be
+    /// aligned against itself — and the caller has to be able to say which.
+    pub playing: usize,
 }
 
 /// List all active render (playback) devices.
@@ -572,6 +578,7 @@ pub fn align_source_levels(
     Ok(AlignOutcome {
         aligned: applied,
         left_alone,
+        playing: playing.len(),
     })
 }
 
