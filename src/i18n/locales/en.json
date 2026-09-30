@@ -67,6 +67,7 @@
     "autostartDesc": "Launches into the tray with no window at sign-in, so remembered routes are ready before you open anything.",
     "delays": "Delay compensation",
     "delayNote": "Every device's delay is set against the app's audio; a route is applied in delay order, so the device the OS plays directly is the earliest one and becomes the alignment reference. On the main screen, drag the number under a device node, or scroll it. Delay and volume only apply in multi-device duplication routes; a single-device route is played by the system directly, with no engine in between.",
+    "calibrationNote": "Each device's latency is measured and shown under it on the main screen, but that figure is the software side only: what a codec or a Bluetooth link adds happens after the audio leaves Windows, and measuring it would take a microphone. This app does not ask for one, so that last stretch stays yours to place by ear — which the live number turns into a matter of seconds rather than guesswork.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
     "delayStep": "Step size",

@@ -498,6 +498,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             <p className="px-3 pb-1 pt-2 text-[11px] leading-relaxed text-text-muted">
               {t('settings.delayNote')}
             </p>
+            <p className="px-3 pb-1 pt-1 text-[11px] leading-relaxed text-text-muted">
+              {t('settings.calibrationNote')}
+            </p>
             {devices.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-text-muted">
                 {t('settings.noDevices')}
