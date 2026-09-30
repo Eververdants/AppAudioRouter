@@ -9,9 +9,11 @@ use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
-use crate::audio::levels::{SourceLevels, LEVEL_MAX_AGE};
+use crate::audio::levels::{aligned_gains, SourceLevel, SourceLevels, LEVEL_MAX_AGE};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
-use crate::config::{AppSettings, DelayConfig, RouteConfig, SourceVolumeConfig, VolumeConfig};
+use crate::config::{
+    AppSettings, DelayConfig, RouteConfig, SourceVolumeConfig, VolumeConfig, SOURCE_VOLUME_MAX,
+};
 use crate::install::{StartupNotice, StartupNoticeState};
 
 /// What a stop left behind.
@@ -32,6 +34,18 @@ pub struct ResetOutcome {
     pub released: usize,
     /// Executable names still carrying an assignment the service would not drop.
     pub still_pinned: Vec<String>,
+}
+
+/// What one run of the level alignment did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlignOutcome {
+    /// Programs whose level was set, as `(exe_name, percent)`.
+    pub aligned: Vec<(String, u32)>,
+    /// Programs that were routed but left exactly as they were, because nothing
+    /// was playing in them to measure. Aligning against silence would be
+    /// aligning against nothing.
+    pub left_alone: Vec<String>,
 }
 
 /// List all active render (playback) devices.
@@ -523,6 +537,52 @@ pub fn get_source_levels(levels: State<'_, Arc<SourceLevels>>) -> Vec<(String, f
         .into_iter()
         .map(|(exe_name, level)| (exe_name, level.rms, level.peak))
         .collect()
+}
+
+/// Bring every routed program that is playing up to the level of the loudest
+/// one, in one action.
+///
+/// The group is whatever this app is duplicating right now rather than a list
+/// handed over by the frontend: that way it cannot name a program that is not
+/// routed, and a program holding several sessions cannot arrive twice under two
+/// PIDs. A program with nothing playing is left exactly as it was — aligning
+/// against silence would be aligning against nothing — and so is one the
+/// measurement could not read.
+///
+/// This overwrites levels the user set by hand, which is what "align them"
+/// means; the values it writes are ordinary stored levels afterwards, so they
+/// can be edited from the same place as any other.
+#[tauri::command]
+pub fn align_source_levels(
+    sources: State<'_, Arc<SourceVolumeConfig>>,
+    levels: State<'_, Arc<SourceLevels>>,
+    duplications: State<'_, DuplicationManager>,
+) -> Result<AlignOutcome, String> {
+    let routed = duplications.routed_exe_names();
+    let playing: Vec<(String, SourceLevel)> = levels
+        .fresh_all(LEVEL_MAX_AGE)
+        .into_iter()
+        .filter(|(exe_name, _)| routed.contains(exe_name))
+        .collect();
+
+    let mut applied = Vec::new();
+    for (exe_name, gain) in aligned_gains(&playing) {
+        let percent = (gain * 100.0).round().clamp(0.0, SOURCE_VOLUME_MAX as f32) as u32;
+        sources.set(&exe_name, percent)?;
+        duplications.update_source_volume(&exe_name, percent);
+        info!("aligned {exe_name} to {percent}%");
+        applied.push((exe_name, percent));
+    }
+
+    let changed: HashSet<&str> = applied.iter().map(|(name, _)| name.as_str()).collect();
+    let left_alone = routed
+        .into_iter()
+        .filter(|name| !changed.contains(name.as_str()))
+        .collect();
+    Ok(AlignOutcome {
+        aligned: applied,
+        left_alone,
+    })
 }
 
 fn parse_role(role: &str) -> audio::Role {

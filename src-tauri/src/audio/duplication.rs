@@ -737,6 +737,20 @@ impl DuplicationManager {
         }
     }
 
+    /// The executables this manager currently runs an engine for, each named
+    /// once, sorted.
+    ///
+    /// One program can hold several engines (a browser holds one per window's
+    /// session), and a level belongs to the program, so the caller gets programs
+    /// rather than PIDs.
+    pub fn routed_exe_names(&self) -> Vec<String> {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        let mut names: Vec<String> = engines.values().map(|e| e.exe_name.clone()).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// Re-read every device's persisted delay. Needed after the configured
     /// range changed, which may have clamped values that live engines are still
     /// applying.

@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::config::SOURCE_VOLUME_MAX;
+
 /// One program's most recent measurement.
 #[derive(Clone, Copy, Debug)]
 pub struct SourceLevel {
@@ -85,9 +87,68 @@ impl SourceLevels {
     }
 }
 
+/// How far below the group's loudest program every other program is brought.
+///
+/// Several programs aligned to the same level add up at the device, and that sum
+/// belongs to the Windows mixer where this side cannot see it. So this is a
+/// courtesy margin rather than a guarantee: with many programs playing at once,
+/// the device volume is still the control that has to move.
+pub const ALIGN_HEADROOM: f32 = 0.7;
+
+/// What each program in a group needs to be as loud as the others, as
+/// `(exe_name, gain)`, where a gain of 1.0 leaves that program's audio alone.
+///
+/// Empty when there is nothing to align: fewer than two programs are playing
+/// (one program cannot be aligned against itself), or every one of them is
+/// silent, in which case there is no ratio to take and dividing by it would
+/// produce a gain that means nothing.
+///
+/// Each gain is bounded twice — once by the ceiling a program's own level may
+/// reach, and once by that program's measured peak. The second bound is what
+/// makes amplification safe: a gain of `1 / peak` puts a program's loudest
+/// sample at full scale and can put nothing past it.
+pub fn aligned_gains(playing: &[(String, SourceLevel)]) -> Vec<(String, f32)> {
+    if playing.len() < 2 {
+        return Vec::new();
+    }
+    let loudest = playing
+        .iter()
+        .map(|(_, level)| level.rms)
+        .fold(0.0f32, f32::max);
+    let target = loudest * ALIGN_HEADROOM;
+    if target <= 0.0 {
+        return Vec::new();
+    }
+    let ceiling = SOURCE_VOLUME_MAX as f32 / 100.0;
+    playing
+        .iter()
+        .map(|(exe_name, level)| {
+            // A program whose peak was never measured is only bounded by the
+            // ceiling: guessing a peak would either clip it or hold it back for
+            // no reason.
+            let peak_bound = if level.peak > 0.0 {
+                1.0 / level.peak
+            } else {
+                ceiling
+            };
+            let bound = ceiling.min(peak_bound);
+            let gain = (target / level.rms.max(f32::MIN_POSITIVE)).clamp(0.0, bound);
+            (exe_name.clone(), gain)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn level(rms: f32, peak: f32) -> SourceLevel {
+        SourceLevel {
+            rms,
+            peak,
+            at: Instant::now(),
+        }
+    }
 
     #[test]
     fn a_reading_is_fresh_until_it_ages_out() {
@@ -129,5 +190,61 @@ mod tests {
             .map(|(name, _)| name)
             .collect();
         assert_eq!(names, vec!["chat.exe", "game.exe", "music.exe"]);
+    }
+
+    #[test]
+    fn one_program_is_not_a_group() {
+        let playing = vec![("solo.exe".to_string(), level(0.5, 0.5))];
+        assert!(aligned_gains(&playing).is_empty());
+    }
+
+    #[test]
+    fn a_group_of_silence_is_left_alone() {
+        // Dividing by a zero level is a gain of nothing meaningful, and the NaN
+        // it produces would reach the stored percentage as silence.
+        let playing = vec![
+            ("a.exe".to_string(), level(0.0, 0.0)),
+            ("b.exe".to_string(), level(0.0, 0.0)),
+        ];
+        assert!(aligned_gains(&playing).is_empty());
+    }
+
+    #[test]
+    fn the_quieter_program_is_brought_up_to_the_loudest() {
+        let playing = vec![
+            ("loud.exe".to_string(), level(0.5, 0.5)),
+            ("quiet.exe".to_string(), level(0.25, 0.25)),
+        ];
+        let gains = aligned_gains(&playing);
+        assert_eq!(gains[0].0, "loud.exe");
+        // The target is the loudest level less the headroom margin, so the loud
+        // program comes down a little and the quiet one comes up to meet it.
+        assert!((gains[0].1 - 0.7).abs() < 1e-6, "gain was {}", gains[0].1);
+        assert_eq!(gains[1].0, "quiet.exe");
+        assert!((gains[1].1 - 1.4).abs() < 1e-6, "gain was {}", gains[1].1);
+    }
+
+    #[test]
+    fn a_programs_own_peak_bounds_the_gain_that_would_clip_it() {
+        // The quiet program already peaks at full scale, so it cannot be raised
+        // at all: the ratio asks for 1.4 and its peak allows 1.0.
+        let playing = vec![
+            ("loud.exe".to_string(), level(0.5, 0.5)),
+            ("crunchy.exe".to_string(), level(0.25, 1.0)),
+        ];
+        let gains = aligned_gains(&playing);
+        assert_eq!(gains[1].1, 1.0);
+    }
+
+    #[test]
+    fn a_very_quiet_program_stops_at_the_level_ceiling() {
+        // 0.35 / 0.01 asks for a gain of 35. The ceiling is how far a program's
+        // own level may be raised before its noise floor comes up with it.
+        let playing = vec![
+            ("loud.exe".to_string(), level(0.5, 0.5)),
+            ("whisper.exe".to_string(), level(0.01, 0.01)),
+        ];
+        let gains = aligned_gains(&playing);
+        assert_eq!(gains[1].1, SOURCE_VOLUME_MAX as f32 / 100.0);
     }
 }
