@@ -305,7 +305,7 @@ Because it is not being routed. The level is applied by the duplication engine t
 
 ### Does the level change my application's own volume?
 
-No, and that distinction is deliberate. The level is a gain this app applies to the audio it captured from that program, on its way to the devices you routed it to; the program itself, and anything Windows stores about it, is untouched. Take a program's level down to silence and its own volume slider has not moved.
+No, and that distinction is deliberate. The level is a gain this app applies to the audio it captured from that program, on its way to the devices it was duplicated to; the program itself, and anything Windows stores about it, is untouched. Take a program's level down to silence and its own volume slider has not moved — though note that, like the device volume and the delay, it does not reach the one device Windows plays directly.
 
 ### Does it run in the background or poll the audio devices?
 
