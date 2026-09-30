@@ -47,7 +47,7 @@ AppAudioRouter/
 │       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
 │       │   ├── routing.rs      # 每应用端点：槽 25/26 写入·释放·读回（null HSTRING = 清除）+ 系统关键进程拦截 + PinnedRoutes（本进程写过的分配，停止/退出/重置时归还）
-│       │   ├── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎
+│       │   ├── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎（源静默后停放；见「引擎的唤醒成本」）
 │       │   └── notifications.rs # 变更通知线程 → audio-changed 事件（设备/会话实时刷新）
 │       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %；app-settings.json: close_to_tray）
 ├── src/                    # React 前端
@@ -242,6 +242,16 @@ AppAudioRouter/
 - 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
 
+### 引擎的唤醒成本（2.2 起，改动前必读）
+
+一条路由常驻就是一个引擎常驻，而引擎的成本**不在 CPU 百分比里**——它落在调度唤醒次数上。任务管理器把一个每 10 ms 醒一次的线程显示成几乎没有占用，风扇曲线却看得见，因为它一直进不了包 C-state。所以这个模块里每一处等待都要能说出自己是被什么唤醒的：
+
+- **事件驱动的渲染客户端只被「喂」驱动**：客户端只要处于 `Start` 状态，就每个音频周期被信号一次，**与有没有东西可播无关**。所以「永远写满缓冲、静音也用 `AUDCLNT_BUFFERFLAGS_SILENT` 写」的写法会让设备流永不空闲，每路镜像稳定约 100 次/秒，长期不变。修法是**源静默后停放**：捕获侧为每个非静音包盖时间戳（`note_audio`），某路镜像缓冲排空且源静默超过 `SOURCE_IDLE_MS`（1.5 s）就 `Stop()` 掉它的客户端（`park_mirror`），下一个包直接唤醒该线程并 `Start()` 回来。停放只会丢掉静音：`SILENT` 包从不入环，且停放那一刻设备里存的也是静音，所以两个方向都听不见。**不要退回「一直写静音」**——那正是风扇投诉的来源。
+- **唤醒必须显式，超时只能是兜底**：渲染线程用 `std::thread::park_timeout` 等，捕获侧用 `MirrorChannel::wake()`（`Thread::unpark`）唤醒；「先查条件、再停放」加上 token 语义保证了不会丢唤醒，`PARK_POLL` / `GATE_POLL` 的 250 ms 是「万一没醒」的上限而不是机制本身。**新增任何停放点都要在被唤醒那一侧接上 `wake()`**：`open_gate_when_ready`、`DuplicationManager::stop`、`capture_session` 退出前各有一处，缺一处就是让捕获线程陪着等完整个兜底超时。`Thread::unpark` 只对 `park_timeout` 有效，**对 `WaitForSingleObject` 无效**，两者不能混用。
+- **唤醒计数是仪表**：`MirrorChannel.wakeups` / `EngineShared.capture_wakeups` 只在引擎退出时汇总成一行 `info!`，没有任何音频路径读它。改循环节奏时用它对照前后，比看任务管理器可靠。
+- **空闲引擎唯一还在做的事就是存活性检查**，所以它不能每次都多开一对句柄：`process_alive` 复用已打开的句柄读创建时间（`creation_time_of`）。同理，不要为了「以后可能有用」在每个周期里加系统调用。
+- **已知且接受的取舍**：镜像停放期间设备被拔掉不会立刻报 `duplication-mirror-failed`，而是推迟到音频恢复、真正要写设备的时候。原实现也不是靠超时发现设备消失的（超时分支只 `continue`），而是靠写失败，而停放时不写。设备列表本身仍由 `audio-changed` 实时更新。
+
 ### 每应用端点分配的生命周期（2.1.1 起，改动前必读）
 
 路由期间 `routing.rs` 写下的不是一条"临时路由"，而是音频服务为**可执行文件**保存的一条 Per-app 默认端点记录：程序退出、本应用退出、乃至卸载之后它都还在，并且**优先于系统默认设备**。2.1.0 的「停止路由」是把这条记录改写成当时的默认设备再留在那儿，于是用户之后手动切默认设备对这个程序失效（现场表现就是"停止之后就切不了播放设备了"）。规则：
@@ -415,6 +425,7 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 单实例：程序已经在运行时再次启动它，只把已有窗口唤到前台，不出现第二个托盘图标，也不重复起一份复制引擎
 - [ ] 进程列表搜索：输入即时过滤，已路由的排在最前且组内顺序稳定；`Escape` 清空并失焦；无匹配时的提示与「没有进程在放音」不是同一句
 - [ ] 镜像设备失败：让一台正在镜像的设备打不开，该设备从路由徽标里消失并留一行点名它的 error 日志，其余设备继续出声
+- [ ] 功耗：路由一个程序到 2–3 台设备后让它静默，`powercfg /energy` 里本进程的唤醒数从约 100×设备数/秒降到个位数；音频恢复时无爆音，停顿后第一声的延迟与连续播放一致
 - [ ] 延迟/音量的生效提示：单设备路由时读数变淡并说明不生效；主设备的提示写明它只作基准
 - [ ] 窗口失焦或最小化后舞台上的循环动效停住（GPU 占用回落），窗口恢复后又动起来
 - [ ] Light/Dark 切换流畅
