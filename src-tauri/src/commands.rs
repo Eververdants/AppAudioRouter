@@ -10,7 +10,7 @@ use tauri::{AppHandle, State};
 use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
-use crate::config::{AppSettings, DelayConfig, RouteConfig, VolumeConfig};
+use crate::config::{AppSettings, DelayConfig, RouteConfig, SourceVolumeConfig, VolumeConfig};
 use crate::install::{StartupNotice, StartupNoticeState};
 
 /// What a stop left behind.
@@ -139,7 +139,13 @@ pub async fn apply_route(
     duplications.stop(pid);
     let generation = if device_ids.len() > 1 {
         duplications
-            .start(pid, &device_ids[0], device_ids[1..].to_vec(), &app)
+            .start(
+                pid,
+                &exe_name,
+                &device_ids[0],
+                device_ids[1..].to_vec(),
+                &app,
+            )
             .map_err(|e| e.to_string())?
     } else {
         0
@@ -478,6 +484,29 @@ pub fn set_device_volume(
 #[tauri::command]
 pub fn get_device_volumes(volumes: State<'_, Arc<VolumeConfig>>) -> Vec<(String, u32)> {
     volumes.all()
+}
+
+/// Set one program's own level (0–[`config::SOURCE_VOLUME_MAX`], where 100 is
+/// that program's audio untouched) and push it to the engines already running
+/// for it. Rejects out-of-range values rather than clamping, so the two sides
+/// cannot end up disagreeing about what was stored.
+#[tauri::command]
+pub fn set_source_volume(
+    exe_name: String,
+    percent: u32,
+    sources: State<'_, Arc<SourceVolumeConfig>>,
+    duplications: State<'_, DuplicationManager>,
+) -> Result<(), String> {
+    info!("cmd: set_source_volume exe={exe_name} level={percent}%");
+    sources.set(&exe_name, percent)?;
+    duplications.update_source_volume(&exe_name, percent);
+    Ok(())
+}
+
+/// Every stored per-program level as `(exe_name, percent)` pairs.
+#[tauri::command]
+pub fn get_source_volumes(sources: State<'_, Arc<SourceVolumeConfig>>) -> Vec<(String, u32)> {
+    sources.all()
 }
 
 fn parse_role(role: &str) -> audio::Role {

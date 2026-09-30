@@ -63,10 +63,16 @@ fn main() {
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             let volumes = std::sync::Arc::new(volumes);
             app.manage(volumes.clone());
+            let sources = config::SourceVolumeConfig::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            let sources = std::sync::Arc::new(sources);
+            app.manage(sources.clone());
             let settings = config::AppSettings::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(settings);
-            app.manage(audio::duplication::DuplicationManager::new(delays, volumes));
+            app.manage(audio::duplication::DuplicationManager::new(
+                delays, volumes, sources,
+            ));
             // Every per-app endpoint assignment this app writes is written down
             // here, so it can be taken back on stop and on quit: Windows keeps
             // the assignment after this process is gone, and a program left
@@ -124,6 +130,8 @@ fn main() {
             commands::clear_route,
             commands::set_device_volume,
             commands::get_device_volumes,
+            commands::set_source_volume,
+            commands::get_source_volumes,
             commands::get_close_to_tray,
             commands::set_close_to_tray,
             commands::get_autostart,

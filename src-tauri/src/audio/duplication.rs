@@ -74,7 +74,7 @@ use windows::Win32::System::Threading::{
 };
 
 use crate::audio::AudioError;
-use crate::config::{DelayConfig, VolumeConfig, DELAY_RANGE_MAX_MS};
+use crate::config::{DelayConfig, SourceVolumeConfig, VolumeConfig, DELAY_RANGE_MAX_MS};
 
 /// Shared-mode stream buffer, in hundreds of nanoseconds (200 ms).
 const STREAM_BUFFER_DURATION: i64 = 2_000_000;
@@ -385,6 +385,9 @@ impl MirrorChannel {
 /// Immutable state shared by one engine's threads.
 struct EngineShared {
     pid: u32,
+    /// Executable this engine duplicates. The per-program level is keyed by it
+    /// rather than by `pid`, because one program can hold several sessions.
+    exe_name: String,
     generation: u64,
     /// Process creation time as a FILETIME (u64), used to detect PID reuse.
     creation_time: u64,
@@ -403,6 +406,10 @@ struct EngineShared {
     /// towards the group's reference level (see `group_max_volume`), which is
     /// what every mirror is scaled against.
     primary_volume_percent: AtomicU32,
+    /// The program's own level as a percentage of what it produced, applied to
+    /// its audio before it reaches any device. Unlike a device's share of the
+    /// group, this may exceed 100 — see `source_gain`. Live-adjustable.
+    source_volume_percent: AtomicU32,
     /// Raw bytes of the capture format (WAVEFORMATEX, possibly extensible).
     format: Vec<u8>,
     /// How the capture format stores one sample, so volume can be applied to
@@ -489,6 +496,8 @@ pub struct DuplicationManager {
     delays: Arc<DelayConfig>,
     /// Persisted per-device volume values.
     volumes: Arc<VolumeConfig>,
+    /// Persisted per-program level values.
+    sources: Arc<SourceVolumeConfig>,
     /// Whether delay compensation is enabled (mirrors the frontend toggle).
     delay_sync: AtomicBool,
 }
@@ -496,11 +505,16 @@ pub struct DuplicationManager {
 impl DuplicationManager {
     /// Create the manager, reading initial per-device values from `delays` and
     /// `volumes`.
-    pub fn new(delays: Arc<DelayConfig>, volumes: Arc<VolumeConfig>) -> Self {
+    pub fn new(
+        delays: Arc<DelayConfig>,
+        volumes: Arc<VolumeConfig>,
+        sources: Arc<SourceVolumeConfig>,
+    ) -> Self {
         Self {
             engines: Mutex::new(HashMap::new()),
             delays,
             volumes,
+            sources,
             delay_sync: AtomicBool::new(false),
         }
     }
@@ -566,6 +580,26 @@ impl DuplicationManager {
         }
     }
 
+    /// Push a program's level to every engine running for it.
+    ///
+    /// Matched by executable name rather than by PID, the same ownership rule
+    /// the routing assignments use: one program can hold several sessions, and
+    /// its level belongs to the program.
+    pub fn update_source_volume(&self, exe_name: &str, percent: u32) {
+        for engine in self
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+        {
+            if engine.exe_name == exe_name {
+                engine
+                    .source_volume_percent
+                    .store(percent, Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Re-read every device's persisted delay. Needed after the configured
     /// range changed, which may have clamped values that live engines are still
     /// applying.
@@ -601,6 +635,7 @@ impl DuplicationManager {
     pub fn start(
         &self,
         pid: u32,
+        exe_name: &str,
         primary_device_id: &str,
         mirror_device_ids: Vec<String>,
         app: &AppHandle,
@@ -642,6 +677,7 @@ impl DuplicationManager {
         let creation_time = process_creation_time(pid).unwrap_or(0);
         let shared = Arc::new(EngineShared {
             pid,
+            exe_name: exe_name.to_string(),
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             creation_time,
             shutdown: AtomicBool::new(false),
@@ -649,6 +685,7 @@ impl DuplicationManager {
             primary_device_id: primary_device_id.to_string(),
             primary_delay_ms: AtomicI32::new(self.delays.get(primary_device_id)),
             primary_volume_percent: AtomicU32::new(self.volumes.get(primary_device_id)),
+            source_volume_percent: AtomicU32::new(self.sources.get(exe_name)),
             format,
             sample,
             block_align,
@@ -968,6 +1005,17 @@ fn group_max_volume(shared: &EngineShared) -> u32 {
 /// device, i.e. 1.0 when it is the loudest one (or the only one left).
 fn volume_gain(shared: &EngineShared, mirror: &MirrorChannel) -> f32 {
     mirror.volume_percent.load(Ordering::Relaxed) as f32 / group_max_volume(shared) as f32
+}
+
+/// Gain for the program's own audio, from its persisted level.
+///
+/// This is the only gain in this module that may exceed 1.0. A device's share of
+/// its group can only attenuate, because that device has a hardware volume above
+/// the software one that can be turned up; a program's audio has nothing above
+/// it, so raising a quiet program to the level of its neighbours means
+/// amplifying it. See `SOURCE_VOLUME_MAX` for the ceiling and why it is there.
+fn source_gain(shared: &EngineShared) -> f32 {
+    shared.source_volume_percent.load(Ordering::Relaxed) as f32 / 100.0
 }
 
 /// Frames this mirror keeps buffered between the capture tap and playback: the
@@ -1412,11 +1460,17 @@ fn pump_render(
                         .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
                 }
             } else {
-                // Per-device volume is applied here, the one place where the
-                // app's audio is in our hands: the chunk is in the capture
-                // format, which is also what this mirror's render client was
-                // initialized with, so the device gets the shape it expects.
-                apply_gain(&mut chunk, shared.sample, volume_gain(shared, mirror));
+                // Both gains are applied here, the one place where the app's
+                // audio is in our hands: the chunk is in the capture format,
+                // which is also what this mirror's render client was initialized
+                // with, so the device gets the shape it expects. The program's
+                // own level is a property of the source and the device's share
+                // is a property of where this copy is going, so they multiply.
+                apply_gain(
+                    &mut chunk,
+                    shared.sample,
+                    source_gain(shared) * volume_gain(shared, mirror),
+                );
                 let frames = (chunk.len() / shared.block_align) as u32;
                 // SAFETY: copy of exactly frames * block_align bytes into the
                 // buffer returned by GetBuffer.
@@ -1751,6 +1805,7 @@ mod tests {
     fn engine(mirror_delays: &[i32], primary_ms: i32, sync: bool) -> EngineShared {
         EngineShared {
             pid: 1,
+            exe_name: "test.exe".to_string(),
             generation: 0,
             creation_time: 0,
             shutdown: AtomicBool::new(false),
@@ -1773,6 +1828,7 @@ mod tests {
             primary_device_id: "primary".to_string(),
             primary_delay_ms: AtomicI32::new(primary_ms),
             primary_volume_percent: AtomicU32::new(100),
+            source_volume_percent: AtomicU32::new(100),
             format: Vec::new(),
             sample: SampleFormat::Unknown,
             block_align: 8,
@@ -2107,6 +2163,22 @@ mod tests {
         let before = bytes.clone();
         apply_gain(&mut bytes, SampleFormat::Float32, 1.0);
         assert_eq!(bytes, before);
+    }
+
+    #[test]
+    fn a_programs_own_level_can_amplify_it() {
+        // One mirror, both volumes neutral, so the device share is exactly 1.0
+        // and the product below is the program's level alone.
+        let eng = engine(&[0], 0, true);
+        let mirror = &eng.mirrors[0];
+        assert_eq!(source_gain(&eng) * volume_gain(&eng, mirror), 1.0);
+
+        // A program quieter than its neighbours is brought up to them, and what
+        // `apply_gain` is handed is then above unity — which is the only reason
+        // the shortcut there may not test `>=`.
+        eng.source_volume_percent.store(250, Ordering::Relaxed);
+        assert_eq!(source_gain(&eng), 2.5);
+        assert_eq!(source_gain(&eng) * volume_gain(&eng, mirror), 2.5);
     }
 
     #[test]

@@ -365,6 +365,130 @@ impl VolumeConfigInner {
     }
 }
 
+/// Ceiling for a program's own level, as a percentage of what that program
+/// produced.
+///
+/// A *device* volume may only attenuate, because a device has a hardware volume
+/// above the software one that can be turned up. A program's audio has nothing
+/// above it, so raising a quiet program to its neighbours means amplifying it —
+/// the one thing this file allows that `device-volumes.json` does not. The
+/// ceiling is what stops that being a blank cheque: past roughly +12 dB a
+/// program's noise floor comes up along with its signal.
+pub const SOURCE_VOLUME_MAX: u32 = 400;
+
+/// The level at which a program's audio is left exactly as the program produced
+/// it. Never persisted, so clearing a value round-trips back to the same neutral
+/// number the frontend assumes.
+pub const SOURCE_VOLUME_NEUTRAL: u32 = 100;
+
+/// Per-program levels, keyed by executable name.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct SourceVolumeMap {
+    #[serde(default)]
+    volumes: HashMap<String, u32>,
+}
+
+impl SourceVolumeMap {
+    /// The level for `exe_name`, neutral when nothing is stored.
+    pub fn level(&self, exe_name: &str) -> u32 {
+        self.volumes
+            .get(exe_name)
+            .copied()
+            .unwrap_or(SOURCE_VOLUME_NEUTRAL)
+    }
+
+    /// Store one program's level, or clear it when it is the neutral value.
+    pub fn store(&mut self, exe_name: &str, percent: u32) -> Result<(), String> {
+        if percent > SOURCE_VOLUME_MAX {
+            return Err(format!(
+                "source volume {percent} is out of range (0–{SOURCE_VOLUME_MAX})"
+            ));
+        }
+        if percent == SOURCE_VOLUME_NEUTRAL {
+            // Unlike a device volume, the neutral value is not the top of the
+            // range here, it is the middle of it: only equality means "as the
+            // program made it", which is why this is not the `>=` the device
+            // config uses.
+            self.volumes.remove(exe_name);
+        } else {
+            self.volumes.insert(exe_name.to_string(), percent);
+        }
+        Ok(())
+    }
+}
+
+/// Manages the per-program level file (interior mutability for Tauri State).
+///
+/// Keyed by **executable name, not PID**, for the same reason the routing
+/// assignments are: a program can hold several audio sessions under several
+/// PIDs, and the level belongs to the program.
+pub struct SourceVolumeConfig {
+    inner: Mutex<SourceVolumeConfigInner>,
+}
+
+struct SourceVolumeConfigInner {
+    path: PathBuf,
+    map: SourceVolumeMap,
+}
+
+impl SourceVolumeConfig {
+    /// Load config from the app data directory.
+    pub fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let path = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir failed: {e}"))?
+            .join("source-volumes.json");
+
+        let map = if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            SourceVolumeMap::default()
+        };
+
+        Ok(Self {
+            inner: Mutex::new(SourceVolumeConfigInner { path, map }),
+        })
+    }
+
+    /// One program's level (neutral when unset).
+    pub fn get(&self, exe_name: &str) -> u32 {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .level(exe_name)
+    }
+
+    /// Set one program's level and persist.
+    pub fn set(&self, exe_name: &str, percent: u32) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.map.store(exe_name, percent)?;
+        inner.persist()
+    }
+
+    /// All entries as `(exe_name, percent)` pairs.
+    pub fn all(&self) -> Vec<(String, u32)> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .volumes
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+}
+
+impl SourceVolumeConfigInner {
+    /// Persist to disk.
+    fn persist(&self) -> Result<(), String> {
+        persist_json(&self.path, &self.map)
+    }
+}
+
 /// Window and shell behaviour the **native** side has to know about.
 ///
 /// Theme, language and delay step are pure webview preferences and stay in
@@ -494,6 +618,47 @@ mod tests {
         let map: RouteMap = serde_json::from_str(r#"{"routes": {"a.exe": ["x", "y"]}}"#).unwrap();
         let json = serde_json::to_string(&map).unwrap();
         assert_eq!(json, r#"{"routes":{"a.exe":["x","y"]}}"#);
+    }
+
+    #[test]
+    fn a_source_level_roundtrips_above_neutral() {
+        let mut map = SourceVolumeMap::default();
+        map.store("quiet.exe", 250).unwrap();
+        let json = serde_json::to_string(&map).unwrap();
+        let back: SourceVolumeMap = serde_json::from_str(&json).unwrap();
+        // The whole point of this file: a value above 100 has to survive the
+        // round trip, because that is the only way a quiet program is brought
+        // up to its neighbours.
+        assert_eq!(back.level("quiet.exe"), 250);
+    }
+
+    #[test]
+    fn a_source_level_falls_back_to_neutral_when_unset() {
+        let map = SourceVolumeMap::default();
+        assert_eq!(map.level("never-seen.exe"), SOURCE_VOLUME_NEUTRAL);
+    }
+
+    #[test]
+    fn the_neutral_source_level_is_cleared_rather_than_stored() {
+        let mut map = SourceVolumeMap::default();
+        map.store("a.exe", 40).unwrap();
+        assert_eq!(map.level("a.exe"), 40);
+        map.store("a.exe", SOURCE_VOLUME_NEUTRAL).unwrap();
+        // Cleared, not stored as 100: a reset has to come back to the same
+        // shape as a program that was never touched.
+        assert!(map.volumes.is_empty());
+        // 100 is the middle of this range, so the rule is equality and not the
+        // `>=` the attenuation-only device config uses.
+        map.store("a.exe", 101).unwrap();
+        assert_eq!(map.level("a.exe"), 101);
+    }
+
+    #[test]
+    fn a_source_level_past_the_ceiling_is_refused() {
+        let mut map = SourceVolumeMap::default();
+        assert!(map.store("loud.exe", SOURCE_VOLUME_MAX + 1).is_err());
+        assert!(map.store("loud.exe", SOURCE_VOLUME_MAX).is_ok());
+        assert_eq!(map.level("loud.exe"), SOURCE_VOLUME_MAX);
     }
 
     #[test]
