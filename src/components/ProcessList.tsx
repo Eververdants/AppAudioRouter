@@ -87,9 +87,7 @@ export function ProcessList() {
    * so rows do not reshuffle among themselves while audio comes and goes. */
   const visibleSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = q
-      ? sessions.filter((s) => s.exe_name.toLowerCase().includes(q))
-      : sessions;
+    const filtered = q ? sessions.filter((s) => s.exe_name.toLowerCase().includes(q)) : sessions;
     return [...filtered].sort(
       (a, b) => (routedPids[b.pid]?.length ?? 0) - (routedPids[a.pid]?.length ?? 0),
     );

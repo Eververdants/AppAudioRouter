@@ -105,9 +105,7 @@ const DeviceNode = memo(function DeviceNode({
             // live, it just is not worth repainting the stage over. The running
             // values stay as `5c05a97` tuned them — slower and quieter than the
             // loop this gating was written against.
-            animate={
-              awake ? { scale: [1, 1.3], opacity: [0.4, 0] } : { scale: 1.1, opacity: 0.25 }
-            }
+            animate={awake ? { scale: [1, 1.3], opacity: [0.4, 0] } : { scale: 1.1, opacity: 0.25 }}
             transition={
               awake
                 ? { duration: 2.8, repeat: Infinity, ease: 'easeOut' }
