@@ -69,7 +69,12 @@ export function Toast() {
             aria-live="polite"
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
+            // `pointerEvents` is not animatable, so it is applied as the exit
+            // begins rather than animated: without it the card goes on taking
+            // clicks for as long as it is fading out, and the click that follows
+            // a dismissal lands on a card that is already gone from the user's
+            // point of view.
+            exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
             transition={{ opacity: FADE, y: SPRING_GLIDE }}
             onPointerEnter={() => setHeld(true)}
             onPointerLeave={() => setHeld(false)}
