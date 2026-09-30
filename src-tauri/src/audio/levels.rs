@@ -133,10 +133,12 @@ pub const ALIGN_HEADROOM: f32 = 0.7;
 /// What each program in a group needs to be as loud as the others, as
 /// `(exe_name, gain)`, where a gain of 1.0 leaves that program's audio alone.
 ///
-/// Empty when there is nothing to align: fewer than two programs are playing
-/// (one program cannot be aligned against itself), or every one of them is
-/// silent, in which case there is no ratio to take and dividing by it would
-/// produce a gain that means nothing.
+/// Empty when there is nothing to align: fewer than two programs are audible,
+/// which covers both "only one is playing" (one program cannot be aligned
+/// against itself) and "none of them measured above silence" (there is no ratio
+/// to take, and the one a silent program would produce means nothing). Each
+/// program is judged on its own reading, so one quiet program among playing ones
+/// is left out of the group rather than emptying it.
 ///
 /// Each gain is bounded twice — once by the ceiling a program's own level may
 /// reach, and once by that program's measured peak. The second bound is what

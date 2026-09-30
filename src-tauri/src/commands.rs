@@ -46,11 +46,15 @@ pub struct AlignOutcome {
     /// was playing in them to measure. Aligning against silence would be
     /// aligning against nothing.
     pub left_alone: Vec<String>,
-    /// How many routed programs had a live reading at all.
+    /// How many routed programs had a level to align with — a live reading that
+    /// was not silence.
     ///
-    /// Reported because an empty `aligned` has two different reasons behind it —
+    /// Reported because an empty `aligned` has two different reasons behind it:
     /// nothing was playing, or only one program was, and one program cannot be
-    /// aligned against itself — and the caller has to be able to say which.
+    /// aligned against itself. The caller has to be able to say which, and a
+    /// program sitting in a quiet passage is not "playing" for that purpose —
+    /// counting the live readings instead would tell a user who can hear sound
+    /// that none of their programs made any.
     pub playing: usize,
 }
 
@@ -561,8 +565,10 @@ pub fn align_source_levels(
         .filter(|(exe_name, _)| routed.contains(exe_name))
         .collect();
 
+    let gains = aligned_gains(&playing);
+    let audible = gains.len();
     let mut applied = Vec::new();
-    for (exe_name, gain) in aligned_gains(&playing) {
+    for (exe_name, gain) in gains {
         let percent = (gain * 100.0).round().clamp(0.0, SOURCE_VOLUME_MAX as f32) as u32;
         sources.set(&exe_name, percent)?;
         duplications.update_source_volume(&exe_name, percent);
@@ -578,7 +584,7 @@ pub fn align_source_levels(
     Ok(AlignOutcome {
         aligned: applied,
         left_alone,
-        playing: playing.len(),
+        playing: audible,
     })
 }
 
