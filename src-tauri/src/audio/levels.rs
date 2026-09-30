@@ -42,9 +42,17 @@ pub const LEVEL_MAX_AGE: Duration = Duration::from_millis(1_000);
 /// Written by each engine's capture thread and read by the commands and by the
 /// level alignment. Interior mutability, like the config files, because it is
 /// reached through shared state.
+///
+/// Keyed by **program and PID together**, even though a level belongs to the
+/// program. One program can hold several engines at once — several windows of a
+/// browser, each routed by hand — and each of them measures a *different* piece
+/// of audio, so a table keyed by the program alone would keep whichever engine
+/// folded last and hand an alignment a number that describes neither. The
+/// readings are folded up to the program on the way out instead (see
+/// `fresh_all`).
 #[derive(Default)]
 pub struct SourceLevels {
-    levels: Mutex<HashMap<String, SourceLevel>>,
+    levels: Mutex<HashMap<(String, u32), SourceLevel>>,
 }
 
 impl SourceLevels {
@@ -53,13 +61,14 @@ impl SourceLevels {
         Self::default()
     }
 
-    /// Record the current estimate for one program, replacing the last one.
-    pub fn record(&self, exe_name: &str, rms: f32, peak: f32) {
+    /// Record the current estimate for one engine's program, replacing whatever
+    /// that engine published last.
+    pub fn record(&self, exe_name: &str, pid: u32, rms: f32, peak: f32) {
         self.levels
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(
-                exe_name.to_string(),
+                (exe_name.to_string(), pid),
                 SourceLevel {
                     rms,
                     peak,
@@ -68,24 +77,50 @@ impl SourceLevels {
             );
     }
 
-    /// Every reading still describing something, as `(exe_name, level)` pairs
-    /// sorted by name so the order a caller sees does not shift under it.
+    /// Every program still being measured, as `(exe_name, level)` pairs sorted
+    /// by name so the order a caller sees does not shift under it.
+    ///
+    /// A program with several engines reporting collapses to its **loudest**
+    /// one, for both numbers. The level is the program's, so the loudest window
+    /// is what the program is doing; and taking the highest peak is the
+    /// conservative half of that choice, since the peak is what bounds a gain.
     ///
     /// Readings that have gone stale are dropped here rather than removed on the
     /// way in: a program that pauses and resumes is the same program, and
-    /// forgetting its number would only throw away the estimate that is about to
-    /// be refreshed anyway.
+    /// forgetting its number would throw away the estimate that is about to be
+    /// refreshed anyway.
     pub fn fresh_all(&self, max_age: Duration) -> Vec<(String, SourceLevel)> {
         let levels = self.levels.lock().unwrap_or_else(|e| e.into_inner());
-        let mut fresh: Vec<(String, SourceLevel)> = levels
-            .iter()
-            .filter(|(_, level)| level.at.elapsed() < max_age)
-            .map(|(name, level)| (name.clone(), *level))
+        let mut folded: HashMap<&str, SourceLevel> = HashMap::new();
+        for ((exe_name, _), level) in levels.iter() {
+            if level.at.elapsed() >= max_age {
+                continue;
+            }
+            folded
+                .entry(exe_name.as_str())
+                .and_modify(|kept| {
+                    kept.rms = kept.rms.max(level.rms);
+                    kept.peak = kept.peak.max(level.peak);
+                    kept.at = kept.at.max(level.at);
+                })
+                .or_insert(*level);
+        }
+        let mut fresh: Vec<(String, SourceLevel)> = folded
+            .into_iter()
+            .map(|(name, level)| (name.to_string(), level))
             .collect();
         fresh.sort_by(|a, b| a.0.cmp(&b.0));
         fresh
     }
 }
+
+/// Below this the measured level counts as silence rather than as a quiet
+/// program, about −60 dBFS.
+///
+/// A program that measured as silence has no ratio to take: the target over its
+/// level is unbounded, so it would be clamped to the ceiling and stored there —
+/// a 400 % gain waiting for the first sound the program makes.
+const SILENT_LEVEL: f32 = 1e-3;
 
 /// How far below the group's loudest program every other program is brought.
 ///
@@ -108,31 +143,32 @@ pub const ALIGN_HEADROOM: f32 = 0.7;
 /// makes amplification safe: a gain of `1 / peak` puts a program's loudest
 /// sample at full scale and can put nothing past it.
 pub fn aligned_gains(playing: &[(String, SourceLevel)]) -> Vec<(String, f32)> {
-    if playing.len() < 2 {
+    // A program that measured as silence is not part of the group: it has no
+    // level to align to, and boosting it is precisely what the ceiling would do.
+    let audible: Vec<&(String, SourceLevel)> = playing
+        .iter()
+        .filter(|(_, level)| level.rms > SILENT_LEVEL)
+        .collect();
+    if audible.len() < 2 {
         return Vec::new();
     }
-    let loudest = playing
+    let loudest = audible
         .iter()
         .map(|(_, level)| level.rms)
         .fold(0.0f32, f32::max);
     let target = loudest * ALIGN_HEADROOM;
-    if target <= 0.0 {
-        return Vec::new();
-    }
     let ceiling = SOURCE_VOLUME_MAX as f32 / 100.0;
-    playing
-        .iter()
+    audible
+        .into_iter()
         .map(|(exe_name, level)| {
-            // A program whose peak was never measured is only bounded by the
-            // ceiling: guessing a peak would either clip it or hold it back for
-            // no reason.
-            let peak_bound = if level.peak > 0.0 {
-                1.0 / level.peak
-            } else {
-                ceiling
-            };
+            // The peak bound keeps the gain under what this program was heard to
+            // reach, so the material it was measured on cannot be pushed past
+            // full scale. It says nothing about material that comes later and is
+            // louder — the gain is stored and reused — which is why the docs
+            // promise "cannot clip what was measured" rather than "cannot clip".
+            let peak_bound = 1.0 / level.peak.max(f32::MIN_POSITIVE);
             let bound = ceiling.min(peak_bound);
-            let gain = (target / level.rms.max(f32::MIN_POSITIVE)).clamp(0.0, bound);
+            let gain = (target / level.rms).clamp(0.0, bound);
             (exe_name.clone(), gain)
         })
         .collect()
@@ -153,7 +189,7 @@ mod tests {
     #[test]
     fn a_reading_is_fresh_until_it_ages_out() {
         let levels = SourceLevels::new();
-        levels.record("game.exe", 0.25, 0.5);
+        levels.record("game.exe", 42, 0.25, 0.5);
 
         let fresh = levels.fresh_all(Duration::from_secs(60));
         assert_eq!(fresh.len(), 1);
@@ -169,8 +205,8 @@ mod tests {
     #[test]
     fn recording_again_replaces_the_previous_reading() {
         let levels = SourceLevels::new();
-        levels.record("game.exe", 0.25, 0.5);
-        levels.record("game.exe", 0.1, 0.9);
+        levels.record("game.exe", 42, 0.25, 0.5);
+        levels.record("game.exe", 42, 0.1, 0.9);
 
         let fresh = levels.fresh_all(Duration::from_secs(60));
         assert_eq!(fresh.len(), 1, "one program, one reading");
@@ -179,10 +215,27 @@ mod tests {
     }
 
     #[test]
+    fn one_programs_engines_fold_to_its_loudest() {
+        // Two windows of one browser, each routed by hand and each measuring a
+        // different piece of audio. The level belongs to the program, so the
+        // table has to report what the program is doing — and keeping the
+        // highest peak is the conservative half of that, because the peak is
+        // what bounds a gain.
+        let levels = SourceLevels::new();
+        levels.record("browser.exe", 100, 0.4, 0.5);
+        levels.record("browser.exe", 200, 0.05, 0.06);
+
+        let fresh = levels.fresh_all(Duration::from_secs(60));
+        assert_eq!(fresh.len(), 1, "one program, however many engines");
+        assert_eq!(fresh[0].1.rms, 0.4);
+        assert_eq!(fresh[0].1.peak, 0.5);
+    }
+
+    #[test]
     fn readings_come_back_sorted_so_the_order_does_not_shift() {
         let levels = SourceLevels::new();
         for name in ["music.exe", "chat.exe", "game.exe"] {
-            levels.record(name, 0.2, 0.3);
+            levels.record(name, 42, 0.2, 0.3);
         }
         let names: Vec<String> = levels
             .fresh_all(Duration::from_secs(60))
@@ -196,6 +249,25 @@ mod tests {
     fn one_program_is_not_a_group() {
         let playing = vec![("solo.exe".to_string(), level(0.5, 0.5))];
         assert!(aligned_gains(&playing).is_empty());
+    }
+
+    #[test]
+    fn a_program_that_measured_as_silence_is_not_part_of_the_group() {
+        // Its ratio is unbounded, so it would land on the ceiling and be stored
+        // there: a 400 % gain waiting for the first sound the program makes.
+        let playing = vec![
+            ("loud.exe".to_string(), level(0.5, 0.5)),
+            ("muted.exe".to_string(), level(0.0, 0.0)),
+        ];
+        // One audible program cannot be aligned against itself.
+        assert!(aligned_gains(&playing).is_empty());
+
+        // And with two audible programs it is left out rather than aligned.
+        let mut with_two = playing.clone();
+        with_two.push(("quiet.exe".to_string(), level(0.25, 0.25)));
+        let gains = aligned_gains(&with_two);
+        assert_eq!(gains.len(), 2, "the muted program is not in the group");
+        assert!(gains.iter().all(|(name, _)| name != "muted.exe"));
     }
 
     #[test]

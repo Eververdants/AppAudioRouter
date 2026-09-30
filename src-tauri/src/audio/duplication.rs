@@ -273,7 +273,7 @@ impl LevelTracker {
     }
 
     /// Publish the estimate if `LEVEL_PUBLISH_MS` has passed since the last one.
-    fn publish_if_due(&mut self, levels: &SourceLevels, exe_name: &str) {
+    fn publish_if_due(&mut self, levels: &SourceLevels, exe_name: &str, pid: u32) {
         let due = self
             .published_at
             .is_none_or(|at| at.elapsed() >= Duration::from_millis(LEVEL_PUBLISH_MS));
@@ -281,7 +281,7 @@ impl LevelTracker {
             return;
         }
         self.published_at = Some(Instant::now());
-        levels.record(exe_name, self.rms(), self.peak);
+        levels.record(exe_name, pid, self.rms(), self.peak);
     }
 }
 
@@ -893,17 +893,31 @@ impl DuplicationManager {
         let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
         let mut routes: Vec<ActiveRoute> = engines
             .values()
-            .map(|engine| ActiveRoute {
-                pid: engine.pid,
-                generation: engine.generation,
-                device_ids: std::iter::once(engine.primary_device_id.clone())
-                    .chain(engine.mirrors.iter().map(|m| m.device_id.clone()))
-                    .collect(),
-                // Same order, same length: the primary heads the list and is the
-                // one entry this engine cannot answer for.
-                latency_ms: std::iter::once(None)
-                    .chain(engine.mirrors.iter().map(|m| total_latency_ms(engine, m)))
-                    .collect(),
+            .map(|engine| {
+                // Only the mirrors that are still in service. A mirror that
+                // failed to open, or that errored later, is not a route target:
+                // reporting it as one puts its badge, its success dot and its
+                // pulse ring back on the stage for a device that is producing
+                // nothing, and hides the one report the user got about it. The
+                // frontend cannot recover this on its own — the failure arrives
+                // as an event, and it is this list that would overwrite it.
+                let mirrors: Vec<&Arc<MirrorChannel>> = engine
+                    .mirrors
+                    .iter()
+                    .filter(|m| m.enabled.load(Ordering::Relaxed))
+                    .collect();
+                ActiveRoute {
+                    pid: engine.pid,
+                    generation: engine.generation,
+                    device_ids: std::iter::once(engine.primary_device_id.clone())
+                        .chain(mirrors.iter().map(|m| m.device_id.clone()))
+                        .collect(),
+                    // Same order, same length: the primary heads the list and is
+                    // the one entry this engine cannot answer for.
+                    latency_ms: std::iter::once(None)
+                        .chain(mirrors.iter().map(|m| total_latency_ms(engine, m)))
+                        .collect(),
+                }
             })
             .collect();
         routes.sort_by_key(|route| route.pid);
@@ -1311,7 +1325,7 @@ fn capture_packets_inner(
                 if let Some((mean_sq, peak)) = measure_chunk(chunk, shared.sample) {
                     let chunk_ms = frames as f32 * 1000.0 / shared.sample_rate.max(1) as f32;
                     level.fold(mean_sq, peak, chunk_ms);
-                    level.publish_if_due(&shared.levels, &shared.exe_name);
+                    level.publish_if_due(&shared.levels, &shared.exe_name, shared.pid);
                 }
                 // Timestamp first, then the push, then the wake: a mirror that
                 // runs on either of the last two must not conclude the source
@@ -1337,23 +1351,46 @@ fn render_main(shared: Arc<EngineShared>, mirror: Arc<MirrorChannel>, app: AppHa
         Err(e) => {
             fail_mirror(&shared, &mirror, &app, e);
             // A failed mirror must not hold the synchronized-start gate open.
-            shared.ready_count.fetch_add(1, Ordering::Relaxed);
+            mirror_ready(&shared, &app);
             return;
         }
     };
 
     match open_render_session(&shared, &mirror) {
         Ok(session) => {
-            shared.ready_count.fetch_add(1, Ordering::Relaxed);
+            mirror_ready(&shared, &app);
             render_run(&shared, &mirror, session, &app);
         }
         Err(e) => {
             fail_mirror(&shared, &mirror, &app, e);
-            shared.ready_count.fetch_add(1, Ordering::Relaxed);
+            mirror_ready(&shared, &app);
         }
     }
 
     crate::audio::uninit_com(com_owned);
+}
+
+/// Count one mirror as initialized and, when the last one is in, tell the
+/// frontend the engine has something to report.
+///
+/// A mirror asks its endpoint for the endpoint's own stream latency while it
+/// initializes, so until this point the reading is not missing by accident, it
+/// simply does not exist yet. `apply_route` has answered long before any of this
+/// (the render threads are spawned behind an asynchronous device activation), so
+/// without this event the frontend would read an empty reading — and keep it,
+/// because nothing else asks again until some later, unrelated action.
+fn mirror_ready(shared: &EngineShared, app: &AppHandle) {
+    let previous = shared.ready_count.fetch_add(1, Ordering::Relaxed);
+    if previous + 1 != shared.mirrors.len() {
+        return;
+    }
+    let _ = app.emit(
+        "duplication-ready",
+        json!({
+            "pid": shared.pid,
+            "generation": shared.generation,
+        }),
+    );
 }
 
 /// Take one mirror out of service and tell the frontend why.
