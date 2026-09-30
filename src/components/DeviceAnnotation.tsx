@@ -39,7 +39,19 @@ function LatencyReadout({ latencyMs, engineRole }: { latencyMs?: number; engineR
   if (latencyMs === undefined) {
     return (
       <span
-        title={t(engineRole === 'primary' ? 'deviceLatency.primary' : 'deviceLatency.inactive')}
+        // Three ways to have no number, and they are not the same thing: the
+        // device Windows plays has no stream of ours to ask, a mirror whose
+        // endpoint never reported one is a measurement that did not happen, and
+        // a device no engine path touches is simply not part of a route. Saying
+        // the last of those about a device that *is* being duplicated is the
+        // opposite of the truth.
+        title={t(
+          engineRole === 'primary'
+            ? 'deviceLatency.primary'
+            : engineRole === 'mirror'
+              ? 'deviceLatency.unmeasured'
+              : 'deviceLatency.inactive',
+        )}
         className="flex h-4 cursor-default items-center gap-px rounded-sm px-1 text-[10px] font-medium tabular-nums text-text-muted opacity-50"
       >
         <span>—</span>
