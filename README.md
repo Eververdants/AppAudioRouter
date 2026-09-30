@@ -289,6 +289,12 @@ A program only shows up while it holds an active audio session, so start playbac
 
 In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
 
+### Can the delay calibrate itself automatically?
+
+Not the part that matters, and it is worth saying exactly why. Everything this app controls is already measured and shown: for each device you can see the pipeline the engine is holding for it plus the latency that endpoint reports for its own stream, live, as you change the delay. That is the half that used to be guesswork.
+
+The other half is what a codec or a Bluetooth link adds after the audio leaves Windows, and a program cannot observe that from user mode — the only way to measure it is to play a tone out of each device and record the room with a **microphone**, then line the recordings up. This app does not ask for your microphone and does not guess at what it cannot hear, so the delay you set stays yours to place by ear. The numbers on screen are what make that quick rather than blind.
+
 ### Can it give me more channels than a virtual-cable mixer?
 
 There is no channel count to raise, because this is not a bus mixer. Each routed program gets its own engine instead of a strip on a shared bus, so the programs are independent of one another and nothing caps how many of them — or how many devices — you route at once. That also means there is no bus count to run out of, which is the limit people hit with Voicemeeter's three, five or eight buses.
