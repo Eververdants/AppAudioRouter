@@ -58,16 +58,19 @@ The same route in both themes: `Music.exe` is playing to a Bluetooth headset, an
 - **Stop on demand.** Stop routing and the program is handed back to the system default device — the fixed output device Windows took while the route was live is released again, so switching the default device by hand keeps moving that program.
 - **Nothing left behind.** The only trace of a route is an output device Windows fixes for the program while it is routed. Stopping the route, quitting the app and **Settings → Reset per-app output** each give it back, and a program that exited while routed gets its device back the next time it plays.
 - **Auto-remember.** Routing rules are stored per executable name and restored when that program plays again.
+- **A mirror that fails says so.** If one device of a multi-device route cannot be opened, the engine keeps playing on the others and the log names the device that went silent — a route that is only half alive should not look fully applied.
 
 ### Per-device fine-tuning
 
 - **Delay compensation** — a signed millisecond value per device to align a fast device with a slow one, for example wired speakers against a Bluetooth headset whose codec adds inherent latency. Range and step are configurable (±1/2/5/10 s; 1/10/50/100/1000 ms, 10 ms by default).
 - **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest one in the route, so a quiet headset and a loud speaker rig can be brought in line.
 - **Editable in place** — drag sideways, scroll, use the arrow keys (hold `Shift` for ten steps), or click a value and type an exact number. Both values sit under the device node and share one set of gestures.
+- **Applied to mirrored copies** — both values are applied by the duplication engine, so they take effect on the devices that receive a copy. A single-device route has no copy (Windows drives that device directly), so its values are dimmed with a note saying they do nothing right now; under the primary device of a multi-device route, the note says the value anchors the group rather than being applied to it.
 
 ### Stays out of the way
 
 - **Live lists.** The device list and the process list follow the audio engine on their own — plug in a headset, or start and stop playback in an app, and both lists update without pressing anything. This uses Core Audio's own change notifications, not a polling timer.
+- **One copy, one tray icon.** Launching the app again does not start a second process: the copy already running brings its window to the front instead. Two instances would fight over the same configuration files and the same audio devices.
 - **System tray.** A tray icon appears while the app runs: left click shows or hides the window, the right-click menu has *Show / hide* and *Quit*.
 - **Close to tray.** Optionally, the close button hides the window instead of quitting, so routing keeps running with no window on screen. Off by default; `Quit` is the action that stops the routes.
 - **Start with Windows.** Optionally registers the app under your user's startup entries (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), launching silently into the tray so remembered routes are ready before you open anything. Turn it back off from the same switch, or from Task Manager → Startup apps.
@@ -75,8 +78,9 @@ The same route in both themes: `Music.exe` is playing to a Bluetooth headset, an
 ### Interface and overhead
 
 - **Concentric router UI** — process at the centre, devices on an outer ring, flow lines that show what is currently routed, ripple feedback when a route is applied.
+- **Process list search** — filter the list by name as you type, with the programs that are currently routed kept at the top so the one you are working with does not move under the cursor. `Escape` clears the search.
 - **Light and dark themes**, English and Simplified Chinese, both switchable from the title bar; the preferred theme and language are applied before the first frame paints, so there is no flash on startup.
-- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged.
+- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. The decorative animation — the drifting backdrop, the orbit ring, the pulse rings and the flowing route dashes — also stops whenever the window is hidden or unfocused, so an app left running in the background is not redrawing a blurred backdrop behind your back.
 - **Fast cold start** — the window is created hidden and is revealed once the first frame is on screen (with a watchdog on the Rust side as a fallback), device enumeration waits for the first paint to be idle, and the release profile is tuned for a small, dense binary (LTO, one codegen unit, symbol stripping, `panic = "abort"`).
 
 ## How it compares to other options
@@ -127,6 +131,7 @@ Two speakers playing the same audio will not sound in sync if one of them is a B
 - **Software delay can only be added, never removed.** The earliest device of the group is therefore the reference: it is the one Windows plays directly, and every other device is held back by the difference. The relative difference you configure is reproduced exactly; the absolute value is normalised to the earliest device.
 - **The route is applied in delay order**, so the earliest device normally becomes the primary (the one Windows drives). Lowering a delay while a route is running simply shifts the whole group instead of glitching.
 - **Range and step are yours to set** in Settings → Delay compensation: ±1/2/5/10 s for the range, 1/10/50/100/1000 ms for the step (10 ms by default). Shrinking the range clamps stored values that no longer fit.
+- **A delay needs something to delay.** It is realised by the mirrored copy, so it exists only when at least one further device receives a copy. Route a program to a single device and Windows plays it directly: the value is kept for when you add a second device, and the readout is dimmed with a note saying it is not applied — rather than showing a number that looks like it is doing something.
 
 ## Volume balancing explained
 
@@ -135,6 +140,7 @@ Delay fixes *when* the audio arrives; the volume value fixes *how loud* each dev
 - **Each device holds a 0–100 % value.** 100 % leaves the device exactly at the level the application produced; lower values attenuate it. 0 % is silence.
 - **The value is relative to the loudest device in the route.** The engine scales each mirrored copy by `own / max`, so software gain only ever attenuates and the loudest device is the reference the others are brought down towards.
 - **The primary device's value is not applied to it** — Windows renders that device natively — but it still counts towards the group's reference level, so it determines how much the other devices are attenuated.
+- **Like delay, it needs a mirrored copy to act on.** In a single-device route there is no copy and nothing is attenuated; the readout is dimmed and says as much, so a value that does nothing is never displayed as though it were doing something.
 - Volumes are stored per device and pushed to any route that is already running, so a change is audible immediately.
 
 ## How it works
@@ -147,7 +153,7 @@ Delay fixes *when* the audio arrives; the volume value fixes *how loud* each dev
 | 4 | For each further device, a **WASAPI process-loopback** capture client for that PID feeds an `IAudioClient` render client on the target device. Delay is implemented as ring-buffer backlog (silence is prepended, never appended, so raising a delay never lets a burst of audio through first); volume is a per-sample gain applied before the samples are written. |
 | 5 | Sample formats are parsed from the endpoint's `WAVEFORMATEX` — float32, float64 and PCM 16/24/32 are scaled; anything unrecognised is passed through untouched rather than mangled. A gain of exactly 1.0 short-circuits, so at 100 % the path costs nothing. |
 | 6 | Routing rules, delays and volumes are persisted as JSON in the application data directory (`route-memory.json`, `device-delays.json`, `device-volumes.json`). |
-| 7 | Each duplication engine reports its end (stopped by the user, the process exited, or an error) through a `duplication-stopped` event, and routes that outlived an app restart are reconciled on boot so the badges match reality. |
+| 7 | Each duplication engine reports its end (stopped by the user, the process exited, or an error) through a `duplication-stopped` event, and routes that outlived an app restart are reconciled on boot so the badges match reality. A single device that cannot be opened is reported on its own channel instead (`duplication-mirror-failed`), because the engine carries on for the rest of the route and the UI has to say which device went quiet. |
 
 Routing rules are keyed by **executable name**, not by PID, so a remembered route survives restarts.
 
@@ -177,7 +183,7 @@ AppAudioRouter/
 │   │   ├── LogPanel.tsx          # activity log
 │   │   ├── TitleBar.tsx          # custom frameless title bar
 │   │   └── ui/                   # Switch, SegmentedControl, ScrubReadout, …
-│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useFitScale
+│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useFitScale, useDecorativeMotion
 │   ├── stores/routerStore.ts     # Zustand store
 │   ├── i18n/locales/             # en.json, zh-CN.json
 │   ├── lib/                      # invoke wrapper, delay maths, shared types
@@ -189,6 +195,8 @@ AppAudioRouter/
         ├── config.rs             # route / delay / volume / shell-settings persistence
         ├── tray.rs               # tray icon, its menu, show and hide
         ├── autostart.rs          # HKCU Run entry for start-with-Windows
+        ├── install.rs            # first-run / after-update notice, decided before the window exists
+        ├── single_instance.rs    # named mutex + event, so a second launch raises the window
         └── audio/
             ├── devices.rs        # IMMDeviceEnumerator
             ├── sessions.rs       # IAudioSessionEnumerator
@@ -263,6 +271,16 @@ In plain JSON files in the application data directory: `route-memory.json` (exec
 
 It never polls, and there is no service. The app registers for the audio engine's own change notifications and re-reads a list when Windows reports that something moved — that is how the device and process lists stay current on their own. Otherwise it talks to the audio engine only when you refresh a list, change a device value or apply a route. While a route is active, the duplication engine for that process runs; when you stop routing, the engine is torn down.
 
+The window's decorative animation is not left running either: the drifting backdrop, the orbit ring, the pulse rings and the flowing route dashes all freeze while the window is hidden or unfocused, and start again when it is back in front of you. Only motion that reports state — a selection, a route being applied — is left alone.
+
+### Can I run two copies of the app at once?
+
+No, and deliberately so. Starting the app again when it is already running brings the existing window to the front instead of starting a second process: two instances would fight over the same configuration files and the same audio devices, and a second tray icon for one routing engine is nothing but a way to lose track of which copy is doing what. A second launch during a silent start-with-Windows start raises the window too, so you are never left clicking a shortcut that appears to do nothing. (A separate Windows logon session, such as a second RDP session, gets its own instance — the audio engine is per session, so there is nothing for them to fight over.)
+
+### One device in my route is silent — how do I find out which?
+
+The log tells you. A device that could not be opened for mirrored playback drops out of the route's device count and produces an entry naming that device and the error, while the remaining devices keep playing. Nothing is retried behind your back; re-apply the route (or re-plug the device) once it is available again.
+
 ### Does the app keep routing after I close the window?
 
 By default, closing the window quits the app, and a route that needed a mirrored copy stops with it — every program the app had fixed to a device is handed back to the system default on the way out. Turn on **Settings → Background → Minimize to tray when closed** and the close button hides the window instead: routing keeps running and the tray icon brings the window back. **Quit** in the tray menu always stops everything, switch on or off.
@@ -282,6 +300,7 @@ No. The routing mechanism is built on Windows Core Audio, so the app is Windows-
 - Delay compensation can only *add* latency. The earliest device of the group is the alignment reference and cannot be pulled earlier — that is why routing is applied in delay order.
 - A mirrored copy is buffered for stability (about 100 ms of pipeline latency) so that all mirrors play the same sample at the same moment. Alignment between mirrored devices is exact; the offset to the primary device, which Windows plays natively, is inherent to capturing and re-rendering the stream.
 - Volume can only attenuate, so the loudest device in the group is the reference and cannot be pushed below the level the application produced on it.
+- Delay and volume act on mirrored copies only, so neither does anything in a single-device route; the values are kept for when you add a second device.
 - Routes for system-critical processes are refused rather than half-applied.
 - A routed program carries a **fixed output device** while its route is live, and Windows keeps that device stored per executable — even after the program exits. It is given back when the route stops, when the app quits, when the program is next seen playing after having exited while routed, or by **Settings → Reset per-app output**. A program that an earlier version left fixed keeps ignoring the system default until one of those happens (the volume mixer's own **Reset** for that app works too).
 - Releasing a fixed output device needs the program to be running, because the audio service is addressed by process; a program that is closed keeps its device until it plays again.
