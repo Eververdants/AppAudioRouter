@@ -42,9 +42,9 @@ const item = {
 };
 
 /**
- * One device node on the orbit. Memoized and subscribed only to its own delay
- * and volume, so scrubbing one device's value does not re-render the whole
- * orbit — only this node's annotation.
+ * One device node on the orbit. Memoized and subscribed only to its own delay,
+ * volume and measured latency, so scrubbing one device's value does not
+ * re-render the whole orbit — only this node's annotation.
  */
 interface DeviceNodeProps {
   device: { id: string; name: string };
@@ -79,6 +79,7 @@ const DeviceNode = memo(function DeviceNode({
   const { t } = useTranslation();
   const delay = useRouterStore((s) => s.deviceDelays[device.id]);
   const volume = useRouterStore((s) => s.deviceVolumes[device.id]);
+  const latency = useRouterStore((s) => s.deviceLatencyMs[device.id]);
 
   return (
     <motion.div
@@ -161,6 +162,7 @@ const DeviceNode = memo(function DeviceNode({
           engineRole={engineRole}
           delay={delay}
           volume={volume}
+          latency={latency}
         />
       </div>
     </motion.div>

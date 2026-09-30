@@ -29,6 +29,11 @@
     "inactive": "Not applied right now: delay compensation only runs in multi-device duplication routes; a single-device route is played by the system directly",
     "primary": "The system plays this device directly (the route's anchor); its value only shifts the alignment reference of the whole group"
   },
+  "deviceLatency": {
+    "hint": "Software-side latency only: the engine's pipeline for this device plus the endpoint's own reported stream latency. What a codec or a Bluetooth link adds on top is invisible to the app, so what you hear is later than this",
+    "inactive": "Nothing to measure: no engine is duplicating this device — a single-device route is played by the system directly",
+    "primary": "Not measurable: the system plays this device directly (the route's anchor), so there is no stream of ours to ask"
+  },
   "settings": {
     "title": "Settings",
     "back": "Back",
