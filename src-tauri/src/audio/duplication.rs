@@ -73,6 +73,7 @@ use windows::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
+use crate::audio::levels::SourceLevels;
 use crate::audio::AudioError;
 use crate::config::{DelayConfig, SourceVolumeConfig, VolumeConfig, DELAY_RANGE_MAX_MS};
 
@@ -209,6 +210,134 @@ fn write_int_le(bytes: &mut [u8], value: i32) {
     for (i, byte) in bytes.iter_mut().enumerate() {
         *byte = ((value >> (8 * i)) & 0xFF) as u8;
     }
+}
+
+/// Smoothing window for a program's level estimate.
+///
+/// Short enough to describe what is playing now rather than everything since
+/// the engine started, long enough that the estimate does not swing packet to
+/// packet.
+const LEVEL_WINDOW_MS: f32 = 300.0;
+/// Release time of the peak estimate: how long the loudest sample seen keeps
+/// its influence.
+///
+/// A gain is bounded by this peak, so it has to outlive the short peaks of
+/// ordinary program material without pinning the estimate to one loud moment
+/// for the rest of the session. Long enough to survive a transient, short
+/// enough that a program which has genuinely quietened down stops being held
+/// back by a moment from a minute ago.
+const PEAK_RELEASE_MS: f32 = 2_000.0;
+/// How often the running estimate is published. The level cannot change
+/// meaningfully faster than this, and publishing per packet would take the
+/// shared table's lock a hundred times a second per engine.
+const LEVEL_PUBLISH_MS: u64 = 100;
+
+/// The running level estimate of one program's audio.
+///
+/// Owned by that engine's capture thread, which is its only writer, and folded
+/// from the packets as they arrive. Two numbers, because an alignment needs
+/// both: a stable level to bring everything to, and a worst case that the gain
+/// it computes has to stay under.
+#[derive(Default)]
+struct LevelTracker {
+    /// Mean square of the samples, smoothed over `LEVEL_WINDOW_MS`.
+    rms_sq: f32,
+    /// Loudest sample seen, fading over `PEAK_RELEASE_MS`.
+    peak: f32,
+    /// Milliseconds folded so far, which is what sets the smoothing weight.
+    elapsed_ms: f32,
+    /// When the estimate was last published, so the shared table is written on
+    /// a schedule rather than per packet.
+    published_at: Option<Instant>,
+}
+
+impl LevelTracker {
+    /// Fold one chunk in. `mean_sq` and `peak` are fractions of full scale.
+    fn fold(&mut self, mean_sq: f32, peak: f32, chunk_ms: f32) {
+        // The first chunk seeds the average instead of fading up from silence,
+        // which would understate a program that has only just started playing.
+        let alpha = if self.elapsed_ms == 0.0 {
+            1.0
+        } else {
+            (chunk_ms / LEVEL_WINDOW_MS).clamp(0.0, 1.0)
+        };
+        self.rms_sq += (mean_sq - self.rms_sq) * alpha;
+        let decay = (1.0 - chunk_ms / PEAK_RELEASE_MS).clamp(0.0, 1.0);
+        self.peak = (self.peak * decay).max(peak);
+        self.elapsed_ms += chunk_ms;
+    }
+
+    /// The smoothed level, as a fraction of full scale.
+    fn rms(&self) -> f32 {
+        self.rms_sq.max(0.0).sqrt()
+    }
+
+    /// Publish the estimate if `LEVEL_PUBLISH_MS` has passed since the last one.
+    fn publish_if_due(&mut self, levels: &SourceLevels, exe_name: &str) {
+        let due = self
+            .published_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_millis(LEVEL_PUBLISH_MS));
+        if !due {
+            return;
+        }
+        self.published_at = Some(Instant::now());
+        levels.record(exe_name, self.rms(), self.peak);
+    }
+}
+
+/// Peak and mean square of one chunk of interleaved samples, both as fractions
+/// of full scale, or `None` for a format whose samples cannot be read.
+///
+/// A format this does not understand is left out of the estimate rather than
+/// counted as silence: reporting a program as quiet when it is merely
+/// unreadable would have an alignment amplify it.
+fn measure_chunk(bytes: &[u8], format: SampleFormat) -> Option<(f32, f32)> {
+    // (sample count, sum of squares, loudest magnitude), all in units of full
+    // scale so the three kinds of sample are folded the same way afterwards.
+    let (count, sum_sq, peak) = match format {
+        SampleFormat::Float32 => {
+            let mut sum_sq = 0.0f64;
+            let mut peak = 0.0f32;
+            for sample in bytes.as_chunks::<4>().0 {
+                let value = f32::from_le_bytes(*sample);
+                sum_sq += (value as f64) * (value as f64);
+                peak = peak.max(value.abs());
+            }
+            (bytes.len() / 4, sum_sq, peak)
+        }
+        SampleFormat::Float64 => {
+            let mut sum_sq = 0.0f64;
+            let mut peak = 0.0f32;
+            for sample in bytes.as_chunks::<8>().0 {
+                let value = f64::from_le_bytes(*sample);
+                sum_sq += value * value;
+                peak = peak.max(value.abs() as f32);
+            }
+            (bytes.len() / 8, sum_sq, peak)
+        }
+        SampleFormat::Int(width @ 2..=4) => {
+            let full_scale = match width {
+                2 => i16::MAX as f64,
+                3 => 8_388_607.0,
+                _ => i32::MAX as f64,
+            };
+            let mut sum_sq = 0.0f64;
+            let mut peak = 0.0f32;
+            let mut count = 0usize;
+            for sample in bytes.chunks_exact(width) {
+                let value = read_int_le(sample) as f64 / full_scale;
+                sum_sq += value * value;
+                peak = peak.max(value.abs() as f32);
+                count += 1;
+            }
+            (count, sum_sq, peak)
+        }
+        _ => return None,
+    };
+    if count == 0 {
+        return None;
+    }
+    Some(((sum_sq / count as f64) as f32, peak))
 }
 
 /// Scale every sample of `bytes` by `gain`, in place.
@@ -410,6 +539,10 @@ struct EngineShared {
     /// its audio before it reaches any device. Unlike a device's share of the
     /// group, this may exceed 100 — see `source_gain`. Live-adjustable.
     source_volume_percent: AtomicU32,
+    /// Shared table of what each program is measuring at. This engine publishes
+    /// its own program's level there and reads the others' from it, which is the
+    /// only way one program's level can be compared with another's.
+    levels: Arc<SourceLevels>,
     /// Raw bytes of the capture format (WAVEFORMATEX, possibly extensible).
     format: Vec<u8>,
     /// How the capture format stores one sample, so volume can be applied to
@@ -498,6 +631,8 @@ pub struct DuplicationManager {
     volumes: Arc<VolumeConfig>,
     /// Persisted per-program level values.
     sources: Arc<SourceVolumeConfig>,
+    /// Shared per-program level measurements.
+    levels: Arc<SourceLevels>,
     /// Whether delay compensation is enabled (mirrors the frontend toggle).
     delay_sync: AtomicBool,
 }
@@ -509,12 +644,14 @@ impl DuplicationManager {
         delays: Arc<DelayConfig>,
         volumes: Arc<VolumeConfig>,
         sources: Arc<SourceVolumeConfig>,
+        levels: Arc<SourceLevels>,
     ) -> Self {
         Self {
             engines: Mutex::new(HashMap::new()),
             delays,
             volumes,
             sources,
+            levels,
             delay_sync: AtomicBool::new(false),
         }
     }
@@ -686,6 +823,7 @@ impl DuplicationManager {
             primary_delay_ms: AtomicI32::new(self.delays.get(primary_device_id)),
             primary_volume_percent: AtomicU32::new(self.volumes.get(primary_device_id)),
             source_volume_percent: AtomicU32::new(self.sources.get(exe_name)),
+            levels: self.levels.clone(),
             format,
             sample,
             block_align,
@@ -1109,6 +1247,10 @@ fn capture_packets_inner(
 ) -> Result<ExitReason, AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
+    // One estimate per engine, folded from the packets as they arrive and
+    // published on a schedule. Owned here because this thread is its only
+    // writer, and kept across packets because a level is a running measurement.
+    let mut level = LevelTracker::default();
     loop {
         // SAFETY: valid event handle owned by this thread.
         let wait = unsafe { WaitForSingleObject(event, CAPTURE_WAIT_MS) };
@@ -1149,6 +1291,14 @@ fn capture_packets_inner(
                 let bytes = frames as usize * shared.block_align;
                 // SAFETY: GetBuffer guarantees `bytes` writable bytes.
                 let chunk = unsafe { std::slice::from_raw_parts(data, bytes) };
+                // Measured before the push and outside the ring, so the level
+                // describes what the program produced rather than what any one
+                // device was handed after its own gains.
+                if let Some((mean_sq, peak)) = measure_chunk(chunk, shared.sample) {
+                    let chunk_ms = frames as f32 * 1000.0 / shared.sample_rate.max(1) as f32;
+                    level.fold(mean_sq, peak, chunk_ms);
+                    level.publish_if_due(&shared.levels, &shared.exe_name);
+                }
                 // Timestamp first, then the push, then the wake: a mirror that
                 // runs on either of the last two must not conclude the source
                 // is quiet on the strength of the packet it is already holding.
@@ -1829,6 +1979,7 @@ mod tests {
             primary_delay_ms: AtomicI32::new(primary_ms),
             primary_volume_percent: AtomicU32::new(100),
             source_volume_percent: AtomicU32::new(100),
+            levels: Arc::new(SourceLevels::new()),
             format: Vec::new(),
             sample: SampleFormat::Unknown,
             block_align: 8,
@@ -2163,6 +2314,80 @@ mod tests {
         let before = bytes.clone();
         apply_gain(&mut bytes, SampleFormat::Float32, 1.0);
         assert_eq!(bytes, before);
+    }
+
+    #[test]
+    fn a_chunk_is_measured_as_a_fraction_of_full_scale() {
+        // Two float samples, 0.5 and -1.0: mean square 0.625, peak 1.0.
+        let bytes: Vec<u8> = [0.5f32, -1.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let (mean_sq, peak) = measure_chunk(&bytes, SampleFormat::Float32).unwrap();
+        assert!((mean_sq - 0.625).abs() < 1e-6, "mean square was {mean_sq}");
+        assert_eq!(peak, 1.0);
+    }
+
+    #[test]
+    fn an_integer_chunk_is_measured_against_its_own_full_scale() {
+        let bytes: Vec<u8> = [i16::MIN + 1, i16::MAX]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let (_, peak) = measure_chunk(&bytes, SampleFormat::Int(2)).unwrap();
+        // Both ends of a 16-bit sample sit at full scale, so the level of a
+        // quiet program and a loud one are comparable across formats.
+        assert!((peak - 1.0).abs() < 1e-4, "peak was {peak}");
+    }
+
+    #[test]
+    fn a_format_that_cannot_be_read_has_no_level_at_all() {
+        // Not silence: a program whose samples cannot be read has to stay out of
+        // the estimate, or an alignment would treat it as quiet and amplify it.
+        assert_eq!(measure_chunk(&[7u8; 16], SampleFormat::Unknown), None);
+    }
+
+    #[test]
+    fn the_first_chunk_seeds_the_level_instead_of_fading_up() {
+        let mut tracker = LevelTracker::default();
+        tracker.fold(0.25, 0.5, 10.0);
+        assert!(
+            (tracker.rms() - 0.5).abs() < 1e-6,
+            "level was {}",
+            tracker.rms()
+        );
+        assert_eq!(tracker.peak, 0.5);
+    }
+
+    #[test]
+    fn a_short_chunk_moves_the_level_only_a_little() {
+        let mut tracker = LevelTracker::default();
+        tracker.fold(0.0, 0.0, 10.0);
+        // A tenth of the window, so a tenth of the way to the new level.
+        tracker.fold(1.0, 1.0, LEVEL_WINDOW_MS / 10.0);
+        assert!(
+            (tracker.rms() - 0.316).abs() < 0.01,
+            "level was {}",
+            tracker.rms()
+        );
+    }
+
+    #[test]
+    fn a_loud_moment_fades_out_over_the_release_time() {
+        let mut tracker = LevelTracker::default();
+        tracker.fold(0.01, 1.0, 10.0);
+        assert_eq!(tracker.peak, 1.0);
+
+        // Delivered packet by packet, the way the capture does.
+        let chunk_ms = 10.0;
+        for _ in 0..(PEAK_RELEASE_MS / chunk_ms) as usize {
+            tracker.fold(0.01, 0.0, chunk_ms);
+        }
+        assert!(tracker.peak < 0.4, "peak was {}", tracker.peak);
+
+        // A new loud moment takes over immediately, whatever the decay has done.
+        tracker.fold(0.01, 0.9, chunk_ms);
+        assert_eq!(tracker.peak, 0.9);
     }
 
     #[test]

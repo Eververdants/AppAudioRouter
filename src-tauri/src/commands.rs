@@ -9,6 +9,7 @@ use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
+use crate::audio::levels::{SourceLevels, LEVEL_MAX_AGE};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
 use crate::config::{AppSettings, DelayConfig, RouteConfig, SourceVolumeConfig, VolumeConfig};
 use crate::install::{StartupNotice, StartupNoticeState};
@@ -507,6 +508,21 @@ pub fn set_source_volume(
 #[tauri::command]
 pub fn get_source_volumes(sources: State<'_, Arc<SourceVolumeConfig>>) -> Vec<(String, u32)> {
     sources.all()
+}
+
+/// What each routed program is measuring at right now, as
+/// `(exe_name, rms, peak)`, both levels as fractions of full scale.
+///
+/// Only programs that are still making a sound appear: a reading older than
+/// `LEVEL_MAX_AGE` means the program went quiet, and a stale level would be
+/// mistaken for a quiet program by anything aligning them.
+#[tauri::command]
+pub fn get_source_levels(levels: State<'_, Arc<SourceLevels>>) -> Vec<(String, f32, f32)> {
+    levels
+        .fresh_all(LEVEL_MAX_AGE)
+        .into_iter()
+        .map(|(exe_name, level)| (exe_name, level.rms, level.peak))
+        .collect()
 }
 
 fn parse_role(role: &str) -> audio::Role {

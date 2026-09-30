@@ -70,8 +70,13 @@ fn main() {
             let settings = config::AppSettings::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(settings);
+            // What each program's audio is measuring at. Every engine writes its
+            // own program's level here and reads the others' from it, which is
+            // what makes one program's level comparable with another's.
+            let levels = std::sync::Arc::new(audio::levels::SourceLevels::new());
+            app.manage(levels.clone());
             app.manage(audio::duplication::DuplicationManager::new(
-                delays, volumes, sources,
+                delays, volumes, sources, levels,
             ));
             // Every per-app endpoint assignment this app writes is written down
             // here, so it can be taken back on stop and on quit: Windows keeps
@@ -132,6 +137,7 @@ fn main() {
             commands::get_device_volumes,
             commands::set_source_volume,
             commands::get_source_volumes,
+            commands::get_source_levels,
             commands::get_close_to_tray,
             commands::set_close_to_tray,
             commands::get_autostart,

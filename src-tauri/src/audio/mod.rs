@@ -7,6 +7,7 @@
 
 pub mod devices;
 pub mod duplication;
+pub mod levels;
 pub mod notifications;
 pub mod routing;
 pub mod sessions;
