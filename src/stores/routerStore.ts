@@ -108,6 +108,18 @@ interface RouterState {
   dismissStartupNotice: () => Promise<void>;
   toggleCloseToTray: () => Promise<void>;
   toggleAutostart: () => Promise<void>;
+  /** Route one program to `deviceIds` and resolve with the generation of the
+   * engine the backend started for it; rejects when the backend refused. The
+   * single-PID seam the routing paths share — what a route means to the rest of
+   * the state is written by the caller, which is the only side that knows
+   * whether it is routing one program or a batch. */
+  routeOne: (
+    pid: number,
+    exeName: string,
+    deviceIds: string[],
+    /** Whether the backend also writes this route to the memory. */
+    remember: boolean,
+  ) => Promise<number>;
   applyRoute: () => Promise<void>;
   stopRoute: (pid: number) => Promise<void>;
   stopAllRoutes: () => Promise<void>;
@@ -704,6 +716,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
+  // The seam the routing paths in here share, and the only place this store
+  // reaches for `applyRoute`: one program, one backend call, and the generation
+  // of the engine it started. What that route means to the rest of the state is
+  // the caller's to write — it is the only side that knows whether it is routing
+  // one program or a whole selection.
+  routeOne: (pid, exeName, deviceIds, remember) =>
+    api.applyRoute(pid, exeName, deviceIds, remember),
+
   applyRoute: async () => {
     // A flighting request already owns the selection: a second click while the
     // first is in flight would dispatch a duplicate route against the same
@@ -742,7 +762,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // routes each PID on its own, so awaiting them in a loop simply added
       // their latencies up — a ten-process selection cost ten times one.
       const results = await Promise.allSettled(
-        targets.map((target) => api.applyRoute(target.pid, target.exeName, ordered, autoRemember)),
+        targets.map((target) => get().routeOne(target.pid, target.exeName, ordered, autoRemember)),
       );
       const applied: { pid: number; exeName: string; generation: number }[] = [];
       const errors: string[] = [];
@@ -764,7 +784,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       }
 
       // Only the processes the backend actually accepted keep a badge, an engine
-      // identity and a memory; a partial apply must not claim the rest.
+      // identity and a memory; a partial apply must not claim the rest. One
+      // `set` for the whole batch, so the stage repaints once.
       set((s) => ({
         routedPids: {
           ...s.routedPids,
