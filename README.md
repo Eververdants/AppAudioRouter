@@ -64,6 +64,7 @@ The same route in both themes: `Music.exe` is playing to a Bluetooth headset, an
 
 - **Delay compensation** — a signed millisecond value per device to align a fast device with a slow one, for example wired speakers against a Bluetooth headset whose codec adds inherent latency. Range and step are configurable (±1/2/5/10 s; 1/10/50/100/1000 ms, 10 ms by default).
 - **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest one in the route, so a quiet headset and a loud speaker rig can be brought in line.
+- **Reported latency** — the software-side latency each device is actually playing at, measured from the running stream and shown beside the values you set, so what you asked for and what you got sit in the same place.
 - **Editable in place** — drag sideways, scroll, use the arrow keys (hold `Shift` for ten steps), or click a value and type an exact number. Both values sit under the device node and share one set of gestures.
 - **Applied to mirrored copies** — both values are applied by the duplication engine, so they take effect on the devices that receive a copy. A single-device route has no copy (Windows drives that device directly), so its values are dimmed with a note saying they do nothing right now; under the primary device of a multi-device route, the note says the value anchors the group rather than being applied to it.
 
@@ -142,6 +143,14 @@ Delay fixes *when* the audio arrives; the volume value fixes *how loud* each dev
 - **The primary device's value is not applied to it** — Windows renders that device natively — but it still counts towards the group's reference level, so it determines how much the other devices are attenuated.
 - **Like delay, it needs a mirrored copy to act on.** In a single-device route there is no copy and nothing is attenuated; the readout is dimmed and says as much, so a value that does nothing is never displayed as though it were doing something.
 - Volumes are stored per device and pushed to any route that is already running, so a change is audible immediately.
+
+## What the reported latency means
+
+The delay value is what you asked for; the number beside it under a device is what that device is doing right now.
+
+- **It is measured per device, from the running stream** — the engine's own pipeline for that device (its base latency plus whatever delay compensation that device is under) plus the latency the endpoint reports for its own stream. It follows the values you set rather than restating them, so changing a delay moves the number.
+- **The device Windows plays directly does not report one.** There is no stream of ours on that device to measure, so rather than inventing a figure the app says it cannot be measured.
+- **Whatever a codec or a Bluetooth link adds is on top of this, and is not in the number.** That part is not observable from a user-mode program and is not guessed at — treat the figure as a floor for the path, not as the whole of it.
 
 ## How it works
 
