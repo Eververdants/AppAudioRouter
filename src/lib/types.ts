@@ -71,6 +71,13 @@ export interface ActiveRoute {
   pid: number;
   generation: number;
   deviceIds: string[];
+  /** The software-side latency each `deviceIds` entry is playing at right now,
+   * in milliseconds and in the same order: the engine's pipeline depth for that
+   * device plus the endpoint's own reported stream latency. `null` for the
+   * primary, which Windows plays itself — there is no stream of ours there to
+   * ask, and what a hardware codec or a Bluetooth link adds on top of any of
+   * these is invisible from user mode. */
+  latencyMs: (number | null)[];
 }
 
 export type DuplicationStopReason = 'stopped' | 'process-exited' | 'error';
