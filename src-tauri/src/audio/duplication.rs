@@ -1601,11 +1601,10 @@ fn default_mix_format() -> Result<(Vec<u8>, usize, u32), AudioError> {
     result
 }
 
-/// Process creation time as a FILETIME (u64), or None if unavailable.
-fn process_creation_time(pid: u32) -> Option<u64> {
-    // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION; the handle is closed
-    // on both exits below, so a failed query does not leak it.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()? };
+/// Creation time as a FILETIME (u64) read from an already-open process handle,
+/// or None if the query failed. The caller owns the handle and has already
+/// established that the process has not exited.
+fn creation_time_of(handle: HANDLE) -> Option<u64> {
     let mut creation = FILETIME::default();
     let mut _exit = FILETIME::default();
     let mut _kernel = FILETIME::default();
@@ -1614,14 +1613,23 @@ fn process_creation_time(pid: u32) -> Option<u64> {
     let read =
         unsafe { GetProcessTimes(handle, &mut creation, &mut _exit, &mut _kernel, &mut _user) }
             .is_ok();
-    // SAFETY: balances OpenProcess.
-    unsafe {
-        let _ = CloseHandle(handle);
-    }
     if !read {
         return None;
     }
     Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
+}
+
+/// Process creation time as a FILETIME (u64), or None if unavailable.
+fn process_creation_time(pid: u32) -> Option<u64> {
+    // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION; the handle is closed
+    // on both exits below, so a failed query does not leak it.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()? };
+    let creation = creation_time_of(handle);
+    // SAFETY: balances OpenProcess.
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    creation
 }
 
 /// Returns true while `pid` still refers to the same process that was alive at
@@ -1633,24 +1641,26 @@ fn process_alive(pid: u32, recorded_time: u64) -> bool {
         Ok(h) => {
             // SAFETY: h is a valid handle; WAIT_OBJECT_0 means terminated.
             let exited = unsafe { WaitForSingleObject(h, 0) } == WAIT_OBJECT_0;
+            let alive = if exited {
+                false
+            } else if recorded_time == 0 {
+                // No recorded creation time means there is nothing to compare
+                // against: reading 0 as a timestamp would call a live process a
+                // recycled one on the first idle poll and tear the engine down.
+                true
+            } else {
+                // A different creation time means the PID was recycled. This is
+                // read from the handle already open rather than a second
+                // OpenProcess: it is the same process object, and this runs on
+                // an idle engine's poll, where the extra handle pair would be
+                // paid for nothing.
+                creation_time_of(h).is_none_or(|current| current == recorded_time)
+            };
             // SAFETY: balances OpenProcess.
             unsafe {
                 let _ = CloseHandle(h);
             }
-            if exited {
-                return false;
-            }
-            // No recorded creation time means there is nothing to compare
-            // against: reading 0 as a timestamp would call a live process a
-            // recycled one on the first idle poll and tear the engine down.
-            if recorded_time == 0 {
-                return true;
-            }
-            // Check PID reuse: if the creation time differs, the PID was recycled.
-            match process_creation_time(pid) {
-                Some(current) => current == recorded_time,
-                None => true, // If we can't get the time, assume it's the same process.
-            }
+            alive
         }
         // The process was openable when the route was applied, so an
         // OpenProcess failure now means it is gone.
