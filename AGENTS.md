@@ -47,9 +47,10 @@ AppAudioRouter/
 │       │   ├── devices.rs      # IMMDeviceEnumerator 设备枚举
 │       │   ├── sessions.rs     # IAudioSessionEnumerator 会话枚举
 │       │   ├── routing.rs      # 每应用端点：槽 25/26 写入·释放·读回（null HSTRING = 清除）+ 系统关键进程拦截 + PinnedRoutes（本进程写过的分配，停止/退出/重置时归还）
-│       │   ├── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎（源静默后停放；见「引擎的唤醒成本」）
+│       │   ├── duplication.rs  # WASAPI 进程回环 → 多设备复制引擎（源静默后停放；见「引擎的唤醒成本」）+ 每源电平估计与增益
+│       │   ├── levels.rs       # 每源电平表：各引擎写自己的估算，对齐与诊断都从这里读（只回 1 秒内的读数）
 │       │   └── notifications.rs # 变更通知线程 → audio-changed 事件（设备/会话实时刷新）
-│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %；app-settings.json: close_to_tray）
+│       └── config.rs       # 配置持久化（route-memory.json: exe -> 设备列表；device-delays.json: 设备 -> 延迟补偿 ms + delay_range_ms 正负范围上限；device-volumes.json: 设备 -> 音量 %；source-volumes.json: exe -> 电平 %（可 >100）；app-settings.json: close_to_tray）
 ├── src/                    # React 前端
 │   ├── main.tsx
 │   ├── App.tsx
@@ -190,6 +191,13 @@ AppAudioRouter/
   **不要**再回到「按 exe 压会话音量」那套（`ISimpleAudioVolume` / `set_session_volume` / session-volumes.json 已于 2026-09-19 整体移除）。
   前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
   0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
+- **每源电平是对我们捕获到的音频做的软件增益，不是那个应用的音量**（`source-volumes.json`，**exe -> %**，0–400，100 为原样）。它与设备份额**相乘**施加在同一处（`pump_render` 里的 `apply_gain`），键按**可执行文件名**——与路由归属同一条规则：一个程序可以有好几个会话，电平属于程序。
+  - 这是本模块**唯一允许 >1.0** 的增益。设备份额只能衰减，因为设备头上还有硬件音量可拧；而一个程序的音频头上没有东西，比邻居轻就得放大它。`SOURCE_VOLUME_MAX`（约 +12 dB）是上限，再往上噪声底会一起抬起来。
+  - ⚠️ **它不是复活 2026-09-19 删掉的那套**：那是 `ISimpleAudioVolume` 改应用自己的会话音量并落盘，会改变该应用在**所有**路径上的响度；这里是引擎对自己捕获到的字节做乘法，不碰应用、不写应用状态。UI 文案必须说清这一点，否则会被当成同一个东西。也正因如此它**只对正在路由的程序有意义**（没有引擎就没有这条路径），列表只列在路由的程序。
+  - **一键对齐**（`align_source_levels`）取「正在路由且在放音」的程序，把每条抬/压到「最响那条 × `ALIGN_HEADROOM`」。每条增益**双重设界**：`SOURCE_VOLUME_MAX` 的绝对上限，以及**该程序自己的实测峰值**（`1 / peak`）——后者让「放大小声的程序」在数学上不可能削顶，所以**不需要限幅器**。多个源相加的削顶发生在 Windows 的混音里、这边看不见，headroom 只是礼让余量而非保证。
+  - **没在放音的程序原样不动**并在结果里点名：对着静音做对齐等于对着「没有」做对齐。**读不出格式的程序也不能当成安静**（`measure_chunk` 返回 `None` 而不是 0），否则会被放大。
+  - 电平表（`levels.rs`）**只回 1 秒内的读数**：进程回环只在程序真的出声时才给包，安静下来的程序会留着上一次的测量值，而过期读数会被当成「一个安静的程序」——那正是最该避免的误判。
+  - **不要**为它加轮询或实时电平表：对齐是一次性动作，结果走日志与存下来的数值。
 - 两个读数都靠 `EngineRole`（`mirror` / `primary` / `inactive`）说明**这个值此刻到底生不生效**，因为改得动不等于改了就有效：
   - `mirror` = 引擎在驱动这台设备，值直接生效；
   - `primary` = 系统直连播放，软件既加不了延迟也压不了音量，它的值只作为整组的基准，所以提示里要写明"只影响对齐参考 / 只作为响度基准"；
@@ -205,6 +213,7 @@ AppAudioRouter/
 - **单个镜像失败走自己的事件，不并进 `duplication-stopped`**：`duplication.rs` 的 `fail_mirror()` 发 `duplication-mirror-failed`（pid / generation / deviceId / error），引擎继续为其余设备播放。前端 `handleMirrorFailed` 用与引擎级事件**同一套 generation 守卫**（过期的镜像不得改动已经被替换掉的路由），再把该设备从 `routedPids[pid]` 里摘掉并写一条 error 日志点名它。
   修的是这个观感问题：以前只 `warn!` 到 release 会丢弃的 stderr，界面上整条路由看起来完整生效，但有一台设备根本没声音——和"程序坏了"没法区分。**不要把它并回 `duplication-stopped`**：那条会拆掉整个引擎，而这里其余设备还在正常出声。
 - `stop_route` 返回 `StopOutcome`（`released` / `pinned_device`）：没释放成功时前端写一条 error 日志点名那台设备，而不是报"已恢复系统默认"；设置页的「重置每应用音频输出」、以及 `refreshSessions` 发现被路由的 pid 消失后调用的 `releaseStaleRoutes()`，都归到同一套端点归还逻辑（见下面「每应用端点分配的生命周期」）
+- **源数与设备数没有人为上限**：`apply_route(device_ids)` 与进程多选都不设上限，引擎按需起。本项目**不是**总线混音器，所以没有 Voicemeeter 那类「3/5/8 条 ins/outs」的硬限制——被问到「通道数能不能再多」时，答案是这个定位，而不是一个新功能。上报类结构（`ActiveRoute` 的 `device_ids` / `latency_ms`）一律是**平行数组、等长同序**，加条目时别破坏这一点。
 - 设备列表、进程列表由 store action 管理：后端 `audio-changed` 事件驱动自动同步（见下面「后台常驻与实时刷新」），手动 Refresh 按钮保留作兜底；**没有轮询定时器**
 
 ---
@@ -435,6 +444,8 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 功耗：路由一个程序到 2–3 台设备后让它静默，`powercfg /energy` 里本进程的唤醒数从约 100×设备数/秒降到个位数；音频恢复时无爆音，停顿后第一声的延迟与连续播放一致
 - [ ] 延迟/音量的生效提示：单设备路由时读数变淡并说明不生效；主设备的提示写明它只作基准
 - [ ] 实测延迟读数：路由一个程序到 2–3 台设备，镜像设备显示软件侧延迟且**随延迟补偿变化**；主设备显示「无法测量」而不是数字；单设备路由与未路由各显示对应说明；停掉路由后读数**立刻消失**，不留旧数字
+- [ ] 每源电平：路由两个程序到同一组设备，把其中一个调到 <100 或 >100，只有它的响度变；100 时该 exe 不落盘（`source-volumes.json` 里查不到）
+- [ ] 一键对齐：两个程序同时放音，点「对齐电平」后两条响度接近且**不削顶**（含「某条本来已接近满刻度」这一例）；没在放音的程序原样不动并在日志里被点名
 - [ ] 窗口失焦或最小化后舞台上的循环动效停住（GPU 占用回落），窗口恢复后又动起来
 - [ ] Light/Dark 切换流畅
 - [ ] 同心圆动画流畅（60fps）
