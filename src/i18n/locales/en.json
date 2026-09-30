@@ -97,6 +97,11 @@
   "logPanel": {
     "title": "Logs"
   },
+  "toast": {
+    "message": "Routed {{process}}",
+    "messageMulti": "Routed {{n}} processes",
+    "undo": "Undo"
+  },
   "log": {
     "deviceRefreshed": "Device list refreshed ({{n}})",
     "deviceRefreshFailed": "Device refresh failed: {{error}}",
@@ -130,6 +135,8 @@
     "routeStoppedStillPinned": "Stopped routing {{process}}, but Windows still has it fixed to {{device}} — switching devices will not move it until you reset per-app output in the settings",
     "routeStoppedUnreleased": "Stopped routing {{process}}; the output device it was fixed to could not be released",
     "stoppedAllStillPinned": "Stopped routing, but {{n}} program(s) are still fixed to an output device ({{processes}}) — reset per-app output in the settings",
+    "routeUndone": "Undid the last route ({{n}} processes)",
+    "routeUndoFailed": "Could not undo the last route: {{error}}",
     "staleAssignmentReleased": "Released the output device {{processes}} was left fixed to by an earlier route",
     "pinnedEndpointsReset": "Released the fixed output device of {{n}} program(s)",
     "pinnedEndpointsRemaining": "Could not release {{processes}}; a program must be playing sound to be released",

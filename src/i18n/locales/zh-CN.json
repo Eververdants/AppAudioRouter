@@ -97,6 +97,11 @@
   "logPanel": {
     "title": "日志"
   },
+  "toast": {
+    "message": "已路由 {{process}}",
+    "messageMulti": "已路由 {{n}} 个进程",
+    "undo": "撤销"
+  },
   "log": {
     "deviceRefreshed": "设备列表已刷新（{{n}} 项）",
     "deviceRefreshFailed": "设备刷新失败：{{error}}",
@@ -130,6 +135,8 @@
     "routeStoppedStillPinned": "已停止 {{process}} 的路由，但 Windows 仍把它固定在 {{device}}——在设置里重置每应用音频输出之前，手动切换设备不会影响它",
     "routeStoppedUnreleased": "已停止 {{process}} 的路由，但没能清除它被固定的输出设备",
     "stoppedAllStillPinned": "已停止路由，但仍有 {{n}} 个程序被固定在输出设备上（{{processes}}）——可在设置里重置每应用音频输出",
+    "routeUndone": "已撤销上一次路由（{{n}} 个进程）",
+    "routeUndoFailed": "撤销上一次路由失败：{{error}}",
     "staleAssignmentReleased": "已清除 {{processes}} 被此前路由固定的输出设备",
     "pinnedEndpointsReset": "已清除 {{n}} 个程序的固定输出设备",
     "pinnedEndpointsRemaining": "无法清除 {{processes}}：程序需要在播放声音时才能被清除",

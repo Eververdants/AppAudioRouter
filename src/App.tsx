@@ -7,6 +7,7 @@ import { LogPanel } from '@/components/LogPanel';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
+import { Toast } from '@/components/Toast';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useDecorativeMotion } from '@/hooks/useDecorativeMotion';
 import { useRouterStore } from '@/stores/routerStore';
@@ -290,9 +291,11 @@ export default function App() {
         )}
       </div>
 
-      {/* Last child, so it covers both views: what this install is told about
-          itself once (a welcome, or the leftovers of an earlier version). */}
+      {/* Last children, so they cover both views: what this install is told
+          about itself once (a welcome, or the leftovers of an earlier version),
+          and the standing offer to undo the route that was just applied. */}
       <StartupNoticeDialog />
+      <Toast />
     </div>
   );
 }

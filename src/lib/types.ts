@@ -42,6 +42,30 @@ export interface RememberedRouteEntry {
  * device: positive holds it back, negative makes it the earliest of its group. */
 export type DeviceDelay = [deviceId: string, delayMs: number];
 
+/** One program's route as it stood before a route replaced it. */
+export interface ReplacedRoute {
+  pid: number;
+  exeName: string;
+  /** The devices it was routed to, in route order; null when it had no route,
+   * so the way back is the system default every unrouted program plays through. */
+  previous: string[] | null;
+}
+
+/**
+ * What the last route replaced, so it can be put back.
+ *
+ * A route is a single click on the hub, and it overwrites whatever the chosen
+ * programs were playing through — across several programs at once when they were
+ * multi-selected. This is the memory behind the toast that offers to undo it,
+ * one entry per program the route was accepted for.
+ */
+export interface UndoSnapshot {
+  /** When the route landed; a fresh route replaces the snapshot and its own
+   * timestamp is what restarts the offer's countdown. */
+  at: number;
+  entries: ReplacedRoute[];
+}
+
 /** A live duplication engine and its ordered route targets. */
 export interface ActiveRoute {
   pid: number;

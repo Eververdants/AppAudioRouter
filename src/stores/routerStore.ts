@@ -8,8 +8,10 @@ import type {
   LogEntry,
   MirrorFailedEvent,
   RememberedRouteEntry,
+  ReplacedRoute,
   ResetOutcome,
   StartupNotice,
+  UndoSnapshot,
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import {
@@ -76,6 +78,10 @@ interface RouterState {
    * stale duplication-stopped event from a previous engine cannot clear the
    * state of a newer one. */
   engineGenerations: Record<number, number>;
+  /** What the last route replaced, while the offer to put it back still stands.
+   * Null when there is nothing to undo (nothing routed yet, or it was used,
+   * waved away, or overtaken by a stop). */
+  undoSnapshot: UndoSnapshot | null;
 
   // actions
   /** Pull the device list from the audio engine. `viaNotification` marks a refresh
@@ -121,6 +127,13 @@ interface RouterState {
     remember: boolean,
   ) => Promise<number>;
   applyRoute: () => Promise<void>;
+  /** Put back what the last route replaced: every program it took over returns
+   * to the devices it was on, or to the system default when it was on none.
+   * Consumes the offer, so it can only be run once. */
+  undoLastRoute: () => Promise<void>;
+  /** Drop the offer without acting on it (the toast timed out, Escape was
+   * pressed, a new route replaced it, or the route was stopped by hand). */
+  dismissUndo: () => void;
   stopRoute: (pid: number) => Promise<void>;
   stopAllRoutes: () => Promise<void>;
   /** Release the fixed output device of every program no live route is using.
@@ -354,6 +367,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   logs: [],
   applying: false,
   engineGenerations: {},
+  undoSnapshot: null,
 
   refreshDevices: async (viaNotification = false) => {
     if (deviceRefreshGate.inFlight) {
@@ -757,6 +771,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const deviceNames = ordered.map((id) => get().devices.find((d) => d.id === id)?.name ?? id);
     const primary = deviceNames[0];
     const extra = ordered.length - 1;
+    // What this route is about to replace, read before anything moves: the offer
+    // to undo it is only as honest as the state it was taken from.
+    const replaced: ReplacedRoute[] = targets.map((target) => {
+      const previous = get().routedPids[target.pid];
+      return {
+        pid: target.pid,
+        exeName: target.exeName,
+        previous: previous === undefined ? null : [...previous],
+      };
+    });
     try {
       // One invoke per process, all of them in flight together: the backend
       // routes each PID on its own, so awaiting them in a loop simply added
@@ -783,6 +807,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         return;
       }
 
+      // What the offer to undo will cover: the programs this route was actually
+      // accepted for, not every process that was selected.
+      const accepted = new Set(applied.map((t) => t.pid));
       // Only the processes the backend actually accepted keep a badge, an engine
       // identity and a memory; a partial apply must not claim the rest. One
       // `set` for the whole batch, so the stage repaints once.
@@ -807,6 +834,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         engineGenerations: {
           ...s.engineGenerations,
           ...Object.fromEntries(applied.map((t) => [t.pid, t.generation])),
+        },
+        // This route is now what there is to undo, and it covers exactly the
+        // programs it was accepted for — a previous offer is dropped with it.
+        undoSnapshot: {
+          at: Date.now(),
+          entries: replaced.filter((entry) => accepted.has(entry.pid)),
         },
       }));
       const count = applied.length;
@@ -850,9 +883,56 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
+  undoLastRoute: async () => {
+    const snapshot = get().undoSnapshot;
+    if (snapshot === null) return;
+    // Consumed before the work starts: a second activation — or a route landing
+    // while this unwinds — must not undo the same thing twice. It is also what
+    // keeps the stops below from dropping the offer they are running from.
+    set({ undoSnapshot: null });
+    let failure: string | null = null;
+    for (const entry of snapshot.entries) {
+      const previous = entry.previous;
+      try {
+        if (previous === null || previous.length === 0) {
+          // Back to the system default through the same stop a manual one uses:
+          // that is the path that releases the program's fixed endpoint, and one
+          // left behind would hold it on a device the user thinks they left.
+          await get().stopRoute(entry.pid);
+          continue;
+        }
+        // `remember: false` — this puts back the state the route found. Asking
+        // for it to return on the next launch is a different thing, and not what
+        // undoing a route means.
+        const generation = await get().routeOne(entry.pid, entry.exeName, previous, false);
+        // Written here, one program at a time: an undo is a single user action
+        // rather than a fan-out, and the generation is what a later
+        // duplication-stopped event for this engine is measured against.
+        set((s) => ({
+          routedPids: { ...s.routedPids, [entry.pid]: [...previous] },
+          engineGenerations: { ...s.engineGenerations, [entry.pid]: generation },
+        }));
+      } catch (e) {
+        // One line for the whole action, not one per program.
+        failure ??= String(e);
+      }
+    }
+    if (failure === null) {
+      get().addLog(i18next.t('log.routeUndone', { n: snapshot.entries.length }), 'info');
+    } else {
+      get().addLog(i18next.t('log.routeUndoFailed', { error: failure }), 'error');
+    }
+  },
+
+  dismissUndo: () => set({ undoSnapshot: null }),
+
   stopRoute: async (pid) => {
     const session = get().sessions.find((s) => s.pid === pid);
     if (!get().routedPids[pid]) return;
+    // The offer on screen describes the route this stop is taking apart, so it
+    // is no longer the thing being offered: acting on it would undo the user's
+    // last move instead of the one they meant to take back.
+    set({ undoSnapshot: null });
     // The user just took this one off; a restore must not put it straight back.
     autoRestoreDecided.add(pid);
     // Snapshot before mutating: if the backend rejects the stop the UI must
@@ -905,6 +985,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   stopAllRoutes: async () => {
     const pids = Object.keys(get().routedPids).map(Number);
     if (pids.length === 0) return;
+    // As with a single stop: the offer describes routes the user is taking apart
+    // by hand right now, so it is not an offer any more.
+    set({ undoSnapshot: null });
     // Same rule as a single stop: none of these may be restored under the user.
     for (const pid of pids) autoRestoreDecided.add(pid);
     const names = new Map(get().sessions.map((s) => [s.pid, s.exe_name] as const));
