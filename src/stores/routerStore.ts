@@ -4,6 +4,7 @@ import type {
   AudioChangedEvent,
   AudioDevice,
   AudioSession,
+  DuplicationReadyEvent,
   DuplicationStoppedEvent,
   LogEntry,
   MirrorFailedEvent,
@@ -177,6 +178,9 @@ interface RouterState {
   setDelayStep: (stepMs: number) => void;
   toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
+  /** An engine has finished opening its mirror devices, so the latency it can
+   *  report now exists. Re-reads it; there is no other moment to. */
+  handleDuplicationReady: (event: DuplicationReadyEvent) => void;
   /** One mirror of a live route went quiet. The rest of the route keeps playing,
    * so only that device leaves the badge set — and the log says which one and why. */
   handleMirrorFailed: (event: MirrorFailedEvent) => void;
@@ -521,6 +525,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       await get().loadDefaultDevice();
     }
     if (sessions) await get().refreshSessions(true);
+    // Anything the lists just noticed can change which engines are running and
+    // therefore what their devices are playing at, and this is the refresh the
+    // latency reading would otherwise never get: it is not tied to a route
+    // action, and nothing else asks the engines again.
+    await get().reconcileActiveDuplications();
   },
 
   loadDefaultDevice: async () => {
@@ -810,10 +819,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // to undo it is only as honest as the state it was taken from.
     const replaced: ReplacedRoute[] = targets.map((target) => {
       const previous = get().routedPids[target.pid];
+      // The memory is read here too, because the apply is about to overwrite it.
+      // Putting the live route back without it would leave the memory naming the
+      // route the user took back, and the next launch would apply it again.
+      const memory = get().rememberedRoutes.find((route) => route.exeName === target.exeName);
       return {
         pid: target.pid,
         exeName: target.exeName,
         previous: previous === undefined ? null : [...previous],
+        previousMemory: memory === undefined ? null : [...memory.deviceIds],
       };
     });
     try {
@@ -873,8 +887,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // This route is now what there is to undo, and it covers exactly the
         // programs it was accepted for — a previous offer is dropped with it.
         undoSnapshot: {
-          at: Date.now(),
           entries: replaced.filter((entry) => accepted.has(entry.pid)),
+          remembered: autoRemember,
         },
       }));
       const count = applied.length;
@@ -931,6 +945,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // keeps the stops below from dropping the offer they are running from.
     set({ undoSnapshot: null });
     let failure: string | null = null;
+    let memoryDiffers = false;
     for (const entry of snapshot.entries) {
       const previous = entry.previous;
       try {
@@ -939,17 +954,37 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           // that is the path that releases the program's fixed endpoint, and one
           // left behind would hold it on a device the user thinks they left.
           await get().stopRoute(entry.pid);
+          // A stop leaves the memory alone on purpose — a stopped route stays
+          // remembered — but the apply wrote this program's memory, and leaving
+          // that write behind would apply the route the user just undid the next
+          // time the program starts. Putting the old memory back is not possible
+          // without a command to write one, so it is cleared instead: losing a
+          // route that was not in effect is the smaller loss.
+          if (snapshot.remembered) {
+            await api.clearRoute(entry.exeName);
+            memoryDiffers = true;
+          }
           continue;
         }
-        // `remember: false` — this puts back the state the route found. Asking
-        // for it to return on the next launch is a different thing, and not what
-        // undoing a route means.
-        const generation = await get().routeOne(entry.pid, entry.exeName, previous, false);
+        // Ordered by delay like every other path that starts an engine: the
+        // earliest device has to become the one Windows plays, or a delay the
+        // user set on the old primary is silently not applied at all.
+        const ordered = orderByDelay(previous, get().deviceDelays);
+        // `remember` mirrors what the apply did, because that is what puts the
+        // memory back: with it false the old device list would never be written
+        // and the memory would keep naming the route being undone.
+        const generation = await get().routeOne(
+          entry.pid,
+          entry.exeName,
+          ordered,
+          snapshot.remembered,
+        );
+        if (snapshot.remembered) memoryDiffers = true;
         // Written here, one program at a time: an undo is a single user action
         // rather than a fan-out, and the generation is what a later
         // duplication-stopped event for this engine is measured against.
         set((s) => ({
-          routedPids: { ...s.routedPids, [entry.pid]: [...previous] },
+          routedPids: { ...s.routedPids, [entry.pid]: [...ordered] },
           engineGenerations: { ...s.engineGenerations, [entry.pid]: generation },
         }));
       } catch (e) {
@@ -957,6 +992,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         failure ??= String(e);
       }
     }
+    // Re-read rather than patch the mirror by hand: the backend is the truth for
+    // what was written, and it is the state the settings list shows.
+    if (memoryDiffers) await get().loadRememberedRoutes();
     // What this put back is duplicating now, so its readings are due for the
     // same reason a freshly applied route's are.
     await get().reconcileActiveDuplications();
@@ -1232,17 +1270,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   alignSourceLevels: async () => {
     try {
-      const { aligned, leftAlone } = await api.alignSourceLevels();
+      const { aligned, leftAlone, playing } = await api.alignSourceLevels();
       // One line for the whole action, and it says both halves: what it changed
       // and what it walked past. A program that was not making a sound is not a
       // failure, but it is the reason the numbers on screen moved unevenly —
-      // and when that is all of them, the count alone would read as a no-op
-      // that explains nothing: clicking Align before anything is playing is
-      // the likeliest first move there is.
+      // and when nothing changed, the count alone would read as a no-op that
+      // explains nothing. There are two ways for nothing to change and they need
+      // different words: nothing was playing at all, or exactly one program was,
+      // and one program cannot be aligned against itself. The likeliest first
+      // move a user makes is clicking Align while listening to a single program.
       get().addLog(
         i18next.t(
           aligned.length === 0
-            ? 'log.sourceLevelsAlignedNone'
+            ? playing === 1
+              ? 'log.sourceLevelsAlignedOne'
+              : 'log.sourceLevelsAlignedNone'
             : leftAlone.length === 0
               ? 'log.sourceLevelsAligned'
               : 'log.sourceLevelsAlignedSome',
@@ -1271,6 +1313,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }),
         'info',
       );
+      // The reading is made of this number, so it has to be re-asked: it is
+      // taken from the running engines, and nothing else would tell them the
+      // value moved. Without this the figure would sit at what the device was
+      // playing at before the change, which is the one thing it exists to show.
+      await get().reconcileActiveDuplications();
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
       // keeps matching what the engine actually applies and persists.
@@ -1330,6 +1377,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       set({ delaySync: !next });
       get().addLog(i18next.t('log.delaySyncFailed', { error: String(e) }), 'error');
     }
+  },
+
+  handleDuplicationReady: () => {
+    // The engines have just answered for the first time, so their devices now
+    // have readings where they had none. Nothing else asks again — a reading is
+    // not a route action — so this is the event that makes the number appear
+    // with the route instead of waiting for an unrelated one.
+    void get().reconcileActiveDuplications();
   },
 
   handleDuplicationStopped: (event) => {

@@ -59,6 +59,16 @@ export interface AlignOutcome {
   /** Routed programs that had nothing playing to measure, so they were left
    * exactly as they were: aligning against silence aligns against nothing. */
   leftAlone: string[];
+  /** How many routed programs had a live reading at all. An empty `aligned` has
+   * two different reasons behind it — nothing playing, or only one program
+   * playing, which cannot be aligned against itself — and this says which. */
+  playing: number;
+}
+
+/** An engine has finished opening its mirror devices, so their readings exist. */
+export interface DuplicationReadyEvent {
+  pid: number;
+  generation: number;
 }
 
 /** One program's route as it stood before a route replaced it. */
@@ -68,6 +78,11 @@ export interface ReplacedRoute {
   /** The devices it was routed to, in route order; null when it had no route,
    * so the way back is the system default every unrouted program plays through. */
   previous: string[] | null;
+  /** The route this program had in the memory, or null when it had none. Kept
+   * because the apply overwrites it: an undo that put the live route back but
+   * left the memory naming the route being taken back would bring that route
+   * straight back the next time the program started. */
+  previousMemory: string[] | null;
 }
 
 /**
@@ -79,10 +94,10 @@ export interface ReplacedRoute {
  * one entry per program the route was accepted for.
  */
 export interface UndoSnapshot {
-  /** When the route landed; a fresh route replaces the snapshot and its own
-   * timestamp is what restarts the offer's countdown. */
-  at: number;
   entries: ReplacedRoute[];
+  /** Whether the route this describes was written to the memory as it was
+   * applied. That write is what an undo has to reverse along with the route. */
+  remembered: boolean;
 }
 
 /** A live duplication engine and its ordered route targets. */
