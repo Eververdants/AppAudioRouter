@@ -78,11 +78,6 @@ export interface ReplacedRoute {
   /** The devices it was routed to, in route order; null when it had no route,
    * so the way back is the system default every unrouted program plays through. */
   previous: string[] | null;
-  /** The route this program had in the memory, or null when it had none. Kept
-   * because the apply overwrites it: an undo that put the live route back but
-   * left the memory naming the route being taken back would bring that route
-   * straight back the next time the program started. */
-  previousMemory: string[] | null;
 }
 
 /**

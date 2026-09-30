@@ -819,15 +819,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // to undo it is only as honest as the state it was taken from.
     const replaced: ReplacedRoute[] = targets.map((target) => {
       const previous = get().routedPids[target.pid];
-      // The memory is read here too, because the apply is about to overwrite it.
-      // Putting the live route back without it would leave the memory naming the
-      // route the user took back, and the next launch would apply it again.
-      const memory = get().rememberedRoutes.find((route) => route.exeName === target.exeName);
       return {
         pid: target.pid,
         exeName: target.exeName,
         previous: previous === undefined ? null : [...previous],
-        previousMemory: memory === undefined ? null : [...memory.deviceIds],
       };
     });
     try {
