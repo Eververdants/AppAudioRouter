@@ -23,6 +23,10 @@
     "inactive": "当前未生效：延迟补偿只在多设备复制路由中起作用；单设备路由由系统直连播放",
     "primary": "这台设备由系统直连播放（路由的基准）；这里的数值只影响全组的对齐参考"
   },
+  "sourceLevel": {
+    "valueLabel": "本应用给 {{process}} 的声音加的电平（百分比）",
+    "hint": "本应用在把这个程序的声音送到目标设备时给它加的电平，按百分比计：100 表示原样，低于则衰减，高于则放大。左右拖动调节，滚轮/方向键每次 {{step}}%（按住 Shift 为十倍）；点击可键入精确值"
+  },
   "deviceLatency": {
     "hint": "这里只是软件侧的延迟：引擎为这台设备保持的管线，加上设备自己报告的流延迟。解码器或蓝牙链路额外增加的部分，应用看不到——真正听到的会比这个数更晚",
     "inactive": "暂无读数：没有引擎在复制这台设备——单设备路由由系统直连播放",
@@ -67,6 +71,12 @@
     "delayRangeDesc": "每台设备的延迟可在该正负范围内设置",
     "delayStep": "调节步进",
     "delayStepDesc": "点按 − / + 每次调整的幅度；数值也可直接键入",
+    "sourceLevels": "程序电平",
+    "sourceLevelsAlign": "对齐电平",
+    "sourceLevelsAlignDesc": "一次把每个正在出声的已复制程序都拉到最响的那一个的电平；没在出声的程序没有可测的东西，保持原样。",
+    "sourceLevelsAlignAction": "对齐",
+    "sourceLevelsNote": "程序电平是本应用在把这个程序的声音送到目标设备时给它加的增益，作用在我们自己捕获到的那份声音上；它不是程序自己的音量，也不改动 Windows 里保存的任何东西。100 表示程序原来怎样就怎样，高于 100 则放大。",
+    "sourceLevelsNone": "当前没有正在复制的程序。电平只在多设备复制路由中生效——只路由到一台设备时由系统直连播放。",
     "noDevices": "暂无音频设备",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
@@ -142,6 +152,7 @@
     "sourceVolumesFailed": "加载程序电平失败：{{error}}",
     "sourceLevelsAligned": "已对齐 {{n}} 个程序的电平",
     "sourceLevelsAlignedSome": "已对齐 {{n}} 个程序的电平；{{processes}} 没有在出声，保持原样",
+    "sourceLevelsAlignedNone": "没有可对齐的内容：正在复制的程序都没有在出声，各程序的电平保持原样——让其中一个放点声音再试",
     "sourceLevelsAlignFailed": "对齐程序电平失败：{{error}}",
     "routeFailed": "路由失败：{{error}}",
     "routePartiallyFailed": "已路由 {{n}} 个进程中的 {{ok}} 个，其余失败：{{error}}",

@@ -3,14 +3,24 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { DelayStepper } from '@/components/ui/DelayStepper';
+import { ScrubReadout } from '@/components/ui/ScrubReadout';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
 import { SPRING_TAP } from '@/lib/motion';
-import type { AudioDevice, RememberedRouteEntry } from '@/lib/types';
+import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
+
+/** Top of the per-program level range, matching the engine's own ceiling. */
+const SOURCE_LEVEL_MAX = 400;
+/** The level that leaves a program's audio exactly as the program produced it —
+ * the middle of this range, not the top of it. */
+const SOURCE_LEVEL_NEUTRAL = 100;
+/** One notch of the level, and the pointer travel that amounts to it. */
+const SOURCE_LEVEL_STEP = 5;
+const SOURCE_LEVEL_PX_PER_STEP = 3;
 
 const cardEnter = {
   initial: { opacity: 0, y: 10 },
@@ -67,6 +77,64 @@ function DelayRow({
       <DelayStepper deviceId={deviceId} name={name} rangeMs={rangeMs} />
     </div>
   );
+}
+
+/** One routed program's level: its executable name, and the shared scrubbable
+ * readout next to it. */
+function SourceLevelRow({ exeName }: { exeName: string }) {
+  const { t } = useTranslation();
+  const committed = useRouterStore((s) => s.sourceVolumes[exeName] ?? SOURCE_LEVEL_NEUTRAL);
+  const setSourceVolume = useRouterStore((s) => s.setSourceVolume);
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
+      <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={exeName}>
+        {exeName}
+      </span>
+      <ScrubReadout
+        value={committed}
+        min={0}
+        max={SOURCE_LEVEL_MAX}
+        step={SOURCE_LEVEL_STEP}
+        pxPerStep={SOURCE_LEVEL_PX_PER_STEP}
+        format={(value) => String(value)}
+        unit="%"
+        label={t('sourceLevel.valueLabel', { process: exeName })}
+        hint={t('sourceLevel.hint', { step: SOURCE_LEVEL_STEP })}
+        neutral={committed === SOURCE_LEVEL_NEUTRAL}
+        onCommit={(next) => void setSourceVolume(exeName, next)}
+      />
+    </div>
+  );
+}
+
+/**
+ * The executables this app is duplicating right now, one entry per program.
+ *
+ * Duplicating, not merely routed: a route to a single device is played by the
+ * system directly and starts no engine at all, so there is no gain path for a
+ * level to travel and setting one would do nothing. Listing such a program with
+ * a live readout beside it would claim otherwise, which is the same lie the
+ * device annotations refuse to tell.
+ *
+ * The level belongs to the program, not to a process — a browser is a dozen
+ * PIDs all playing the same thing — so the rows are deduplicated by executable
+ * name. A program with no route is out for the same reason as the single-device
+ * one: no engine, so no level to set.
+ *
+ * Ordered as the session list is, which is already by executable name, so the
+ * rows do not shuffle between refreshes.
+ */
+function duplicatedExecutables(
+  sessions: AudioSession[],
+  routedPids: Record<number, string[]>,
+): string[] {
+  const names: string[] = [];
+  for (const session of sessions) {
+    if ((routedPids[session.pid]?.length ?? 0) < 2) continue;
+    if (!names.includes(session.exe_name)) names.push(session.exe_name);
+  }
+  return names;
 }
 
 /**
@@ -163,10 +231,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const setDelayRange = useRouterStore((s) => s.setDelayRange);
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const setDelayStep = useRouterStore((s) => s.setDelayStep);
+  const sessions = useRouterStore((s) => s.sessions);
+  const routedPids = useRouterStore((s) => s.routedPids);
+  const alignSourceLevels = useRouterStore((s) => s.alignSourceLevels);
   const closeToTray = useRouterStore((s) => s.closeToTray);
   const toggleCloseToTray = useRouterStore((s) => s.toggleCloseToTray);
   const autostart = useRouterStore((s) => s.autostart);
   const toggleAutostart = useRouterStore((s) => s.toggleAutostart);
+  const duplicated = duplicatedExecutables(sessions, routedPids);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -444,6 +516,54 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
         </motion.div>
 
         <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.2 }}>
+          <SectionCard
+            icon={
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <line x1="4" y1="6" x2="20" y2="6" />
+                <circle cx="9" cy="6" r="2" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <circle cx="15" cy="12" r="2" />
+                <line x1="4" y1="18" x2="20" y2="18" />
+                <circle cx="7" cy="18" r="2" />
+              </svg>
+            }
+            label={t('settings.sourceLevels')}
+          >
+            {/* One click and no confirmation: evening the levels out is the
+                feature, and what it covered is reported in the log rather than
+                in a question asked before it runs. */}
+            <Row title={t('settings.sourceLevelsAlign')} desc={t('settings.sourceLevelsAlignDesc')}>
+              <button
+                type="button"
+                onClick={() => void alignSourceLevels()}
+                disabled={duplicated.length === 0}
+                className="shrink-0 rounded-full border border-glass bg-glass px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/40 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-45 disabled:hover:border-glass disabled:hover:text-text-secondary"
+              >
+                {t('settings.sourceLevelsAlignAction')}
+              </button>
+            </Row>
+            <p className="px-3 pb-1 pt-2 text-[11px] leading-relaxed text-text-muted">
+              {t('settings.sourceLevelsNote')}
+            </p>
+            {duplicated.length === 0 ? (
+              <p className="px-3 py-4 text-center text-xs text-text-muted">
+                {t('settings.sourceLevelsNone')}
+              </p>
+            ) : (
+              duplicated.map((exeName) => <SourceLevelRow key={exeName} exeName={exeName} />)
+            )}
+          </SectionCard>
+        </motion.div>
+
+        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.24 }}>
           <SectionCard
             icon={
               <svg

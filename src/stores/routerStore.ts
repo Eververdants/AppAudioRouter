@@ -1235,10 +1235,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const { aligned, leftAlone } = await api.alignSourceLevels();
       // One line for the whole action, and it says both halves: what it changed
       // and what it walked past. A program that was not making a sound is not a
-      // failure, but it is the reason the numbers on screen moved unevenly.
+      // failure, but it is the reason the numbers on screen moved unevenly —
+      // and when that is all of them, the count alone would read as a no-op
+      // that explains nothing: clicking Align before anything is playing is
+      // the likeliest first move there is.
       get().addLog(
         i18next.t(
-          leftAlone.length === 0 ? 'log.sourceLevelsAligned' : 'log.sourceLevelsAlignedSome',
+          aligned.length === 0
+            ? 'log.sourceLevelsAlignedNone'
+            : leftAlone.length === 0
+              ? 'log.sourceLevelsAligned'
+              : 'log.sourceLevelsAlignedSome',
           { n: aligned.length, processes: leftAlone.join(', ') },
         ),
         'info',
