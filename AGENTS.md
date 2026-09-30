@@ -209,6 +209,7 @@ AppAudioRouter/
   - **硬件的部分不猜**：编解码 / A2DP 缓冲在用户态不可观测，文案必须写明这是软件侧、实际听到的更晚，不能暗示它是全部声学延迟。
   - **role 与读数要交叉校验**：`deviceLatencyMs` 只在 `reconcileActiveDuplications` 里重建，而 `routedPids` 有多处会改，所以 `DeviceAnnotation` 只在 `engineRole === 'mirror'` 时才把值当数——否则停掉路由后会留下一个描述"已经不存在的流"的数字。
   - **新起引擎的路径都要跟一次 `reconcileActiveDuplications()`**（手改路由、撤销、开机恢复记忆路由），否则那台设备要等到 Core Audio 下次变动才有读数。每次操作一次，**不要**改成轮询或定时器。
+  - **声学那一半测不到，也不要假装测得到**：硬件编解码 / A2DP 缓冲在用户态不可观测，唯一的办法是用麦克风录下各设备实际发出的声音再做互相关——那会引入**录音权限**，属于新能力，**没有明确同意之前不要加**。也不存在「数字侧偏斜可自动测」这条路：每路镜像都读同一份捕获字节、管线深度由我们给定，镜像之间的数字差**就是配置的延迟本身**，是已知量而不是待测量。所以延迟补偿永远是「软件侧精确 + 声学侧靠耳朵」，**实测延迟读数**的 tooltip（`deviceLatency.hint`）与设置页的说明都要写明，别让用户以为那个数就是全部声学延迟。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - **单个镜像失败走自己的事件，不并进 `duplication-stopped`**：`duplication.rs` 的 `fail_mirror()` 发 `duplication-mirror-failed`（pid / generation / deviceId / error），引擎继续为其余设备播放。前端 `handleMirrorFailed` 用与引擎级事件**同一套 generation 守卫**（过期的镜像不得改动已经被替换掉的路由），再把该设备从 `routedPids[pid]` 里摘掉并写一条 error 日志点名它。
   修的是这个观感问题：以前只 `warn!` 到 release 会丢弃的 stderr，界面上整条路由看起来完整生效，但有一台设备根本没声音——和"程序坏了"没法区分。**不要把它并回 `duplication-stopped`**：那条会拆掉整个引擎，而这里其余设备还在正常出声。
