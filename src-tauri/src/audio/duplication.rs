@@ -280,6 +280,13 @@ struct MirrorChannel {
     /// what lets an idle engine's cost in scheduler wakeups be attributed to a
     /// route at all (see `capture_main`).
     wakeups: AtomicU64,
+    /// The endpoint's own stream latency in milliseconds, asked of the render
+    /// client once it is initialized. Zero until then, and zero if the query
+    /// fails, which the reporting side reads as "not measured" rather than as
+    /// "no latency" — a started stream is never free. This is the part of the
+    /// total that belongs to the device rather than to this engine, and it is
+    /// where a hardware codec or a Bluetooth link adds on top without saying so.
+    stream_latency_ms: AtomicU32,
     /// The render thread that owns this mirror, published for as long as it
     /// runs so the capture side can wake it out of an idle park. `None` until
     /// that thread reaches its render loop, and a wake for a thread that is not
@@ -458,6 +465,13 @@ pub struct ActiveRoute {
     pub generation: u64,
     /// Ordered route targets: primary first, then mirrors.
     pub device_ids: Vec<String>,
+    /// The software-side latency each device of `device_ids` is playing at right
+    /// now, in milliseconds and in the same order: this engine's pipeline depth
+    /// for that device plus the endpoint's own reported stream latency. `None`
+    /// for the primary, which Windows plays itself — there is no stream of ours
+    /// to ask, and a made-up number would be worse than saying so. What a
+    /// hardware codec or a Bluetooth link adds on top is invisible from here.
+    pub latency_ms: Vec<Option<u32>>,
 }
 
 /// Per-process duplication engines, managed as Tauri state.
@@ -611,6 +625,7 @@ impl DuplicationManager {
                     capacity: ring_capacity,
                     enabled: AtomicBool::new(true),
                     wakeups: AtomicU64::new(0),
+                    stream_latency_ms: AtomicU32::new(0),
                     worker: Mutex::new(None),
                 })
             })
@@ -686,6 +701,11 @@ impl DuplicationManager {
                 generation: engine.generation,
                 device_ids: std::iter::once(engine.primary_device_id.clone())
                     .chain(engine.mirrors.iter().map(|m| m.device_id.clone()))
+                    .collect(),
+                // Same order, same length: the primary heads the list and is the
+                // one entry this engine cannot answer for.
+                latency_ms: std::iter::once(None)
+                    .chain(engine.mirrors.iter().map(|m| total_latency_ms(engine, m)))
                     .collect(),
             })
             .collect();
@@ -956,6 +976,25 @@ fn target_frames(shared: &EngineShared, mirror: &MirrorChannel) -> usize {
     shared.latency_frames + offset_frames
 }
 
+/// The software-side latency `mirror` is playing at, in milliseconds: the
+/// pipeline it holds between the capture tap and the endpoint, which is the
+/// engine's base latency plus this device's delay compensation (see
+/// `target_frames`), plus what the endpoint reports as its own.
+///
+/// `None` when the endpoint never reported a latency, so a device that was
+/// never measured is not drawn with a confident-looking number. Whatever a
+/// hardware codec or a Bluetooth link adds on top of this is not observable
+/// from user mode and is deliberately not guessed at.
+fn total_latency_ms(shared: &EngineShared, mirror: &MirrorChannel) -> Option<u32> {
+    let stream_ms = mirror.stream_latency_ms.load(Ordering::Relaxed);
+    if stream_ms == 0 {
+        return None;
+    }
+    let rate = shared.sample_rate.max(1) as u64;
+    let pipeline_ms = (target_frames(shared, mirror) as u64 * 1000 / rate) as u32;
+    Some(pipeline_ms.saturating_add(stream_ms))
+}
+
 /// Open the start gate once every mirror is initialized and holds one base
 /// pipeline of pre-roll, or after the timeout (a silent app never fills it, and
 /// starting un-synced while silence plays is harmless).
@@ -1212,6 +1251,18 @@ fn open_render_session(
             .GetBufferSize()
             .map_err(|e| com_err("GetBufferSize", e))?
     } as usize;
+    // SAFETY: GetStreamLatency on an initialized client; it reports in 100 ns
+    // units how far ahead of the hardware this client's frames are queued, i.e.
+    // the endpoint's own contribution to the total.
+    match unsafe { client.GetStreamLatency() } {
+        // Not clamped upwards: a value this large would mean the endpoint is
+        // already broken, and reporting it beats reporting a plausible lie.
+        Ok(hns) => mirror.stream_latency_ms.store(
+            (hns / 10_000).clamp(0, u32::MAX as i64) as u32,
+            Ordering::Relaxed,
+        ),
+        Err(e) => warn!("GetStreamLatency failed for {}: {e}", mirror.device_id),
+    }
     Ok(RenderSession {
         client,
         render,
@@ -1681,6 +1732,7 @@ mod tests {
             volume_percent: AtomicU32::new(100),
             enabled: AtomicBool::new(true),
             wakeups: AtomicU64::new(0),
+            stream_latency_ms: AtomicU32::new(0),
             worker: Mutex::new(None),
         }
     }
@@ -1705,6 +1757,7 @@ mod tests {
                         volume_percent: AtomicU32::new(100),
                         enabled: AtomicBool::new(true),
                         wakeups: AtomicU64::new(0),
+                        stream_latency_ms: AtomicU32::new(0),
                         worker: Mutex::new(None),
                     })
                 })
@@ -1725,6 +1778,34 @@ mod tests {
             started: Instant::now(),
             last_audio_ms: AtomicU64::new(0),
         }
+    }
+
+    #[test]
+    fn the_reported_latency_is_our_pipeline_plus_the_endpoints_own() {
+        let eng = engine(&[0, 0], 0, true);
+        for mirror in &eng.mirrors {
+            mirror.stream_latency_ms.store(12, Ordering::Relaxed);
+            // 4 800 frames of base latency at 48 kHz is 100 ms, plus the 12 ms
+            // the endpoint reports for itself.
+            assert_eq!(total_latency_ms(&eng, mirror), Some(112));
+        }
+    }
+
+    #[test]
+    fn a_mirrors_delay_shows_up_in_its_reported_latency() {
+        let eng = engine(&[0, 250], 0, true);
+        let mirror = &eng.mirrors[1];
+        mirror.stream_latency_ms.store(10, Ordering::Relaxed);
+        // 100 ms base + 250 ms of compensation + the endpoint's 10 ms.
+        assert_eq!(total_latency_ms(&eng, mirror), Some(360));
+    }
+
+    #[test]
+    fn an_endpoint_that_never_reported_a_latency_has_none_to_show() {
+        // Zero is "not measured", not "free": drawing 0 ms would claim the
+        // device is playing the app's audio instantly.
+        let eng = engine(&[0], 0, true);
+        assert_eq!(total_latency_ms(&eng, &eng.mirrors[0]), None);
     }
 
     #[test]
