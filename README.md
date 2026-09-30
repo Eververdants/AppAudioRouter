@@ -92,6 +92,8 @@ The same route in both themes: `Music.exe` is playing to a Bluetooth headset, an
 | Applies to an already-running app | **Yes** | Yes | Yes | Yes |
 | Per-device delay alignment for Bluetooth | **Yes** — signed milliseconds per device | No | Manual, configured per bus | No |
 | Per-device loudness balance | **Yes** — 0–100 % per device | No | Yes, via bus gain | No |
+| Per-program level balance | **Yes** — 0–400 % per program, aligned in one click | No | Yes, but every strip is set by hand | No |
+| How many programs and devices at once | **No built-in limit** — each routed program is its own engine | — | A fixed number of buses (3/5/8 by edition) | No |
 | Remembers the route per application | **Yes**, automatically | Yes (this is the same Windows setting) | Configured in Windows, not in the mixer | Inherits the Windows per-app setting |
 | Requires a virtual audio driver | **No** | — | Yes | — |
 | Cost | **Free, MIT licensed** | Bundled with Windows | Free or pay-what-you-want | Free, MIT licensed |
@@ -151,6 +153,17 @@ The delay value is what you asked for; the number beside it under a device is wh
 - **It is measured per device, from the running stream** — the engine's own pipeline for that device (its base latency plus whatever delay compensation that device is under) plus the latency the endpoint reports for its own stream. It follows the values you set rather than restating them, so changing a delay moves the number.
 - **The device Windows plays directly does not report one.** There is no stream of ours on that device to measure, so rather than inventing a figure the app says it cannot be measured.
 - **Whatever a codec or a Bluetooth link adds is on top of this, and is not in the number.** That part is not observable from a user-mode program and is not guessed at — treat the figure as a floor for the path, not as the whole of it.
+
+## Level alignment explained
+
+Delay fixes *when* the audio arrives and the device volume fixes *how loud each device* is. Neither of them touches the other problem: one application is simply quieter than another, a game's mix against a voice chat's.
+
+- **Each program carries a 0–400 % level of its own**, applied by the engine to that program's audio on its way to the routed devices. 100 % leaves it exactly as the program produced it; below that attenuates, above it amplifies. This is not the application's own volume and never changes it — nothing outside this app sees it, and nothing about it is stored in Windows.
+- **One click aligns all of them.** Every routed program that is currently playing is brought to the loudest one's level, less a small headroom margin.
+- **Nothing can clip.** Each gain is bounded by that program's own measured peak — a gain of `1/peak` puts its loudest sample at full scale and cannot put anything past it — and by a ceiling, because past roughly +12 dB a program's noise floor comes up along with its signal. That is why none of this needs a limiter anywhere.
+- **A program that is not playing is left exactly as it was**, and the log names it. Aligning against silence would be aligning against nothing.
+- **Several programs at once still add up at the device**, and that sum happens inside the Windows mixer where this app cannot see it. The headroom margin is a courtesy rather than a guarantee: with many programs playing together, the device volume is still the control that has to move.
+- **Only routed programs have a level**, because the level is applied by the engine to the audio it has captured. A program with no engine has no such path, so it is not listed — route it first.
 
 ## How it works
 
@@ -275,6 +288,18 @@ A program only shows up while it holds an active audio session, so start playbac
 ### Where are the settings stored?
 
 In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
+
+### Can it give me more channels than a virtual-cable mixer?
+
+There is no channel count to raise, because this is not a bus mixer. Each routed program gets its own engine instead of a strip on a shared bus, so the programs are independent of one another and nothing caps how many of them — or how many devices — you route at once. That also means there is no bus count to run out of, which is the limit people hit with Voicemeeter's three, five or eight buses.
+
+### Why is a program missing from the level list?
+
+Because it is not being routed. The level is applied by the duplication engine to the audio it has already captured, so a program with no engine has no such path and nothing to set. Route it first, then set or align its level.
+
+### Does the level change my application's own volume?
+
+No, and that distinction is deliberate. The level is a gain this app applies to the audio it captured from that program, on its way to the devices you routed it to; the program itself, and anything Windows stores about it, is untouched. Take a program's level down to silence and its own volume slider has not moved.
 
 ### Does it run in the background or poll the audio devices?
 
