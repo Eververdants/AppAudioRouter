@@ -137,7 +137,6 @@ fn main() {
             commands::get_device_volumes,
             commands::set_source_volume,
             commands::get_source_volumes,
-            commands::get_source_levels,
             commands::align_source_levels,
             commands::get_close_to_tray,
             commands::set_close_to_tray,

@@ -189,14 +189,19 @@ pub async fn stop_route(
     pins: State<'_, PinnedRoutes>,
 ) -> Result<StopOutcome, String> {
     info!("cmd: stop_route pid={pid}");
-    // Resolve the fallback endpoint before tearing down duplication: if the
+    // The engine comes down first, before the lookup below can hold this command
+    // for a round trip. The frontend has already cleared the badge optimistically
+    // and anything that reconciles against the live engines in that window would
+    // read the engine this stop is removing and put the badge back — and the
+    // `stopped` event that follows is ignored on purpose as redundant.
+    duplications.stop(pid);
+    // Resolve the fallback endpoint before releasing the assignment: if the
     // assignment cannot be released, the program is pointed here so it keeps
     // playing where the user can hear it.
     let default_device = tokio::task::spawn_blocking(audio::devices::get_default_render_device)
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
-    duplications.stop(pid);
 
     match audio::routing::release_process_default_devices(vec![pid], audio::Role::All).await {
         Ok(outcomes) if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) => {
@@ -522,21 +527,6 @@ pub fn set_source_volume(
 #[tauri::command]
 pub fn get_source_volumes(sources: State<'_, Arc<SourceVolumeConfig>>) -> Vec<(String, u32)> {
     sources.all()
-}
-
-/// What each routed program is measuring at right now, as
-/// `(exe_name, rms, peak)`, both levels as fractions of full scale.
-///
-/// Only programs that are still making a sound appear: a reading older than
-/// `LEVEL_MAX_AGE` means the program went quiet, and a stale level would be
-/// mistaken for a quiet program by anything aligning them.
-#[tauri::command]
-pub fn get_source_levels(levels: State<'_, Arc<SourceLevels>>) -> Vec<(String, f32, f32)> {
-    levels
-        .fresh_all(LEVEL_MAX_AGE)
-        .into_iter()
-        .map(|(exe_name, level)| (exe_name, level.rms, level.peak))
-        .collect()
 }
 
 /// Bring every routed program that is playing up to the level of the loudest
