@@ -47,6 +47,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::thread::Thread;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
@@ -95,6 +96,16 @@ const TRIM_SLACK_MS: usize = 20;
 const PRE_ROLL_TIMEOUT: Duration = Duration::from_secs(4);
 /// Render-thread poll interval while waiting for the start gate.
 const GO_POLL: Duration = Duration::from_millis(2);
+/// How long a source must have produced nothing before its mirrors stop
+/// playing and let the device idle. Well clear of the pipeline's own jitter (a
+/// few periods, against a `TRIM_SLACK_MS` of slack) so a pause between two
+/// packets never reads as silence.
+const SOURCE_IDLE_MS: u64 = 1_500;
+/// Backstop interval for a mirror parked on a quiet source. A packet wakes the
+/// mirror directly (see `MirrorChannel::wake`); this only bounds how long a
+/// wakeup that never arrives can hold audio back, so it is short enough that a
+/// missed one is heard as a stutter rather than as a gap.
+const PARK_POLL: Duration = Duration::from_millis(250);
 
 /// Generations handed out to engines so a stale thread can never unregister a
 /// newer engine that replaced it for the same PID.
@@ -267,6 +278,12 @@ struct MirrorChannel {
     /// what lets an idle engine's cost in scheduler wakeups be attributed to a
     /// route at all (see `capture_main`).
     wakeups: AtomicU64,
+    /// The render thread that owns this mirror, published for as long as it
+    /// runs so the capture side can wake it out of an idle park. `None` until
+    /// that thread reaches its render loop, and a wake for a thread that is not
+    /// parked is what `Thread::unpark` already handles: it leaves a token that
+    /// the next park consumes instead of blocking.
+    worker: Mutex<Option<Thread>>,
 }
 
 impl MirrorChannel {
@@ -319,6 +336,20 @@ impl MirrorChannel {
         if excess > 0 {
             let aligned = excess - excess % block_align;
             ring.drain(..aligned);
+        }
+    }
+
+    /// Wake the render thread owning this mirror if it is parked waiting for
+    /// its source to come back. Cheap and safe to call unconditionally, which
+    /// is what the capture side does with every packet it pushes.
+    fn wake(&self) {
+        if let Some(thread) = self
+            .worker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            thread.unpark();
         }
     }
 
@@ -379,9 +410,40 @@ struct EngineShared {
     /// How many times the capture loop has woken up. Diagnostic, as the mirror
     /// counterpart is.
     capture_wakeups: AtomicU64,
-    /// When the engine was created. Origin for the wake summary below and, once
-    /// a mirror parks, for how long the source has been quiet.
+    /// When the engine was created. Origin for the wake summary below and for
+    /// how long the source has been quiet.
     started: Instant,
+    /// Milliseconds since `started` at which the source last delivered a
+    /// non-silent packet. Starts at zero, so an app that is already silent when
+    /// its route is applied goes idle on the same schedule as one that falls
+    /// silent later.
+    last_audio_ms: AtomicU64,
+}
+
+/// Record that the source just produced audio. Called by the capture thread,
+/// before it wakes the mirrors, so a mirror woken by the same packet never
+/// observes the source as still quiet.
+fn note_audio(shared: &EngineShared) {
+    shared.last_audio_ms.store(
+        shared.started.elapsed().as_millis() as u64,
+        Ordering::Relaxed,
+    );
+}
+
+/// Whether the source has produced nothing for long enough that its mirrors may
+/// stop playing.
+fn source_quiet(shared: &EngineShared) -> bool {
+    should_park(
+        shared.started.elapsed().as_millis() as u64,
+        shared.last_audio_ms.load(Ordering::Relaxed),
+    )
+}
+
+/// Whether `now_ms - last_audio_ms` has reached the idle threshold. `last` is
+/// zero before the first packet, which is what makes an engine that has never
+/// heard anything go idle too.
+fn should_park(now_ms: u64, last_audio_ms: u64) -> bool {
+    now_ms.saturating_sub(last_audio_ms) >= SOURCE_IDLE_MS
 }
 
 /// A live duplication engine and the device list it is currently serving.
@@ -547,6 +609,7 @@ impl DuplicationManager {
                     capacity: ring_capacity,
                     enabled: AtomicBool::new(true),
                     wakeups: AtomicU64::new(0),
+                    worker: Mutex::new(None),
                 })
             })
             .collect();
@@ -572,6 +635,7 @@ impl DuplicationManager {
             ready_count: AtomicUsize::new(0),
             capture_wakeups: AtomicU64::new(0),
             started: Instant::now(),
+            last_audio_ms: AtomicU64::new(0),
         });
         self.engines
             .lock()
@@ -594,13 +658,19 @@ impl DuplicationManager {
 
     /// Signal the engine for `pid` to stop. Threads clean up asynchronously.
     pub fn stop(&self, pid: u32) {
-        if let Some(shared) = self
+        let engine = self
             .engines
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(&pid)
-        {
+            .remove(&pid);
+        if let Some(shared) = engine {
             shared.shutdown.store(true, Ordering::Relaxed);
+            // A mirror parked on a quiet source waits on its own thread rather
+            // than on the device, so it has to be woken or the capture thread
+            // cannot join it until the park's backstop expires.
+            for mirror in &shared.mirrors {
+                mirror.wake();
+            }
         }
     }
 
@@ -795,6 +865,12 @@ fn capture_session(
     // would wait forever on threads that are happily playing silence, leaking the
     // engine, its threads and the mirror devices they hold open.
     shared.shutdown.store(true, Ordering::Relaxed);
+    // Wake the render threads for the same reason the registry does when a
+    // route is stopped: one of them may be parked on a quiet source, waiting on
+    // its own thread, and this thread is about to join it.
+    for mirror in &shared.mirrors {
+        mirror.wake();
+    }
     // SAFETY: Stop on a started client; errors during shutdown are ignored.
     unsafe {
         let _ = client.Stop();
@@ -970,8 +1046,13 @@ fn capture_packets_inner(
                 let bytes = frames as usize * shared.block_align;
                 // SAFETY: GetBuffer guarantees `bytes` writable bytes.
                 let chunk = unsafe { std::slice::from_raw_parts(data, bytes) };
+                // Timestamp first, then the push, then the wake: a mirror that
+                // runs on either of the last two must not conclude the source
+                // is quiet on the strength of the packet it is already holding.
+                note_audio(shared);
                 for mirror in &shared.mirrors {
                     mirror.push(chunk, shared.block_align);
+                    mirror.wake();
                 }
             }
             // SAFETY: balances GetBuffer with the number of frames read.
@@ -1187,12 +1268,28 @@ fn pump_render(
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
+    // Publish this thread so a packet can pull it out of the park below. A wake
+    // arriving before this point leaves a token that the first park consumes
+    // instead of blocking, and every park re-checks its condition afterwards,
+    // so no wakeup is lost.
+    *mirror.worker.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current());
     loop {
         // SAFETY: valid event handle owned by this thread.
         let wait = unsafe { WaitForSingleObject(session.event, RENDER_WAIT_MS) };
         mirror.wakeups.fetch_add(1, Ordering::Relaxed);
         if shared.shutdown.load(Ordering::Relaxed) {
             return Ok(());
+        }
+        // Nothing buffered and nothing arriving: stop feeding the device, which
+        // is the only way to stop it signalling this thread every period. The
+        // pipeline is empty, so the device is playing the silence that was
+        // written into it, and stopping is silent too.
+        if mirror.buffered_bytes() == 0 && source_quiet(shared) {
+            park_mirror(shared, mirror, session)?;
+            if shared.shutdown.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            continue;
         }
         if wait == WAIT_TIMEOUT {
             continue;
@@ -1265,6 +1362,55 @@ fn pump_render(
             }
         }
     }
+}
+
+/// Stop a mirror's render client and wait for its source to come back.
+///
+/// An event-driven render client is signalled once per device period for as
+/// long as it is started, whether or not it has anything to play. Writing
+/// silence at it forever therefore keeps the endpoint busy and this thread
+/// waking about a hundred times a second per mirror, which is what a routed app
+/// that is not currently making a sound used to cost. `Stop` takes the client
+/// out of the engine's mix, and no further events arrive until it is started
+/// again.
+///
+/// This only ever drops silence. The caller parks once the pipeline is empty
+/// and the source has been quiet for `SOURCE_IDLE_MS`, and a Silent packet is
+/// never pushed into a ring to begin with, so nothing audible is discarded; the
+/// silence the endpoint still holds makes the stop inaudible as well, and the
+/// restart resumes from silence rather than from a click.
+fn park_mirror(
+    shared: &EngineShared,
+    mirror: &MirrorChannel,
+    session: &RenderSession,
+) -> Result<(), AudioError> {
+    // SAFETY: Stop on a started client; errors here are not actionable, the
+    // park still holds and the next Start reports the real failure.
+    unsafe {
+        let _ = session.client.Stop();
+    }
+    loop {
+        // The park is armed before the condition is re-checked, so a packet
+        // landing between the caller's check and this call still leaves a token
+        // that returns immediately. The timeout is a backstop for a wakeup that
+        // never arrives, not the mechanism that ends the wait.
+        std::thread::park_timeout(PARK_POLL);
+        if shared.shutdown.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        if mirror.buffered_bytes() > 0 || !source_quiet(shared) {
+            break;
+        }
+    }
+    // Rebuilding the pipeline depth is left to the next pass of the caller's
+    // loop, which settles the backlog before handing anything to the device.
+    // SAFETY: Start on a stopped client.
+    if let Err(e) = unsafe { session.client.Start() } {
+        return Err(AudioError::Api(format!(
+            "Start(render) after idle failed: {e}"
+        )));
+    }
+    Ok(())
 }
 
 /// Activate an `IAudioClient` that captures everything `pid` plays.
@@ -1512,6 +1658,7 @@ mod tests {
             volume_percent: AtomicU32::new(100),
             enabled: AtomicBool::new(true),
             wakeups: AtomicU64::new(0),
+            worker: Mutex::new(None),
         }
     }
 
@@ -1535,6 +1682,7 @@ mod tests {
                         volume_percent: AtomicU32::new(100),
                         enabled: AtomicBool::new(true),
                         wakeups: AtomicU64::new(0),
+                        worker: Mutex::new(None),
                     })
                 })
                 .collect(),
@@ -1552,7 +1700,30 @@ mod tests {
             ready_count: AtomicUsize::new(0),
             capture_wakeups: AtomicU64::new(0),
             started: Instant::now(),
+            last_audio_ms: AtomicU64::new(0),
         }
+    }
+
+    #[test]
+    fn a_source_that_has_never_played_goes_idle_on_schedule() {
+        // `last_audio_ms` starts at zero, so an engine whose app is silent from
+        // the moment its route is applied parks on the same schedule as one
+        // that fell silent later.
+        assert!(!should_park(SOURCE_IDLE_MS - 1, 0));
+        assert!(should_park(SOURCE_IDLE_MS, 0));
+    }
+
+    #[test]
+    fn a_recent_packet_keeps_the_mirrors_playing() {
+        assert!(!should_park(10_000, 10_000 - SOURCE_IDLE_MS + 1));
+        assert!(should_park(10_000, 10_000 - SOURCE_IDLE_MS));
+    }
+
+    #[test]
+    fn a_timestamp_ahead_of_now_does_not_read_as_silence() {
+        // Saturating subtraction, not wrapping: a stale read must not look like
+        // the longest possible silence.
+        assert!(!should_park(5, 10));
     }
 
     #[test]
