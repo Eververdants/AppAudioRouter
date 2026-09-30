@@ -213,13 +213,21 @@ fn write_int_le(bytes: &mut [u8], value: i32) {
 
 /// Scale every sample of `bytes` by `gain`, in place.
 ///
-/// This is per-device volume: it runs on the capture-format bytes on their way
-/// into one mirror, and that format is exactly what the mirror's render client
-/// was initialized with, so the device receives the shape it expects. Only
-/// whole samples are scaled — a trailing partial sample, which an endpoint
-/// never produces, is left as it is.
+/// This runs on the capture-format bytes on their way into one mirror, and that
+/// format is exactly what the mirror's render client was initialized with, so
+/// the device receives the shape it expects. Only whole samples are scaled — a
+/// trailing partial sample, which an endpoint never produces, is left as it is.
+///
+/// Only *exact* unity is skipped. The shortcut was always about not walking the
+/// buffer when there is nothing to do, but testing `>= 1.0` also discarded
+/// amplification silently, which a per-program level needs. Integer formats
+/// saturate at full scale because they cannot represent more; a float format is
+/// allowed to carry values past full scale rather than being clipped here,
+/// because the level that produced such a gain was bounded by that program's
+/// own measured peak (see the level alignment), and a hand-set value is the
+/// user's own call.
 fn apply_gain(bytes: &mut [u8], format: SampleFormat, gain: f32) {
-    if gain >= 1.0 {
+    if gain == 1.0 {
         return;
     }
     match format {
@@ -2057,6 +2065,48 @@ mod tests {
         // Halving an odd value rounds away from zero, so the top ends at 16384
         // rather than 16383 — the error is one LSB of the quantisation step.
         assert_eq!(scaled, vec![-16384, -500, 500, 16384]);
+    }
+
+    #[test]
+    fn gain_above_unity_amplifies_instead_of_being_skipped() {
+        let mut bytes: Vec<u8> = [0.25f32, -0.5]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        apply_gain(&mut bytes, SampleFormat::Float32, 2.0);
+        let scaled: Vec<f32> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
+            .collect();
+        assert_eq!(scaled, vec![0.5, -1.0]);
+    }
+
+    #[test]
+    fn an_amplified_integer_sample_saturates_at_full_scale() {
+        let mut bytes: Vec<u8> = [i16::MAX, 1000]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        apply_gain(&mut bytes, SampleFormat::Int(2), 4.0);
+        let scaled: Vec<i16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| i16::from_le_bytes(*c))
+            .collect();
+        // An integer format cannot hold more than full scale, so an
+        // amplification that overshoots is clamped rather than wrapped around.
+        assert_eq!(scaled, vec![i16::MAX, 4000]);
+    }
+
+    #[test]
+    fn unity_gain_is_still_the_only_gain_that_skips_the_buffer() {
+        let mut bytes = vec![1u8, 2, 3, 4];
+        let before = bytes.clone();
+        apply_gain(&mut bytes, SampleFormat::Float32, 1.0);
+        assert_eq!(bytes, before);
     }
 
     #[test]
