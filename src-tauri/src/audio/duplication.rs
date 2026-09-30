@@ -94,8 +94,10 @@ const TRIM_SLACK_MS: usize = 20;
 /// Upper bound for waiting on the synchronized start. A silent app never fills
 /// the pre-roll, and starting un-synced while silence plays is harmless.
 const PRE_ROLL_TIMEOUT: Duration = Duration::from_secs(4);
-/// Render-thread poll interval while waiting for the start gate.
-const GO_POLL: Duration = Duration::from_millis(2);
+/// Backstop interval for a render thread waiting for the start gate. The gate
+/// wakes the mirrors when it opens; this only bounds a wakeup that never
+/// arrives.
+const GATE_POLL: Duration = Duration::from_millis(250);
 /// How long a source must have produced nothing before its mirrors stop
 /// playing and let the device idle. Well clear of the pipeline's own jitter (a
 /// few periods, against a `TRIM_SLACK_MS` of slack) so a pause between two
@@ -977,6 +979,12 @@ fn open_gate_when_ready(shared: &Arc<EngineShared>, gate: &mut StartGate) {
     if all_filled || gate.opened_at.elapsed() >= PRE_ROLL_TIMEOUT {
         gate.opened = true;
         shared.go.store(true, Ordering::Relaxed);
+        // The mirrors wait on their own threads rather than polling this flag,
+        // so setting it is not by itself enough to release them: without the
+        // wake each would sit out the rest of its backstop before starting.
+        for mirror in &shared.mirrors {
+            mirror.wake();
+        }
         info!(
             "duplication for PID {} started, pre-roll took {:?}",
             shared.pid,
@@ -1219,13 +1227,23 @@ fn render_run(
     session: RenderSession,
     app: &AppHandle,
 ) {
+    // Publish this thread before the first of the two waits that can park it.
+    // The gate below and the idle park in the render loop are both ended by a
+    // wake aimed at this thread, so it has to be reachable by the time either
+    // can block; a wake arriving earlier leaves a token that the next park
+    // consumes instead of blocking, and each wait re-checks its condition
+    // afterwards, so no wakeup is lost.
+    *mirror.worker.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current());
     // A slow device (e.g. Bluetooth connecting for the first time) holds the
     // gate closed; the other mirrors wait for it instead of running ahead.
+    // Waiting on the thread rather than polling: this window is bounded by the
+    // pre-roll timeout, and a polling loop spends it waking five hundred times
+    // a second per mirror to re-read a flag that has not changed.
     while !shared.go.load(Ordering::Relaxed) {
         if shared.shutdown.load(Ordering::Relaxed) {
             return;
         }
-        std::thread::sleep(GO_POLL);
+        std::thread::park_timeout(GATE_POLL);
     }
     if shared.shutdown.load(Ordering::Relaxed) {
         return;
@@ -1268,11 +1286,6 @@ fn pump_render(
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
-    // Publish this thread so a packet can pull it out of the park below. A wake
-    // arriving before this point leaves a token that the first park consumes
-    // instead of blocking, and every park re-checks its condition afterwards,
-    // so no wakeup is lost.
-    *mirror.worker.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current());
     loop {
         // SAFETY: valid event handle owned by this thread.
         let wait = unsafe { WaitForSingleObject(session.event, RENDER_WAIT_MS) };
