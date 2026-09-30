@@ -31,10 +31,11 @@
   },
   "sourceLevel": {
     "valueLabel": "Level this app gives the audio of {{process}}, in percent",
-    "hint": "Level this app gives this program's audio on the way to its devices, as a percentage: 100 leaves it as the program produced it, below attenuates, above amplifies. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value"
+    "hint": "Level this app gives this program's audio on its way to the devices it is duplicated to, as a percentage: 100 leaves it as the program produced it, below attenuates, above amplifies. Like the device volume and the delay, it acts on the mirrored copies — the device Windows plays directly is not affected by it. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value"
   },
   "deviceLatency": {
     "hint": "Software-side latency only: the engine's pipeline for this device plus the endpoint's own reported stream latency. What a codec or a Bluetooth link adds on top is invisible to the app, so what you hear is later than this",
+    "unmeasured": "Not measured: this device is being duplicated, but its endpoint has not reported a latency for the stream — nothing has been assumed in its place",
     "inactive": "Nothing to measure: no engine is duplicating this device — a single-device route is played by the system directly",
     "primary": "Not measurable: the system plays this device directly (the route's anchor), so there is no stream of ours to ask"
   },
@@ -76,7 +77,7 @@
     "sourceLevelsAlign": "Align levels",
     "sourceLevelsAlignDesc": "Brings every program this app is duplicating that is playing up to the loudest one's level, in one action. One that is not making a sound has nothing to measure, so it is left exactly as it is.",
     "sourceLevelsAlignAction": "Align",
-    "sourceLevelsNote": "A program's level is the gain this app gives its audio on the way to the devices it is routed to: our own copy of the sound, after it was captured. It is not the program's own volume, and nothing Windows stores is touched by it. 100 leaves the program as it produced it, and anything above amplifies it.",
+    "sourceLevelsNote": "A program's level is the gain this app gives its audio on its way to the devices it is duplicated to: our own copy of the sound, after it was captured. It is not the program's own volume, and nothing Windows stores is touched by it. Like the device volume and the delay, it acts on the mirrored copies only — the device Windows plays directly is not affected. 100 leaves the program as it produced it, and anything above amplifies it.",
     "sourceLevelsNone": "No program is being duplicated right now. A level only applies in a multi-device route — a route to a single device is played by the system directly.",
     "noDevices": "No audio devices",
     "about": "About",
@@ -153,7 +154,8 @@
     "sourceVolumesFailed": "Failed to load program levels: {{error}}",
     "sourceLevelsAligned": "Aligned the level of {{n}} program(s)",
     "sourceLevelsAlignedSome": "Aligned the level of {{n}} program(s); {{processes}} had nothing playing and were left alone",
-    "sourceLevelsAlignedNone": "Nothing to align: none of the programs being duplicated is playing, so every level was left as it was — play something in one of them and try again",
+    "sourceLevelsAlignedNone": "Nothing to align: none of the programs being duplicated had any sound to measure, so every level was left as it was — play something in one of them and try again",
+    "sourceLevelsAlignedOne": "Nothing to align: only one of the duplicated programs is playing, and a program cannot be lined up against itself — play something in a second one and try again",
     "sourceLevelsAlignFailed": "Failed to align the program levels: {{error}}",
     "routeFailed": "Routing failed: {{error}}",
     "routePartiallyFailed": "Routed {{ok}} of {{n}} processes, the rest failed: {{error}}",
