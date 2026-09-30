@@ -220,7 +220,8 @@ AppAudioRouter/
 - **单个镜像失败走自己的事件，不并进 `duplication-stopped`**：`duplication.rs` 的 `fail_mirror()` 发 `duplication-mirror-failed`（pid / generation / deviceId / error），引擎继续为其余设备播放。前端 `handleMirrorFailed` 用与引擎级事件**同一套 generation 守卫**（过期的镜像不得改动已经被替换掉的路由），再把该设备从 `routedPids[pid]` 里摘掉并写一条 error 日志点名它。
   修的是这个观感问题：以前只 `warn!` 到 release 会丢弃的 stderr，界面上整条路由看起来完整生效，但有一台设备根本没声音——和"程序坏了"没法区分。**不要把它并回 `duplication-stopped`**：那条会拆掉整个引擎，而这里其余设备还在正常出声。
 - `stop_route` 返回 `StopOutcome`（`released` / `pinned_device`）：没释放成功时前端写一条 error 日志点名那台设备，而不是报"已恢复系统默认"；设置页的「重置每应用音频输出」、以及 `refreshSessions` 发现被路由的 pid 消失后调用的 `releaseStaleRoutes()`，都归到同一套端点归还逻辑（见下面「每应用端点分配的生命周期」）
-- **撤销是一个快照，不是一叠栈**：`undoSnapshot` 记下这一路由**替换掉的**每一条——原设备列表，以及原记忆（`previousMemory`）——撤销时逐条放回：非空按 `orderByDelay` 重排后重路由（延迟最小的那台必须回到主设备位，否则用户设的延迟被静默不施加），原本没有路由的走 `stopRoute`；**开了自动记忆时记忆也要一起还原或清掉**，否则下次启动会把刚撤掉的路由装回来。手动停止路由会**丢弃**快照（那条路由已被用户改过，再对它撤销就是逆着用户最后一次操作走）。
+- **撤销是一个快照，不是一叠栈**：`undoSnapshot` 记下这一路由**替换掉的**每一条（原设备列表），撤销时逐条放回：非空按 `orderByDelay` 重排后重路由（延迟最小的那台必须回到主设备位，否则用户设的延迟被静默不施加），原本没有路由的走 `stopRoute`。
+  **记忆也要跟着处理**，否则下次启动会把刚撤掉的路由装回来：重路由那条用**与当初相同的 `remember` 标志**，于是旧设备列表被写回去；而 `stopRoute` 那条会**清掉**记忆——这里没有「写任意记忆」的命令，所以是清掉而不是还原，丢的是一条当时并未生效的记忆，比「撤销被悄悄翻回去」小得多。手动停止路由会**丢弃**快照（那条路由已被用户改过，再对它撤销就是逆着用户最后一次操作走）。
 - **源数与设备数没有人为上限**：`apply_route(device_ids)` 与进程多选都不设上限，引擎按需起。本项目**不是**总线混音器，所以没有 Voicemeeter 那类「3/5/8 条 ins/outs」的硬限制——被问到「通道数能不能再多」时，答案是这个定位，而不是一个新功能。上报类结构（`ActiveRoute` 的 `device_ids` / `latency_ms`）一律是**平行数组、等长同序**，加条目时别破坏这一点。
 - 设备列表、进程列表由 store action 管理：后端 `audio-changed` 事件驱动自动同步（见下面「后台常驻与实时刷新」），手动 Refresh 按钮保留作兜底；**没有轮询定时器**
 
@@ -261,7 +262,8 @@ AppAudioRouter/
 - 三种回调缺一不可：`IMMNotificationClient`（端点增删/默认切换/属性变化）、`IAudioSessionNotification`（**只报新建**）、`IAudioSessionEvents::OnStateChanged(Expired)`（会话消亡）。少了最后一种，进程列表会永远留着早就停止播放的程序。`Inactive`（暂停但会话还在）**不能**当成退出处理，否则暂停一下就从列表消失。
 - 线程启动时必须先 `sync()` 一次：两种回调都只报「变化」，不给已存在的设备/会话预先挂钩子，启动前就在放音的程序永远不会被通知到。
 - 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
-- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。
+- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面两处才不至于永远停在旧值。
+- **第四个引擎事件 `duplication-ready`**（pid / generation）：最后一个镜像初始化完成时由 `mirror_ready` 发一次，因为镜像的 `GetStreamLatency` 是在**渲染线程**里、在一次异步设备激活**之后**才拿到的，而 `apply_route` 早就返回了——前端若只在收到路由回执时读一次，读到的必然是空值，而且**再也不会重读**。`reconcileActiveDuplications()` 因此有四处调用：开机、路由落地后、撤销后、以及这个事件；外加改延迟之后与 `syncFromNotification`。**每一条新起引擎的路径都要跟一次**，否则那台设备的读数要么不出现、要么停在改动之前。
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
 
 ### 引擎的唤醒成本（2.2 起，改动前必读）
@@ -363,7 +365,7 @@ AppAudioRouter/
     每个读数各自的悬停反馈是一根 `absolute` hairline 下划线（`group/scrub`），不占宽度。两个读数之间的分隔用 1px 竖 hairline。
   - 标注显隐：**选中 或 该读数非中性**（延迟≠0 / 音量<100）——已生效的偏移绝不能被藏起来，没动的设备也不该无谓地占视觉。
     读数另按 `EngineRole` 变淡并在 tooltip 里说明"当前未生效"的原因（单设备路由没有引擎、主设备只作基准），见「状态管理」。
-    实测延迟的显隐取自己那条规则：**选中 或 该设备是 `mirror` 且拿得到值**；选中但测不到时给一根变淡的 `— ms`，tooltip 说明是哪一种「测不到」（主设备由系统直连 / 没有引擎路径），**不要**把测不到画成 0。
+    实测延迟的显隐取自己那条规则：**选中 或 该设备是 `mirror` 且拿得到值**；选中但测不到时给一根变淡的 `— ms`，tooltip 说明是哪一种「测不到」——**三种，不能混**：主设备由系统直连（`primary`）、是镜像但端点还没报读数（mirror + 无值 → `unmeasured`）、根本没有引擎路径（`inactive`）。把第三种的话说给第二种听就是**反话**（"没有引擎在复制这台设备"），**不要**把测不到画成 0。
   - 点击名称按钮选中设备后要 `blur()`（仅指针点击，`e.detail > 0`）：否则按钮保持焦点，下一个 Space 会静默取消刚做的选择。
     键盘激活（`detail === 0`）必须保留焦点。
 - **误操作防护：撤销优先于确认。** 这个舞台的手感就是「点一下就路由」，所以**不要**给路由加路由前确认——那会毁掉它。撤销是一个瞬态 Toast（`components/Toast.tsx`，挂在 `App.tsx`，`role="status"`、`pointer-events-none` 的外层里只有卡片可点、悬停或聚焦时暂停计时、退场时把 `pointerEvents` 设为 `none` 以免吃掉下一次点击）。
