@@ -11,7 +11,12 @@ import { Toast } from '@/components/Toast';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useDecorativeMotion } from '@/hooks/useDecorativeMotion';
 import { useRouterStore } from '@/stores/routerStore';
-import type { AudioChangedEvent, DuplicationStoppedEvent, MirrorFailedEvent } from '@/lib/types';
+import type {
+  AudioChangedEvent,
+  DuplicationReadyEvent,
+  DuplicationStoppedEvent,
+  MirrorFailedEvent,
+} from '@/lib/types';
 import { FADE, SPRING_GLIDE } from '@/lib/motion';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
@@ -203,6 +208,13 @@ export default function App() {
   // running, so it is reported apart from the engine-level stop above.
   useBackendEvent<MirrorFailedEvent>('duplication-mirror-failed', (payload) => {
     useRouterStore.getState().handleMirrorFailed(payload);
+  });
+
+  // An engine opens its mirror devices behind an asynchronous activation, so
+  // this arrives after apply_route has already answered. It is the first moment
+  // a latency reading exists for those devices.
+  useBackendEvent<DuplicationReadyEvent>('duplication-ready', (payload) => {
+    useRouterStore.getState().handleDuplicationReady(payload);
   });
 
   // Core Audio says something moved — a device was plugged in, an app started or
