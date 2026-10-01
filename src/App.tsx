@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ConcentricRouter } from '@/components/ConcentricRouter';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
+import { OutputStatusBar } from '@/components/OutputStatusBar';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
@@ -275,22 +276,17 @@ export default function App() {
               <ProcessList />
             </motion.aside>
 
-            {/* Center: the concentric router on a glass stage. Device delays are
-                set on the device nodes themselves, so the stage owns the whole
-                column. */}
-            <motion.main
-              {...panelEnter}
-              className="flex min-w-0 flex-1 flex-col rounded-2xl border border-glass bg-glass p-3 shadow-glass backdrop-blur-xl"
-            >
-              <div className="min-h-0 w-full flex-1">
+            {/* Center column: the standing answer to "where is the sound" on
+                top, the concentric router on its glass stage in the middle,
+                and what the app did folded into a strip underneath. The stage
+                keeps the flexible share; the other two take what they need. */}
+            <motion.main {...panelEnter} className="flex min-w-0 flex-1 flex-col gap-3">
+              <OutputStatusBar />
+              <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-glass bg-glass p-3 shadow-glass backdrop-blur-xl">
                 <ConcentricRouter />
               </div>
-            </motion.main>
-
-            {/* Right panel: log (hidden below lg to keep the router usable) */}
-            <motion.aside {...panelEnter} className="hidden w-72 flex-shrink-0 lg:block">
               <LogPanel />
-            </motion.aside>
+            </motion.main>
           </motion.div>
         ) : (
           <motion.div

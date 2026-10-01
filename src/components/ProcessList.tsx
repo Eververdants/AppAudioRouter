@@ -303,30 +303,38 @@ export function ProcessList() {
                   </motion.button>
                   <AnimatePresence>
                     {routedCountForPid > 0 && (
-                      <motion.button
+                      <motion.span
                         initial={{ opacity: 0, scale: 0.6 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.6 }}
-                        whileHover={{ scale: 1.15 }}
-                        whileTap={{ scale: 0.9 }}
                         transition={SPRING_TAP}
-                        onClick={() => void stopRoute(session.pid)}
-                        title={t('processList.stopRoute')}
-                        aria-label={t('processList.stopRoute')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-text-muted transition-colors hover:bg-error/10 hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50"
+                        className="absolute right-2 top-1/2 flex -translate-y-1/2"
                       >
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 10 10"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        >
-                          <line x1="1" y1="1" x2="9" y2="9" />
-                          <line x1="9" y1="1" x2="1" y2="9" />
-                        </svg>
-                      </motion.button>
+                        {/* Stopping sends the program's sound back to the
+                            system default — harmless, but baffling when it
+                            happens under an accidental click, so it asks first,
+                            the same way the stop-all in the header does. */}
+                        <ConfirmButton
+                          variant="icon"
+                          label={t('processList.stopRoute')}
+                          confirmLabel={t('processList.stopRouteConfirm')}
+                          onConfirm={() => void stopRoute(session.pid)}
+                          icon={
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 10 10"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              aria-hidden="true"
+                            >
+                              <line x1="1" y1="1" x2="9" y2="9" />
+                              <line x1="9" y1="1" x2="1" y2="9" />
+                            </svg>
+                          }
+                        />
+                      </motion.span>
                     )}
                   </AnimatePresence>
                 </div>
