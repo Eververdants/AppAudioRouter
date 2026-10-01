@@ -1,17 +1,18 @@
 {
   "productName": "App Audio Router",
   "processList": {
-    "title": "Processes",
+    "title": "Apps",
     "refresh": "Refresh",
-    "search": "Search processes",
-    "noMatch": "No process matches the search",
-    "empty": "No processes with audio sessions found",
-    "emptyHint": "Play sound in the target app, then refresh",
-    "routedBadge": "Routed to {{n}} device(s)",
-    "stopRoute": "Stop routing this process",
-    "stopAll": "Stop all routing",
-    "stopAllConfirm": "Click again to stop all routing",
-    "multiSelectHint": "Click to select; Ctrl+click to pick several and route them together",
+    "search": "Search apps",
+    "noMatch": "No app matches the search",
+    "empty": "No apps are playing audio",
+    "emptyHint": "Play sound in an app, then refresh",
+    "routedBadge": "Playing to {{n}} device(s)",
+    "stopRoute": "Stop output and return to the system default",
+    "stopRouteConfirm": "Click again to confirm",
+    "stopAll": "All back to system default",
+    "stopAllConfirm": "Click again to return everything to the system default",
+    "multiSelectHint": "Click to select; Ctrl+click to pick several and send them together",
     "associatedDevice": "Plays through {{device}}"
   },
   "deviceVolume": {
@@ -54,6 +55,8 @@
     "forgetRoute": "Forget the route remembered for {{process}}",
     "delaySync": "Latency sync",
     "delaySyncDesc": "Compensate faster devices to align with a slower (Bluetooth) one",
+    "advancedMode": "Advanced controls",
+    "advancedModeDesc": "Show per-device delay and volume readouts plus the full activity log. Off keeps the main screen to what routing needs.",
     "resetEndpoints": "Reset per-app output",
     "resetEndpointsDesc": "Gives every program its own output device back, except the ones a route is using right now. A program an earlier version left fixed to a device ignores the system default until this is done.",
     "resetEndpointsAction": "Reset",
@@ -94,7 +97,7 @@
     "resetRemaining": "{{processes}} could not be cleared — let it play a sound and try again.",
     "dismiss": "Got it",
     "firstRunTitle": "Welcome to {{product}}",
-    "firstRunBody": "Pick a program that is playing on the left, click a device on the right, then press the button in the middle and the sound moves there. Pick several devices to play on all of them at once. If a program ever stops following the devices you switch to in Windows, the reset in Settings releases it.",
+    "firstRunBody": "Select an app on the left, pick a device, then confirm at the center button — output moves there. Pick several devices to output to all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
     "startAction": "Start routing"
   },
   "titleBar": {
@@ -108,20 +111,39 @@
     "quit": "Quit"
   },
   "router": {
-    "selectProcess": "Select a process",
-    "selectDevice": "Select a device",
-    "clickToRoute": "Click to route",
-    "clickToRouteMulti": "Route to {{n}} devices",
-    "routedActive": "{{n}} devices active",
-    "processCount": "{{n}} processes",
-    "defaultDevice": "System default playback device"
+    "selectDevice": "Pick a device",
+    "clickToRoute": "Output to {{device}}",
+    "clickToRouteMulti": "Output to {{n}} devices",
+    "routedActive": "Outputting to {{n}} devices",
+    "processCount": "{{n}} apps",
+    "defaultDevice": "System default playback device",
+    "defaultLabel": "System default",
+    "guide": "Select an app, pick a device, confirm at the center",
+    "confirmOne": "Output to {{device}}",
+    "confirmMulti": "Output to {{n}} devices at once",
+    "confirmMultiProcess": "Output {{n}} apps to {{device}}",
+    "confirmHint": "Click again to confirm"
+  },
+  "statusBar": {
+    "idleDefault": "System default · {{device}}",
+    "following": "{{process}} → {{device}} (follows system)",
+    "playing": "{{process}} → {{device}}",
+    "playingMore": "{{process}} → {{device}} +{{m}}",
+    "someRouted": "{{n}} app(s) on a non-default device",
+    "selectedMulti": "{{n}} apps selected",
+    "backToDefault": "Back to system default",
+    "backToDefaultConfirm": "Click again to confirm"
   },
   "logPanel": {
-    "title": "Logs"
+    "title": "Activity",
+    "expand": "Expand activity",
+    "collapse": "Collapse activity"
   },
   "toast": {
-    "message": "Routed {{process}}",
-    "messageMulti": "Routed {{n}} processes",
+    "routedOne": "{{process}} → {{device}}",
+    "routedOneMore": "{{process}} → {{device}} +{{m}}",
+    "routedMany": "{{n}} apps → {{device}}",
+    "routedManyMore": "{{n}} apps → {{device}} +{{m}}",
     "undo": "Undo"
   },
   "log": {
