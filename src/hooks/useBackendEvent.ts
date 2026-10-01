@@ -25,11 +25,18 @@ export function useBackendEvent<P>(name: string, handler: (payload: P) => void):
     activeRef.current = token;
     let unlisten: (() => void) | null = null;
 
-    void listen<P>(name, (event) => handlerRef.current(event.payload)).then((off) => {
-      // A newer effect run already replaced this one: drop the stale handle.
-      if (activeRef.current !== token) off();
-      else unlisten = off;
-    });
+    void listen<P>(name, (event) => handlerRef.current(event.payload)).then(
+      (off) => {
+        // A newer effect run already replaced this one: drop the stale handle.
+        if (activeRef.current !== token) off();
+        else unlisten = off;
+      },
+      (error) => {
+        // Outside the Tauri shell (a plain browser tab during `vite dev`)
+        // there is no event plugin to talk to; that is not a crash.
+        console.warn(`[events] could not subscribe to ${name}`, error);
+      },
+    );
 
     return () => {
       if (activeRef.current === token) activeRef.current = null;

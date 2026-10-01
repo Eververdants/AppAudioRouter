@@ -18,10 +18,17 @@ if (import.meta.env.DEV) {
 
 // `reducedMotion="user"` follows the OS setting: transforms and layout
 // animations drop out, while the opacity changes that carry state still play.
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <MotionConfig reducedMotion="user">
-      <App />
-    </MotionConfig>
-  </StrictMode>,
-);
+const rootElement = document.getElementById('root');
+if (rootElement === null) {
+  // Nothing to attach to: say so instead of throwing a bare TypeError. The
+  // only way here is a broken index.html, which no amount of UI can cover.
+  console.error('[boot] #root element is missing; nothing to render into');
+} else {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <MotionConfig reducedMotion="user">
+        <App />
+      </MotionConfig>
+    </StrictMode>,
+  );
+}
