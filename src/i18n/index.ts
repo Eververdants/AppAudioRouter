@@ -15,8 +15,12 @@ const resources = {
 } as const;
 
 function getInitialLanguage(): Language {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === 'zh-CN' || stored === 'en') return stored;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'zh-CN' || stored === 'en') return stored;
+  } catch {
+    /* storage may be unavailable; fall through to the system language */
+  }
   return navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
 
@@ -44,5 +48,8 @@ i18next.on('languageChanged', (lng) => {
 
 /** The active UI language, normalized for callers outside React. */
 export function currentLanguage(): Language {
-  return i18next.language.startsWith('zh') ? 'zh-CN' : 'en';
+  // `language` is undefined until i18next finishes initializing — and stays
+  // that way if initialization failed — while `addLog` calls this on every
+  // entry. Defaulting to English keeps a broken init from breaking the log.
+  return i18next.language?.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
