@@ -13,20 +13,21 @@ const EXPANDED_HEIGHT = 176;
  * The log is the expert surface: it matters when something went wrong and is
  * noise the rest of the time. So it lives collapsed as a thin bar that still
  * shows the latest line — the one sentence a novice actually needs — and
- * expands on demand. The advanced-controls switch starts it expanded, because
- * someone who opted into readouts opted into this too.
+ * expands only on demand. It never opens by itself: the main screen is
+ * remounted on every return from settings, and a panel that reopens each time
+ * is a panel the user has to keep closing.
  */
 export function LogPanel() {
   const { t } = useTranslation();
   const logs = useRouterStore((s) => s.logs);
   const advancedMode = useRouterStore((s) => s.advancedMode);
-  const [expanded, setExpanded] = useState(advancedMode);
+  const [expanded, setExpanded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // The switch re-decides the default: turning advanced on opens the log,
-  // turning it off folds it back away.
+  // Turning the advanced switch off folds the log away; turning it on does
+  // not open it — opening is always the user's own click.
   useEffect(() => {
-    setExpanded(advancedMode);
+    if (!advancedMode) setExpanded(false);
   }, [advancedMode]);
 
   // Depend on the last log's id, not the array length — the store caps
