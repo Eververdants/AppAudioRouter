@@ -8,7 +8,6 @@
    when adjusting the palette. */
 :root {
   --bg-primary: #fafafa;
-  --bg-secondary: #f3f3f5;
   --bg-tertiary: #e8e8ec;
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
@@ -16,14 +15,12 @@
   --accent: #0891b2;
   --accent-hover: #0e7490;
   --accent-muted: rgba(8, 145, 178, 0.12);
-  --accent-glow: rgba(8, 145, 178, 0.32);
-  --border: #e4e4e7;
   --success: #10b981;
   --error: #ef4444;
 
   /* Editor surfaces. The main screen is built out of flat planes separated by
-     1px hairlines rather than floating glass cards: a sidebar plane, the work
-     area behind it, and one raised plane for things that genuinely float (the
+     1px hairlines rather than floating cards: a sidebar plane, the work area
+     behind it, and one raised plane for things that genuinely float (the
      route-confirm capsule). `--hairline` is the divider between rows and
      sections; `--hairline-strong` is for the few edges that must read as a
      border rather than a separator. */
@@ -43,27 +40,14 @@
      channels in sync with the hex/rgba values above. */
   --accent-rgb: 8 145 178;
   --error-rgb: 239 68 68;
-  --border-rgb: 228 228 231;
   --bg-tertiary-rgb: 232 232 236;
   --text-muted-rgb: 113 113 122;
   --hairline-rgb: 230 230 234;
   --surface-rgb: 255 255 255;
-
-  /* Liquid-glass surfaces. Translucent panels pick up the ambient gradient
-     and the drifting orbs rendered behind them, which is what sells the glass. */
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.65);
-  --glass-highlight: rgba(255, 255, 255, 0.9);
-  --glass-edge: rgba(24, 24, 27, 0.06);
-  --glass-shadow: rgba(24, 24, 27, 0.14);
-
-  /* Ambient wash painted by the body gradient. */
 }
 
 .dark {
   --bg-primary: #09090b;
-  --bg-secondary: #18181b;
   --bg-tertiary: #27272a;
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
@@ -71,8 +55,6 @@
   --accent: #22d3ee;
   --accent-hover: #06b6d4;
   --accent-muted: rgba(34, 211, 238, 0.14);
-  --accent-glow: rgba(34, 211, 238, 0.28);
-  --border: #27272a;
   --success: #34d399;
   --error: #f87171;
 
@@ -86,18 +68,10 @@
 
   --accent-rgb: 34 211 238;
   --error-rgb: 248 113 113;
-  --border-rgb: 39 39 42;
   --bg-tertiary-rgb: 39 39 42;
   --text-muted-rgb: 161 161 170;
   --hairline-rgb: 35 39 46;
   --surface-rgb: 18 21 26;
-
-  --glass-bg: rgba(24, 24, 27, 0.5);
-  --glass-bg-strong: rgba(28, 28, 32, 0.78);
-  --glass-border: rgba(255, 255, 255, 0.09);
-  --glass-highlight: rgba(255, 255, 255, 0.08);
-  --glass-edge: rgba(255, 255, 255, 0.06);
-  --glass-shadow: rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -130,8 +104,8 @@ body {
     color 0.3s ease;
 }
 
-/* Scrollbar. The thumb is a slice of the muted text colour rather than
-   --border, which in dark mode is all but the panel colour behind it. */
+/* Scrollbar. The thumb is a slice of the muted text colour rather than the
+   hairline, which in dark mode is all but the panel colour behind it. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
