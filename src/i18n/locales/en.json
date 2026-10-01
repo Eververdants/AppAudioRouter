@@ -53,7 +53,7 @@
     "rememberedRoutes": "Remembered",
     "forgetRoute": "Forget the route remembered for {{process}}",
     "advancedMode": "Advanced controls",
-    "advancedModeDesc": "Show per-device delay and volume readouts plus the full activity log",
+    "advancedModeDesc": "Show the per-device delay and volume columns in the output table",
     "resetEndpoints": "Reset per-app output",
     "resetEndpointsDesc": "Releases a program that no longer follows the system's playback device; routed programs are left alone",
     "resetEndpointsAction": "Reset",

@@ -53,7 +53,7 @@
     "rememberedRoutes": "已记忆的路由",
     "forgetRoute": "忘记 {{process}} 的记忆路由",
     "advancedMode": "高级调节",
-    "advancedModeDesc": "显示设备延迟、音量等进阶数值与完整活动记录",
+    "advancedModeDesc": "在设备表格里显示每台设备的延迟与音量两列",
     "resetEndpoints": "重置每应用音频输出",
     "resetEndpointsDesc": "程序不再跟随系统播放设备时，点此释放；正在路由的程序不受影响",
     "resetEndpointsAction": "重置",
