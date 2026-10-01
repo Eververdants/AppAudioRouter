@@ -93,9 +93,7 @@ export function LogPanel() {
             transition={SPRING_GLIDE}
             className="overflow-hidden"
           >
-            <div
-              className="h-full overflow-y-auto border-t border-border/50 px-4 py-2 font-mono text-[11px] leading-4"
-            >
+            <div className="h-full overflow-y-auto border-t border-border/50 px-4 py-2 font-mono text-[11px] leading-4">
               <AnimatePresence initial={false}>
                 {logs.map((log) => (
                   <motion.div
