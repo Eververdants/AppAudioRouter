@@ -1037,16 +1037,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   stopRoute: async (pid) => {
     const session = get().sessions.find((s) => s.pid === pid);
-    if (!get().routedPids[pid]) return;
+    // Snapshot before mutating: if the backend rejects the stop the UI must
+    // keep showing the route as live instead of silently desyncing from it.
+    const previous = get().routedPids[pid];
+    if (previous === undefined) return;
     // The offer on screen describes the route this stop is taking apart, so it
     // is no longer the thing being offered: acting on it would undo the user's
     // last move instead of the one they meant to take back.
     set({ undoSnapshot: null });
     // The user just took this one off; a restore must not put it straight back.
     autoRestoreDecided.add(pid);
-    // Snapshot before mutating: if the backend rejects the stop the UI must
-    // keep showing the route as live instead of silently desyncing from it.
-    const previous = get().routedPids[pid];
     const previousGeneration = get().engineGenerations[pid] ?? 0;
     const process = session?.exe_name ?? `PID ${pid}`;
     try {
@@ -1084,7 +1084,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       // Backend didn't actually stop: roll the route and its event identity back.
       set((s) => ({
-        routedPids: { ...s.routedPids, [pid]: previous! },
+        routedPids: { ...s.routedPids, [pid]: previous },
         engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
       }));
       get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
