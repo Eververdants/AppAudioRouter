@@ -80,6 +80,15 @@ interface RouterState {
   /** Whether a route is written to the memory as it is applied, and restored
    * from it when the program plays again. */
   autoRemember: boolean;
+  /**
+   * Whether the expert surface is shown: per-device delay/volume annotations
+   * under the device nodes and the activity log expanded. Off is the default
+   * and keeps the main screen to what routing needs — the target users are not
+   * audio engineers, and a value they did not ask for is a value they can
+   * change by accident. A UI preference, persisted to localStorage like the
+   * theme; the engine never reads it.
+   */
+  advancedMode: boolean;
   /** Routes the backend remembers, one entry per executable name. */
   rememberedRoutes: RememberedRouteEntry[];
   /** Whether the close button hides the window to the tray instead of quitting. */
@@ -126,6 +135,8 @@ interface RouterState {
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
   toggleAutoRemember: () => void;
+  /** Show or hide the expert surface (device annotations, full log). */
+  setAdvancedMode: (on: boolean) => void;
   /** Read the close-to-tray preference and the startup registry entry. */
   loadShellSettings: () => Promise<void>;
   /** Read what this install should be told about itself (first run / update). */
@@ -291,6 +302,18 @@ function readAutoRemember(): boolean {
   }
 }
 
+/** localStorage key holding the advanced-controls switch. */
+const ADVANCED_MODE_STORAGE_KEY = 'aar-advanced-mode';
+
+function readAdvancedMode(): boolean {
+  try {
+    return localStorage.getItem(ADVANCED_MODE_STORAGE_KEY) === '1';
+  } catch {
+    /* storage may be unavailable; the preference just does not persist */
+    return false;
+  }
+}
+
 /**
  * PIDs this run already decided about, so a restore is attempted at most once
  * per process.
@@ -394,6 +417,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   sourceVolumes: {},
   delaySync: false,
   autoRemember: readAutoRemember(),
+  advancedMode: readAdvancedMode(),
   rememberedRoutes: [],
   closeToTray: false,
   autostart: false,
@@ -603,6 +627,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // Turning it on asks for the routes that are already remembered, not for a
     // promise about the next time something happens to move in the audio graph.
     if (next) void get().restoreRememberedRoutes();
+  },
+
+  setAdvancedMode: (on) => {
+    if (get().advancedMode === on) return;
+    set({ advancedMode: on });
+    try {
+      localStorage.setItem(ADVANCED_MODE_STORAGE_KEY, on ? '1' : '0');
+    } catch {
+      /* storage may be unavailable; the preference just does not persist */
+    }
   },
 
   loadRememberedRoutes: async () => {
@@ -881,9 +915,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         },
         // This route is now what there is to undo, and it covers exactly the
         // programs it was accepted for — a previous offer is dropped with it.
+        // The device it sent audio to rides along so the offer can name it.
         undoSnapshot: {
           entries: replaced.filter((entry) => accepted.has(entry.pid)),
           remembered: autoRemember,
+          deviceName: primary ?? '',
+          deviceCount: ordered.length,
         },
       }));
       const count = applied.length;

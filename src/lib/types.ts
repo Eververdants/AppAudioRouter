@@ -93,6 +93,11 @@ export interface UndoSnapshot {
   /** Whether the route this describes was written to the memory as it was
    * applied. That write is what an undo has to reverse along with the route. */
   remembered: boolean;
+  /** Display name of the primary device the route sent audio to, so the undo
+   * offer can say where the sound went, not just that it moved. */
+  deviceName: string;
+  /** Total devices the route targeted (primary + mirrored copies). */
+  deviceCount: number;
 }
 
 /** A live duplication engine and its ordered route targets. */
