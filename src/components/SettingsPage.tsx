@@ -218,6 +218,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const { theme, setTheme } = useTheme();
   const { language, setLanguage } = useLanguage();
   const devices = useRouterStore((s) => s.devices);
+  const advancedMode = useRouterStore((s) => s.advancedMode);
+  const setAdvancedMode = useRouterStore((s) => s.setAdvancedMode);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
   const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
@@ -341,6 +343,16 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   { value: 'zh-CN', label: '中文' },
                   { value: 'en', label: 'EN' },
                 ]}
+              />
+            </Row>
+            {/* Off by default: the readouts and the full log are the expert
+                surface, and the main screen stays safer without them — a value
+                nobody asked for is a value that can be dragged by accident. */}
+            <Row title={t('settings.advancedMode')} desc={t('settings.advancedModeDesc')}>
+              <Switch
+                checked={advancedMode}
+                onChange={() => setAdvancedMode(!advancedMode)}
+                label={t('settings.advancedMode')}
               />
             </Row>
           </SectionCard>

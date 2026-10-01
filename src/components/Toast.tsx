@@ -94,9 +94,27 @@ export function Toast() {
             className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-glass bg-glass-strong px-4 py-2.5 shadow-glass backdrop-blur-xl"
           >
             <span className="text-[12px] text-text-secondary">
+              {/* The offer names where the sound went, not just that it moved:
+                  "routed music.exe" answers nothing for someone who did not
+                  mean to route anything. */}
               {entries.length > 1
-                ? t('toast.messageMulti', { n: entries.length })
-                : t('toast.message', { process: only?.exeName ?? '' })}
+                ? snapshot.deviceCount > 1
+                  ? t('toast.routedManyMore', {
+                      n: entries.length,
+                      device: snapshot.deviceName,
+                      m: snapshot.deviceCount - 1,
+                    })
+                  : t('toast.routedMany', { n: entries.length, device: snapshot.deviceName })
+                : snapshot.deviceCount > 1
+                  ? t('toast.routedOneMore', {
+                      process: only?.exeName ?? '',
+                      device: snapshot.deviceName,
+                      m: snapshot.deviceCount - 1,
+                    })
+                  : t('toast.routedOne', {
+                      process: only?.exeName ?? '',
+                      device: snapshot.deviceName,
+                    })}
             </span>
             <button
               type="button"
