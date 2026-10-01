@@ -251,11 +251,11 @@ export function ScrubReadout({
             }
           }}
           aria-label={label}
-          className="w-[38px] flex-none bg-transparent text-center text-[10px] font-medium tabular-nums text-accent outline-none"
+          className="w-[38px] flex-none bg-transparent text-center font-mono text-[11px] tabular-nums text-accent outline-none"
         />
       ) : (
         <span
-          className={`text-[10px] font-medium tabular-nums transition-[color,transform] duration-100 ${
+          className={`font-mono text-[11px] tabular-nums transition-[color,transform] duration-100 ${
             neutral
               ? 'text-text-muted group-focus-within/scrub:text-accent group-hover/scrub:text-accent'
               : 'text-accent'
@@ -264,7 +264,7 @@ export function ScrubReadout({
           {format(shown)}
         </span>
       )}
-      <span className="flex-none text-[8px] leading-none text-text-muted">{unit}</span>
+      <span className="flex-none font-mono text-[9px] leading-none text-text-muted">{unit}</span>
       {/* Hairline underline: the only hint that the number is live, and it
           costs no width, so the annotation never moves. */}
       <span

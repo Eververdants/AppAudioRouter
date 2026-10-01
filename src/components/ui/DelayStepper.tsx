@@ -7,7 +7,7 @@ import { useDelayValue } from '@/hooks/useDelayValue';
  * stepping by the configured step, with a directly editable millisecond value
  * in between so an exact figure can be entered too.
  *
- * The stage capsule (`DelayCapsule`) is the same control in its compact form;
+ * The device table's delay cell is the same control through `ScrubReadout`;
  * both share the editing logic in `useDelayValue`.
  */
 export function DelayStepper({
@@ -32,7 +32,7 @@ export function DelayStepper({
       >
         <line x1="1" y1="5" x2="9" y2="5" />
       </StepButton>
-      <div className="bg-bg-secondary/60 flex h-6 items-center rounded-md border border-border pr-1.5 transition-colors focus-within:border-accent/60">
+      <div className="flex h-6 items-center border-b border-line pr-1 transition-colors focus-within:border-accent/60">
         <input
           type="number"
           inputMode="numeric"
@@ -50,9 +50,9 @@ export function DelayStepper({
             }
           }}
           aria-label={t('deviceDelay.valueLabel', { device: name })}
-          className="h-full w-[54px] bg-transparent text-right text-[11px] tabular-nums text-text-primary outline-none"
+          className="h-full w-[54px] bg-transparent text-right font-mono text-[11px] tabular-nums text-text-primary outline-none"
         />
-        <span className="ml-0.5 text-[9px] leading-none text-text-muted">ms</span>
+        <span className="ml-0.5 font-mono text-[9px] leading-none text-text-muted">ms</span>
       </div>
       <StepButton
         label={t('deviceDelay.stepUp', { step: stepLabel })}

@@ -13,14 +13,19 @@ interface SegmentedControlProps<T extends string> {
   value: T;
   options: ReadonlyArray<SegmentedOption<T>>;
   onChange: (value: T) => void;
-  /** Must be unique per control instance: it keys the shared sliding pill. */
+  /** Must be unique per control instance: it keys the shared sliding rule. */
   layoutId: string;
   ariaLabel?: string;
 }
 
 /**
- * Segmented control with a sliding accent pill behind the active option
- * (spring-animated via a shared layout id).
+ * Segments separated by a rule, not a pill sliding in a track.
+ *
+ * A few mutually exclusive choices behave like a row of tabs in a settings
+ * page, so they look like one: words with a rule under the chosen one. That
+ * keeps the accent meaning "selected" everywhere in the app, instead of
+ * meaning "selected" here and "pressable" in the list beside it — which is what
+ * an accent-filled pill does when the buttons next to it are plain.
  */
 export function SegmentedControl<T extends string>({
   value,
@@ -33,7 +38,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="flex flex-none items-center rounded-full border border-glass bg-glass-strong p-0.5"
+      className="flex flex-none items-center gap-4 border-b border-line"
     >
       {options.map((option) => {
         const active = option.value === value;
@@ -45,18 +50,24 @@ export function SegmentedControl<T extends string>({
             aria-checked={active}
             aria-label={option.ariaLabel}
             onClick={() => onChange(option.value)}
-            className={`relative flex h-7 items-center gap-1 rounded-full px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
-              active ? 'text-white' : 'text-text-muted hover:text-text-primary'
-            }`}
+            className="relative flex flex-col justify-end outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           >
+            <span
+              className={`flex items-center gap-1 px-0.5 pb-1 text-[11px] transition-colors ${
+                active
+                  ? 'font-medium text-text-primary'
+                  : 'text-text-muted hover:text-text-secondary'
+              }`}
+            >
+              {option.label}
+            </span>
             {active && (
               <motion.span
                 layoutId={layoutId}
-                className="absolute inset-0 rounded-full bg-accent shadow-glow"
                 transition={SPRING_TAP}
+                className="absolute inset-x-0 bottom-0 h-0.5 bg-accent"
               />
             )}
-            <span className="relative">{option.label}</span>
           </button>
         );
       })}

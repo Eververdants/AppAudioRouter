@@ -11,13 +11,13 @@ import { SPRING_TAP } from '@/lib/motion';
  */
 const CONFIRM_TIMEOUT_MS = 5000;
 
-/** The settings-row shape, next to the other small buttons there. */
+/** The settings-row / table-header shape: a word that asks once before it acts. */
 const PILL_CLASS =
-  'shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 disabled:cursor-default disabled:opacity-45 disabled:hover:border-glass disabled:hover:text-text-secondary';
+  'shrink-0 rounded border px-2.5 py-1 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-muted';
 /** The process-list header shape: here the idle look is an icon, so the armed
  * state has to read as "this one is asking something" on its own. */
 const ICON_CLASS =
-  'mr-0.5 flex h-6 w-6 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-text-muted';
+  'mr-0.5 flex h-6 w-6 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-text-muted';
 
 /** Drawn in place of an icon button's glyph once it is armed. */
 const CONFIRM_GLYPH = (
@@ -85,7 +85,7 @@ export function ConfirmButton({
     : `${PILL_CLASS} ${
         armed
           ? 'border-error/50 bg-error/10 text-error hover:bg-error/15 focus-visible:ring-error/50'
-          : 'border-glass bg-glass text-text-secondary hover:border-accent/40 hover:text-accent focus-visible:ring-accent/60'
+          : 'border-line text-text-secondary hover:border-accent/50 hover:text-accent focus-visible:ring-accent/60'
       }`;
 
   return (

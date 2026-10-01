@@ -91,7 +91,7 @@ export function Toast() {
                 setHeld(false);
               }
             }}
-            className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-glass bg-glass-strong px-4 py-2.5 shadow-glass backdrop-blur-xl"
+            className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-surface-raised py-2 pl-4 pr-2 shadow-[0_12px_28px_-12px_rgba(0,0,0,0.55)]"
           >
             <span className="text-[12px] text-text-secondary">
               {/* The offer names where the sound went, not just that it moved:
@@ -119,7 +119,7 @@ export function Toast() {
             <button
               type="button"
               onClick={() => void undoLastRoute()}
-              className="shrink-0 rounded-full bg-accent px-3 py-1 text-[11px] font-medium text-white outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="shrink-0 rounded px-2.5 py-1 text-[12px] font-semibold text-accent outline-none transition-colors hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('toast.undo')}
             </button>

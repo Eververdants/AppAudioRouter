@@ -1,21 +1,22 @@
 import type { ReactNode } from 'react';
 
-/** Round ± button shared by the delay controls. */
+/**
+ * The ± button of the delay stepper: a hairline square.
+ *
+ * Flat rather than a filled circle, so it reads as a control belonging to the
+ * field it steps rather than as a button standing on its own beside it.
+ */
 export function StepButton({
   label,
   disabled,
   onClick,
-  size = 'md',
   children,
 }: {
   label: string;
   disabled: boolean;
   onClick: () => void;
-  /** `sm` is the stage capsule, `md` the settings row. */
-  size?: 'sm' | 'md';
   children: ReactNode;
 }) {
-  const box = size === 'sm' ? 'h-5 w-5' : 'h-6 w-6';
   return (
     <button
       type="button"
@@ -23,7 +24,7 @@ export function StepButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={`flex ${box} flex-none items-center justify-center rounded-full text-text-secondary outline-none transition-colors hover:bg-accent-muted hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default disabled:text-text-muted/40 disabled:hover:bg-transparent disabled:hover:text-text-muted/40`}
+      className="flex h-6 w-6 flex-none items-center justify-center rounded border border-line text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default disabled:opacity-40 disabled:hover:border-line disabled:hover:text-text-secondary"
     >
       <svg
         width="9"
