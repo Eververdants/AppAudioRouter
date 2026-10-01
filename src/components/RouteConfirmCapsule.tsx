@@ -46,12 +46,23 @@ export function RouteConfirmCapsule() {
   const applyRoute = useRouterStore((s) => s.applyRoute);
 
   const staged = selectedDeviceIds;
-  const show = !alreadyApplied(staged, selectedPids, routedPids);
-
   const primarySession =
     selectedPids.length > 0 ? sessions.find((s) => s.pid === selectedPids[0]) : undefined;
   const primaryDevice = devices.find((d) => d.id === staged[0]);
-  const extra = staged.length - 1;
+
+  /**
+   * The question, when there is one to ask: a program and a device to name in
+   * it. Both halves are needed — a staged device with no program, or a program
+   * with nowhere to go, is not a question — and so is an answer that has not
+   * already been given.
+   */
+  const question =
+    !alreadyApplied(staged, selectedPids, routedPids) &&
+    primarySession !== undefined &&
+    primaryDevice !== undefined
+      ? { session: primarySession, device: primaryDevice, extra: staged.length - 1 }
+      : null;
+  const asking = question !== null;
 
   // Cancelling un-stages the targets. The store's toggle owns the list, so it is
   // asked one id at a time, reading the list at the moment of each call rather
@@ -62,7 +73,13 @@ export function RouteConfirmCapsule() {
   };
 
   useEffect(() => {
-    if (!show) return;
+    // Only while the capsule is up. The listener is in the capture phase so it
+    // can stop Escape before whatever is behind the capsule answers it — which
+    // is exactly why it must not be registered when there is nothing to
+    // dismiss: a standing capture-phase listener swallows Escape for the whole
+    // window, and the search box stops clearing on the key every other search
+    // box clears on.
+    if (!asking) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         // Only the staged route is dropped; Escape must not also close whatever
@@ -73,14 +90,14 @@ export function RouteConfirmCapsule() {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [show]);
+  }, [asking]);
 
   return (
     // The layer is a full-width strip that takes no pointer events, so only the
     // capsule itself is clickable and the table behind it stays usable.
     <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">
       <AnimatePresence>
-        {show && primarySession !== undefined && primaryDevice !== undefined && (
+        {question !== null && (
           <motion.div
             key="route-confirm"
             role="group"
@@ -96,15 +113,15 @@ export function RouteConfirmCapsule() {
               <span className="truncate text-text-secondary">
                 {selectedPids.length > 1
                   ? t('router.processCount', { n: selectedPids.length })
-                  : primarySession.exe_name}
+                  : question.session.exe_name}
               </span>
               <span aria-hidden="true" className="flex-none text-text-muted">
                 →
               </span>
-              <span className="truncate font-medium text-text-primary">{primaryDevice.name}</span>
-              {extra > 0 && (
+              <span className="truncate font-medium text-text-primary">{question.device.name}</span>
+              {question.extra > 0 && (
                 <span className="flex-none font-mono text-[11px] tabular-nums text-text-muted">
-                  +{extra}
+                  +{question.extra}
                 </span>
               )}
             </span>
