@@ -211,7 +211,8 @@ const MoonIcon = (
 /**
  * Settings as a full page (not a modal): slides in over the content area from
  * the title-bar gear and slides back out. Owns everything app-level — theme,
- * language, auto-remember, latency sync and the per-device delay sliders.
+ * language, the advanced-controls switch, auto-remember and the per-device
+ * delay sliders.
  */
 export function SettingsPage({ onBack }: { onBack: () => void }) {
   const { t } = useTranslation();
@@ -227,8 +228,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
-  const delaySync = useRouterStore((s) => s.delaySync);
-  const toggleDelaySync = useRouterStore((s) => s.toggleDelaySync);
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const setDelayRange = useRouterStore((s) => s.setDelayRange);
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
@@ -399,13 +398,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </div>
               </div>
             )}
-            <Row title={t('settings.delaySync')} desc={t('settings.delaySyncDesc')}>
-              <Switch
-                checked={delaySync}
-                onChange={() => void toggleDelaySync()}
-                label={t('settings.delaySync')}
-              />
-            </Row>
             <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
               <button
                 type="button"

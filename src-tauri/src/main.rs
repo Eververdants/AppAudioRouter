@@ -129,8 +129,6 @@ fn main() {
             commands::get_device_delays,
             commands::get_delay_range,
             commands::set_delay_range,
-            commands::set_delay_sync,
-            commands::get_delay_sync,
             commands::get_remembered_routes,
             commands::clear_route,
             commands::set_device_volume,

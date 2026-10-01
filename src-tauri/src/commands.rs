@@ -473,19 +473,6 @@ pub fn set_delay_range(
     Ok(())
 }
 
-/// Toggle delay compensation for all current and future engines.
-#[tauri::command]
-pub fn set_delay_sync(enabled: bool, duplications: State<'_, DuplicationManager>) {
-    info!("cmd: set_delay_sync enabled={enabled}");
-    duplications.set_delay_sync(enabled);
-}
-
-/// Whether delay compensation is currently enabled.
-#[tauri::command]
-pub fn get_delay_sync(duplications: State<'_, DuplicationManager>) -> bool {
-    duplications.delay_sync()
-}
-
 /// Set a device's volume (percent, 0–100) and push it to any live engine using
 /// that device.
 ///

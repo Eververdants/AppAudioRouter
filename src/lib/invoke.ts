@@ -90,14 +90,6 @@ export async function setDelayRange(rangeMs: number): Promise<void> {
   await invoke('set_delay_range', { rangeMs });
 }
 
-export async function getDelaySync(): Promise<boolean> {
-  return invoke<boolean>('get_delay_sync');
-}
-
-export async function setDelaySync(enabled: boolean): Promise<void> {
-  await invoke('set_delay_sync', { enabled });
-}
-
 /** Set a device's volume (percent, 0–100), live engines pick it up instantly. */
 export async function setDeviceVolume(deviceId: string, percent: number): Promise<void> {
   await invoke('set_device_volume', { deviceId, percent });

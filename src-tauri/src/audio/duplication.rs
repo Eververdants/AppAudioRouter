@@ -633,7 +633,8 @@ pub struct DuplicationManager {
     sources: Arc<SourceVolumeConfig>,
     /// Shared per-program level measurements.
     levels: Arc<SourceLevels>,
-    /// Whether delay compensation is enabled (mirrors the frontend toggle).
+    /// Whether delay compensation is enabled. Always on: the compensation is
+    /// the whole point of the feature, so it has no switch of its own.
     delay_sync: AtomicBool,
 }
 
@@ -652,26 +653,8 @@ impl DuplicationManager {
             volumes,
             sources,
             levels,
-            delay_sync: AtomicBool::new(false),
+            delay_sync: AtomicBool::new(true),
         }
-    }
-
-    /// Enable or disable delay compensation for current and future engines.
-    pub fn set_delay_sync(&self, enabled: bool) {
-        self.delay_sync.store(enabled, Ordering::Relaxed);
-        for engine in self
-            .engines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-        {
-            engine.sync_delays.store(enabled, Ordering::Relaxed);
-        }
-    }
-
-    /// Whether delay compensation is currently enabled.
-    pub fn delay_sync(&self) -> bool {
-        self.delay_sync.load(Ordering::Relaxed)
     }
 
     /// Push a new delay value to any live engine using `device_id`, regardless

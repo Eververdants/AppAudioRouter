@@ -75,8 +75,6 @@ interface RouterState {
    * level".
    */
   sourceVolumes: Record<string, number>;
-  /** Whether delay compensation is applied by the engine. */
-  delaySync: boolean;
   /** Whether a route is written to the memory as it is applied, and restored
    * from it when the program plays again. */
   autoRemember: boolean;
@@ -187,7 +185,6 @@ interface RouterState {
   setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
   setDelayRange: (rangeMs: number) => Promise<void>;
   setDelayStep: (stepMs: number) => void;
-  toggleDelaySync: () => Promise<void>;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   /** An engine has finished opening its mirror devices, so the latency it can
    *  report now exists. Re-reads it; there is no other moment to. */
@@ -415,7 +412,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
   sourceVolumes: {},
-  delaySync: false,
   autoRemember: readAutoRemember(),
   advancedMode: readAdvancedMode(),
   rememberedRoutes: [],
@@ -1190,16 +1186,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   loadDelaySettings: async () => {
     try {
-      const [delays, delaySync, delayRangeMs] = await Promise.all([
+      const [delays, delayRangeMs] = await Promise.all([
         api.getDeviceDelays(),
-        api.getDelaySync(),
         api.getDelayRange(),
       ]);
       const deviceDelays: Record<string, number> = {};
       for (const [deviceId, delayMs] of delays) {
         deviceDelays[deviceId] = delayMs;
       }
-      set({ deviceDelays, delaySync, delayRangeMs });
+      set({ deviceDelays, delayRangeMs });
     } catch (e) {
       get().addLog(i18next.t('log.delaySettingsFailed', { error: String(e) }), 'error');
     }
@@ -1396,18 +1391,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       localStorage.setItem(DELAY_STEP_STORAGE_KEY, String(step));
     } catch {
       /* storage may be unavailable; the preference just does not persist */
-    }
-  },
-
-  toggleDelaySync: async () => {
-    const next = !get().delaySync;
-    set({ delaySync: next });
-    try {
-      await api.setDelaySync(next);
-      get().addLog(i18next.t(next ? 'log.delaySyncOn' : 'log.delaySyncOff'), 'info');
-    } catch (e) {
-      set({ delaySync: !next });
-      get().addLog(i18next.t('log.delaySyncFailed', { error: String(e) }), 'error');
     }
   },
 
