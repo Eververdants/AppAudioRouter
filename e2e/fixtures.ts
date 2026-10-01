@@ -43,8 +43,14 @@ export async function resetCalls(page: Page): Promise<void> {
   await page.evaluate(() => window.__AAR__?.resetCalls());
 }
 
-/** Device capsule on the router stage. */
-export function deviceNode(page: Page, name: string) {
+/**
+ * The name cell of one device row in the output table.
+ *
+ * Scoped to `main` and to buttons: the app list lives in `aside`, and the only
+ * clickable thing in a device row is its name — the delay and volume cells are
+ * separate controls beside it, not inside it.
+ */
+export function deviceRow(page: Page, name: string) {
   return page.locator('main button').filter({ hasText: name });
 }
 
@@ -54,12 +60,31 @@ export function appRow(page: Page, exeName: string) {
 }
 
 /**
- * The hub at the centre of the stage.
+ * The floating capsule that asks whether to route.
  *
- * Matched by its accessible name rather than by any text on the page: the
- * activity strip can be showing a line that contains the word "output", and a
- * loose text match would then be the hub and that strip at once.
+ * Matched by role and accessible name rather than by its text: the app list,
+ * the route tree and the capsule all name the same program and device, so a
+ * text match would be all three at once.
  */
-export function hub(page: Page) {
-  return page.getByRole('button', { name: /Output to|Select an app/ });
+export function routeQuestion(page: Page) {
+  return page.getByRole('group', { name: 'Current route' });
+}
+
+/** The capsule's two answers. */
+export function routeConfirmButton(page: Page) {
+  return page.getByRole('button', { name: 'Route it' });
+}
+
+export function routeCancelButton(page: Page) {
+  return page.getByRole('button', { name: 'Cancel' });
+}
+
+/**
+ * The table header's way back to the system default.
+ *
+ * A confirm-once button: the first press arms it and changes its accessible
+ * name, so the same locator has to match both states.
+ */
+export function backToDefault(page: Page) {
+  return page.getByRole('button', { name: /^Back to system default$|^Click again to confirm$/ });
 }
