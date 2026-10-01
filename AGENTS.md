@@ -55,30 +55,30 @@ AppAudioRouter/
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
-│   │   ├── ConcentricRouter.tsx  # 同心圆路由核心组件（设备节点 + 节点下方的延迟/音量标注）
-│   │   ├── DeviceAnnotation.tsx  # 挂在设备节点下方的一行标注（延迟 + 音量 + 实测延迟读数），顺带管显隐与 hairline 引线
+│   │   ├── RouteFlow.tsx         # 路由树：源节点 + 肘形连线 + 目标设备节点（画的是用户在确认胶囊里回答的那个问题）
+│   │   ├── DeviceTable.tsx       # 设备表格：设备 / 角色 /（高级）延迟 / 音量 四列 + 表头里的「回到系统默认」
+│   │   ├── RouteConfirmCapsule.tsx # 悬浮确认胶囊：源 → 目标 + 取消/路由，浮在工作区底部，不占布局
 │   │   ├── Toast.tsx             # 瞬态提示：路由后提供「撤销」（全项目唯一的撤销入口）
 │   │   ├── ProcessList.tsx
 │   │   ├── SettingsPage.tsx      # 设置独立页面（主题/语言/路由开关/已记忆路由列表/每应用音频重置/后台开关/延迟范围·步进·逐设备设置/关于）
-│   │   ├── LogPanel.tsx
+│   │   ├── LogPanel.tsx          # 活动记录（下划线标签页的第二页）
 │   │   ├── TitleBar.tsx    # 自定义标题栏（无边框窗口，仅品牌 + 设置入口 + 窗口控制）
 │   │   ├── StartupNoticeDialog.tsx  # 启动提示弹窗（欢迎语 / 旧版本提示 + 就地重置）
 │   │   └── ui/             # 基础控件
-│   │       ├── Switch.tsx              # 动画开关
-│   │       ├── SegmentedControl.tsx    # 滑动胶囊分段控件
+│   │       ├── Switch.tsx              # 开关（h-5 w-9）
+│   │       ├── UnderlineTabs.tsx       # 下划线标签页（无胶囊；下划线用 layoutId 迁移）
+│   │       ├── SegmentedControl.tsx    # 下划线式分段控件（不是胶囊，也不是 pill track）
 │   │       ├── ScrubReadout.tsx        # 通用「数值即控件」（拖动/滚轮/方向键/键入），延迟与音量共用
 │   │       ├── DelayReadout.tsx        # 延迟读数：签名毫秒 + 步进/范围，套 ScrubReadout
 │   │       ├── VolumeReadout.tsx       # 音量读数：百分比 0–100，套 ScrubReadout
-│   │       ├── StepButton.tsx          # 圆形 ± 按钮（仅设置页在用）
+│   │       ├── StepButton.tsx          # 方形 ± 按钮（h-6 w-6，仅设置页在用）
 │   │       ├── ConfirmButton.tsx       # 二次确认按钮（先「确认？」再执行；Escape/失焦/超时解除）
 │   │       └── DelayStepper.tsx        # 设置页的延迟行控件（−/数值/+ 方框样式）
 │   ├── hooks/              # 自定义 hooks
 │   │   ├── useTheme.ts
 │   │   ├── useLanguage.ts
 │   │   ├── useDelayValue.ts  # 延迟编辑状态（草稿/提交/步进），两个延迟控件共用
-│   │   ├── useBackendEvent.ts # 后端事件订阅（StrictMode 安全的 token 交接），三个事件共用
-│   │   ├── useDecorativeMotion.ts # 装饰性循环该不该跑（窗口可见 + 有焦点 + 未要求减少动效）
-│   │   └── useFitScale.ts  # 适配缩放（同心圆舞台）
+│   │   └── useBackendEvent.ts # 后端事件订阅（StrictMode 安全的 token 交接），三个事件共用
 │   ├── stores/             # 状态管理
 │   │   └── routerStore.ts  # Zustand store
 │   ├── i18n/               # 国际化
@@ -122,8 +122,8 @@ AppAudioRouter/
    - 类型/接口：`PascalCase`，**不**加 `I` 前缀
 6. **Tailwind**：优先 utility class，禁止自定义 CSS 类（除非通过 `@apply` 或 CSS variables）
 7. **动画**：统一使用 Motion 组件，禁止手写 `@keyframes`（除非 Motion 无法实现）。spring 与时长一律取 `lib/motion.ts` 的四条共享曲线——`SPRING_TAP`（微交互）/ `SPRING_GLIDE`（有位移的元素）/ `SPRING_ROUTE`（路由动作本身）/ `FADE`（纯透明度），**不要在调用点现调参数**：邻居之间弹得不一样看着像 bug，不像设计。`main.tsx` 的 `MotionConfig reducedMotion="user"` 已全局跟随系统「减少动态效果」，新增动画不必各自判断。
-8. **动效只用来报告状态**：常驻的循环动画要有含义（已生效的路由在流动、可路由时中心圆呼吸），纯装饰的无限循环会被砍掉——日志面板那颗心跳点就是因为一直在眼角闪而改成静止的。
-9. **没人看的时候循环要停**：剩下的装饰性循环（背景漂移光晕、80s 轨道环、设备脉冲环、已生效连线的流动虚线）统一由 `useDecorativeMotion()` 把关——窗口不可见、失去焦点、或系统要求减少动效时冻结成一帧静止状态，而不是继续重绘。一个后台窗口里的 backdrop-blur + 滤镜每帧重算，代价落在 WebView2 的 GPU 进程上，而任务管理器里那一条没人会算到这个程序头上。**动效层面的 `matchMedia` / `visibilitychange` 判断只此一处**，不要在组件里各写一份（`useTheme` 读 `prefers-color-scheme` 是配色的事，与此无关）。`reducedMotion="user"`（见上条）管的是入场与交互动画，这条管的是常驻循环，两者不重叠、都要留。
+8. **动效只用来报告状态**：动画要说明一件正在发生的事（视图切换、下划线迁移、胶囊浮出、路由已生效），纯装饰的无限循环一律不加——日志面板那颗心跳点就是因为一直在眼角闪而改成静止的。
+9. **目前没有任何常驻装饰循环**：2026-10-01 的编辑器式改版把这批循环（背景漂移光晕、80s 轨道环、设备脉冲环、已生效连线的流动虚线）连同 `useDecorativeMotion()` 一起删掉了——静止是这个界面应有的样子，不要为了"有生气"把它们加回来。若将来确实需要新增常驻循环，必须自己按可见性与焦点把关（窗口不可见、失去焦点、或系统要求减少动效时冻结成静止一帧，而不是继续重绘）：一个后台窗口里每帧重算的滤镜与重绘，代价落在 WebView2 的 GPU 进程上，而任务管理器里那一条没人会算到这个程序头上。`reducedMotion="user"`（见上条）管的是入场与交互动画，与常驻循环不重叠。
 10. **导入顺序**：React → 第三方 → 别名 → 相对路径，各组间空行
 
 ### Rust
@@ -176,22 +176,21 @@ AppAudioRouter/
   `duplication.rs` 以「组内延迟最小的设备」为基准，`target_frames()` = 基础 100ms `LATENCY_TARGET_MS` + (自身延迟 − 组内最小值)，
   所以相对差一定被精确还原、绝对值会被归一化到最早的那台（软件延迟只能加不能减）。组内最小值同时包含主设备的值（`primary_delay_ms`）。
 - 应用路由时前端按延迟从小到大排序（`orderByDelay`），让延迟最小的设备成为系统直连的主设备；设置页可调 ±1/2/5/10 秒范围与步进（默认 10 ms，`aar-delay-step`），缩小范围时前后端同时钳制越界值。
-- 延迟入口在**设备节点胶囊下方**（`DeviceAnnotation` 里的 `DelayReadout`，绝对定位，不参与胶囊布局）：
-  hairline 引线 + 签名数值 + 小号 `ms`，**没有任何 ± 按钮**，胶囊本身只写设备名。
+- 延迟入口是**设备表格的 Delay 列**（`DeviceTable` 的延迟单元格里放 `DelayReadout`；列宽常量 `COL_DELAY` 由表头与行共用，两者不许各写一份）：
+  签名数值 + 小号 `ms`，**没有任何 ± 按钮**，设备名只在同一行的名称单元格里写一次。
+  这一列整体随 `advancedMode` 显隐（默认关，见「专家信息总闸门」）。
   横向拖动按配置步进连续调节（4px 一步），滚轮 / 方向键步进（Shift 十倍），点击键入精确值。
   拖动期间只更新本地预览、松手一次性提交（一次手势只留一条日志）；步进与键入即时提交。
-  零值渲染为弱化色，非零或交互中才用 accent。标注显隐规则：**选中 或 延迟≠0**
-  （后者保证舞台不会隐藏一个已生效的偏移）。
-  **胶囊宽度恒定**——悬停/编辑都不改变任何宽度（历史上那套「胶囊内嵌步进器 + 悬停展开」的方案已废弃，不要再复活）。
-  不要在舞台底部再做常驻面板。`delaySync` 关闭时该读数变淡并提示「延迟同步已关闭」；
-  设置页仍保留逐设备列表（`DelayStepper`，−/数值/+），便于给未选中的设备预设延迟。
+  零值渲染为弱化色，非零或交互中才用 accent。
+  **单元格宽度恒定**——悬停/编辑都不改变任何宽度（历史上那套「胶囊内嵌步进器 + 悬停展开」的方案已废弃，不要再复活）。
+  不要在表格外面再做常驻面板。设置页仍保留逐设备列表（`DelayStepper`，−/数值/+），便于给未选中的设备预设延迟。
 - 音量按设备持久化到 `app_data_dir/device-volumes.json`（`config.rs`，设备 -> %）。值与延迟同构：**以组内最响的一台为基准**，
   `duplication.rs` 的 `group_max_volume()` 取组内（含主设备）最大值，镜像按 `own / max` 在 `pump_render` 写设备**之前**缩放采样的增益；
   软件增益只能衰减，所以最响的那台无法被压低，只能作为基准，其余设备向它对齐。0 表示静音，100 表示原样（不落盘）。
   采样格式在 `start()` 时从 `WAVEFORMATEX`(可能 extensible) 解析成 `SampleFormat`（float32/float64/PCM 16·24·32），
   认不出的格式**跳过增益**而不是乱改数据；增益为 1.0 时直接短路，常规情况不付任何代价。
   **不要**再回到「按 exe 压会话音量」那套（`ISimpleAudioVolume` / `set_session_volume` / session-volumes.json 已于 2026-09-19 整体移除）。
-  前端读数 `VolumeReadout` 挂在胶囊下方的标注行里（延迟右侧，1px 竖 hairline 分隔），同样套 `ScrubReadout`：
+  前端读数 `VolumeReadout` 是设备表格的 Volume 列（`COL_VOLUME`，同样只在 `advancedMode` 打开时存在），同为延迟右侧的独立单元格，套 `ScrubReadout`：
   0–100、固定步进 5%、3px 一步；tooltip 说明「相对同组最响的一台衰减」。进程列表里那个按程序的音量滑杆已随之删除。
 - **每源电平是对我们捕获到的音频做的软件增益，不是那个应用的音量**（`source-volumes.json`，**exe -> %**，0–400，100 为原样）。它与设备份额**相乘**施加在同一处（`pump_render` 里的 `apply_gain`），键按**可执行文件名**——与路由归属同一条规则：一个程序可以有好几个会话，电平属于程序。
   - 这是本模块**唯一允许 >1.0** 的增益。设备份额只能衰减，因为设备头上还有硬件音量可拧；而一个程序的音频头上没有东西，比邻居轻就得放大它。`SOURCE_VOLUME_MAX`（约 +12 dB）是上限，再往上噪声底会一起抬起来。
@@ -208,12 +207,12 @@ AppAudioRouter/
   - `mirror` = 引擎在驱动这台设备，值直接生效；
   - `primary` = 系统直连播放，软件既加不了延迟也压不了音量，它的值只作为整组的基准，所以提示里要写明"只影响对齐参考 / 只作为响度基准"；
   - `inactive` = 没有任何引擎路径涉及它（未路由，或是单设备路由——单设备根本不启动引擎），此时读数**变淡**并提示原因。
-  `ConcentricRouter` 从 `routedPids` 推导角色，**跳过长度 < 2 的路由**（单设备路由没有引擎），且 `mirror` 优先于 `primary`——一台设备同时是某条路由的镜像和另一条的基准时，它的值是在生效的。
+  `lib/engineRole.ts` 的 `engineRolesFor` 从 `routedPids` 推导角色，**跳过长度 < 2 的路由**（单设备路由没有引擎），且 `mirror` 优先于 `primary`——一台设备同时是某条路由的镜像和另一条的基准时，它的值是在生效的。表格的行角色（`DeviceTable` 的 `roleOf`）与它分工不同：角色列还要表达 `staged`（已选未应用）与 `idle`，所以那一份的输入是 `activeDeviceIds()` 而不是引擎角色本身。
   提示的优先级是"最具体的原因先赢"：同步关闭 > 未生效 > 主设备基准。**不要**给单设备路由也照常显示一个看起来很有效的数值：用户会以为调了有用。
 - **上报的延迟是软件侧的实测值**：`ActiveRoute.latency_ms`（与 `device_ids` 等长同序，主设备在前）给出每台设备**此刻实际在播**的软件侧延迟 = 该设备的管线深度（`target_frames`，含它自己的延迟补偿）+ 端点自报的 `GetStreamLatency`。前端存进 `deviceLatencyMs`（按设备 id），每个 `DeviceNode` 只订阅自己那一个，memo 不受影响。
   - **主设备是 `null`，不是 0**：它由 Windows 直接播放，没有我们自己的流可问；`duplication.rs` 里 `stream_latency_ms == 0` 一律读作「未测量」（初始化即 0，查询失败也是 0），所以别把它当「零延迟」用。
   - **硬件的部分不猜**：编解码 / A2DP 缓冲在用户态不可观测，文案必须写明这是软件侧、实际听到的更晚，不能暗示它是全部声学延迟。
-  - **role 与读数要交叉校验**：`deviceLatencyMs` 只在 `reconcileActiveDuplications` 里重建，而 `routedPids` 有多处会改，所以 `DeviceAnnotation` 只在 `engineRole === 'mirror'` 时才把值当数——否则停掉路由后会留下一个描述"已经不存在的流"的数字。
+  - **role 与读数要交叉校验**：`deviceLatencyMs` 只在 `reconcileActiveDuplications` 里重建，而 `routedPids` 有多处会改，所以延迟单元格只在 `engineRole === 'mirror'` 时才把值当数——否则停掉路由后会留下一个描述"已经不存在的流"的数字。
   - **新起引擎的路径都要跟一次 `reconcileActiveDuplications()`**（手改路由、撤销、开机恢复记忆路由），否则那台设备要等到 Core Audio 下次变动才有读数。每次操作一次，**不要**改成轮询或定时器。
   - **声学那一半测不到，也不要假装测得到**：硬件编解码 / A2DP 缓冲在用户态不可观测，唯一的办法是用麦克风录下各设备实际发出的声音再做互相关——那会引入**录音权限**，属于新能力，**没有明确同意之前不要加**。也不存在「数字侧偏斜可自动测」这条路：每路镜像都读同一份捕获字节、管线深度由我们给定，镜像之间的数字差**就是配置的延迟本身**，是已知量而不是待测量。所以延迟补偿永远是「软件侧精确 + 声学侧靠耳朵」，**实测延迟读数**的 tooltip（`deviceLatency.hint`）与设置页的说明都要写明，别让用户以为那个数就是全部声学延迟。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
@@ -306,12 +305,11 @@ AppAudioRouter/
 - `darkMode: 'class'` 策略
 - 主题切换通过 `document.documentElement.classList.toggle('dark')`
 - 持久化用户偏好到 `localStorage` + 跟随系统初始值
-- 色板为青色（cyan）信号色，不用靛紫/紫罗兰；改色时 `:root` / `.dark` 两份定义、`--accent-rgb` 镜像通道与 `--ambient-*` 环境光必须一起改
+- 色板为青色（cyan）信号色，不用靛紫/紫罗兰；改色时 `:root` / `.dark` 两份定义与 `--accent-rgb` 镜像通道必须一起改（`--bg-primary` / `--text-primary` 还在 `index.html` 里各有一份首帧内联副本，也要同步）
 
 ```css
 :root {
   --bg-primary: #fafafa;
-  --bg-secondary: #f3f3f5;
   --bg-tertiary: #e8e8ec;
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
@@ -319,14 +317,19 @@ AppAudioRouter/
   --accent: #0891b2;
   --accent-hover: #0e7490;
   --accent-muted: rgba(8, 145, 178, 0.12);
-  --accent-glow: rgba(8, 145, 178, 0.32);
-  --border: #e4e4e7;
+  --accent-ink: #ffffff;      /* 压在 accent 填充上的文字 */
   --success: #10b981;
   --error: #ef4444;
+  /* 编辑器式平面与分隔线 */
+  --surface: #ffffff;         /* 侧栏等实体平面 */
+  --surface-sunken: #fafafa;  /* 工作区背景（回落一层） */
+  --surface-raised: #ffffff;  /* 真正浮起来的东西：确认胶囊、弹窗 */
+  --surface-hover: rgba(24, 24, 27, 0.035);
+  --hairline: #e6e6ea;        /* 行与行、块与块之间的分隔 */
+  --hairline-strong: #d4d4da; /* 需要读成"边界"而非"分隔"的少数边缘 */
 }
 .dark {
   --bg-primary: #09090b;
-  --bg-secondary: #18181b;
   --bg-tertiary: #27272a;
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
@@ -334,51 +337,59 @@ AppAudioRouter/
   --accent: #22d3ee;
   --accent-hover: #06b6d4;
   --accent-muted: rgba(34, 211, 238, 0.14);
-  --accent-glow: rgba(34, 211, 238, 0.28);
-  --border: #27272a;
+  --accent-ink: #05222b;
   --success: #34d399;
   --error: #f87171;
+  --surface: #12151a;
+  --surface-sunken: #0e1114;
+  --surface-raised: #161c24;
+  --surface-hover: rgba(255, 255, 255, 0.035);
+  --hairline: #23272e;
+  --hairline-strong: #2e3742;
 }
 ```
 
 ---
 
-## 同心圆 UI 规范
+## 编辑器式 UI 规范（2026-10-01 改版，改动前必读）
 
-- 中心圆：当前选中进程，显示进程名 + 目标设备数（点击路由到选中的设备集合）；液态玻璃质感（accent 渐变 + 顶部高光 + 内圈描边），可路由时有呼吸光晕；`applying` 期间按钮禁用并降到 70% 不透明度 + `cursor-progress`（禁用了却毫无变化看着像坏了）
-- 中环：涟漪动画，路由操作时触发（单道柔波）；慢速旋转装饰环含轨道点（80s 一圈，是舞台上唯一的常驻装饰动效，窗口没人看时冻结——见「代码规范 · 动画」第 9 条）
-- 音频流连线：中心到每个选中设备的虚线曲线（统一顺时针弧度）。**虚线只在路由已生效时流动**——选中但未路由的连线是静止的，动的那条才代表音频真的在走；已生效的连线更亮更粗，下面垫一条同色的模糊 halo（`<filter>` 在 `<defs>` 里，只作用于这条静止的 halo）。不要给会动的虚线路径挂 `drop-shadow`：滤镜会跟着每一帧重算
-- 外环：设备列表（**多选**），每个设备为一个玻璃胶囊节点
-  - 第 1 个选中设备 = 主设备（实心 accent 徽标 "1"）
-  - 其余选中设备 = 复制目标（描边样式 + 序号徽标）
-  - 已在当前路由中的设备带 success 圆点 + 扩散脉冲光环
-  - 系统默认播放设备在节点右下角带一个 muted 小圆点（title 提示）
-  - 延迟与音量**挂在胶囊下方**（`DeviceAnnotation` 里排一行，绝对定位）：hairline 引线 + 读数（`+180 ms  │  60 %  │  112 ms`）——
-    胶囊本身只写设备名，一个设备仍然是一个对象，不要另起气泡/面板。前两者是**数值即控件**（`ScrubReadout`）：拖动/滚轮/方向键/键入，没有 ± 按钮；
-    末尾那个实测延迟**是读数不是控件**——没有指针处理、没有悬停下划线、**不用 accent 色**（这个舞台上 accent 意味着"你可以操作它"），否则用户会去拖它。
-  - **长度自适应，但只有一个上限**：胶囊宽度由内容决定，设备名 `min-w-0 truncate` 占它需要的宽度；
-    上限是推导值而不是像素预算：`MAX_NODE_WIDTH = 2 × (CENTER − ORBIT_RADIUS)`（=132px，轨道水平极端的节点到舞台边缘的余量），
-    以 inline style `style={{ maxWidth: MAX_NODE_WIDTH }}` 下发。这个额度**只属于设备名**（标注在胶囊外，不参与）。
-    **悬停/编辑不改变任何宽度**——这是「延迟占满了」事故之后定下的铁律：不要复活任何「悬停让胶囊变宽」的设计。
-    **不要再给名字设 `max-w-[42px]` 这类像素预算**——会得到忽长忽短的胶囊。
-  - 标注行绝对定位在 `top-full` 居中处，宽度随数值自然变化也**不会推动任何东西**；
-    每个读数各自的悬停反馈是一根 `absolute` hairline 下划线（`group/scrub`），不占宽度。两个读数之间的分隔用 1px 竖 hairline。
-  - 标注显隐：**选中 或 该读数非中性**（延迟≠0 / 音量<100）——已生效的偏移绝不能被藏起来，没动的设备也不该无谓地占视觉。
-    读数另按 `EngineRole` 变淡并在 tooltip 里说明"当前未生效"的原因（单设备路由没有引擎、主设备只作基准），见「状态管理」。
-    实测延迟的显隐取自己那条规则：**选中 或 该设备是 `mirror` 且拿得到值**；选中但测不到时给一根变淡的 `— ms`，tooltip 说明是哪一种「测不到」——**三种，不能混**：主设备由系统直连（`primary`）、是镜像但端点还没报读数（mirror + 无值 → `unmeasured`）、根本没有引擎路径（`inactive`）。把第三种的话说给第二种听就是**反话**（"没有引擎在复制这台设备"），**不要**把测不到画成 0。
-  - 点击名称按钮选中设备后要 `blur()`（仅指针点击，`e.detail > 0`）：否则按钮保持焦点，下一个 Space 会静默取消刚做的选择。
-    键盘激活（`detail === 0`）必须保留焦点。
-- **误操作防护：撤销优先于确认。** 这个舞台的手感就是「点一下就路由」，所以**不要**给路由加路由前确认——那会毁掉它。撤销是一个瞬态 Toast（`components/Toast.tsx`，挂在 `App.tsx`，`role="status"`、`pointer-events-none` 的外层里只有卡片可点、悬停或聚焦时暂停计时、退场时把 `pointerEvents` 设为 `none` 以免吃掉下一次点击）。
-  确认只留给**破坏性且影响全局**的动作：`components/ui/ConfirmButton.tsx`（先「确认？」再执行，Escape / 失焦 / 5 秒超时解除，Escape 要 `stopPropagation`），目前只有列表头的「停止全部」和设置页里同一个动作在用。
-- 进程列表：已路由进程显示设备数徽标 + 停止路由按钮（✕）；选中高亮为跨条目滑动的共享胶囊（layoutId）；未选中的行悬停才有 `bg-bg-tertiary/40` 浅底——已选中的行不加，免得盖住那颗胶囊；每行第二行是 `PID xxx · 当前播放设备`（同一行内，不要再单开一行显示设备）
+界面语言是**编辑器式（VSCode / Linear 一脉）**：扁平平面 + hairline 分隔 + 下划线标签 + 等宽技术值。
+上一版是「液态玻璃 + 同心圆舞台 + 胶囊节点」，那套（`ConcentricRouter` / `DeviceAnnotation` /
+`OutputStatusBar` / `useFitScale` / `useDecorativeMotion` / `--glass-*`）已整体删除，**不要复活**。
+
+- **布局**：`TitleBar`（36px，`bg-surface` + 下边框）→ 一行两栏：左 `aside` 300px 应用列表（`border-r border-line`）
+  ＋ `main` 工作区（`bg-surface-sunken`，内含标签页 + 当前页）。设置页覆盖整个工作区，自己是一列设置（`max-w-2xl` 居中）。
+- **标签页**：`UnderlineTabs`（`role="tablist"`/`tab`），「Routing / Activity」。活动记录是**标签页**而不是折叠条：
+  折叠条会被每次从设置页返回时重新展开，而专家信息本该是 opt-in 的。
+- **路由树**（`RouteFlow`）：源节点（exe 名 + PID + "Playing"，多选时显示数量）→ 肘形连线（`Connector`，`SPRING_INSET`/`SPINE_STUB` 固定，
+  首尾各收一半，让两个设备读起来是一条分支）→ 目标设备节点（名称 + 角色 + `System default` 标签）。
+  它画的就是确认胶囊问的那句话：**"这个程序，那些设备"**。⚠️ **顶部不要再放第二条状态条**——同一件事说两遍会让人以为有两套状态（`OutputStatusBar` 就是这样被删掉的）。
+- **设备表格**（`DeviceTable`）：列 = 设备 / 角色 /（`advancedMode`）延迟 / 音量。列宽是表头与行**共用**的常量（`COL_ROLE`/`COL_DELAY`/`COL_VOLUME`），不许各写一份。
+  表头行 `h-8` + mono 大写小字；行 `min-h-11` + `border-b border-line`，最后一行去掉边框；行悬停 `bg-surface-hover`。
+  **可点的只有名称单元格**（`aria-pressed`）：延迟与音量是它**旁边**的独立控件，控件不能嵌在控件里（键盘够不到）。
+  角色列：`primary` / `mirror` / `pending`（已选未应用）/ `idle` → `—`（不标注，因为大多数设备大多数时候都是空的）。
+- **专家信息总闸门（`advancedMode`，`aar-advanced-mode`，默认关）**：它现在只管一件事——设备表格的延迟列与音量列。
+  活动记录**不再**受它控制：日志是标签页，本身就是 opt-in 的。开关的副标题文案必须跟这个事实一致（别写成"显示完整日志"，那是改版前的事）。
+- **悬浮确认胶囊**（`RouteConfirmCapsule`）：底部一个满宽 `pointer-events-none` 的绝对定位层 + `justify-center`，只有胶囊本身可点，所以它浮着**不占布局、不推动任何东西**。
+  内容：`源 → 目标 (+n)` ＋ 一条竖 hairline ＋ 两个并列按钮（取消 / 路由）。**不用**「按一下变成另一种按钮」的做法：两个答案并排，问题才看得见。
+  - `alreadyApplied()`：staged 跟正在播放的一模一样时不问——刚路由完、或重新选中一个已路由的程序，都属于"你在看着答案，不该再问你一遍"。
+  - 取消 = 逐项 `toggleDeviceSelection`，每次都读**实时** state（不是渲染时的快照，否则前一次调用就把它作废了）。
+  - ⚠️ **Escape 监听是捕获阶段的，且只在胶囊真的在屏时才注册**（`question !== null`）：捕获阶段是为了抢在背后那个控件之前吃掉这个键，
+    也正因如此，**常驻注册会把整个窗口的 Escape 都吞掉**——搜索框按 Esc 清空、设置页按 Esc 返回全部失效。
+    这个 bug 真的出现过（2026-10-01 由 e2e 抓出），把它当规矩记住：**捕获阶段的全局监听必须跟着可见性注册与注销**。
+- **左栏选中态**：2px 左侧条（`SelectionMark`，`bg-accent`），不是跨行滑动的共享胶囊；行与行之间是 hairline，不是圆角卡片。
+- **左栏（`ProcessList`）**：已路由进程显示设备数徽标 + 停止路由按钮（✕）；每行第二行是 `PID xxx · 当前播放设备`（同一行内，不要再单开一行显示设备）。
   - 列表顶部有搜索框：`query` 是**组件本地 `useState`**，不进 store（它是视图状态，不是应用状态）；按 `exe_name` 过滤（`display_name` 已被后端移除，别再引用），`Escape` 清空并失焦。
   - 已路由的进程**排到最前**：按 `routedPids` 长度做**稳定**排序，让组内保持枚举顺序——否则行会在每次刷新时互相换位，鼠标底下的目标就跑了。
   - 无匹配时显示 `processList.noMatch`，**不要**复用 `processList.empty`：「没有进程在放音」和「你的搜索词没匹配上」是两件事，后者提示"让程序发声"是答非所问。
-- 舞台底部不放常驻面板：延迟在设备节点上改，其余设置都在设置页
-- 激活状态：`scale(1.05)` + `box-shadow` 扩散
-- 路由动画：`SPRING_ROUTE`（spring stiffness=300, damping=20），中心圆的悬停/按下走这条；其余动效一律取 `lib/motion.ts` 的共享曲线（见「代码规范 · 动画」）
-- 视觉体系：液态玻璃（`--glass-*` tokens + backdrop-blur + shadow-glass），body 环境渐变 + App 内漂移光晕为玻璃提供"折射"色彩；所有微动效统一走 Motion，不手写 @keyframes
-- 漂移光晕、脉冲环、流动虚线、轨道环这几处循环全部由 `useDecorativeMotion()` 把关（见「代码规范 · 动画」第 9 条）：窗口不可见或失焦时**冻结成静止一帧**。冻结时光晕**保留颜色**只停位移——玻璃面板的"折射"观感靠的就是那点色，停掉动画不该让整块背景变灰
+- **撤销优先于确认**：路由不加确认（点一下就路由是这个应用的手感），撤销是那个瞬态 Toast（`role="status"`，唯一的撤销入口）。
+  `ConfirmButton`（先「确认？」再执行，Escape / 失焦 / 5 秒超时解除）只留给**破坏性且影响全局**的动作：左栏表头的「全部回到系统默认」、
+  设备列表表头的「回到系统默认」（作用域 = 选中的已路由程序；没有选中时 = 全部已路由程序，因为那是唯一能走出"看不见的路由"的出口）。
+- **accent 只表示"你可以操作它"**：读数、说明、版本号一律 muted；实测延迟是**读数不是控件**，所以它连 accent 都不穿（否则用户会去拖它）。
+  数字与标识符（PID、毫秒、百分比、版本号、exe 名）用 `font-mono` + `tabular-nums`：等宽是这类界面里"这是数据"的记号。
+- **禁止**：胶囊/药丸状按钮与标签页、boxy card、`rounded-2xl` 大圆角卡片、玻璃与 `backdrop-blur`、
+  常驻装饰循环（背景漂移光晕、轨道环、脉冲环、流动虚线）。圆角只用在控件上（`rounded`，约 4px），平面本身不圆角。
+- **动效**：下划线迁移与胶囊浮出用 `SPRING_GLIDE`，纯透明度用 `FADE`，微交互用 `SPRING_TAP`（全部取自 `lib/motion.ts`，不在调用点现调参数）。
 
 ---
 
@@ -459,9 +470,9 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 每源电平：路由两个程序到同一组设备，把其中一个调到 <100 或 >100，只有它的响度变；100 时该 exe 不落盘（`source-volumes.json` 里查不到）
 - [ ] 一键对齐：两个程序同时放音，点「对齐电平」后两条响度接近，且**没在放音的程序原样不动并在日志里被点名**；只有一个程序在放音时提示说的是「只有一个」而不是「没有在放音」
 - [ ] 撤销：改路由后撤销回到上一步；撤销一个原本未路由的进程 = 回到未路由；开了自动记忆时，**撤销之后重启该程序不会把撤掉的路由装回来**；手动停掉某条路由后 Toast 不再提供撤销
-- [ ] 误操作防护：列表头的「停止全部」需二次确认（Escape / 失焦 / 超时解除）；Toast 退场时不吃掉紧接着的点击
-- [ ] 窗口失焦或最小化后舞台上的循环动效停住（GPU 占用回落），窗口恢复后又动起来
+- [ ] 误操作防护：列表头的「全部回到系统默认」与设备表表头的同一个动作都需二次确认（Escape / 失焦 / 超时解除）；Toast 退场时不吃掉紧接着的点击
+- [ ] 确认胶囊只在有内容可确认时出现；`Escape` 关掉它，且**搜索框里的 `Escape` 仍然能清空搜索**（胶囊不在屏时不许吃掉这个键）
 - [ ] Light/Dark 切换流畅
-- [ ] 同心圆动画流畅（60fps）
+- [ ] 切页与下划线迁移流畅（60fps），界面静止时不产生任何常驻重绘
 - [ ] `pnpm tauri build` 产物可安装运行
 - [ ] 无第三方 exe 依赖
