@@ -110,7 +110,7 @@ export function TitleBar({
       aria-label={t('productName')}
       data-tauri-drag-region
       style={{ height: BAR_HEIGHT }}
-      className="relative z-20 flex flex-none select-none items-stretch justify-between border-b border-line bg-surface"
+      className="relative z-20 flex flex-none select-none items-stretch justify-between border-b border-line bg-surface-sunken"
     >
       {/* Brand. `pointer-events-none` keeps the whole area draggable instead of
           swallowing the press on the text. */}

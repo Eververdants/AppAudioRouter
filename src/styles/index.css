@@ -19,13 +19,18 @@
   --error: #ef4444;
 
   /* Editor surfaces. The main screen is built out of flat planes separated by
-     1px hairlines rather than floating cards: a sidebar plane, the work area
-     behind it, and one raised plane for things that genuinely float (the
-     route-confirm capsule). `--hairline` is the divider between rows and
-     sections; `--hairline-strong` is for the few edges that must read as a
-     border rather than a separator. */
+     1px hairlines rather than floating glass cards. The window chrome and the
+     sidebar share the sunken plane and the work area is the raised one, so the
+     content sits on the lighter paper and the navigation sits behind it — the
+     way an editor arranges a file list and the file it opened. `--surface-hover`
+     is the wash under the pointer; `--hairline` divides rows and sections, and
+     `--hairline-strong` closes a group that has to read as one object. */
   --surface: #ffffff;
-  --surface-sunken: #fafafa;
+  /* Thirteen steps below the work area, not five. At #f7f7f8 the two planes were
+     within rounding distance of each other and the split did not read at all:
+     a sidebar that is the same white as the pane beside it stops looking like a
+     sidebar and starts looking like an unpainted part of the page. */
+  --surface-sunken: #f2f3f5;
   --surface-raised: #ffffff;
   --surface-hover: rgba(24, 24, 27, 0.035);
   --hairline: #e6e6ea;
