@@ -115,7 +115,16 @@
     "processCount": "{{n}} 个程序",
     "defaultDevice": "系统默认播放设备",
     "defaultLabel": "系统默认",
-    "guide": "选择程序，点选设备，中间确认输出",
+    "guide": "选择程序，点选设备，确认输出",
+    "currentRoute": "当前路由",
+    "playing": "正在播放",
+    "noProcess": "选择一个程序",
+    "pending": "待确认",
+    "rolePrimary": "主设备",
+    "roleMirror": "复制",
+    "confirmAction": "确认路由",
+    "cancel": "取消",
+    "cancelHint": "取消（Esc）",
     "confirmOne": "输出到 {{device}}",
     "confirmMulti": "同时输出到 {{n}} 台设备",
     "confirmMultiProcess": "输出 {{n}} 个程序到 {{device}}",
@@ -135,6 +144,15 @@
     "title": "活动记录",
     "expand": "展开活动记录",
     "collapse": "收起活动记录"
+  },
+  "deviceTable": {
+    "title": "输出设备",
+    "device": "设备",
+    "role": "角色",
+    "delay": "延迟",
+    "volume": "音量",
+    "selectedHint": "已选 {{n}} 个应用 · 点击设备输出",
+    "selectHint": "先在左侧选择程序"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",

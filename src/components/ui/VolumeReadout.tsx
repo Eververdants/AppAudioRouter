@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { ScrubReadout } from '@/components/ui/ScrubReadout';
-import type { EngineRole } from '@/components/DeviceAnnotation';
+import type { EngineRole } from '@/lib/engineRole';
 import { useRouterStore } from '@/stores/routerStore';
 
 /** Travel worth one step: 20 steps of 5 % across roughly 60 px. */
@@ -9,7 +9,7 @@ const PX_PER_STEP = 3;
 const VOLUME_STEP = 5;
 
 /**
- * One device's volume, annotated under its node capsule next to its delay.
+ * One device's volume, in the table's volume cell next to its delay.
  *
  * The value is a share of the group's loudest device rather than an absolute
  * level: the engine scales each mirror by `own / loudest`, so 100 % means "as

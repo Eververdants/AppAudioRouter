@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import { ScrubReadout } from '@/components/ui/ScrubReadout';
 import { formatDelaySigned, formatStep } from '@/lib/delay';
-import type { EngineRole } from '@/components/DeviceAnnotation';
+import type { EngineRole } from '@/lib/engineRole';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
- * One device's delay compensation, annotated under its node capsule.
+ * One device's delay compensation, in the table's delay cell.
  *
  * The number is the control (see `ScrubReadout`); this wrapper only supplies
  * what a delay means: a signed value inside the configured range, stepped by

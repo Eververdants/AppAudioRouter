@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { ConcentricRouter } from '@/components/ConcentricRouter';
+import { DeviceTable } from '@/components/DeviceTable';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
-import { OutputStatusBar } from '@/components/OutputStatusBar';
+import { RouteConfirmCapsule } from '@/components/RouteConfirmCapsule';
+import { RouteFlow } from '@/components/RouteFlow';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
@@ -276,14 +277,14 @@ export default function App() {
               <ProcessList />
             </motion.aside>
 
-            {/* Center column: the standing answer to "where is the sound" on
-                top, the concentric router on its glass stage in the middle,
-                and what the app did folded into a strip underneath. The stage
-                keeps the flexible share; the other two take what they need. */}
+            {/* Center column: the route drawn as a tree on top, the devices it
+                can go to underneath, and the question about them floating over
+                the bottom while anything is staged. */}
             <motion.main {...panelEnter} className="flex min-w-0 flex-1 flex-col gap-3">
-              <OutputStatusBar />
-              <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-glass bg-glass p-3 shadow-glass backdrop-blur-xl">
-                <ConcentricRouter />
+              <div className="relative flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+                <RouteFlow />
+                <DeviceTable />
+                <RouteConfirmCapsule />
               </div>
               <LogPanel />
             </motion.main>

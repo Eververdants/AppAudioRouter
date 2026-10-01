@@ -115,7 +115,16 @@
     "processCount": "{{n}} apps",
     "defaultDevice": "System default playback device",
     "defaultLabel": "System default",
-    "guide": "Select an app, pick a device, confirm at the center",
+    "guide": "Select an app, pick a device, then route it",
+    "currentRoute": "Current route",
+    "playing": "Playing",
+    "noProcess": "No app selected",
+    "pending": "Pending",
+    "rolePrimary": "Primary",
+    "roleMirror": "Mirror",
+    "confirmAction": "Route it",
+    "cancel": "Cancel",
+    "cancelHint": "Cancel (Esc)",
     "confirmOne": "Output to {{device}}",
     "confirmMulti": "Output to {{n}} devices at once",
     "confirmMultiProcess": "Output {{n}} apps to {{device}}",
@@ -135,6 +144,15 @@
     "title": "Activity",
     "expand": "Expand activity",
     "collapse": "Collapse activity"
+  },
+  "deviceTable": {
+    "title": "Output devices",
+    "device": "Device",
+    "role": "Role",
+    "delay": "Delay",
+    "volume": "Volume",
+    "selectedHint": "{{n}} selected · click a device to route",
+    "selectHint": "Select an app first"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",
