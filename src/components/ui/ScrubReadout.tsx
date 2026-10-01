@@ -79,6 +79,10 @@ export function ScrubReadout({
   const steppedRef = useRef<number | null>(null);
   const stepTimer = useRef<number | null>(null);
 
+  // A non-positive step would divide by zero below and hand `onCommit` a NaN;
+  // every caller passes a clamped positive one, this just makes sure of it.
+  const safeStep = step > 0 ? step : 1;
+
   const clamp = (raw: number) => Math.max(min, Math.min(max, Math.round(raw)));
   const shown = scrub ?? stepped ?? value;
 
@@ -124,8 +128,8 @@ export function ScrubReadout({
     const base = Number.isFinite(typed) ? typed : (steppedRef.current ?? value);
     setDraft(null);
     // Snap first, so a value left behind by a coarser step lands on the grid.
-    const snapped = Math.round(base / step) * step;
-    rememberStep(clamp(snapped + direction * step * times));
+    const snapped = Math.round(base / safeStep) * safeStep;
+    rememberStep(clamp(snapped + direction * safeStep * times));
     if (stepTimer.current !== null) window.clearTimeout(stepTimer.current);
     stepTimer.current = window.setTimeout(() => {
       stepTimer.current = null;
@@ -199,7 +203,7 @@ export function ScrubReadout({
         const dx = e.clientX - state.x;
         if (!state.moved && Math.abs(dx) < DRAG_SLOP_PX) return;
         state.moved = true;
-        setScrub(clamp(state.from + Math.trunc(dx / pxPerStep) * step));
+        setScrub(clamp(state.from + Math.trunc(dx / pxPerStep) * safeStep));
       }}
       onPointerUp={() => endDrag(true)}
       onPointerCancel={() => endDrag(false)}

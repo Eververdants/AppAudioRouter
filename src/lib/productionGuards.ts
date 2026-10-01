@@ -11,13 +11,16 @@
 const EDITING_KEYS = new Set(['a', 'c', 'v', 'x', 'y', 'z']);
 
 /** Returns true when `target` is an editable control. */
-function isEditableTarget(target: EventTarget | null): boolean {
+export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
+  // `isContentEditable` is coerced: it is not implemented everywhere the app
+  // can be loaded (a jsdom test, an older webview), and a falsy `undefined`
+  // here would make the guard below undecidable rather than simply false.
   return (
     target.tagName === 'INPUT' ||
     target.tagName === 'TEXTAREA' ||
     target.tagName === 'SELECT' ||
-    target.isContentEditable
+    Boolean(target.isContentEditable)
   );
 }
 
@@ -27,7 +30,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
  * exemption explicit prevents a future browser-shortcut guard from eating
  * copy/paste/select-all/undo in editable controls.
  */
-function isEditingShortcut(event: KeyboardEvent): boolean {
+export function isEditingShortcut(event: KeyboardEvent): boolean {
   if (!isEditableTarget(event.target)) return false;
 
   const key = event.key.toLowerCase();
@@ -42,7 +45,7 @@ function isEditingShortcut(event: KeyboardEvent): boolean {
 }
 
 /** Returns true when the event is a browser DevTools or DOM-inspector shortcut. */
-function isInspectorShortcut(event: KeyboardEvent): boolean {
+export function isInspectorShortcut(event: KeyboardEvent): boolean {
   const key = event.key.toLowerCase();
   const code = event.code;
 

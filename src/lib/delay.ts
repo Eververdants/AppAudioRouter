@@ -42,8 +42,12 @@ export function readDelayStep(): number {
 
 /** Clamp a delay to the configured ± range, rounded to whole milliseconds. */
 export function clampDelay(ms: number, rangeMs: number): number {
+  // A range that is not a finite number (a malformed read, a NaN on the way
+  // in) would clamp to NaN, which would then be written back and displayed.
+  // The store's pre-backend default is the sanest bound to fall back to.
+  const range = Number.isFinite(rangeMs) ? rangeMs : DEFAULT_DELAY_RANGE_MS;
   const rounded = Math.round(Number.isFinite(ms) ? ms : 0);
-  return Math.max(-rangeMs, Math.min(rangeMs, rounded));
+  return Math.max(-range, Math.min(range, rounded));
 }
 
 /**
