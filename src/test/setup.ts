@@ -27,7 +27,7 @@ function stubMatchMedia(): void {
     }) as MediaQueryList;
 }
 
-/** jsdom has no layout engine, so `useFitScale` has nothing to observe. */
+/** jsdom has no layout engine, so anything observing element sizes needs this. */
 function stubResizeObserver(): void {
   if (typeof globalThis.ResizeObserver === 'function') return;
   globalThis.ResizeObserver = class {

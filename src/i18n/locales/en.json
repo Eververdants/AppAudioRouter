@@ -108,10 +108,6 @@
     "quit": "Quit"
   },
   "router": {
-    "selectDevice": "Pick a device",
-    "clickToRoute": "Output to {{device}}",
-    "clickToRouteMulti": "Output to {{n}} devices",
-    "routedActive": "Outputting to {{n}} devices",
     "processCount": "{{n}} apps",
     "defaultDevice": "System default playback device",
     "defaultLabel": "System default",
@@ -124,19 +120,9 @@
     "roleMirror": "Mirror",
     "confirmAction": "Route it",
     "cancel": "Cancel",
-    "cancelHint": "Cancel (Esc)",
-    "confirmOne": "Output to {{device}}",
-    "confirmMulti": "Output to {{n}} devices at once",
-    "confirmMultiProcess": "Output {{n}} apps to {{device}}",
-    "confirmHint": "Click again to confirm"
+    "cancelHint": "Cancel (Esc)"
   },
   "statusBar": {
-    "idleDefault": "System default · {{device}}",
-    "following": "{{process}} → {{device}} (follows system)",
-    "playing": "{{process}} → {{device}}",
-    "playingMore": "{{process}} → {{device}} +{{m}}",
-    "someRouted": "{{n}} app(s) on a non-default device",
-    "selectedMulti": "{{n}} apps selected",
     "backToDefault": "Back to system default",
     "backToDefaultConfirm": "Click again to confirm"
   },

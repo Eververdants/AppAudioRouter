@@ -108,10 +108,6 @@
     "quit": "退出"
   },
   "router": {
-    "selectDevice": "选择设备",
-    "clickToRoute": "输出到 {{device}}",
-    "clickToRouteMulti": "输出到 {{n}} 台设备",
-    "routedActive": "正在输出到 {{n}} 台设备",
     "processCount": "{{n}} 个程序",
     "defaultDevice": "系统默认播放设备",
     "defaultLabel": "系统默认",
@@ -124,19 +120,9 @@
     "roleMirror": "复制",
     "confirmAction": "确认路由",
     "cancel": "取消",
-    "cancelHint": "取消（Esc）",
-    "confirmOne": "输出到 {{device}}",
-    "confirmMulti": "同时输出到 {{n}} 台设备",
-    "confirmMultiProcess": "输出 {{n}} 个程序到 {{device}}",
-    "confirmHint": "再次点击确认"
+    "cancelHint": "取消（Esc）"
   },
   "statusBar": {
-    "idleDefault": "系统默认 · {{device}}",
-    "following": "{{process}} → {{device}}（跟随系统）",
-    "playing": "{{process}} → {{device}}",
-    "playingMore": "{{process}} → {{device}} +{{m}}",
-    "someRouted": "{{n}} 个程序输出到非默认设备",
-    "selectedMulti": "已选 {{n}} 个程序",
     "backToDefault": "回到系统默认",
     "backToDefaultConfirm": "再点一次确认"
   },
