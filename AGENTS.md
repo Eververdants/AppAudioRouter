@@ -55,8 +55,7 @@ AppAudioRouter/
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/         # UI 组件
-│   │   ├── RouteFlow.tsx         # 路由树：源节点 + 肘形连线 + 目标设备节点（画的是用户在确认胶囊里回答的那个问题）
-│   │   ├── DeviceTable.tsx       # 设备表格：设备 / 角色 /（高级）延迟 / 音量 四列 + 表头里的「回到系统默认」
+│   │   ├── DeviceTable.tsx       # 设备表格，也是路由唯一被表达的地方：路由行按路由顺序置顶、末尾用更强的一条线收束成组；列 = 设备 / 角色 /（高级）延迟 / 音量，表头右侧是「回到系统默认」
 │   │   ├── RouteConfirmCapsule.tsx # 悬浮确认胶囊：源 → 目标 + 取消/路由，浮在工作区底部，不占布局
 │   │   ├── Toast.tsx             # 瞬态提示：路由后提供「撤销」（全项目唯一的撤销入口）
 │   │   ├── ProcessList.tsx
@@ -209,12 +208,12 @@ AppAudioRouter/
   - `inactive` = 没有任何引擎路径涉及它（未路由，或是单设备路由——单设备根本不启动引擎），此时读数**变淡**并提示原因。
   `lib/engineRole.ts` 的 `engineRolesFor` 从 `routedPids` 推导角色，**跳过长度 < 2 的路由**（单设备路由没有引擎），且 `mirror` 优先于 `primary`——一台设备同时是某条路由的镜像和另一条的基准时，它的值是在生效的。表格的行角色（`DeviceTable` 的 `roleOf`）与它分工不同：角色列还要表达 `staged`（已选未应用）与 `idle`，所以那一份的输入是 `activeDeviceIds()` 而不是引擎角色本身。
   提示的优先级是"最具体的原因先赢"：同步关闭 > 未生效 > 主设备基准。**不要**给单设备路由也照常显示一个看起来很有效的数值：用户会以为调了有用。
-- **上报的延迟是软件侧的实测值**：`ActiveRoute.latency_ms`（与 `device_ids` 等长同序，主设备在前）给出每台设备**此刻实际在播**的软件侧延迟 = 该设备的管线深度（`target_frames`，含它自己的延迟补偿）+ 端点自报的 `GetStreamLatency`。前端存进 `deviceLatencyMs`（按设备 id），每个 `DeviceNode` 只订阅自己那一个，memo 不受影响。
+- **上报的延迟是软件侧的实测值**：`ActiveRoute.latency_ms`（与 `device_ids` 等长同序，主设备在前）给出每台设备**此刻实际在播**的软件侧延迟 = 该设备的管线深度（`target_frames`，含它自己的延迟补偿）+ 端点自报的 `GetStreamLatency`。前端存进 `deviceLatencyMs`（按设备 id），只有设备表格里延迟那一格用它，而且只作为 `DelayReadout` 的 tooltip 文案。
   - **主设备是 `null`，不是 0**：它由 Windows 直接播放，没有我们自己的流可问；`duplication.rs` 里 `stream_latency_ms == 0` 一律读作「未测量」（初始化即 0，查询失败也是 0），所以别把它当「零延迟」用。
   - **硬件的部分不猜**：编解码 / A2DP 缓冲在用户态不可观测，文案必须写明这是软件侧、实际听到的更晚，不能暗示它是全部声学延迟。
   - **role 与读数要交叉校验**：`deviceLatencyMs` 只在 `reconcileActiveDuplications` 里重建，而 `routedPids` 有多处会改，所以延迟单元格只在 `engineRole === 'mirror'` 时才把值当数——否则停掉路由后会留下一个描述"已经不存在的流"的数字。
   - **新起引擎的路径都要跟一次 `reconcileActiveDuplications()`**（手改路由、撤销、开机恢复记忆路由），否则那台设备要等到 Core Audio 下次变动才有读数。每次操作一次，**不要**改成轮询或定时器。
-  - **声学那一半测不到，也不要假装测得到**：硬件编解码 / A2DP 缓冲在用户态不可观测，唯一的办法是用麦克风录下各设备实际发出的声音再做互相关——那会引入**录音权限**，属于新能力，**没有明确同意之前不要加**。也不存在「数字侧偏斜可自动测」这条路：每路镜像都读同一份捕获字节、管线深度由我们给定，镜像之间的数字差**就是配置的延迟本身**，是已知量而不是待测量。所以延迟补偿永远是「软件侧精确 + 声学侧靠耳朵」，**实测延迟读数**的 tooltip（`deviceLatency.hint`）与设置页的说明都要写明，别让用户以为那个数就是全部声学延迟。
+  - **声学那一半测不到，也不要假装测得到**：硬件编解码 / A2DP 缓冲在用户态不可观测，唯一的办法是用麦克风录下各设备实际发出的声音再做互相关——那会引入**录音权限**，属于新能力，**没有明确同意之前不要加**。也不存在「数字侧偏斜可自动测」这条路：每路镜像都读同一份捕获字节、管线深度由我们给定，镜像之间的数字差**就是配置的延迟本身**，是已知量而不是待测量。所以延迟补偿永远是「软件侧精确 + 声学侧靠耳朵」，**实测延迟读数**的 tooltip（`deviceLatency.reading`）与设置页的说明都要写明，别让用户以为那个数就是全部声学延迟。
 - 复制引擎通过后端事件 `duplication-stopped`（pid / reason / error）向前端同步状态
 - **单个镜像失败走自己的事件，不并进 `duplication-stopped`**：`duplication.rs` 的 `fail_mirror()` 发 `duplication-mirror-failed`（pid / generation / deviceId / error），引擎继续为其余设备播放。前端 `handleMirrorFailed` 用与引擎级事件**同一套 generation 守卫**（过期的镜像不得改动已经被替换掉的路由），再把该设备从 `routedPids[pid]` 里摘掉并写一条 error 日志点名它。
   修的是这个观感问题：以前只 `warn!` 到 release 会丢弃的 stderr，界面上整条路由看起来完整生效，但有一台设备根本没声音——和"程序坏了"没法区分。**不要把它并回 `duplication-stopped`**：那条会拆掉整个引擎，而这里其余设备还在正常出声。
@@ -320,9 +319,10 @@ AppAudioRouter/
   --accent-ink: #ffffff;      /* 压在 accent 填充上的文字 */
   --success: #10b981;
   --error: #ef4444;
-  /* 编辑器式平面与分隔线 */
-  --surface: #ffffff;         /* 侧栏等实体平面 */
-  --surface-sunken: #fafafa;  /* 工作区背景（回落一层） */
+  /* 编辑器式平面与分隔线。窗口 chrome 与侧栏同在 sunken 面，工作区是抬起来的那个面；
+     只有真正浮在内容之上的东西（确认胶囊、弹窗）用 raised。 */
+  --surface: #ffffff;         /* 工作区：内容所在的那张纸 */
+  --surface-sunken: #f2f3f5;  /* 窗口 chrome + 侧栏：导航在内容后面 */
   --surface-raised: #ffffff;  /* 真正浮起来的东西：确认胶囊、弹窗 */
   --surface-hover: rgba(24, 24, 27, 0.035);
   --hairline: #e6e6ea;        /* 行与行、块与块之间的分隔 */
@@ -340,9 +340,9 @@ AppAudioRouter/
   --accent-ink: #05222b;
   --success: #34d399;
   --error: #f87171;
-  --surface: #12151a;
-  --surface-sunken: #0e1114;
-  --surface-raised: #161c24;
+  --surface: #12151a;         /* 工作区 */
+  --surface-sunken: #0e1114;  /* 窗口 chrome + 侧栏 */
+  --surface-raised: #161c24;  /* 浮起来的东西 */
   --surface-hover: rgba(255, 255, 255, 0.035);
   --hairline: #23272e;
   --hairline-strong: #2e3742;
@@ -356,18 +356,33 @@ AppAudioRouter/
 界面语言是**编辑器式（VSCode / Linear 一脉）**：扁平平面 + hairline 分隔 + 下划线标签 + 等宽技术值。
 上一版是「液态玻璃 + 同心圆舞台 + 胶囊节点」，那套（`ConcentricRouter` / `DeviceAnnotation` /
 `OutputStatusBar` / `useFitScale` / `useDecorativeMotion` / `--glass-*`）已整体删除，**不要复活**。
+中间还有过一版「设备表格上面再画一棵路由树」（`RouteFlow` / `RouteSubject`），也已删除，理由见下面「路由由表格承载」。
 
-- **布局**：`TitleBar`（36px，`bg-surface` + 下边框）→ 一行两栏：左 `aside` 300px 应用列表（`border-r border-line`）
-  ＋ `main` 工作区（`bg-surface-sunken`，内含标签页 + 当前页）。设置页覆盖整个工作区，自己是一列设置（`max-w-2xl` 居中）。
+- **布局**：`TitleBar`（36px，`bg-surface-sunken` + 下边框）→ 一行两栏：左 `aside` 264px 应用列表（`bg-surface-sunken` + `border-r border-line`）
+  ＋ `main` 工作区（`bg-surface`，内含标签页 + 当前页）。**平面是反过来的**：窗口 chrome 与侧栏同在 sunken 面，工作区是抬起来的那一面——
+  内容在亮纸上、导航在它后面，就是编辑器把文件列表放在文件背后的排法。
+  ⚠️ `--surface-sunken`（亮）必须和 `--surface` 拉开足够距离（现在 #f2f3f5 vs #ffffff）：只差几个色阶时两栏看起来是同一块白，
+  侧栏就不像侧栏，像页面上一块忘了上色的地方。设置页覆盖整个工作区，自己是一列设置（`max-w-2xl` 居中）。
 - **标签页**：`UnderlineTabs`（`role="tablist"`/`tab`），「Routing / Activity」。活动记录是**标签页**而不是折叠条：
   折叠条会被每次从设置页返回时重新展开，而专家信息本该是 opt-in 的。
-- **路由树**（`RouteFlow`）：源节点（exe 名 + PID + "Playing"，多选时显示数量）→ 肘形连线（`Connector`，`SPRING_INSET`/`SPINE_STUB` 固定，
-  首尾各收一半，让两个设备读起来是一条分支）→ 目标设备节点（名称 + 角色 + `System default` 标签）。
-  它画的就是确认胶囊问的那句话：**"这个程序，那些设备"**。⚠️ **顶部不要再放第二条状态条**——同一件事说两遍会让人以为有两套状态（`OutputStatusBar` 就是这样被删掉的）。
-- **设备表格**（`DeviceTable`）：列 = 设备 / 角色 /（`advancedMode`）延迟 / 音量。列宽是表头与行**共用**的常量（`COL_ROLE`/`COL_DELAY`/`COL_VOLUME`），不许各写一份。
-  表头行 `h-8` + mono 大写小字；行 `min-h-11` + `border-b border-line`，最后一行去掉边框；行悬停 `bg-surface-hover`。
-  **可点的只有名称单元格**（`aria-pressed`）：延迟与音量是它**旁边**的独立控件，控件不能嵌在控件里（键盘够不到）。
-  角色列：`primary` / `mirror` / `pending`（已选未应用）/ `idle` → `—`（不标注，因为大多数设备大多数时候都是空的）。
+- **路由由表格承载，不要再在上面画一棵树**：路由行（`routeIds` = `selectedDeviceIds`，为空时退回 `activeIds`）按路由顺序**稳定排序**置顶，
+  并在组的最后一行用 `border-line-strong` 收束——**靠前的几行就是这条路由**，下面的是路由没在用的硬件。
+  在上面再画一张"一个程序 + 这些设备"的图，是同一件事说第二遍；更糟的是两张清单的排序依据不同（树按路由顺序、表按后端枚举顺序），
+  同一屏里三台设备列两遍还对不上，读起来是 bug 而不是两个视图。⚠️ **顶部也不要再放第二条状态条**（`OutputStatusBar` 就是这样被删掉的）。
+
+- **设备表格**（`DeviceTable`）：列 = 设备 / 角色 /（`advancedMode`）延迟 / 音量。列宽是表头与行**共用**的常量（`COL_DEVICE`/`COL_ROLE`/`COL_DELAY`/`COL_VOLUME`），不许各写一份。
+  - **设备列是固定 200px 且可收缩，不是百分比份额**：按份额它会长到工作区宽度的 46%，把角色词推到离名字两百多像素的地方——
+    那是行中间的一个洞，看起来像出错而不是像一列。200px 大致就是「设备名 + System default 后缀」需要的宽度，
+    省下来的富余交给 spacer，于是它分隔的是行的两半（叫什么 / 路由拿它做什么），而不是切开其中一半。
+    `shrink` + `min-w-[110px]` 是窗口最小宽度（720px）下的兜底，否则四列会横向溢出面板。
+  - **表头行自己不带下边框**：它下面那条列头线已经把表格和标签分开了。顶部一百像素里叠四条横线读起来是栅栏，不是结构。
+  - 行 `min-h-10` + `border-b border-line`，最后一行去掉边框；行悬停 `bg-surface-hover`。
+  - **路由行铺一层极淡的 accent 底纹**（`bg-accent/[0.06] dark:bg-accent/[0.09]`）来说"它在路由里"。
+    ⚠️ **不要在行首做 2px 色条**（左栏那种）：它紧贴侧栏的 `border-r`，两条相距 12px 的竖线看起来像渲染错位，而不是选中。
+  - **可点的只有名称单元格**（`aria-pressed`）：延迟与音量是它**旁边**的独立控件，控件不能嵌在控件里（键盘够不到）。
+    行本身挂 `data-device-row`，e2e 读整行（角色词在按钮**外面**，用名称按钮定位读不到它）。
+  - 「System default」是名称后面一段 muted 文字（`· System default`），**不是带边框的徽标**——一整窗 hairline 里不该出现唯一一个方框。
+  - 角色列：`primary` / `mirror` / `pending`（已选未应用）/ `idle` → `—`（不标注，因为大多数设备大多数时候都是空的）。
 - **专家信息总闸门（`advancedMode`，`aar-advanced-mode`，默认关）**：它现在只管一件事——设备表格的延迟列与音量列。
   活动记录**不再**受它控制：日志是标签页，本身就是 opt-in 的。开关的副标题文案必须跟这个事实一致（别写成"显示完整日志"，那是改版前的事）。
 - **悬浮确认胶囊**（`RouteConfirmCapsule`）：底部一个满宽 `pointer-events-none` 的绝对定位层 + `justify-center`，只有胶囊本身可点，所以它浮着**不占布局、不推动任何东西**。
@@ -378,14 +393,20 @@ AppAudioRouter/
     也正因如此，**常驻注册会把整个窗口的 Escape 都吞掉**——搜索框按 Esc 清空、设置页按 Esc 返回全部失效。
     这个 bug 真的出现过（2026-10-01 由 e2e 抓出），把它当规矩记住：**捕获阶段的全局监听必须跟着可见性注册与注销**。
 - **左栏选中态**：2px 左侧条（`SelectionMark`，`bg-accent`），不是跨行滑动的共享胶囊；行与行之间是 hairline，不是圆角卡片。
-- **左栏（`ProcessList`）**：已路由进程显示设备数徽标 + 停止路由按钮（✕）；每行第二行是 `PID xxx · 当前播放设备`（同一行内，不要再单开一行显示设备）。
+- **左栏（`ProcessList`）**：已路由进程行末只有一个 accent 圆点（"它的声音去了别处"），**不写设备数**——数写在上面那行的设备名后面（`+n`），同一件事写两遍就是两个数。
+  停止路由的 ✕ 只在**行悬停 / 焦点进入**时出现（`group/row` + `opacity-0 group-hover/row:opacity-100`）：每行都挂个叉，列表就读成一份待删除清单。
+  每行第二行是 `PID xxx`，**只有已路由的行**才追加 `· 当前播放设备`——没路由的程序全都走同一个系统默认设备，
+  逐行重复它是一列一模一样的文字，还会让每个程序看起来都被送往了某处（同一行内，不要再单开一行显示设备）。
   - 列表顶部有搜索框：`query` 是**组件本地 `useState`**，不进 store（它是视图状态，不是应用状态）；按 `exe_name` 过滤（`display_name` 已被后端移除，别再引用），`Escape` 清空并失焦。
   - 已路由的进程**排到最前**：按 `routedPids` 长度做**稳定**排序，让组内保持枚举顺序——否则行会在每次刷新时互相换位，鼠标底下的目标就跑了。
   - 无匹配时显示 `processList.noMatch`，**不要**复用 `processList.empty`：「没有进程在放音」和「你的搜索词没匹配上」是两件事，后者提示"让程序发声"是答非所问。
 - **撤销优先于确认**：路由不加确认（点一下就路由是这个应用的手感），撤销是那个瞬态 Toast（`role="status"`，唯一的撤销入口）。
   `ConfirmButton`（先「确认？」再执行，Escape / 失焦 / 5 秒超时解除）只留给**破坏性且影响全局**的动作：左栏表头的「全部回到系统默认」、
   设备列表表头的「回到系统默认」（作用域 = 选中的已路由程序；没有选中时 = 全部已路由程序，因为那是唯一能走出"看不见的路由"的出口）。
-- **accent 只表示"你可以操作它"**：读数、说明、版本号一律 muted；实测延迟是**读数不是控件**，所以它连 accent 都不穿（否则用户会去拖它）。
+- **accent 只用来标记"属于路由的那部分"**：① 选中（左栏 2px 色条 + 极淡底纹）；② 被移离中性位的值（延迟非 0、音量非 100）；
+  ③ 路由行的底纹与胶囊里那个动作词。除此之外一律 muted——读数、说明、版本号、角色词都是。
+  实测延迟是**读数不是控件**，所以它连 accent 都不穿（否则用户会伸手去拖它），而且它只活在 tooltip 里（`deviceLatency.reading`）：
+  两个数字并排几个像素，会被读成一个坏掉的数。
   数字与标识符（PID、毫秒、百分比、版本号、exe 名）用 `font-mono` + `tabular-nums`：等宽是这类界面里"这是数据"的记号。
 - **禁止**：胶囊/药丸状按钮与标签页、boxy card、`rounded-2xl` 大圆角卡片、玻璃与 `backdrop-blur`、
   常驻装饰循环（背景漂移光晕、轨道环、脉冲环、流动虚线）。圆角只用在控件上（`rounded`，约 4px），平面本身不圆角。
