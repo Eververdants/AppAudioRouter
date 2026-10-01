@@ -5,7 +5,6 @@ import { DeviceTable } from '@/components/DeviceTable';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { RouteConfirmCapsule } from '@/components/RouteConfirmCapsule';
-import { RouteFlow } from '@/components/RouteFlow';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
@@ -203,14 +202,16 @@ export default function App() {
             transition={FADE}
             className="flex min-h-0 flex-1"
           >
-            <aside className="w-[300px] flex-none border-r border-line">
+            <aside className="w-[264px] flex-none border-r border-line">
               <ProcessList />
             </aside>
 
             {/* The work area: one tab row, then whatever that tab shows. The
-                route question floats over it, so it is anchored here rather
-                than in the layout — nothing is displaced while it is up. */}
-            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-sunken">
+                plane is the raised one and the sidebar is the sunken one, the
+                way an editor puts its file list behind the file. The route
+                question floats over it, so it is anchored here rather than in
+                the layout — nothing is displaced while it is up. */}
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
               <UnderlineTabs
                 ariaLabel={t('tabs.label')}
                 layoutId="work-tab-rule"
@@ -223,7 +224,6 @@ export default function App() {
               />
               {tab === 'router' ? (
                 <>
-                  <RouteFlow />
                   <DeviceTable />
                   <RouteConfirmCapsule />
                 </>

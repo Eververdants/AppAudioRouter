@@ -34,10 +34,7 @@
     "hint": "Level this app gives this program's audio on its way to the devices it is duplicated to, as a percentage: 100 leaves it as the program produced it, below attenuates, above amplifies. Like the device volume and the delay, it acts on the mirrored copies — the device Windows plays directly is not affected by it. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value"
   },
   "deviceLatency": {
-    "hint": "Software-side latency only: the engine's pipeline for this device plus the endpoint's own reported stream latency. What a codec or a Bluetooth link adds on top is invisible to the app, so what you hear is later than this",
-    "unmeasured": "Not measured: this device is being duplicated, but its endpoint has not reported a latency for the stream — nothing has been assumed in its place",
-    "inactive": "Nothing to measure: no engine is duplicating this device — a single-device route is played by the system directly",
-    "primary": "Not measurable: the system plays this device directly (the route's anchor), so there is no stream of ours to ask"
+    "reading": "Measured on this device: {{ms}} ms. Software side only — what a codec or a Bluetooth link adds on top is invisible to the app"
   },
   "settings": {
     "title": "Settings",
@@ -67,7 +64,7 @@
     "autostart": "Start with Windows",
     "autostartDesc": "Launches silently into the tray at sign-in; remembered routes are ready before you open anything",
     "delays": "Delay compensation",
-    "delayNote": "Drag or scroll the number under a device node on the main screen. Applies in multi-device routes only — a single-device route is played by the system directly.",
+    "delayNote": "Drag or scroll the value in the device table's delay column. Applies in multi-device routes only — a single-device route is played by the system directly.",
     "calibrationNote": "The measured latency covers the software side only; what a Bluetooth link itself adds cannot be measured here, so align by ear.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
@@ -94,7 +91,7 @@
     "resetRemaining": "{{processes}} could not be cleared — let it play a sound and try again.",
     "dismiss": "Got it",
     "firstRunTitle": "Welcome to {{product}}",
-    "firstRunBody": "Select an app on the left, pick a device, then confirm at the center button — output moves there. Pick several devices to output to all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
+    "firstRunBody": "Select an app on the left, pick a device, then confirm in the capsule that floats up — output moves there. Pick several devices to output to all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
     "startAction": "Start routing"
   },
   "titleBar": {
@@ -113,8 +110,6 @@
     "defaultLabel": "System default",
     "guide": "Select an app, pick a device, then route it",
     "currentRoute": "Current route",
-    "playing": "Playing",
-    "noProcess": "No app selected",
     "pending": "Pending",
     "rolePrimary": "Primary",
     "roleMirror": "Mirror",
@@ -132,19 +127,14 @@
     "activity": "Activity"
   },
   "logPanel": {
-    "title": "Activity",
-    "expand": "Expand activity",
-    "collapse": "Collapse activity",
     "empty": "Nothing logged yet"
   },
   "deviceTable": {
-    "title": "Output devices",
     "device": "Device",
     "role": "Role",
     "delay": "Delay",
     "volume": "Volume",
-    "selectedHint": "{{n}} selected · click a device to route",
-    "selectHint": "Select an app first"
+    "selectedHint": "{{n}} selected"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",

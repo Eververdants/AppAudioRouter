@@ -251,11 +251,11 @@ export function ScrubReadout({
             }
           }}
           aria-label={label}
-          className="w-[38px] flex-none bg-transparent text-center font-mono text-[11px] tabular-nums text-accent outline-none"
+          className="w-[40px] flex-none bg-transparent text-center font-mono text-[12px] tabular-nums text-accent outline-none"
         />
       ) : (
         <span
-          className={`font-mono text-[11px] tabular-nums transition-[color,transform] duration-100 ${
+          className={`font-mono text-[12px] tabular-nums transition-[color,transform] duration-100 ${
             neutral
               ? 'text-text-muted group-focus-within/scrub:text-accent group-hover/scrub:text-accent'
               : 'text-accent'
@@ -264,7 +264,13 @@ export function ScrubReadout({
           {format(shown)}
         </span>
       )}
-      <span className="flex-none font-mono text-[9px] leading-none text-text-muted">{unit}</span>
+      {/* A fixed slot for the unit, left-aligned. Without it the unit is the
+          last thing in the cell and the whole column aligns on it, which puts
+          the figures at a different x in every row: "0 ms" and "+180 ms" need
+          their digits to line up, not their unit letters. */}
+      <span className="min-w-[15px] flex-none text-left font-mono text-[10px] leading-none text-text-muted">
+        {unit}
+      </span>
       {/* Hairline underline: the only hint that the number is live, and it
           costs no width, so the annotation never moves. */}
       <span
