@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DeviceAnnotation, type EngineRole } from '@/components/DeviceAnnotation';
@@ -11,6 +11,14 @@ import { useRouterStore } from '@/stores/routerStore';
 const STAGE_SIZE = 460;
 const ORBIT_RADIUS = 164;
 const CENTER = STAGE_SIZE / 2;
+/**
+ * How long the hub stays in its confirm pose before it forgets the question.
+ *
+ * Routing moves the sound of programs the user may not have meant to touch,
+ * so the hub asks once before it acts — but a question nobody answers must
+ * not stay one click away from firing forever.
+ */
+const ROUTE_CONFIRM_TIMEOUT_MS = 6000;
 /** Widest a device capsule may get, derived rather than picked: a node at the
  *  horizontal extreme of the orbit is `ORBIT_RADIUS` from the centre, so
  *  anything wider than the room left on either side would spill out of the
@@ -76,10 +84,10 @@ const DeviceNode = memo(function DeviceNode({
   awake,
   onToggle,
 }: DeviceNodeProps) {
-  const { t } = useTranslation();
   const delay = useRouterStore((s) => s.deviceDelays[device.id]);
   const volume = useRouterStore((s) => s.deviceVolumes[device.id]);
   const latency = useRouterStore((s) => s.deviceLatencyMs[device.id]);
+  const advanced = useRouterStore((s) => s.advancedMode);
 
   return (
     <motion.div
@@ -92,12 +100,6 @@ const DeviceNode = memo(function DeviceNode({
       className="absolute left-1/2 top-1/2 focus-within:z-10 hover:z-10"
     >
       <div className="group/device relative -translate-x-1/2 -translate-y-1/2">
-        {isDefault && (
-          <span
-            title={t('router.defaultDevice')}
-            className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-text-muted/80 ring-2 ring-bg-secondary"
-          />
-        )}
         {isLive && (
           <motion.span
             aria-hidden="true"
@@ -159,6 +161,8 @@ const DeviceNode = memo(function DeviceNode({
           name={device.name}
           rangeMs={delayRangeMs}
           isSelected={isSelected}
+          isDefault={isDefault}
+          showValues={advanced}
           engineRole={engineRole}
           delay={delay}
           volume={volume}
@@ -194,6 +198,11 @@ export function ConcentricRouter() {
   const [rippleKey, setRippleKey] = useState(0);
   const [showRipple, setShowRipple] = useState(false);
   const latestRippleKey = useRef(0);
+  // The hub asks once before it routes: the first press arms the question,
+  // the second one answers it. Anything that changes what would be routed —
+  // another process, another device — silently retracts the question, because
+  // an answer to a different question is a mis-route waiting to happen.
+  const [confirming, setConfirming] = useState(false);
 
   const selectedCount = selectedPids.length;
   const isMulti = selectedCount > 1;
@@ -229,14 +238,52 @@ export function ConcentricRouter() {
 
   const canRoute = selectedCount > 0 && selectedDeviceIds.length > 0;
 
+  // The question is about these exact targets; the moment they change, the
+  // answer no longer matches it.
+  useEffect(() => {
+    setConfirming(false);
+  }, [selectedPids, selectedDeviceIds]);
+
+  // An unanswered question times out rather than staying armed, and Escape
+  // retracts it — the same rules the other confirm-in-place controls follow.
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = window.setTimeout(() => setConfirming(false), ROUTE_CONFIRM_TIMEOUT_MS);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConfirming(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [confirming]);
+
   const handleRoute = async () => {
     if (!canRoute) return;
+    // First press only asks; the route fires on the second one.
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setConfirming(false);
     const nextKey = rippleKey + 1;
     latestRippleKey.current = nextKey;
     setRippleKey(nextKey);
     setShowRipple(true);
     await applyRoute();
   };
+
+  // The question the confirm pose asks, spelled out with its targets: a
+  // multi-device route says so (that is the mistake worth catching), several
+  // programs name the count, and the plain case names the device.
+  const primaryTargetName = devices.find((d) => d.id === selectedDeviceIds[0])?.name ?? '';
+  const confirmText =
+    selectedDeviceIds.length > 1
+      ? t('router.confirmMulti', { n: selectedDeviceIds.length })
+      : isMulti
+        ? t('router.confirmMultiProcess', { n: selectedCount, device: primaryTargetName })
+        : t('router.confirmOne', { device: primaryTargetName });
 
   const orbitBox = {
     left: CENTER - ORBIT_RADIUS,
@@ -246,7 +293,13 @@ export function ConcentricRouter() {
   };
 
   return (
-    <div ref={ref} className="relative flex h-full w-full items-center justify-center">
+    // A click anywhere on the stage that is not the hub retracts the question:
+    // the user moved on, so the answer must not linger one click away.
+    <div
+      ref={ref}
+      className="relative flex h-full w-full items-center justify-center"
+      onClick={() => setConfirming(false)}
+    >
       <div
         className="relative flex items-center justify-center"
         style={{ width: STAGE_SIZE, height: STAGE_SIZE, transform: `scale(${scale})` }}
@@ -403,7 +456,9 @@ export function ConcentricRouter() {
           {canRoute && (
             <motion.div
               aria-hidden="true"
-              className="absolute -inset-2 rounded-full border border-accent/30"
+              className={`absolute -inset-2 rounded-full border ${
+                confirming ? 'border-accent/60' : 'border-accent/30'
+              }`}
               animate={
                 awake
                   ? { opacity: [0.12, 0.34, 0.12], scale: [1, 1.025, 1] }
@@ -418,16 +473,23 @@ export function ConcentricRouter() {
           )}
           <motion.button
             type="button"
-            onClick={handleRoute}
+            onClick={(e) => {
+              // The stage retracts the question on click; the hub is the one
+              // place a click must answer it instead.
+              e.stopPropagation();
+              void handleRoute();
+            }}
             disabled={!canRoute || applying}
             title={
               applying
                 ? undefined
-                : canRoute
-                  ? selectedPids
-                      .map((pid) => sessions.find((s) => s.pid === pid)?.exe_name ?? `PID ${pid}`)
-                      .join(' · ')
-                  : undefined
+                : confirming
+                  ? confirmText
+                  : canRoute
+                    ? selectedPids
+                        .map((pid) => sessions.find((s) => s.pid === pid)?.exe_name ?? `PID ${pid}`)
+                        .join(' · ')
+                    : undefined
             }
             whileHover={canRoute && !applying ? { scale: 1.04 } : undefined}
             whileTap={canRoute && !applying ? { scale: 0.97 } : undefined}
@@ -435,8 +497,10 @@ export function ConcentricRouter() {
             className={`relative flex h-36 w-36 flex-col items-center justify-center rounded-full border outline-none backdrop-blur-2xl transition-[color,background-color,border-color,box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-accent/60 ${
               canRoute
                 ? // The button is disabled for the whole round-trip, so it has to
-                  // look busy rather than merely inert.
-                  `border-accent/40 bg-white/50 shadow-glow dark:bg-white/[0.07] ${
+                  // look busy rather than merely inert. The confirm pose wears
+                  // the strongest border the stage has: it is the one moment the
+                  // next click moves someone's sound.
+                  `${confirming ? 'border-accent/70' : 'border-accent/40'} bg-white/50 shadow-glow dark:bg-white/[0.07] ${
                     applying ? 'cursor-progress opacity-70' : 'cursor-pointer'
                   }`
                 : 'cursor-default border-white/60 bg-white/40 shadow-glass dark:border-white/10 dark:bg-white/[0.05]'
@@ -458,37 +522,66 @@ export function ConcentricRouter() {
                   className="flex flex-col items-center gap-2 px-5 text-center"
                 >
                   <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-accent text-white shadow-glow">
-                    <svg
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <polygon points="6 3 21 12 6 21 6 3" />
-                    </svg>
+                    {confirming ? (
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <polyline points="4 12.5 9.5 18 20 6" />
+                      </svg>
+                    ) : (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <polygon points="6 3 21 12 6 21 6 3" />
+                      </svg>
+                    )}
                   </span>
                   <span className="max-w-[104px] truncate text-[13px] font-semibold leading-tight text-text-primary">
                     {isMulti
                       ? t('router.processCount', { n: selectedCount })
                       : primarySession.exe_name}
                   </span>
-                  <span
-                    className={`text-[10px] leading-none ${
-                      canRoute
-                        ? 'font-medium text-accent'
-                        : activeIds.length > 0
-                          ? 'font-medium text-success'
-                          : 'text-text-muted'
-                    }`}
-                  >
-                    {canRoute
-                      ? selectedDeviceIds.length > 1
-                        ? t('router.clickToRouteMulti', { n: selectedDeviceIds.length })
-                        : t('router.clickToRoute')
-                      : activeIds.length > 0
-                        ? t('router.routedActive', { n: activeIds.length })
-                        : t('router.selectDevice')}
+                  <span className="flex flex-col items-center gap-1">
+                    <span
+                      className={`leading-none ${
+                        confirming
+                          ? 'max-w-[120px] text-[10px] font-semibold text-accent'
+                          : `text-[10px] ${
+                              canRoute
+                                ? 'font-medium text-accent'
+                                : activeIds.length > 0
+                                  ? 'font-medium text-success'
+                                  : 'text-text-muted'
+                            }`
+                      }`}
+                    >
+                      {confirming
+                        ? confirmText
+                        : canRoute
+                          ? selectedDeviceIds.length > 1
+                            ? t('router.clickToRouteMulti', { n: selectedDeviceIds.length })
+                            : t('router.clickToRoute', { device: primaryTargetName })
+                          : activeIds.length > 0
+                            ? t('router.routedActive', { n: activeIds.length })
+                            : t('router.selectDevice')}
+                    </span>
+                    {confirming && (
+                      <span className="text-[9px] leading-none text-text-muted">
+                        {t('router.confirmHint')}
+                      </span>
+                    )}
                   </span>
                 </motion.div>
               ) : (
@@ -512,8 +605,8 @@ export function ConcentricRouter() {
                       <path d="M12 16v-4M12 8h.01" />
                     </svg>
                   </span>
-                  <span className="text-[10px] leading-tight text-text-muted">
-                    {t('router.selectProcess')}
+                  <span className="max-w-[150px] text-[10px] leading-relaxed text-text-muted">
+                    {t('router.guide')}
                   </span>
                 </motion.div>
               )}

@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DelayReadout } from '@/components/ui/DelayReadout';
 import { VolumeReadout } from '@/components/ui/VolumeReadout';
@@ -72,8 +73,29 @@ function LatencyReadout({ latencyMs, engineRole }: { latencyMs?: number; engineR
 }
 
 /**
+ * The mark of the device Windows itself plays through.
+ *
+ * This is the safety anchor of the whole stage: whatever the user routes,
+ * this is the device everything returns to, so it is named in words rather
+ * than hinted at with a dot. It sits in the annotation row like a value but
+ * is not one — no hover affordance, no accent, nothing to grab.
+ */
+function DefaultLabel() {
+  const { t } = useTranslation();
+  return (
+    <span
+      title={t('router.defaultDevice')}
+      className="flex h-4 cursor-default items-center rounded-sm px-1 text-[10px] font-medium text-text-muted"
+    >
+      {t('router.defaultLabel')}
+    </span>
+  );
+}
+
+/**
  * The annotations hanging under one device node: its delay, its volume and
- * what it is playing at.
+ * what it is playing at — plus the one label that is always welcome, the
+ * "system default" mark.
  *
  * The values are owned by the parent DeviceNode, which subscribes to them
  * once; they are read here only to decide whether each annotation should show.
@@ -81,12 +103,19 @@ function LatencyReadout({ latencyMs, engineRole }: { latencyMs?: number; engineR
  * carries something that is actually being applied — the stage must never hide
  * an offset that is in effect, and must not shout about devices that are
  * neutral either.
+ *
+ * `showValues` is the advanced-controls switch: with it off the whole
+ * delay/volume/latency row stays away, because a number a novice did not ask
+ * for is a number they can drag by accident. The default-device mark ignores
+ * the switch — knowing which device is safe is not an advanced feature.
  */
 export function DeviceAnnotation({
   deviceId,
   name,
   rangeMs,
   isSelected,
+  isDefault,
+  showValues,
   engineRole,
   delay,
   volume,
@@ -96,6 +125,10 @@ export function DeviceAnnotation({
   name: string;
   rangeMs: number;
   isSelected: boolean;
+  /** Whether this is the system default device — the stage's safety anchor. */
+  isDefault: boolean;
+  /** Whether the expert readouts (delay / volume / latency) may show at all. */
+  showValues: boolean;
   engineRole: EngineRole;
   delay?: number;
   volume?: number;
@@ -108,11 +141,33 @@ export function DeviceAnnotation({
   // stream of ours to measure, which is also why the primary reads as "nothing
   // to measure" instead of as a zero.
   const measured = engineRole === 'mirror' ? latency : undefined;
-  const showDelay = isSelected || (delay ?? 0) !== 0;
-  const showVolume = isSelected || (volume ?? 100) !== 100;
-  const showLatency = isSelected || measured !== undefined;
+  const showDelay = showValues && (isSelected || (delay ?? 0) !== 0);
+  const showVolume = showValues && (isSelected || (volume ?? 100) !== 100);
+  const showLatency = showValues && (isSelected || measured !== undefined);
 
-  if (!showDelay && !showVolume && !showLatency) return null;
+  const items: ReactNode[] = [];
+  if (isDefault) items.push(<DefaultLabel key="default" />);
+  if (showDelay) {
+    items.push(
+      <DelayReadout
+        key="delay"
+        deviceId={deviceId}
+        name={name}
+        rangeMs={rangeMs}
+        engineRole={engineRole}
+      />,
+    );
+  }
+  if (showVolume) {
+    items.push(
+      <VolumeReadout key="volume" deviceId={deviceId} name={name} engineRole={engineRole} />,
+    );
+  }
+  if (showLatency) {
+    items.push(<LatencyReadout key="latency" latencyMs={measured} engineRole={engineRole} />);
+  }
+
+  if (items.length === 0) return null;
 
   return (
     <div className="absolute left-1/2 top-full z-10 mt-1.5 flex -translate-x-1/2 items-center gap-1.5">
@@ -122,17 +177,16 @@ export function DeviceAnnotation({
         aria-hidden="true"
         className="absolute -top-1.5 left-1/2 h-1.5 w-px -translate-x-1/2 bg-accent/30"
       />
-      {showDelay && (
-        <DelayReadout deviceId={deviceId} name={name} rangeMs={rangeMs} engineRole={engineRole} />
+      {items.map((node, index) =>
+        index === 0 ? (
+          node
+        ) : (
+          <Fragment key={index}>
+            <span aria-hidden="true" className="h-2.5 w-px flex-none bg-border" />
+            {node}
+          </Fragment>
+        ),
       )}
-      {showDelay && showVolume && (
-        <span aria-hidden="true" className="h-2.5 w-px flex-none bg-border" />
-      )}
-      {showVolume && <VolumeReadout deviceId={deviceId} name={name} engineRole={engineRole} />}
-      {showVolume && showLatency && (
-        <span aria-hidden="true" className="h-2.5 w-px flex-none bg-border" />
-      )}
-      {showLatency && <LatencyReadout latencyMs={measured} engineRole={engineRole} />}
     </div>
   );
 }
