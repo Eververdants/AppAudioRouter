@@ -145,8 +145,11 @@ export function DeviceAnnotation({
   const showVolume = showValues && (isSelected || (volume ?? 100) !== 100);
   const showLatency = showValues && (isSelected || measured !== undefined);
 
+  // The default mark trails the row rather than leading it: the readouts of
+  // every device appear in the same place as the row grows, so the values stay
+  // put under the capsule and the mark sits at the end like a qualifier —
+  // leading with it would shove it out to the left the moment values appear.
   const items: ReactNode[] = [];
-  if (isDefault) items.push(<DefaultLabel key="default" />);
   if (showDelay) {
     items.push(
       <DelayReadout
@@ -166,6 +169,7 @@ export function DeviceAnnotation({
   if (showLatency) {
     items.push(<LatencyReadout key="latency" latencyMs={measured} engineRole={engineRole} />);
   }
+  if (isDefault) items.push(<DefaultLabel key="default" />);
 
   if (items.length === 0) return null;
 
