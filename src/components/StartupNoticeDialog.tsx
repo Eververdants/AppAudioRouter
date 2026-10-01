@@ -50,18 +50,21 @@ export function StartupNoticeDialog() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="startup-notice-title"
     >
+      {/* The one surface in the app that is genuinely above the page, so the
+          one that keeps a shadow: without it the dimmed backdrop alone does not
+          say which of the two layers the words belong to. */}
       <motion.div
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={SPRING_GLIDE}
-        className="w-full max-w-md rounded-2xl border border-glass bg-glass-strong p-5 shadow-glass backdrop-blur-xl"
+        className="w-full max-w-md rounded-lg border border-line-strong bg-surface-raised p-5 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.65)]"
       >
-        <h2 id="startup-notice-title" className="text-[15px] font-semibold text-text-primary">
+        <h2 id="startup-notice-title" className="text-[15px] font-semibold tracking-tight text-text-primary">
           {upgrade
             ? t('startup.upgradeTitle')
             : t('startup.firstRunTitle', { product: t('productName') })}
@@ -82,10 +85,8 @@ export function StartupNoticeDialog() {
 
         {result !== null && (
           <p
-            className={`mt-3 rounded-xl px-3 py-2 text-[11px] leading-relaxed ${
-              result.still_pinned.length === 0
-                ? 'bg-accent-muted text-accent'
-                : 'bg-accent-muted text-text-secondary'
+            className={`mt-3 rounded border border-line px-3 py-2 font-mono text-[11px] leading-relaxed tabular-nums ${
+              result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
             }`}
           >
             {t('startup.resetDone', { n: result.released })}
@@ -94,13 +95,13 @@ export function StartupNoticeDialog() {
           </p>
         )}
 
-        <div className="mt-4 flex items-center justify-end gap-2">
+        <div className="mt-5 flex items-center justify-end gap-2">
           {upgrade && (
             <button
               type="button"
               onClick={() => void runReset()}
               disabled={busy}
-              className="rounded-full bg-accent px-3.5 py-1.5 text-[11px] font-medium text-white outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+              className="rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
             >
               {busy ? t('startup.resetting') : t('startup.resetAction')}
             </button>
@@ -109,7 +110,7 @@ export function StartupNoticeDialog() {
             type="button"
             autoFocus
             onClick={() => void dismiss()}
-            className="rounded-full border border-glass bg-glass px-3.5 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/40 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             {upgrade ? t('startup.dismiss') : t('startup.startAction')}
           </button>
