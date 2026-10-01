@@ -434,6 +434,17 @@ pnpm tsc --noEmit
 # 构建
 pnpm tauri build
 
+# 单测（Vitest）
+pnpm test
+
+# E2E（Playwright，假 Tauri IPC；跑之前先起 `pnpm dev --port 1420`）
+pnpm test:e2e
+
+# 重拍 README 的两张截图（按需要手动跑，平时会被 skip）
+# 输出 docs/images/app-audio-router-{light,dark}.png，900×680 @2x
+# 画面由 e2e/tauri/bridge.ts 的脚本化音频图驱动，所以换机器也一致
+CAPTURE_SCREENSHOTS=1 pnpm exec playwright test e2e/screenshots.spec.ts
+
 # Rust 检查
 cd src-tauri && cargo check
 
