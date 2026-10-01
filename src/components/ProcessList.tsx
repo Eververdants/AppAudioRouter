@@ -2,64 +2,43 @@ import { useMemo, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
-import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { FADE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
 const container: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.05 },
+    transition: { staggerChildren: 0.04 },
   },
 };
 
 const item: Variants = {
-  hidden: { opacity: 0, x: -8 },
-  show: { opacity: 1, x: 0, transition: SPRING_GLIDE },
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: FADE },
 };
-
-/**
- * Shared layout id of the selection highlight.
- *
- * One id means one element: framer-motion slides that single pill from the row
- * it was on to the row it is on now, which is what makes a click feel like the
- * selection travelling down the list. Give each row its own id, as this list
- * used to, and there is nothing to slide — the old pill just disappears and a
- * new one appears.
- */
-const SELECTION_PILL_LAYOUT_ID = 'process-selection-pill';
-
-const SELECTION_PILL_CLASS =
-  'pointer-events-none absolute inset-0 rounded-lg border border-accent/60 bg-accent-muted';
 
 /**
  * The highlight behind a chosen row.
  *
- * A layout id can only exist once at a time, so the sliding pill belongs to one
- * row — the first selected process — and the rest of a Ctrl multi-selection get
- * a static twin. Without that split the second selected row would be left bare,
- * which is the reason the per-row ids were there in the first place.
+ * A 2 px accent bar on the leading edge plus the faintest accent wash — the
+ * shape a selection takes in an editor's file list. It replaced a sliding
+ * outline that travelled from row to row: that animation was pleasant, but it
+ * drew a box around a row in a list where nothing else is boxed, and a list
+ * whose rows are separated by hairlines does not need its selection outlined as
+ * well as marked.
  *
- * It is a sibling of the row button rather than a child: the button scales on
- * tap, and a transform on an ancestor skews the box framer-motion measures, so
- * the pill would miss its target whenever a tap and a slide happened together.
+ * A multi-selection marks every row the same way: the rows are the same kind of
+ * thing, and the first one is distinguished by the order of routing (the `#n`
+ * on the right), not by a different highlight.
  */
-function SelectionPill({ selected, sliding }: { selected: boolean; sliding: boolean }) {
-  if (!selected) return null;
-  return sliding ? (
-    <motion.span
-      key="sliding"
-      layoutId={SELECTION_PILL_LAYOUT_ID}
-      transition={SPRING_GLIDE}
-      className={SELECTION_PILL_CLASS}
-    />
-  ) : (
-    <motion.span
-      key="static"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={FADE}
-      className={SELECTION_PILL_CLASS}
+function SelectionMark({ selected }: { selected: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`pointer-events-none absolute inset-y-0 left-0 w-0.5 transition-colors ${
+        selected ? 'bg-accent' : 'bg-transparent'
+      }`}
     />
   );
 }
@@ -78,9 +57,6 @@ export function ProcessList() {
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
 
   const routedCount = Object.keys(routedPids).length;
-  // The first selected process owns the sliding pill, so a plain click on
-  // another row carries the highlight across instead of blinking.
-  const anchorPid: number | null = selectedPids[0] ?? null;
   const [query, setQuery] = useState('');
 
   /** The rows on screen: filtered by what was typed, routed processes floated
@@ -109,12 +85,15 @@ export function ProcessList() {
   };
 
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-glass bg-glass p-4 shadow-glass backdrop-blur-xl">
-      <div className="mb-3 flex items-center justify-between gap-1">
-        <h2 className="truncate text-sm font-semibold text-text-primary">
+    // No frame: this panel is a plane of the window, separated from the work
+    // area by the hairline the layout puts between them. A panel that draws its
+    // own border inside a bordered window is one border too many.
+    <div className="flex h-full flex-col overflow-hidden bg-surface">
+      <div className="flex h-12 flex-none items-center justify-between gap-1 border-b border-line pl-4 pr-3">
+        <h2 className="truncate text-[13px] font-medium text-text-primary">
           {t('processList.title')}
         </h2>
-        <div className="flex flex-none items-center">
+        <div className="flex flex-none items-center gap-1">
           <AnimatePresence initial={false}>
             {routedCount > 0 && (
               <motion.span
@@ -157,10 +136,9 @@ export function ProcessList() {
             // optional "this came from a notification" flag, and the click event
             // would arrive as a truthy one if the handler were passed directly.
             onClick={() => void refreshSessions()}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.92 }}
+            whileTap={{ scale: 0.96 }}
             transition={SPRING_TAP}
-            className="rounded-md px-2 py-1 text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="rounded px-2 py-1 text-[11px] text-text-muted outline-none transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             {t('processList.refresh')}
           </motion.button>
@@ -168,7 +146,7 @@ export function ProcessList() {
       </div>
 
       {sessions.length > 0 && (
-        <div className="relative mb-2 flex-none">
+        <div className="relative flex-none border-b border-line">
           <svg
             width="12"
             height="12"
@@ -178,7 +156,7 @@ export function ProcessList() {
             strokeWidth="2"
             strokeLinecap="round"
             aria-hidden="true"
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
+            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"
           >
             <circle cx="11" cy="11" r="7" />
             <line x1="20" y1="20" x2="16.5" y2="16.5" />
@@ -197,7 +175,7 @@ export function ProcessList() {
             }}
             placeholder={t('processList.search')}
             aria-label={t('processList.search')}
-            className="bg-bg-secondary/60 w-full rounded-lg border border-transparent py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-accent/50 focus:bg-bg-secondary"
+            className="w-full border-b border-transparent bg-transparent py-2 pl-9 pr-3 text-[12px] text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-accent/60"
           />
         </div>
       )}
@@ -206,10 +184,10 @@ export function ProcessList() {
         variants={container}
         initial="hidden"
         animate="show"
-        className="flex-1 space-y-1.5 overflow-y-auto"
+        className="min-h-0 flex-1 overflow-y-auto"
       >
         {visibleSessions.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-8 text-center">
+          <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
             {query.trim() === '' && (
               <svg
                 width="22"
@@ -225,12 +203,12 @@ export function ProcessList() {
                 <line x1="16" y1="9" x2="22" y2="15" />
               </svg>
             )}
-            <p className="text-xs leading-relaxed text-text-muted">
+            <p className="text-[11px] leading-relaxed text-text-muted">
               {query.trim() === '' ? t('processList.empty') : t('processList.noMatch')}
               {query.trim() === '' && (
                 <>
                   <br />
-                  <span className="text-[10px]">{t('processList.emptyHint')}</span>
+                  <span>{t('processList.emptyHint')}</span>
                 </>
               )}
             </p>
@@ -241,10 +219,17 @@ export function ProcessList() {
             const isSelected = selectedPids.includes(session.pid);
             const deviceName = associatedName(session.pid);
             return (
-              <motion.div key={session.pid} variants={item}>
-                <div className="relative">
-                  <SelectionPill selected={isSelected} sliding={session.pid === anchorPid} />
-                  <motion.button
+              <motion.div
+                key={session.pid}
+                variants={item}
+                className="relative border-b border-line last:border-b-0"
+              >
+                <SelectionMark selected={isSelected} />
+                <div
+                  className={`flex items-center gap-2 pr-2 ${isSelected ? 'bg-accent-muted/50' : ''}`}
+                >
+                  <button
+                    type="button"
                     onClick={(e) => {
                       // Ctrl+click adds to the selection so several processes
                       // can be routed in one go.
@@ -254,31 +239,25 @@ export function ProcessList() {
                         selectProcess(session.pid);
                       }
                     }}
-                    whileTap={{ scale: 0.97 }}
-                    transition={SPRING_TAP}
                     title={t('processList.multiSelectHint')}
-                    className={`relative w-full rounded-lg px-3 py-2 pr-9 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
-                      // A selected row already carries the accent pill; a hover
-                      // wash on top would only muddy it.
-                      isSelected ? '' : 'hover:bg-bg-tertiary/40'
+                    className={`min-w-0 flex-1 py-2 pl-4 pr-1 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
+                      isSelected ? '' : 'hover:bg-surface-hover'
                     }`}
                   >
-                    <span
-                      className={`relative flex items-center gap-1.5 font-medium ${
-                        isSelected ? 'text-accent' : 'text-text-secondary'
-                      }`}
-                    >
-                      <span className="truncate">{session.exe_name}</span>
-                      {routedCountForPid > 0 && (
-                        <span
-                          title={t('processList.routedBadge', { n: routedCountForPid })}
-                          className="flex h-4 min-w-4 flex-none items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-white"
-                        >
-                          {routedCountForPid}
-                        </span>
-                      )}
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className={`truncate text-[13px] ${
+                          isSelected
+                            ? 'font-medium text-text-primary'
+                            : routedCountForPid > 0
+                              ? 'text-text-primary'
+                              : 'text-text-secondary'
+                        }`}
+                      >
+                        {session.exe_name}
+                      </span>
                       {selectedPids.length > 1 && isSelected && (
-                        <span className="ml-auto flex-none text-[9px] font-semibold text-accent/70">
+                        <span className="flex-none font-mono text-[10px] text-accent">
                           #{selectedPids.indexOf(session.pid) + 1}
                         </span>
                       )}
@@ -286,13 +265,13 @@ export function ProcessList() {
                     {/* PID and the device the process plays through share one
                         muted line: a row of its own made the list feel dense
                         for a detail that is only reference information. */}
-                    <span className="relative flex items-center gap-1 text-[10px] tabular-nums text-text-muted">
+                    <span className="flex items-center gap-1 font-mono text-[10px] tabular-nums text-text-muted">
                       <span className="flex-none">PID {session.pid}</span>
                       {deviceName !== null && (
                         <>
                           <span className="flex-none opacity-50">·</span>
                           <span
-                            className="truncate"
+                            className="truncate font-sans"
                             title={t('processList.associatedDevice', { device: deviceName })}
                           >
                             {deviceName}
@@ -300,7 +279,10 @@ export function ProcessList() {
                         </>
                       )}
                     </span>
-                  </motion.button>
+                  </button>
+                  {/* Status, right-aligned: a live route is a dot plus the
+                      number of devices only when there is more than one — the
+                      count is the part that is worth a second glance. */}
                   <AnimatePresence>
                     {routedCountForPid > 0 && (
                       <motion.span
@@ -308,7 +290,26 @@ export function ProcessList() {
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.6 }}
                         transition={SPRING_TAP}
-                        className="absolute right-2 top-1/2 flex -translate-y-1/2"
+                        title={t('processList.routedBadge', { n: routedCountForPid })}
+                        className="flex flex-none items-center gap-1"
+                      >
+                        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />
+                        {routedCountForPid > 1 && (
+                          <span className="font-mono text-[10px] tabular-nums text-accent">
+                            {routedCountForPid}
+                          </span>
+                        )}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                  <AnimatePresence>
+                    {routedCountForPid > 0 && (
+                      <motion.span
+                        initial={{ opacity: 0, scale: 0.6 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.6 }}
+                        transition={SPRING_TAP}
+                        className="flex flex-none"
                       >
                         {/* Stopping sends the program's sound back to the
                             system default — harmless, but baffling when it
