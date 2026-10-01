@@ -21,6 +21,13 @@ src-tauri/target/
 .tsbuild/
 tsconfig.tsbuildinfo
 
+# Test output
+coverage/
+playwright-report/
+playwright/.cache/
+test-results/
+blob-report/
+
 # IDE
 .vscode/
 .idea/
