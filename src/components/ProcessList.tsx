@@ -88,12 +88,12 @@ export function ProcessList() {
     // No frame: this panel is a plane of the window, separated from the work
     // area by the hairline the layout puts between them. A panel that draws its
     // own border inside a bordered window is one border too many.
-    <div className="flex h-full flex-col overflow-hidden bg-surface">
-      <div className="flex h-12 flex-none items-center justify-between gap-1 border-b border-line pl-4 pr-3">
-        <h2 className="truncate text-[13px] font-medium text-text-primary">
+    <div className="flex h-full flex-col overflow-hidden bg-surface-sunken">
+      <div className="flex h-11 flex-none items-center justify-between gap-1 border-b border-line pl-4 pr-2">
+        <h2 className="truncate text-[11px] font-semibold text-text-secondary">
           {t('processList.title')}
         </h2>
-        <div className="flex flex-none items-center gap-1">
+        <div className="flex flex-none items-center gap-0.5">
           <AnimatePresence initial={false}>
             {routedCount > 0 && (
               <motion.span
@@ -222,11 +222,19 @@ export function ProcessList() {
               <motion.div
                 key={session.pid}
                 variants={item}
-                className="relative border-b border-line last:border-b-0"
+                className="group/row relative border-b border-line last:border-b-0"
               >
                 <SelectionMark selected={isSelected} />
                 <div
-                  className={`flex items-center gap-2 pr-2 ${isSelected ? 'bg-accent-muted/50' : ''}`}
+                  className={`flex items-center gap-1 pr-1.5 ${
+                    // Not `bg-accent-muted/50`: `--accent-muted` is a plain
+                    // rgba() with its alpha already baked in, and Tailwind
+                    // cannot apply a modifier to that — it drops the class and
+                    // the row quietly ends up with no wash at all. The accent
+                    // itself is an RGB mirror, so an opacity modifier on it is
+                    // the one form that actually compiles.
+                    isSelected ? 'bg-accent/[0.07] dark:bg-accent/[0.12]' : ''
+                  }`}
                 >
                   <button
                     type="button"
@@ -240,7 +248,7 @@ export function ProcessList() {
                       }
                     }}
                     title={t('processList.multiSelectHint')}
-                    className={`min-w-0 flex-1 py-2 pl-4 pr-1 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
+                    className={`min-w-0 flex-1 py-1.5 pl-4 pr-1 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
                       isSelected ? '' : 'hover:bg-surface-hover'
                     }`}
                   >
@@ -262,27 +270,37 @@ export function ProcessList() {
                         </span>
                       )}
                     </span>
-                    {/* PID and the device the process plays through share one
-                        muted line: a row of its own made the list feel dense
-                        for a detail that is only reference information. */}
+                    {/* PID, and — only for a program that is actually routed —
+                        where its sound goes. An unrouted program plays through
+                        the system default, which is the same device for every
+                        row: repeating it down the list says nothing and makes
+                        every program look like it is being sent somewhere. */}
                     <span className="flex items-center gap-1 font-mono text-[10px] tabular-nums text-text-muted">
                       <span className="flex-none">PID {session.pid}</span>
-                      {deviceName !== null && (
+                      {routedCountForPid > 0 && deviceName !== null && (
                         <>
-                          <span className="flex-none opacity-50">·</span>
+                          <span aria-hidden="true" className="flex-none opacity-50">
+                            ·
+                          </span>
                           <span
                             className="truncate font-sans"
                             title={t('processList.associatedDevice', { device: deviceName })}
                           >
                             {deviceName}
                           </span>
+                          {routedCountForPid > 1 && (
+                            <span className="flex-none text-accent">
+                              +{routedCountForPid - 1}
+                            </span>
+                          )}
                         </>
                       )}
                     </span>
                   </button>
-                  {/* Status, right-aligned: a live route is a dot plus the
-                      number of devices only when there is more than one — the
-                      count is the part that is worth a second glance. */}
+                  {/* Status, right-aligned: one accent dot for "this program's
+                      sound is going somewhere other than the system default".
+                      How many devices it went to is written on the line above,
+                      next to the one it names, instead of being counted twice. */}
                   <AnimatePresence>
                     {routedCountForPid > 0 && (
                       <motion.span
@@ -291,50 +309,50 @@ export function ProcessList() {
                         exit={{ opacity: 0, scale: 0.6 }}
                         transition={SPRING_TAP}
                         title={t('processList.routedBadge', { n: routedCountForPid })}
-                        className="flex flex-none items-center gap-1"
+                        className="flex flex-none items-center"
                       >
                         <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />
-                        {routedCountForPid > 1 && (
-                          <span className="font-mono text-[10px] tabular-nums text-accent">
-                            {routedCountForPid}
-                          </span>
-                        )}
                       </motion.span>
                     )}
                   </AnimatePresence>
                   <AnimatePresence>
                     {routedCountForPid > 0 && (
                       <motion.span
-                        initial={{ opacity: 0, scale: 0.6 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.6 }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
                         transition={SPRING_TAP}
                         className="flex flex-none"
                       >
                         {/* Stopping sends the program's sound back to the
                             system default — harmless, but baffling when it
                             happens under an accidental click, so it asks first,
-                            the same way the stop-all in the header does. */}
-                        <ConfirmButton
-                          variant="icon"
-                          label={t('processList.stopRoute')}
-                          confirmLabel={t('processList.stopRouteConfirm')}
-                          onConfirm={() => void stopRoute(session.pid)}
-                          icon={
-                            <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 10 10"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              aria-hidden="true"
-                            >
-                              <line x1="1" y1="1" x2="9" y2="9" />
-                              <line x1="9" y1="1" x2="1" y2="9" />
-                            </svg>
-                          }
-                        />
+                            the same way the stop-all in the header does. The
+                            button itself waits for a hover: a cross sitting on
+                            every routed row makes the list read as a list of
+                            things waiting to be deleted. */}
+                        <span className="opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100">
+                          <ConfirmButton
+                            variant="icon"
+                            label={t('processList.stopRoute')}
+                            confirmLabel={t('processList.stopRouteConfirm')}
+                            onConfirm={() => void stopRoute(session.pid)}
+                            icon={
+                              <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 10 10"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                aria-hidden="true"
+                              >
+                                <line x1="1" y1="1" x2="9" y2="9" />
+                                <line x1="9" y1="1" x2="1" y2="9" />
+                              </svg>
+                            }
+                          />
+                        </span>
                       </motion.span>
                     )}
                   </AnimatePresence>
