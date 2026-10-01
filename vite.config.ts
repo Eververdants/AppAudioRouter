@@ -1,13 +1,23 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+// The version the window shows. Read from package.json rather than from
+// `npm_package_version`, which is only set when the build is launched through a
+// package-manager script: running vite directly — which is how the E2E suite
+// and the screenshot capture start it — would otherwise stamp `v0.0.0` on the
+// title bar and in the README images.
+const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as {
+  version: string;
+};
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   define: {
-    __APP_VERSION__: JSON.stringify(process.env.npm_package_version || '0.0.0'),
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
   server: {
     port: 1420,
