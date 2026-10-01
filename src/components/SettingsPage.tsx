@@ -1,5 +1,4 @@
 import { useEffect, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { DelayStepper } from '@/components/ui/DelayStepper';
@@ -9,7 +8,6 @@ import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
-import { SPRING_TAP } from '@/lib/motion';
 import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -22,11 +20,22 @@ const SOURCE_LEVEL_NEUTRAL = 100;
 const SOURCE_LEVEL_STEP = 5;
 const SOURCE_LEVEL_PX_PER_STEP = 3;
 
-const cardEnter = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0 },
-} as const;
+/**
+ * The settings-row button: the same shape as `ConfirmButton`'s pill, minus the
+ * asking. Kept beside the components that use it so the two never drift into
+ * looking like different kinds of control.
+ */
+const ROW_BUTTON_CLASS =
+  'shrink-0 rounded border border-line px-2.5 py-1 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-secondary';
 
+/**
+ * A titled group of rows.
+ *
+ * A rule and a small uppercase label, not a card: the settings page is one
+ * column read top to bottom, and a box around each group would claim the groups
+ * are separable objects rather than headings in a list. Nothing is rounded,
+ * nothing is lifted, nothing is translucent.
+ */
 function SectionCard({
   icon,
   label,
@@ -37,22 +46,30 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-glass bg-glass-strong shadow-glass backdrop-blur-xl">
-      <h3 className="flex items-center gap-2 px-5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-widest text-text-muted">
+    <section>
+      <h3 className="flex items-center gap-2 border-b border-line pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
         <span className="text-accent">{icon}</span>
         {label}
       </h3>
-      <div className="space-y-0.5 p-2 pt-1">{children}</div>
+      {children}
     </section>
   );
 }
 
+/** One setting: what it is on the left, the control that changes it on the
+ * right, and a hairline under it to separate it from the next. */
 function Row({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-3 transition-colors hover:bg-bg-tertiary/40">
+    <div className="flex items-center justify-between gap-4 border-b border-line py-3 last:border-b-0">
       <div className="min-w-0">
-        <div className="text-[13px] font-medium text-text-primary">{title}</div>
-        {desc && <div className="mt-0.5 text-[11px] leading-relaxed text-text-muted">{desc}</div>}
+        <div className="text-[13px] text-text-primary">{title}</div>
+        {/* Capped at a reading measure: a description that runs to the width of
+            the page would push the control it describes out to the far edge. */}
+        {desc && (
+          <div className="mt-0.5 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+            {desc}
+          </div>
+        )}
       </div>
       {children}
     </div>
@@ -60,17 +77,9 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
 }
 
 /** A device row: name + the shared −/value/+ delay stepper. */
-function DelayRow({
-  deviceId,
-  name,
-  rangeMs,
-}: {
-  deviceId: string;
-  name: string;
-  rangeMs: number;
-}) {
+function DelayRow({ deviceId, name, rangeMs }: { deviceId: string; name: string; rangeMs: number }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
+    <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0">
       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={name}>
         {name}
       </span>
@@ -87,8 +96,10 @@ function SourceLevelRow({ exeName }: { exeName: string }) {
   const setSourceVolume = useRouterStore((s) => s.setSourceVolume);
 
   return (
-    <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-bg-tertiary/40">
-      <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={exeName}>
+    <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0">
+      {/* Monospaced: an executable name is an identifier, and this column is a
+          list of them. */}
+      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-secondary" title={exeName}>
         {exeName}
       </span>
       <ScrubReadout
@@ -161,7 +172,7 @@ function RememberedChip({
   return (
     <span
       title={`${entry.exeName} → ${target}`}
-      className="flex max-w-full items-center gap-1 rounded-full border border-glass bg-glass px-2 py-0.5 text-[11px] text-text-secondary"
+      className="flex max-w-full items-center gap-1 rounded border border-line bg-surface-raised py-0.5 pl-1.5 pr-0.5 font-mono text-[10px] text-text-secondary"
     >
       <span className="truncate">{entry.exeName}</span>
       <button
@@ -169,7 +180,7 @@ function RememberedChip({
         onClick={() => onForget(entry.exeName)}
         aria-label={label}
         title={label}
-        className="-mr-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-full text-text-muted outline-none transition-colors hover:bg-error/10 hover:text-error focus-visible:ring-2 focus-visible:ring-error/50"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded text-text-muted outline-none transition-colors hover:bg-error/10 hover:text-error focus-visible:ring-2 focus-visible:ring-error/50"
       >
         <svg
           width="8"
@@ -213,6 +224,9 @@ const MoonIcon = (
  * the title-bar gear and slides back out. Owns everything app-level — theme,
  * language, the advanced-controls switch, auto-remember and the per-device
  * delay sliders.
+ *
+ * One column, read top to bottom: a heading, then its rows, then a rule and the
+ * next heading. No card, no shadow, no blur — the sections are the page itself.
  */
 export function SettingsPage({ onBack }: { onBack: () => void }) {
   const { t } = useTranslation();
@@ -252,21 +266,18 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   }, [onBack]);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-4 pb-8 pt-6">
-        {/* Page header */}
-        <div>
-          <motion.button
+    <div className="h-full overflow-y-auto bg-bg-primary">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-9 px-8 pb-14 pt-8">
+        {/* Page header: the way back, then the name of the page. */}
+        <header className="border-b border-line pb-4">
+          <button
             type="button"
             onClick={onBack}
-            whileHover={{ x: -3 }}
-            whileTap={{ scale: 0.96 }}
-            transition={SPRING_TAP}
-            className="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium text-text-secondary outline-none transition-colors hover:bg-bg-tertiary/60 hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="flex items-center gap-1.5 rounded text-[11px] font-medium text-text-muted outline-none transition-colors hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <svg
-              width="13"
-              height="13"
+              width="12"
+              height="12"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -279,329 +290,291 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               <polyline points="12 19 5 12 12 5" />
             </svg>
             {t('settings.back')}
-          </motion.button>
-          <h1 className="mt-2 px-2 text-lg font-semibold text-text-primary">
+          </button>
+          <h1 className="mt-3 text-[17px] font-semibold tracking-tight text-text-primary">
             {t('settings.title')}
           </h1>
-        </div>
+        </header>
 
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.04 }}>
-          <SectionCard
-            icon={
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-              </svg>
-            }
-            label={t('settings.appearance')}
-          >
-            <Row title={t('settings.theme')}>
-              <SegmentedControl
-                layoutId="settings-theme-pill"
-                ariaLabel={t('settings.theme')}
-                value={theme}
-                onChange={setTheme}
-                options={[
-                  {
-                    value: 'light',
-                    label: (
-                      <span className="flex items-center gap-1">
-                        {SunIcon}
-                        {t('settings.themeLight')}
-                      </span>
-                    ),
-                    ariaLabel: t('settings.themeLight'),
-                  },
-                  {
-                    value: 'dark',
-                    label: (
-                      <span className="flex items-center gap-1">
-                        {MoonIcon}
-                        {t('settings.themeDark')}
-                      </span>
-                    ),
-                    ariaLabel: t('settings.themeDark'),
-                  },
-                ]}
-              />
-            </Row>
-            <Row title={t('settings.language')}>
-              <SegmentedControl
-                layoutId="settings-language-pill"
-                ariaLabel={t('settings.language')}
-                value={language}
-                onChange={setLanguage}
-                options={[
-                  { value: 'zh-CN', label: '中文' },
-                  { value: 'en', label: 'EN' },
-                ]}
-              />
-            </Row>
-            {/* Off by default: the readouts and the full log are the expert
-                surface, and the main screen stays safer without them — a value
-                nobody asked for is a value that can be dragged by accident. */}
-            <Row title={t('settings.advancedMode')} desc={t('settings.advancedModeDesc')}>
-              <Switch
-                checked={advancedMode}
-                onChange={() => setAdvancedMode(!advancedMode)}
-                label={t('settings.advancedMode')}
-              />
-            </Row>
-          </SectionCard>
-        </motion.div>
+        <SectionCard
+          icon={
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+            </svg>
+          }
+          label={t('settings.appearance')}
+        >
+          <Row title={t('settings.theme')}>
+            <SegmentedControl
+              layoutId="settings-theme-pill"
+              ariaLabel={t('settings.theme')}
+              value={theme}
+              onChange={setTheme}
+              options={[
+                {
+                  value: 'light',
+                  label: (
+                    <span className="flex items-center gap-1">
+                      {SunIcon}
+                      {t('settings.themeLight')}
+                    </span>
+                  ),
+                  ariaLabel: t('settings.themeLight'),
+                },
+                {
+                  value: 'dark',
+                  label: (
+                    <span className="flex items-center gap-1">
+                      {MoonIcon}
+                      {t('settings.themeDark')}
+                    </span>
+                  ),
+                  ariaLabel: t('settings.themeDark'),
+                },
+              ]}
+            />
+          </Row>
+          <Row title={t('settings.language')}>
+            <SegmentedControl
+              layoutId="settings-language-pill"
+              ariaLabel={t('settings.language')}
+              value={language}
+              onChange={setLanguage}
+              options={[
+                { value: 'zh-CN', label: '中文' },
+                { value: 'en', label: 'EN' },
+              ]}
+            />
+          </Row>
+          {/* Off by default: the readouts and the full log are the expert
+              surface, and the main screen stays safer without them — a value
+              nobody asked for is a value that can be dragged by accident. */}
+          <Row title={t('settings.advancedMode')} desc={t('settings.advancedModeDesc')}>
+            <Switch
+              checked={advancedMode}
+              onChange={() => setAdvancedMode(!advancedMode)}
+              label={t('settings.advancedMode')}
+            />
+          </Row>
+        </SectionCard>
 
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.08 }}>
-          <SectionCard
-            icon={
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <polyline points="4 17 10 11 4 5" />
-                <line x1="12" y1="19" x2="20" y2="19" />
-              </svg>
-            }
-            label={t('settings.routing')}
-          >
-            <Row title={t('settings.autoRemember')} desc={t('settings.autoRememberDesc')}>
-              <Switch
-                checked={autoRemember}
-                onChange={toggleAutoRemember}
-                label={t('settings.autoRemember')}
-              />
-            </Row>
-            {rememberedRoutes.length > 0 && (
-              <div className="px-3 pb-3 pt-1">
-                <div className="mb-1.5 text-[11px] text-text-muted">
-                  {t('settings.rememberedRoutes')}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {rememberedRoutes.map((entry) => (
-                    <RememberedChip
-                      key={entry.exeName}
-                      entry={entry}
-                      devices={devices}
-                      onForget={forgetRememberedRoute}
-                    />
-                  ))}
-                </div>
+        <SectionCard
+          icon={
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+          }
+          label={t('settings.routing')}
+        >
+          <Row title={t('settings.autoRemember')} desc={t('settings.autoRememberDesc')}>
+            <Switch
+              checked={autoRemember}
+              onChange={toggleAutoRemember}
+              label={t('settings.autoRemember')}
+            />
+          </Row>
+          {rememberedRoutes.length > 0 && (
+            <div className="border-b border-line py-3">
+              <div className="mb-2 text-[11px] text-text-muted">
+                {t('settings.rememberedRoutes')}
               </div>
-            )}
-            <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
-              <button
-                type="button"
-                onClick={() => void resetPinnedEndpoints()}
-                className="shrink-0 rounded-full border border-glass bg-glass px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/40 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
-              >
-                {t('settings.resetEndpointsAction')}
-              </button>
-            </Row>
-            {/* The same action as the process list header, and the same reason it
-                asks first: it reaches every routed program, not just the one the
-                user has in mind. */}
-            <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
-              <ConfirmButton
-                label={t('settings.stopAllRoutesAction')}
-                confirmLabel={t('settings.stopAllRoutesConfirm')}
-                onConfirm={() => void stopAllRoutes()}
-                disabled={routedCount === 0}
-              />
-            </Row>
-          </SectionCard>
-        </motion.div>
-
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.12 }}>
-          <SectionCard
-            icon={
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 3v11" />
-                <path d="M8 10.5 12 14.5 16 10.5" />
-                <path d="M4 17.5h16" />
-              </svg>
-            }
-            label={t('settings.background')}
-          >
-            <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
-              <Switch
-                checked={closeToTray}
-                onChange={() => void toggleCloseToTray()}
-                label={t('settings.closeToTray')}
-              />
-            </Row>
-            <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
-              <Switch
-                checked={autostart}
-                onChange={() => void toggleAutostart()}
-                label={t('settings.autostart')}
-              />
-            </Row>
-          </SectionCard>
-        </motion.div>
-
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.16 }}>
-          <SectionCard
-            icon={
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <polyline points="12 7 12 12 15.5 13.5" />
-              </svg>
-            }
-            label={t('settings.delays')}
-          >
-            <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
-              <SegmentedControl
-                layoutId="settings-delay-range"
-                ariaLabel={t('settings.delayRange')}
-                value={String(delayRangeMs)}
-                onChange={(value) => void setDelayRange(Number(value))}
-                options={DELAY_RANGE_OPTIONS.map((ms) => ({
-                  value: String(ms),
-                  label: `±${rangeSeconds(ms)}s`,
-                }))}
-              />
-            </Row>
-            <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
-              <SegmentedControl
-                layoutId="settings-delay-step"
-                ariaLabel={t('settings.delayStep')}
-                value={String(delayStepMs)}
-                onChange={(value) => setDelayStep(Number(value))}
-                options={DELAY_STEP_OPTIONS.map((ms) => ({
-                  value: String(ms),
-                  label: formatStep(ms),
-                }))}
-              />
-            </Row>
-            <p className="px-3 pb-1 pt-2 text-[11px] leading-relaxed text-text-muted">
-              {t('settings.delayNote')}
-            </p>
-            <p className="px-3 pb-1 pt-1 text-[11px] leading-relaxed text-text-muted">
-              {t('settings.calibrationNote')}
-            </p>
-            {devices.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-text-muted">
-                {t('settings.noDevices')}
-              </p>
-            ) : (
-              devices.map((device) => (
-                <DelayRow
-                  key={device.id}
-                  deviceId={device.id}
-                  name={device.name}
-                  rangeMs={delayRangeMs}
-                />
-              ))
-            )}
-          </SectionCard>
-        </motion.div>
-
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.2 }}>
-          <SectionCard
-            icon={
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <line x1="4" y1="6" x2="20" y2="6" />
-                <circle cx="9" cy="6" r="2" />
-                <line x1="4" y1="12" x2="20" y2="12" />
-                <circle cx="15" cy="12" r="2" />
-                <line x1="4" y1="18" x2="20" y2="18" />
-                <circle cx="7" cy="18" r="2" />
-              </svg>
-            }
-            label={t('settings.sourceLevels')}
-          >
-            {/* One click and no confirmation: evening the levels out is the
-                feature, and what it covered is reported in the log rather than
-                in a question asked before it runs. */}
-            <Row title={t('settings.sourceLevelsAlign')} desc={t('settings.sourceLevelsAlignDesc')}>
-              <button
-                type="button"
-                onClick={() => void alignSourceLevels()}
-                disabled={duplicated.length === 0}
-                className="shrink-0 rounded-full border border-glass bg-glass px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/40 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-45 disabled:hover:border-glass disabled:hover:text-text-secondary"
-              >
-                {t('settings.sourceLevelsAlignAction')}
-              </button>
-            </Row>
-            <p className="px-3 pb-1 pt-2 text-[11px] leading-relaxed text-text-muted">
-              {t('settings.sourceLevelsNote')}
-            </p>
-            {duplicated.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-text-muted">
-                {t('settings.sourceLevelsNone')}
-              </p>
-            ) : (
-              duplicated.map((exeName) => <SourceLevelRow key={exeName} exeName={exeName} />)
-            )}
-          </SectionCard>
-        </motion.div>
-
-        <motion.div {...cardEnter} transition={{ duration: 0.2, ease: 'easeOut', delay: 0.24 }}>
-          <SectionCard
-            icon={
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 16v-4M12 8h.01" />
-              </svg>
-            }
-            label={t('settings.about')}
-          >
-            <div className="px-3 py-2.5">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-[13px] font-semibold text-text-primary">
-                  App Audio Router
-                </span>
-                <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent">
-                  v{__APP_VERSION__}
-                </span>
+              <div className="flex flex-wrap gap-1.5">
+                {rememberedRoutes.map((entry) => (
+                  <RememberedChip
+                    key={entry.exeName}
+                    entry={entry}
+                    devices={devices}
+                    onForget={forgetRememberedRoute}
+                  />
+                ))}
               </div>
-              <p className="text-[11px] leading-relaxed text-text-muted">
-                {t('settings.aboutDesc')}
-              </p>
             </div>
-          </SectionCard>
-        </motion.div>
+          )}
+          <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
+            <button
+              type="button"
+              onClick={() => void resetPinnedEndpoints()}
+              className={ROW_BUTTON_CLASS}
+            >
+              {t('settings.resetEndpointsAction')}
+            </button>
+          </Row>
+          {/* The same action as the process list header, and the same reason it
+              asks first: it reaches every routed program, not just the one the
+              user has in mind. */}
+          <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
+            <ConfirmButton
+              label={t('settings.stopAllRoutesAction')}
+              confirmLabel={t('settings.stopAllRoutesConfirm')}
+              onConfirm={() => void stopAllRoutes()}
+              disabled={routedCount === 0}
+            />
+          </Row>
+        </SectionCard>
+
+        <SectionCard
+          icon={
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 3v11" />
+              <path d="M8 10.5 12 14.5 16 10.5" />
+              <path d="M4 17.5h16" />
+            </svg>
+          }
+          label={t('settings.background')}
+        >
+          <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
+            <Switch
+              checked={closeToTray}
+              onChange={() => void toggleCloseToTray()}
+              label={t('settings.closeToTray')}
+            />
+          </Row>
+          <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
+            <Switch
+              checked={autostart}
+              onChange={() => void toggleAutostart()}
+              label={t('settings.autostart')}
+            />
+          </Row>
+        </SectionCard>
+
+        <SectionCard
+          icon={
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="9" />
+              <polyline points="12 7 12 12 15.5 13.5" />
+            </svg>
+          }
+          label={t('settings.delays')}
+        >
+          <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
+            <SegmentedControl
+              layoutId="settings-delay-range"
+              ariaLabel={t('settings.delayRange')}
+              value={String(delayRangeMs)}
+              onChange={(value) => void setDelayRange(Number(value))}
+              options={DELAY_RANGE_OPTIONS.map((ms) => ({
+                value: String(ms),
+                label: `±${rangeSeconds(ms)}s`,
+              }))}
+            />
+          </Row>
+          <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
+            <SegmentedControl
+              layoutId="settings-delay-step"
+              ariaLabel={t('settings.delayStep')}
+              value={String(delayStepMs)}
+              onChange={(value) => setDelayStep(Number(value))}
+              options={DELAY_STEP_OPTIONS.map((ms) => ({
+                value: String(ms),
+                label: formatStep(ms),
+              }))}
+            />
+          </Row>
+          <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+            {t('settings.delayNote')}
+          </p>
+          <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+            {t('settings.calibrationNote')}
+          </p>
+          {devices.length === 0 ? (
+            <p className="py-6 text-center text-[11px] text-text-muted">
+              {t('settings.noDevices')}
+            </p>
+          ) : (
+            devices.map((device) => (
+              <DelayRow
+                key={device.id}
+                deviceId={device.id}
+                name={device.name}
+                rangeMs={delayRangeMs}
+              />
+            ))
+          )}
+        </SectionCard>
+
+        <SectionCard
+          icon={
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <circle cx="9" cy="6" r="2" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <circle cx="15" cy="12" r="2" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+              <circle cx="7" cy="18" r="2" />
+            </svg>
+          }
+          label={t('settings.sourceLevels')}
+        >
+          {/* One click and no confirmation: evening the levels out is the
+              feature, and what it covered is reported in the log rather than
+              in a question asked before it runs. */}
+          <Row title={t('settings.sourceLevelsAlign')} desc={t('settings.sourceLevelsAlignDesc')}>
+            <button
+              type="button"
+              onClick={() => void alignSourceLevels()}
+              disabled={duplicated.length === 0}
+              className={ROW_BUTTON_CLASS}
+            >
+              {t('settings.sourceLevelsAlignAction')}
+            </button>
+          </Row>
+          <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+            {t('settings.sourceLevelsNote')}
+          </p>
+          {duplicated.length === 0 ? (
+            <p className="py-6 text-center text-[11px] text-text-muted">
+              {t('settings.sourceLevelsNone')}
+            </p>
+          ) : (
+            duplicated.map((exeName) => <SourceLevelRow key={exeName} exeName={exeName} />)
+          )}
+        </SectionCard>
+
+        <SectionCard
+          icon={
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 16v-4M12 8h.01" />
+            </svg>
+          }
+          label={t('settings.about')}
+        >
+          <div className="py-3">
+            <div className="mb-1 flex items-center justify-between gap-4">
+              <span className="text-[13px] font-medium text-text-primary">
+                App Audio Router
+              </span>
+              {/* The version is a fact, not an achievement: set in the same
+                  monospaced muted type as every other number in the app. */}
+              <span className="font-mono text-[10px] tabular-nums text-text-muted">
+                v{__APP_VERSION__}
+              </span>
+            </div>
+            <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+              {t('settings.aboutDesc')}
+            </p>
+          </div>
+        </SectionCard>
       </div>
     </div>
   );
