@@ -26,6 +26,20 @@ const config: Config = {
         border: {
           DEFAULT: 'rgb(var(--border-rgb) / <alpha-value>)',
         },
+        /* Flat planes of the editor layout: the sidebar and work-area
+           background, the raised plane used only by things that float, and the
+           1px rules between rows and sections. */
+        surface: {
+          DEFAULT: 'var(--surface)',
+          sunken: 'var(--surface-sunken)',
+          raised: 'var(--surface-raised)',
+          hover: 'var(--surface-hover)',
+        },
+        line: {
+          DEFAULT: 'rgb(var(--hairline-rgb) / <alpha-value>)',
+          strong: 'var(--hairline-strong)',
+        },
+        ink: 'var(--accent-ink)',
         glass: {
           DEFAULT: 'var(--glass-bg)',
           strong: 'var(--glass-bg-strong)',
@@ -35,7 +49,15 @@ const config: Config = {
         glass: 'var(--glass-border)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+        sans: [
+          'Inter',
+          'system-ui',
+          '-apple-system',
+          'Segoe UI',
+          'Microsoft YaHei UI',
+          'Roboto',
+          'sans-serif',
+        ],
         mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
       },
       boxShadow: {

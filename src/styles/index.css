@@ -21,6 +21,21 @@
   --success: #10b981;
   --error: #ef4444;
 
+  /* Editor surfaces. The main screen is built out of flat planes separated by
+     1px hairlines rather than floating glass cards: a sidebar plane, the work
+     area behind it, and one raised plane for things that genuinely float (the
+     route-confirm capsule). `--hairline` is the divider between rows and
+     sections; `--hairline-strong` is for the few edges that must read as a
+     border rather than a separator. */
+  --surface: #ffffff;
+  --surface-sunken: #fafafa;
+  --surface-raised: #ffffff;
+  --surface-hover: rgba(24, 24, 27, 0.035);
+  --hairline: #e6e6ea;
+  --hairline-strong: #d4d4da;
+  /* Text on top of the accent fill. */
+  --accent-ink: #ffffff;
+
   /* RGB channel mirrors for the colours Tailwind combines with opacity
      modifiers (`bg-accent/15`, `hover:bg-error/10`, …). Tailwind can't apply
      alpha to a plain var() colour, so those tokens are declared as
@@ -31,6 +46,8 @@
   --border-rgb: 228 228 231;
   --bg-tertiary-rgb: 232 232 236;
   --text-muted-rgb: 113 113 122;
+  --hairline-rgb: 230 230 234;
+  --surface-rgb: 255 255 255;
 
   /* Liquid-glass surfaces. Translucent panels pick up the ambient gradient
      and the drifting orbs rendered behind them, which is what sells the glass. */
@@ -62,11 +79,21 @@
   --success: #34d399;
   --error: #f87171;
 
+  --surface: #12151a;
+  --surface-sunken: #0e1114;
+  --surface-raised: #161c24;
+  --surface-hover: rgba(255, 255, 255, 0.035);
+  --hairline: #23272e;
+  --hairline-strong: #2e3742;
+  --accent-ink: #05222b;
+
   --accent-rgb: 34 211 238;
   --error-rgb: 248 113 113;
   --border-rgb: 39 39 42;
   --bg-tertiary-rgb: 39 39 42;
   --text-muted-rgb: 161 161 170;
+  --hairline-rgb: 35 39 46;
+  --surface-rgb: 18 21 26;
 
   --glass-bg: rgba(24, 24, 27, 0.5);
   --glass-bg-strong: rgba(28, 28, 32, 0.78);
@@ -98,6 +125,7 @@ body {
     system-ui,
     -apple-system,
     'Segoe UI',
+    'Microsoft YaHei UI',
     Roboto,
     sans-serif;
   background-color: var(--bg-primary);
