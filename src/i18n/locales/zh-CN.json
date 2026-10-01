@@ -126,10 +126,16 @@
     "backToDefault": "回到系统默认",
     "backToDefaultConfirm": "再点一次确认"
   },
+  "tabs": {
+    "label": "视图",
+    "router": "路由",
+    "activity": "活动记录"
+  },
   "logPanel": {
     "title": "活动记录",
     "expand": "展开活动记录",
-    "collapse": "收起活动记录"
+    "collapse": "收起活动记录",
+    "empty": "还没有活动记录"
   },
   "deviceTable": {
     "title": "输出设备",

@@ -10,8 +10,8 @@ import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
+import { UnderlineTabs } from '@/components/ui/UnderlineTabs';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
-import { useDecorativeMotion } from '@/hooks/useDecorativeMotion';
 import { useRouterStore } from '@/stores/routerStore';
 import type {
   AudioChangedEvent,
@@ -30,16 +30,8 @@ import { revealMainWindow } from '@/lib/window';
  */
 const AUDIO_SYNC_DEBOUNCE_MS = 400;
 
-/**
- * Entrance animation for the three panels. Kept short and free of staggering:
- * anything longer delays the moment the user can actually read the screen,
- * which is the part of "startup time" they perceive.
- */
-const panelEnter = {
-  initial: { opacity: 0, y: 6 },
-  animate: { opacity: 1, y: 0 },
-  transition: FADE,
-} as const;
+/** The two things the work area can show. */
+type WorkTab = 'router' | 'activity';
 
 /** Runs `task` once the browser is idle, falling back to a task tick. */
 function afterFirstPaint(task: () => void): () => void {
@@ -49,67 +41,6 @@ function afterFirstPaint(task: () => void): () => void {
   }
   const handle = window.setTimeout(task, 0);
   return () => window.clearTimeout(handle);
-}
-
-/**
- * One drifting light blob. The drift is the expensive part of the whole window:
- * a 110px blur moving behind frosted glass has to be re-rasterized every frame,
- * so it stops when nobody is looking (see `useDecorativeMotion`) — but the blob
- * keeps its colour, which is what the glass above it refracts.
- */
-function AmbientBlob({
-  className,
-  drift,
-  seconds,
-  awake,
-}: {
-  className: string;
-  drift: { x: number[]; y: number[] };
-  seconds: number;
-  awake: boolean;
-}) {
-  return (
-    <motion.div
-      className={className}
-      animate={awake ? drift : { x: 0, y: 0 }}
-      transition={
-        awake
-          ? { duration: seconds, repeat: Infinity, ease: 'easeInOut' }
-          : { duration: 0.6, ease: 'easeOut' }
-      }
-    />
-  );
-}
-
-/**
- * Ambient light blobs drifting behind the glass panels. Pure atmosphere —
- * the backdrop-blur on the panels turns them into the colour the glass
- * "refracts". Mirror easing keeps each drift seamless.
- */
-function AmbientLight() {
-  const awake = useDecorativeMotion();
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <AmbientBlob
-        awake={awake}
-        seconds={26}
-        className="absolute -top-32 right-[6%] h-80 w-80 rounded-full bg-accent/15 blur-[110px]"
-        drift={{ x: [0, -36, 12, 0], y: [0, 26, -16, 0] }}
-      />
-      <AmbientBlob
-        awake={awake}
-        seconds={32}
-        className="absolute -bottom-24 left-[2%] h-72 w-72 rounded-full bg-[#3b82f6]/15 blur-[110px]"
-        drift={{ x: [0, 28, -22, 0], y: [0, -22, 14, 0] }}
-      />
-      <AmbientBlob
-        awake={awake}
-        seconds={38}
-        className="absolute left-[44%] top-[34%] h-64 w-64 rounded-full bg-[#2dd4bf]/10 blur-[100px]"
-        drift={{ x: [0, -24, 26, 0], y: [0, 18, -14, 0] }}
-      />
-    </div>
-  );
 }
 
 export default function App() {
@@ -125,6 +56,7 @@ export default function App() {
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
+  const [tab, setTab] = useState<WorkTab>('router');
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
@@ -251,48 +183,59 @@ export default function App() {
   );
 
   return (
-    <div className="relative flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
-      <AmbientLight />
-
+    <div className="flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
       {/* The native caption bar is disabled, so this bar is the window frame. */}
       <TitleBar
         settingsOpen={view === 'settings'}
         onToggleSettings={() => setView((v) => (v === 'settings' ? 'router' : 'settings'))}
       />
 
-      {/* Content area: the router view and the settings page swap in place.
-          Entrance-only transitions (no AnimatePresence): the outgoing view
-          unmounts immediately, which keeps the swap stuck-free. */}
-      <div className="relative flex flex-1 overflow-hidden p-3">
+      {/* Two planes, one hairline between them: the app list is a sidebar, and
+          everything else is the work area. Entrance-only transitions (no
+          AnimatePresence): the outgoing view unmounts immediately, which keeps
+          the swap stuck-free. */}
+      <div className="flex min-h-0 flex-1">
         {view === 'router' ? (
           <motion.div
             key="router"
-            initial={{ opacity: 0, x: -24 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={SPRING_GLIDE}
-            className="flex min-h-0 flex-1 gap-3"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            className="flex min-h-0 flex-1"
           >
-            {/* Left panel: process list (narrower below lg to leave room for the router) */}
-            <motion.aside {...panelEnter} className="w-48 flex-shrink-0 md:w-56 lg:w-64">
+            <aside className="w-[300px] flex-none border-r border-line">
               <ProcessList />
-            </motion.aside>
+            </aside>
 
-            {/* Center column: the route drawn as a tree on top, the devices it
-                can go to underneath, and the question about them floating over
-                the bottom while anything is staged. */}
-            <motion.main {...panelEnter} className="flex min-w-0 flex-1 flex-col gap-3">
-              <div className="relative flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface">
-                <RouteFlow />
-                <DeviceTable />
-                <RouteConfirmCapsule />
-              </div>
-              <LogPanel />
-            </motion.main>
+            {/* The work area: one tab row, then whatever that tab shows. The
+                route question floats over it, so it is anchored here rather
+                than in the layout — nothing is displaced while it is up. */}
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-sunken">
+              <UnderlineTabs
+                ariaLabel={t('tabs.label')}
+                layoutId="work-tab-rule"
+                active={tab}
+                onChange={(id) => setTab(id as WorkTab)}
+                tabs={[
+                  { id: 'router', label: t('tabs.router') },
+                  { id: 'activity', label: t('tabs.activity') },
+                ]}
+              />
+              {tab === 'router' ? (
+                <>
+                  <RouteFlow />
+                  <DeviceTable />
+                  <RouteConfirmCapsule />
+                </>
+              ) : (
+                <LogPanel />
+              )}
+            </main>
           </motion.div>
         ) : (
           <motion.div
             key="settings"
-            initial={{ opacity: 0, x: 36 }}
+            initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             transition={SPRING_GLIDE}
             className="min-h-0 flex-1"

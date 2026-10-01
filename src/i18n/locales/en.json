@@ -126,10 +126,16 @@
     "backToDefault": "Back to system default",
     "backToDefaultConfirm": "Click again to confirm"
   },
+  "tabs": {
+    "label": "Views",
+    "router": "Routing",
+    "activity": "Activity"
+  },
   "logPanel": {
     "title": "Activity",
     "expand": "Expand activity",
-    "collapse": "Collapse activity"
+    "collapse": "Collapse activity",
+    "empty": "Nothing logged yet"
   },
   "deviceTable": {
     "title": "Output devices",
