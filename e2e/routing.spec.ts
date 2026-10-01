@@ -4,6 +4,7 @@ import {
   backToDefault,
   callsFor,
   deviceRow,
+  deviceRowShell,
   emit,
   openApp,
   routeCancelButton,
@@ -48,11 +49,13 @@ test('selecting an app stages the device it plays through, without routing it', 
   // the capsule offers to change.
   await expect(routeQuestion(page)).toContainText('music.exe');
   await expect(routeQuestion(page)).toContainText('Speakers');
-  // The row says the same thing in its own words.
-  await expect(appRow(page, 'music.exe')).toContainText('Speakers');
-  // The table shows the staged target as staged, not as a fact — and so does
-  // the tree above it, which is the point: the two surfaces say the same thing.
-  await expect(page.locator('main').getByText('Pending', { exact: true })).toHaveCount(2);
+  // The app list stays quiet about it: every unrouted program plays through the
+  // same system default, so replaying that down the list would be a column of
+  // identical text. Where a program is going is the table's business — until a
+  // route actually exists, and then the row says so (see the confirm test).
+  await expect(appRow(page, 'music.exe')).not.toContainText('Speakers');
+  // The table shows the staged target as staged, not as a fact.
+  await expect(page.locator('main').getByText('Pending', { exact: true })).toHaveCount(1);
 
   // Staging is a question, not an action.
   expect(await callsFor(page, 'apply_route')).toHaveLength(0);
@@ -82,9 +85,39 @@ test('confirming the capsule routes it, and a re-selected app is not asked again
   // is already looking at.
   await appRow(page, 'music.exe').click();
   await expect(routeQuestion(page)).toBeHidden();
-  // The tree and the table both name the same device as the primary: the
-  // system plays this one directly, and the two readouts agree about it.
-  await expect(page.locator('main').getByText('Primary', { exact: true })).toHaveCount(2);
+  // The table names the system default as the primary: the system plays this
+  // one directly, and its readout agrees about that. The app list now says
+  // where the program is going, because now there is somewhere to name.
+  await expect(page.locator('main').getByText('Primary', { exact: true })).toHaveCount(1);
+  await expect(appRow(page, 'music.exe')).toContainText('Speakers');
+});
+
+test('the routed devices sort to the top of the table', async ({ page }) => {
+  await openApp(page);
+
+  const yOf = async (name: string) => {
+    const box = await deviceRow(page, name).boundingBox();
+    return box?.y ?? Number.NaN;
+  };
+
+  // Nothing is routed, so the table is in the order the backend reported.
+  expect(await yOf('Speakers')).toBeLessThan(await yOf('TV'));
+
+  // Routing to the TV lifts it above the device the route does not use: the
+  // leading rows of the table are the route, and the device it replaced is
+  // hardware nothing is using. That is what the diagram above the table used to
+  // say, drawn a second time and in an order of its own.
+  await appRow(page, 'music.exe').click();
+  await deviceRow(page, 'TV').click();
+  await routeConfirmButton(page).click();
+
+  // The role the route gave it is written beside the device name, a sibling of
+  // the name button rather than inside it, so the assertion reads the row.
+  await expect(deviceRowShell(page, 'TV')).toContainText('Primary');
+  // The rows move on a spring, so this is polled rather than read once.
+  await expect(async () => {
+    expect(await yOf('TV')).toBeLessThan(await yOf('Speakers'));
+  }).toPass();
 });
 
 test('the first click on another device replaces the staged guess', async ({ page }) => {

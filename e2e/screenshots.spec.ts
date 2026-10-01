@@ -27,17 +27,30 @@ test.skip(
 );
 
 /** One program routed to three devices: the headset it was already on, plus two
- * wired outputs held back so all three arrive together. */
+ * wired outputs held back so all three arrive together. The rest of the hardware
+ * is there and deliberately not part of the route, so the shot also shows where
+ * the routed block ends — the one thing a picture of a route has to get across.
+ * The list is filled out to a plausible desktop rather than trimmed to two rows:
+ * a screenshot that is nine tenths empty white reads as a broken layout, not as
+ * a quiet one. */
 const STATE = {
   devices: [
     { id: 'bt', name: 'WH-1000XM5' },
     { id: 'hdmi', name: 'HDMI output' },
     { id: 'usb', name: 'USB headphones' },
+    { id: 'spk', name: 'Speakers (Realtek)' },
+    { id: 'spdif', name: 'Digital Audio (S/PDIF)' },
+    { id: 'nv', name: 'NVIDIA High Definition Audio' },
   ],
   sessions: [
     { pid: 4021, exe_name: 'Music.exe' },
     { pid: 5233, exe_name: 'chrome.exe' },
     { pid: 6180, exe_name: 'Game.exe' },
+    { pid: 7102, exe_name: 'Discord.exe' },
+    { pid: 8401, exe_name: 'spotify.exe' },
+    { pid: 7500, exe_name: 'Code.exe' },
+    { pid: 9102, exe_name: 'steam.exe' },
+    { pid: 6601, exe_name: 'vlc.exe' },
   ],
   defaultDeviceId: 'bt',
   remembered: [],

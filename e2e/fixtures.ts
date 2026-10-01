@@ -54,6 +54,18 @@ export function deviceRow(page: Page, name: string) {
   return page.locator('main button').filter({ hasText: name });
 }
 
+/**
+ * One whole device row of the output table, name and role together.
+ *
+ * `deviceRow` is the button, which is what a click needs; the role the route
+ * gave the device is a sibling of that button, so anything asserting on it has
+ * to read the row around both. Matched by the row's own hook rather than by a
+ * Tailwind class, which is not a name anything should depend on.
+ */
+export function deviceRowShell(page: Page, name: string) {
+  return page.locator('main [data-device-row]').filter({ hasText: name });
+}
+
 /** One row of the app list. */
 export function appRow(page: Page, exeName: string) {
   return page.locator('aside button').filter({ hasText: exeName });
