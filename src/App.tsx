@@ -17,6 +17,7 @@ import type {
   DuplicationReadyEvent,
   DuplicationStoppedEvent,
   MirrorFailedEvent,
+  SessionActivityEvent,
 } from '@/lib/types';
 import { FADE, SPRING_GLIDE } from '@/lib/motion';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
@@ -148,6 +149,13 @@ export default function App() {
   // a latency reading exists for those devices.
   useBackendEvent<DuplicationReadyEvent>('duplication-ready', (payload) => {
     useRouterStore.getState().handleDuplicationReady(payload);
+  });
+
+  // A session flipping between playing and paused is not a list change, so it
+  // rides its own channel: the routing board's liveness wants the transition
+  // the moment it happens, not at the next re-enumeration.
+  useBackendEvent<SessionActivityEvent>('session-activity', (payload) => {
+    useRouterStore.getState().handleSessionActivity(payload);
   });
 
   // Core Audio says something moved — a device was plugged in, an app started or

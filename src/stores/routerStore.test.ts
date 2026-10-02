@@ -153,6 +153,7 @@ function reset(overrides: Partial<StoreState> = {}): void {
     delayStepMs: 10,
     deviceVolumes: {},
     sourceVolumes: {},
+    soundingPids: {},
     rememberedRoutes: [],
     defaultDeviceId: null,
     startupNotice: null,
@@ -507,6 +508,33 @@ describe('engine events', () => {
     state().handleMirrorFailed({ pid: 1001, generation: 1, deviceId: 'tv', error: 'busy' });
 
     expect(state().routedPids[1001]).toEqual(['tv', 'speakers']);
+  });
+});
+
+describe('session activity', () => {
+  it('tracks the transitions the backend forwards', () => {
+    installBackend();
+    reset({ soundingPids: {} });
+
+    state().handleSessionActivity({ pid: 1001, active: true });
+    expect(state().soundingPids[1001]).toBe(true);
+
+    state().handleSessionActivity({ pid: 1001, active: false });
+    expect(state().soundingPids[1001]).toBeUndefined();
+  });
+
+  it('reseeds from the session list, so a process that left it stops sounding', async () => {
+    installBackend({
+      sessions: [
+        { pid: 1001, exe_name: 'music.exe', playing: true },
+        { pid: 1002, exe_name: 'game.exe' },
+      ],
+    });
+    reset({ soundingPids: { 1001: true, 1002: true } });
+
+    await state().refreshSessions(true);
+
+    expect(state().soundingPids).toEqual({ 1001: true });
   });
 });
 

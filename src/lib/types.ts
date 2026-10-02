@@ -8,6 +8,10 @@ export interface AudioDevice {
 export interface AudioSession {
   pid: number;
   exe_name: string;
+  /** Whether the process was rendering audio when it was enumerated. Absent on
+   *  backends that do not report it (the e2e fake), which reads as "not
+   *  sounding". Kept current by `session-activity` events afterwards. */
+  playing?: boolean;
 }
 
 export type Role = 'all' | 'console' | 'multimedia' | 'communications';
@@ -157,4 +161,12 @@ export interface MirrorFailedEvent {
 export interface AudioChangedEvent {
   devices: boolean;
   sessions: boolean;
+}
+
+/** One process began or stopped rendering audio. Not a list change — the
+ * session survives a pause — but the fact the routing board's liveness is
+ * drawn from. */
+export interface SessionActivityEvent {
+  pid: number;
+  active: boolean;
 }

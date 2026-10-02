@@ -11,6 +11,7 @@ import type {
   RememberedRouteEntry,
   ReplacedRoute,
   ResetOutcome,
+  SessionActivityEvent,
   StartupNotice,
   UndoSnapshot,
 } from '@/lib/types';
@@ -65,6 +66,17 @@ interface RouterState {
   delayStepMs: number;
   /** Per-device volume in percent (100 = the level the app produced). */
   deviceVolumes: Record<string, number>;
+  /**
+   * Which processes are rendering audio right now, keyed by PID.
+   *
+   * Seeded from the session list's `playing` flag on every refresh — the list
+   * is the authority, so a process that left it stops sounding even if no
+   * transition was observed — and kept current between refreshes by
+   * `session-activity` events, which arrive the moment a session flips state
+   * rather than when the next re-enumeration happens to run. This is display
+   * state only: nothing in the routing logic reads it.
+   */
+  soundingPids: Record<number, boolean>;
   /**
    * The level this app applies to each program's audio on its way to the routed
    * devices, in percent, keyed by executable name — the same ownership rule the
@@ -186,6 +198,9 @@ interface RouterState {
   setDelayRange: (rangeMs: number) => Promise<void>;
   setDelayStep: (stepMs: number) => void;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
+  /** One process began or stopped rendering audio. Display state for the
+   * routing board; the routing logic never reads it. */
+  handleSessionActivity: (event: SessionActivityEvent) => void;
   /** An engine has finished opening its mirror devices, so the latency it can
    *  report now exists. Re-reads it; there is no other moment to. */
   handleDuplicationReady: (event: DuplicationReadyEvent) => void;
@@ -412,6 +427,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
   sourceVolumes: {},
+  soundingPids: {},
   autoRemember: readAutoRemember(),
   advancedMode: readAdvancedMode(),
   rememberedRoutes: [],
@@ -495,12 +511,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           const numericPid = Number(pid);
           if (livePids.has(numericPid)) engineGenerations[numericPid] = generation;
         }
+        // Rebuilt rather than merged: the list is the authority on who is
+        // sounding, so a process that left it stops sounding even if its
+        // Inactive transition was never observed. The session-activity events
+        // keep this current between refreshes, the moment a session flips.
+        const soundingPids: Record<number, boolean> = {};
+        for (const session of sessions) {
+          if (session.playing === true) soundingPids[session.pid] = true;
+        }
         return {
           sessions,
           routedPids,
           selectedPids,
           selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
           engineGenerations,
+          soundingPids,
         };
       });
       // A routed program can exit on its own, and the fixed output device
@@ -1430,6 +1455,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } else {
       get().addLog(i18next.t('log.duplicationProcessExited', { pid }), 'info');
     }
+  },
+
+  handleSessionActivity: ({ pid, active }) => {
+    set((s) => {
+      const soundingPids = { ...s.soundingPids };
+      if (active) soundingPids[pid] = true;
+      else delete soundingPids[pid];
+      return { soundingPids };
+    });
   },
 
   handleMirrorFailed: (event) => {
