@@ -26,7 +26,7 @@
 
 App Audio Router (**AAR**) is a per-application audio router for Windows. Windows itself only lets an application play to one output at a time; App Audio Router lifts that restriction. Pick a program, pick one or more playback devices, and the program's audio goes to all of them at once — live, without restarting the program.
 
-It is aimed at ordinary users rather than audio engineers. There is no mixer graph, no virtual cable and no driver installation: the whole app is one window with the process list on the left and the routing view beside it — the current route as the leading rows of the device table (that program, those devices), closed off from the hardware the route is not using, the confirm question in a floating capsule — and the activity log one tab away.
+It is aimed at ordinary users rather than audio engineers. There is no mixer graph, no virtual cable and no driver installation: the whole app is one window with the process list on the left and a routing board beside it — every routed program drawn as a source node on the left, one node per output device on the right, and a wire per program-device pair so you can see where each sound is going at a glance — with the confirm question in a floating capsule and the activity log one tab away.
 
 | | |
 |---|---|
@@ -42,11 +42,11 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 
 ## Screenshots
 
-The same route in both themes: `Music.exe` plays to a Bluetooth headset as the primary device and to USB headphones and an HDMI output as mirrored copies. The routed rows lead the device table, closed off from the hardware the route is not using, with a delay in milliseconds and a volume in percent in its own columns.
+The same board in both themes: `Music.exe` plays to a Bluetooth headset as the primary device and to USB headphones and an HDMI output as mirrored copies, while `chrome.exe` plays to the digital output. Each source node on the left is a routed program — Music's also carries its level as a ring — each wire is one program-device pair, drawn with the moving dash of a program that is sounding, and the routed devices lead the column with their delay and volume beside them. The title bar keeps the count: two routed, two playing.
 
-![App Audio Router routing Music.exe to three devices — WH-1000XM5 over Bluetooth, HDMI output and USB headphones — with per-device delay and volume in the device table](docs/images/app-audio-router-light.png)
+![App Audio Router routing Music.exe to three devices — WH-1000XM5 over Bluetooth, HDMI output and USB headphones — and chrome.exe to the digital output, every route drawn as a wire between nodes](docs/images/app-audio-router-light.png)
 
-![The same multi-device audio route displayed in the dark theme](docs/images/app-audio-router-dark.png)
+![The same multi-program audio board displayed in the dark theme](docs/images/app-audio-router-dark.png)
 
 ## Features
 
@@ -65,7 +65,7 @@ The same route in both themes: `Music.exe` plays to a Bluetooth headset as the p
 - **Delay compensation** — a signed millisecond value per device to align a fast device with a slow one, for example wired speakers against a Bluetooth headset whose codec adds inherent latency. Range and step are configurable (±1/2/5/10 s; 1/10/50/100/1000 ms, 10 ms by default).
 - **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest one in the route, so a quiet headset and a loud speaker rig can be brought in line.
 - **Reported latency** — the software-side latency each device is actually playing at, measured from the running stream. It is a reading and not a setting, so it lives in the tooltip of the delay value rather than beside it: the cell holds the value you asked for, and the tooltip holds what you got.
-- **Editable in place** — drag sideways, scroll, use the arrow keys (hold `Shift` for ten steps), or click a value and type an exact number. Both values live in the device table's own columns and share one set of gestures. The two columns are the expert surface and appear with the rest of it once **Advanced controls** is switched on in Settings.
+- **Editable in place** — drag sideways, scroll, use the arrow keys (hold `Shift` for ten steps), or click a value and type an exact number. Both values live in the device nodes' own columns and share one set of gestures. The two columns are the expert surface and appear with the rest of it once **Advanced controls** is switched on in Settings.
 - **Applied to mirrored copies** — both values are applied by the duplication engine, so they take effect on the devices that receive a copy. A single-device route has no copy (Windows drives that device directly), so its values are dimmed with a note saying they do nothing right now; in the row of the primary device of a multi-device route, the note says the value anchors the group rather than being applied to it.
 
 ### Stays out of the way
@@ -78,10 +78,10 @@ The same route in both themes: `Music.exe` plays to a Bluetooth headset as the p
 
 ### Interface and overhead
 
-- **Flat, editor-style interface** — the process list is a sidebar, the devices are a table with a role for each row and the route as its leading rows, closed off from the rest by a heavier rule, and the route question floats above the table as a capsule that names both ends. Rules and hairlines instead of cards, words instead of pills, and monospaced figures for every value.
+- **A board, not a form** — the process list is a sidebar, and the routing screen is a node board: every routed program is a source node on the left, every output device a node on the right, and the wires between them *are* the routes, coloured by what each route does with the device it reaches (the device Windows plays directly is the accent-coloured primary, the copies are teal, a choice not confirmed yet is amber). A program that is sounding carries its flow: its wires run a slow moving dash, which stops the moment the program does. A program's own level hangs off its node as a small ring, and the title bar keeps a quiet count — *2 routed · 2 playing*. Rules and hairlines instead of cards, words instead of pills, and monospaced figures for every value.
 - **Process list search** — filter the list by name as you type, with the programs that are currently routed kept at the top so the one you are working with does not move under the cursor. `Escape` clears the search.
 - **Light and dark themes**, English and Simplified Chinese, both switchable from the title bar; the preferred theme and language are applied before the first frame paints, so there is no flash on startup.
-- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. Nothing on screen animates on a loop: a window left in the background is not redrawing a blurred backdrop or a drifting highlight behind your back, because the interface has no such decoration to draw. An active route is idle when its program is, too: a routed program that has produced no sound for a second and a half stops being fed to its mirrored devices, rather than having silence written at them a hundred times a second apiece.
+- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. The interface has exactly one thing that moves on its own: the dash on the wires of programs that are sounding — and only while the window is visible, focused and free of the system's reduced-motion request; hidden, unfocused or silent, the wires stand still and nothing repaints. An active route is idle when its program is, too: a routed program that has produced no sound for a second and a half stops being fed to its mirrored devices, rather than having silence written at them a hundred times a second apiece.
 - **Fast cold start** — the window is created hidden and is revealed once the first frame is on screen (with a watchdog on the Rust side as a fallback), device enumeration waits for the first paint to be idle, and the release profile is tuned for a small, dense binary (LTO, one codegen unit, symbol stripping, `panic = "abort"`).
 
 ## How it compares to other options
@@ -92,7 +92,7 @@ The same route in both themes: `Music.exe` plays to a Bluetooth headset as the p
 | Applies to an already-running app | **Yes** | Yes | Yes | Yes |
 | Per-device delay alignment for Bluetooth | **Yes** — signed milliseconds per device | No | Manual, configured per bus | No |
 | Per-device loudness balance | **Yes** — 0–100 % per device | No | Yes, via bus gain | No |
-| Per-program level balance | **Yes** — 0–400 % per program, aligned in one click | No | Yes, but every strip is set by hand | No |
+| Per-program level balance | **Yes** — 0–400 % per program, dialed on its node, aligned in one click | No | Yes, but every strip is set by hand | No |
 | How many programs and devices at once | **No built-in limit** — each routed program is its own engine | — | A fixed number of buses (3/5/8 by edition) | No |
 | Remembers the route per application | **Yes**, automatically | Yes (this is the same Windows setting) | Configured in Windows, not in the mixer | Inherits the Windows per-app setting |
 | Requires a virtual audio driver | **No** | — | Yes | — |
@@ -120,10 +120,9 @@ Prefer building it yourself? See [Build from source](#build-from-source).
 
 1. **Play some sound in the app you want to route.** A program only appears in the process list while it has an active audio session — audio routing is per session, not per shortcut.
 2. **Select it in the process list.** Click one process, or `Ctrl`+`click` to select several and route them together.
-3. **Click the playback devices in the table.** A staged device is marked *Pending* in the Role column; the first one is the primary, and every additional device gets a mirrored copy.
-4. **Confirm the capsule** (`Route it`), which names the program and the device it is about to play through. When the route is live, its rows move to the top of the table, a heavier rule closes them off from the hardware the route is not using, and their Role reads *Primary* and *Mirror*.
-5. **Tune each device if needed.** Drag the delay and volume values in the table's own columns (turn on **Advanced controls** in the settings to see them).
-6. **Turn on Auto-remember** in the settings so the route is restored the next time that program plays.
+3. **Click the playback devices on the board.** A staged device is marked *Pending*; the first one is the primary, and every additional device gets a mirrored copy.
+4. **Confirm the capsule** (`Route it`), which names the program and the device it is about to play through. When the route is live, the program's wires stay on the board — coloured *Primary* at the device Windows plays and *Mirror* at each copy — and they start to flow while the program is sounding.
+5. **Tune each device if needed.** Drag the delay and volume values in the device nodes' own columns (turn on **Advanced controls** in the settings to see them).
 6. **Turn on Auto-remember** in the settings so the route is restored the next time that program plays.
 
 ## Delay compensation explained
@@ -164,7 +163,7 @@ Delay fixes *when* the audio arrives and the device volume fixes *how loud each 
 - **Nothing it measured can clip.** Each gain is bounded by that program's own measured peak — a gain of `1/peak` puts its loudest sample at full scale and cannot put anything past it — and by a ceiling, because past roughly +12 dB a program's noise floor comes up along with its signal. That is why none of this needs a limiter. The bound is against the material that was playing when it was measured, though, and the gain is then stored and reused: a program that was quiet then and is loud later can still be pushed into clipping, so turn it down if you hear it.
 - **A program that is not playing is left exactly as it was**, and the log names it. Aligning against silence would be aligning against nothing.
 - **Several programs at once still add up at the device**, and that sum happens inside the Windows mixer where this app cannot see it. The headroom margin is a courtesy rather than a guarantee: with many programs playing together, the device volume is still the control that has to move.
-- **Only routed programs have a level**, because the level is applied by the engine to the audio it has captured. A program with no engine has no such path, so it is not listed — route it first.
+- **Only routed programs have a level**, because the level is applied by the engine to the audio it has captured. A program routed to a single device has no engine either — Windows plays it directly — so its node carries no ring. Route it to a second device first and the ring appears.
 
 ## How it works
 
@@ -199,14 +198,18 @@ Routing rules are keyed by **executable name**, not by PID, so a remembered rout
 AppAudioRouter/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── DeviceTable.tsx       # devices as a table: device / role / (advanced) delay / volume
+│   │   ├── RouteCanvas.tsx       # the routing board: source nodes, device nodes, wires
+│   │   ├── SourceNode.tsx        # one routed program, with its level ring
+│   │   ├── DeviceNode.tsx        # one output device: name / role / (advanced) delay / volume
+│   │   ├── EdgeLayer.tsx         # all wires on one svg, flowing while their program sounds
+│   │   ├── SourceLevelDial.tsx   # the per-program level as a ring beside the port
 │   │   ├── RouteConfirmCapsule.tsx # the floating "this app → that device, route it?" capsule
 │   │   ├── ProcessList.tsx       # processes with an audio session
 │   │   ├── SettingsPage.tsx      # theme, language, routing, background, delays, about
 │   │   ├── LogPanel.tsx          # activity log (the second tab)
-│   │   ├── TitleBar.tsx          # custom frameless title bar
+│   │   ├── TitleBar.tsx          # custom frameless title bar, with the routed/playing count
 │   │   └── ui/                   # Switch, UnderlineTabs, SegmentedControl, ScrubReadout, …
-│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent
+│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useLiveness
 │   ├── stores/routerStore.ts     # Zustand store
 │   ├── i18n/locales/             # en.json, zh-CN.json
 │   ├── lib/                      # invoke wrapper, delay maths, shared types
@@ -260,7 +263,7 @@ Yes. It is open source under the MIT licence, and there is no paid tier or accou
 
 ### Can I send one application to two (or more) audio devices at the same time?
 
-Yes — that is the main reason the app exists. Select several devices in the device table and confirm; the first device is driven natively by Windows and every additional device gets a mirrored copy of the same stream in real time.
+Yes — that is the main reason the app exists. Select several devices on the board and confirm; the first device is driven natively by Windows and every additional device gets a mirrored copy of the same stream in real time.
 
 ### Does it need a virtual audio driver such as VB-CABLE?
 
