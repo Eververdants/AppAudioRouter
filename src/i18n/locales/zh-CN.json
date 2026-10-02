@@ -130,8 +130,9 @@
     "empty": "还没有活动记录"
   },
   "canvas": {
-    "source": "源程序",
+    "source": "声源",
     "sourceHint": "这台程序的声音会输出到右侧设备",
+    "sourceSelectHint": "点击选中该程序",
     "rolePrimaryHint": "系统直接播放这台设备，其余为复制",
     "roleMirrorHint": "由复制引擎驱动，延迟与音量在这里生效",
     "roleStagedHint": "已选中，确认后才生效",

@@ -72,6 +72,16 @@ export function appRow(page: Page, exeName: string) {
 }
 
 /**
+ * One source node on the routing board, matched by its own hook rather than a
+ * Tailwind class. The locator is the node's button — the thing a click selects
+ * the program with and the thing that carries `aria-pressed` — so it reads and
+ * drives both.
+ */
+export function sourceNode(page: Page, exeName: string) {
+  return page.locator('main [data-source-node]').filter({ hasText: exeName }).locator('button');
+}
+
+/**
  * The floating capsule that asks whether to route.
  *
  * Matched by role and accessible name rather than by its text: the app list,

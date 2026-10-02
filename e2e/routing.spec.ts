@@ -12,6 +12,7 @@ import {
   routeQuestion,
   setFailing,
   setSessions,
+  sourceNode,
 } from './fixtures';
 
 /**
@@ -259,4 +260,44 @@ test('a backend notification brings a newly playing app onto the list', async ({
   await emit(page, 'audio-changed', { devices: false, sessions: true });
 
   await expect(appRow(page, 'browser.exe')).toBeVisible();
+});
+
+test('every routed program is on the board with a wire of its own', async ({ page }) => {
+  await openApp(page);
+
+  await appRow(page, 'music.exe').click();
+  await routeConfirmButton(page).click();
+  await appRow(page, 'game.exe').click();
+  await deviceRow(page, 'TV').click();
+  await routeConfirmButton(page).click();
+
+  // Both programs are drawn as sources, each with the wire its own route is —
+  // the board is where every sound's destination is read at once, not just the
+  // newest route's. The keys name the pair a wire joins.
+  await expect(sourceNode(page, 'music.exe')).toBeVisible();
+  await expect(sourceNode(page, 'game.exe')).toBeVisible();
+  await expect(page.locator('main [data-wire="1001:speakers"]')).toHaveCount(1);
+  await expect(page.locator('main [data-wire="1002:tv"]')).toHaveCount(1);
+  await expect(page.locator('main [data-wire]')).toHaveCount(2);
+});
+
+test('clicking a source node makes that program the subject', async ({ page }) => {
+  await openApp(page);
+
+  await appRow(page, 'music.exe').click();
+  await routeConfirmButton(page).click();
+  await appRow(page, 'game.exe').click();
+  await deviceRow(page, 'TV').click();
+  await routeConfirmButton(page).click();
+
+  // The game was routed last, so it is the subject; the music node is not.
+  await expect(sourceNode(page, 'music.exe')).toHaveAttribute('aria-pressed', 'false');
+
+  await sourceNode(page, 'music.exe').click();
+
+  // Selected, exactly as its row in the app list would have done — and since
+  // its staged state is its own live route, no question is asked about it.
+  await expect(sourceNode(page, 'music.exe')).toHaveAttribute('aria-pressed', 'true');
+  await expect(sourceNode(page, 'game.exe')).toHaveAttribute('aria-pressed', 'false');
+  await expect(routeQuestion(page)).toBeHidden();
 });

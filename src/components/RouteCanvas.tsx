@@ -19,13 +19,14 @@ import {
   deviceWidth,
   roleOf,
   wirePath,
+  type NodeRole,
 } from '@/lib/canvas';
 import { activeDeviceIds, engineRolesFor } from '@/lib/engineRole';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
- * The routing screen: a node graph of one program and the devices its sound
- * goes to.
+ * The routing screen: a node graph of every program whose sound goes somewhere,
+ * and the devices it goes to.
  *
  * Why a graph and not the table this replaced. The table said the same four
  * things — which device, what the route does with it, its delay, its volume —
@@ -36,21 +37,25 @@ import { useRouterStore } from '@/stores/routerStore';
  * somewhere — and the four column headings spent a whole line of the window
  * explaining a shape the eye could have had for free.
  *
- * So: one source node on the left, one node per device on the right, and a
- * Bézier per device in the route. The ordering rule survives — the devices in
- * the route are still the leading ones, top to bottom in route order, which is
- * also the order the wires fan out in. The heading row survives too, aligned to
- * the node's own internal columns, because delay and volume are two numbers a
- * few pixels apart and unlabelled numbers are a puzzle.
+ * The board shows every routed program at once, not just the one being routed:
+ * the question this screen answers is "where is sound going", and an answer
+ * that hides all routes but the newest is a list again. So a source column on
+ * the left — one node per routed program, plus the selection when it is not
+ * routed yet — a device column on the right, and one Bézier per program-device
+ * pair. Each wire wears the colour of what *its own* route does with the
+ * device it reaches: with several programs on the board, one device can be a
+ * primary for one of them and a mirror for another, and the wires are the only
+ * place that difference can live. The device's own port and role word follow
+ * the selection when there is one, and its first route otherwise.
  *
- * What is deliberately *not* here: no free-dragging, no pan, no zoom, no
- * marching dashes. Node positions come from the route order, which means the
- * wires are arithmetic rather than measurement (see `lib/canvas.ts`), which
- * means nothing has to be tracked across a layout pass — and a canvas of six
- * nodes has nothing to explore anyway. Pan and zoom are how you find something
- * you cannot see; the whole board fits, so there is nothing to find. The
- * fan-out *is* the animation budget: when a device joins the route its node
- * travels on a spring and its wire arrives with it.
+ * What is deliberately *not* here: no free-dragging, no pan, no zoom. Node
+ * positions come from the route order, which means the wires are arithmetic
+ * rather than measurement (see `lib/canvas.ts`), which means nothing has to be
+ * tracked across a layout pass — and a canvas of six nodes has nothing to
+ * explore anyway. Pan and zoom are how you find something you cannot see; the
+ * whole board fits, so there is nothing to find. The fan-out *is* the animation
+ * budget: when a device joins the route its node travels on a spring and its
+ * wire arrives with it.
  */
 export function RouteCanvas() {
   const { t } = useTranslation();
@@ -64,10 +69,11 @@ export function RouteCanvas() {
   const deviceLatencyMs = useRouterStore((s) => s.deviceLatencyMs);
   const advancedMode = useRouterStore((s) => s.advancedMode);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
+  const selectProcess = useRouterStore((s) => s.selectProcess);
+  const toggleProcessSelection = useRouterStore((s) => s.toggleProcessSelection);
   const stopRoute = useRouterStore((s) => s.stopRoute);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
 
-  const activeIds = activeDeviceIds(selectedPids, routedPids);
   const engineRoles = engineRolesFor(routedPids);
   const routedCount = Object.keys(routedPids).length;
 
@@ -75,16 +81,24 @@ export function RouteCanvas() {
   const primarySession =
     primaryPid === undefined ? undefined : sessions.find((s) => s.pid === primaryPid);
 
-  // The devices the route is made of, in the order the user picked them: the
-  // first is the one the system plays directly, the rest are mirrored. A staged
-  // choice outranks a live route, because it is the route being decided now.
-  const routeIds = selectedDeviceIds.length > 0 ? selectedDeviceIds : activeIds;
-  const routeSet = new Set(routeIds);
+  // The programs on the board: every routed one — `routedPids`' keys iterate in
+  // ascending PID order, so the column is stable across refreshes — and then
+  // the selection when it is not routed yet, because that is the program a
+  // route is currently being decided for. Selected programs that are already
+  // routed stay where they were and are drawn louder instead.
+  const stagedSourcePids = selectedPids.filter((pid) => routedPids[pid] === undefined);
+  const sourcePids = [...Object.keys(routedPids).map(Number), ...stagedSourcePids];
 
-  // `sort` is stable, so devices the route does not name keep the order the
-  // backend reported them in: hardware that has not moved does not move.
+  // The devices the routes are made of. Every routed program's targets, in
+  // route order, deduplicated by first appearance; then whatever the selection
+  // has staged but no route holds yet, because that is the question on the
+  // board. The remaining devices keep the order the backend reported them in —
+  // the sort is stable, so hardware that has not moved does not move.
   const rank = new Map<string, number>();
-  routeIds.forEach((id, index) => rank.set(id, index));
+  for (const pid of sourcePids) {
+    for (const id of routedPids[pid] ?? []) if (!rank.has(id)) rank.set(id, rank.size);
+  }
+  for (const id of selectedDeviceIds) if (!rank.has(id)) rank.set(id, rank.size);
   const ordered = [...devices].sort(
     (a, b) =>
       (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
@@ -94,34 +108,70 @@ export function RouteCanvas() {
   const deviceW = deviceWidth(expert);
 
   // Where the nodes are. Everything below is derived from these, including the
-  // wires, so a node and the wire that meets it cannot disagree.
-  const stackH =
-    ordered.length === 0 ? 0 : ordered.length * NODE_H + (ordered.length - 1) * NODE_GAP;
-  const sourceTop = Math.max(0, Math.round((stackH - NODE_H) / 2));
+  // wires, so a node and the wire that meets it cannot disagree. Both columns
+  // are centred against the taller of the two stacks, so a single source among
+  // five devices sits in the middle of its column rather than at its top.
+  const stackH = (count: number) =>
+    count === 0 ? 0 : count * NODE_H + (count - 1) * NODE_GAP;
+  const contentH = Math.max(stackH(sourcePids.length), stackH(ordered.length));
+  const sourceTop = Math.round((contentH - stackH(sourcePids.length)) / 2);
+  const deviceTop = Math.round((contentH - stackH(ordered.length)) / 2);
   const sourceX = BOARD_PAD;
-  const sourceY = BOARD_PAD + HEAD_H + sourceTop;
+  const sourceY = BOARD_PAD + HEAD_H;
   const deviceX = BOARD_PAD + SOURCE_W + COLUMN_GAP;
   const deviceY = BOARD_PAD + HEAD_H;
+  const portY = (top: number, index: number) =>
+    top + index * (NODE_H + NODE_GAP) + NODE_H / 2;
 
-  const wires: Wire[] =
-    primarySession === undefined
-      ? []
-      : ordered.flatMap((device, index) =>
-          routeSet.has(device.id)
-            ? [
-                {
-                  key: device.id,
-                  d: wirePath(
-                    sourceX + SOURCE_W,
-                    sourceY + NODE_H / 2,
-                    deviceX,
-                    deviceY + index * (NODE_H + NODE_GAP) + NODE_H / 2,
-                  ),
-                  tone: TONE[roleOf(device.id, selectedDeviceIds, activeIds)],
-                },
-              ]
-            : [],
-        );
+  // The subject's staged choice replaces the display of its own route while a
+  // route is being decided — the board shows the question, not the state it is
+  // about to replace. Every other source shows the route it has.
+  const wires: Wire[] = [];
+  for (const pid of sourcePids) {
+    const isSubject = selectedPids.includes(pid);
+    const active = routedPids[pid];
+    const ids = isSubject && selectedDeviceIds.length > 0 ? selectedDeviceIds : (active ?? []);
+    if (ids.length === 0) continue;
+    const index = sourcePids.indexOf(pid);
+    const fromY = sourceY + portY(sourceTop, index);
+    for (let target = 0; target < ids.length; target += 1) {
+      const deviceId = ids[target];
+      if (deviceId === undefined) continue;
+      const deviceIndex = ordered.findIndex((device) => device.id === deviceId);
+      if (deviceIndex < 0) continue;
+      wires.push({
+        key: `${pid}:${deviceId}`,
+        d: wirePath(
+          sourceX + SOURCE_W,
+          fromY,
+          deviceX,
+          deviceY + portY(deviceTop, deviceIndex),
+        ),
+        // A wire is coloured by what its own route does with the device it
+        // reaches; only the subject's staged choice can wear the amber of a
+        // question not yet answered, which is what passing it an empty staged
+        // list arranges for every other source.
+        tone: TONE[roleOf(deviceId, isSubject ? selectedDeviceIds : [], active ?? [])],
+      });
+    }
+  }
+
+  // A device's port and role word follow the subject when there is one — that
+  // is the routing context the user is working in — and the first route that
+  // involves the device otherwise, so a board read with nothing selected still
+  // says what each routed device is for instead of calling them all idle.
+  const subjectActive = activeDeviceIds(selectedPids, routedPids);
+  const deviceRole = (deviceId: string): NodeRole => {
+    const contextual = roleOf(deviceId, selectedDeviceIds, subjectActive);
+    if (contextual !== 'idle') return contextual;
+    for (const pid of sourcePids) {
+      const route = routedPids[pid];
+      const index = route?.indexOf(deviceId) ?? -1;
+      if (index === 0) return 'primary';
+      if (index > 0) return 'mirror';
+    }
+    return 'idle';
+  };
 
   // The way back to the system default. Whichever scope the selection implies:
   // the selected programs, or — with nothing selected — every routed program,
@@ -186,16 +236,41 @@ export function RouteCanvas() {
           <EdgeLayer wires={wires} />
 
           <div className="flex items-start" style={{ gap: COLUMN_GAP }}>
-            {/* The program. Its heading names the column the way the device
+            {/* The programs. Its heading names the column the way the device
                 column's does, so the two sides of the board are introduced the
                 same way — and so the wires are obviously leaving somewhere. */}
             <div className="flex-none" style={{ width: SOURCE_W }}>
               <div className={`flex items-center ${heading}`} style={{ height: HEAD_H }}>
                 <span className="pl-3">{t('canvas.source')}</span>
               </div>
-              {primarySession !== undefined && (
+              {sourcePids.length > 0 && (
                 <div style={{ marginTop: sourceTop }}>
-                  <SourceNode exeName={primarySession.exe_name} pid={primarySession.pid} />
+                  <motion.div layout className="flex flex-col" style={{ gap: NODE_GAP }}>
+                    {sourcePids.map((pid) => {
+                      const exeName =
+                        sessions.find((session) => session.pid === pid)?.exe_name ??
+                        `PID ${pid}`;
+                      return (
+                        <SourceNode
+                          key={pid}
+                          exeName={exeName}
+                          pid={pid}
+                          selected={selectedPids.includes(pid)}
+                          onSelect={(event) => {
+                            // The same two gestures the app list offers: plain
+                            // click makes this the subject, Ctrl+click adds it
+                            // to a batch. A board and a list that answer the
+                            // same click differently would be two UIs.
+                            if (event.ctrlKey || event.metaKey) {
+                              toggleProcessSelection(pid);
+                            } else {
+                              selectProcess(pid);
+                            }
+                          }}
+                        />
+                      );
+                    })}
+                  </motion.div>
                 </div>
               )}
             </div>
@@ -224,34 +299,36 @@ export function RouteCanvas() {
               {devices.length === 0 ? (
                 <p className="py-8 text-[11px] text-text-muted">{t('settings.noDevices')}</p>
               ) : (
-                <motion.div layout className="flex flex-col" style={{ gap: NODE_GAP }}>
-                  {ordered.map((device) => {
-                    const role = roleOf(device.id, selectedDeviceIds, activeIds);
-                    const engineRole = engineRoles.get(device.id) ?? 'inactive';
-                    // A reading, not a setting: it only ever exists for a device
-                    // a running engine is filling, and it belongs in the
-                    // tooltip rather than beside the setting, where two numbers
-                    // a few pixels apart read as one broken one.
-                    const latency =
-                      engineRole === 'mirror' ? deviceLatencyMs[device.id] : undefined;
+                <div style={{ marginTop: deviceTop }}>
+                  <motion.div layout className="flex flex-col" style={{ gap: NODE_GAP }}>
+                    {ordered.map((device) => {
+                      const role = deviceRole(device.id);
+                      const engineRole = engineRoles.get(device.id) ?? 'inactive';
+                      // A reading, not a setting: it only ever exists for a device
+                      // a running engine is filling, and it belongs in the
+                      // tooltip rather than beside the setting, where two numbers
+                      // a few pixels apart read as one broken one.
+                      const latency =
+                        engineRole === 'mirror' ? deviceLatencyMs[device.id] : undefined;
 
-                    return (
-                      <DeviceNode
-                        key={device.id}
-                        deviceId={device.id}
-                        name={device.name}
-                        role={role}
-                        engineRole={engineRole}
-                        latencyMs={latency}
-                        isDefaultDevice={device.id === defaultDeviceId}
-                        advanced={expert}
-                        delayRangeMs={delayRangeMs}
-                        pressed={selectedDeviceIds.includes(device.id)}
-                        onToggle={() => toggleDeviceSelection(device.id)}
-                      />
-                    );
-                  })}
-                </motion.div>
+                      return (
+                        <DeviceNode
+                          key={device.id}
+                          deviceId={device.id}
+                          name={device.name}
+                          role={role}
+                          engineRole={engineRole}
+                          latencyMs={latency}
+                          isDefaultDevice={device.id === defaultDeviceId}
+                          advanced={expert}
+                          delayRangeMs={delayRangeMs}
+                          pressed={selectedDeviceIds.includes(device.id)}
+                          onToggle={() => toggleDeviceSelection(device.id)}
+                        />
+                      );
+                    })}
+                  </motion.div>
+                </div>
               )}
             </div>
           </div>

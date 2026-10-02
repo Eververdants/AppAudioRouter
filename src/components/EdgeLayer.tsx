@@ -33,7 +33,7 @@ export function EdgeLayer({ wires }: { wires: Wire[] }) {
       fill="none"
     >
       {wires.map((wire) => (
-        <g key={wire.key}>
+        <g key={wire.key} data-wire={wire.key}>
           <path
             d={wire.d}
             className={wire.tone.wire}

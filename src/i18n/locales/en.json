@@ -130,8 +130,9 @@
     "empty": "Nothing logged yet"
   },
   "canvas": {
-    "source": "Source",
+    "source": "Sources",
     "sourceHint": "Sound from this app is sent to the devices on the right",
+    "sourceSelectHint": "Click to make this the program being routed",
     "rolePrimaryHint": "Windows plays this device directly; the others are copies",
     "roleMirrorHint": "Driven by the duplicator, so delay and volume apply here",
     "roleStagedHint": "Picked — it takes effect once you confirm",
