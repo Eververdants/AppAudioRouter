@@ -262,6 +262,45 @@ test('a backend notification brings a newly playing app onto the list', async ({
   await expect(appRow(page, 'browser.exe')).toBeVisible();
 });
 
+test('a wire flows only while its program is sounding', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+  await routeConfirmButton(page).click();
+
+  // Nothing said music.exe was rendering audio, so its wire is a steady line.
+  const wire = page.locator('main [data-wire="1001:speakers"]');
+  await expect(wire).toHaveCount(1);
+  await expect(wire).not.toHaveAttribute('data-live');
+
+  // The session began to render audio — the same transition the backend's
+  // notification thread forwards the moment it happens.
+  await emit(page, 'session-activity', { pid: 1001, active: true });
+  await expect(wire).toHaveAttribute('data-live', 'true');
+
+  // And when it stops, the flow is unmounted rather than left running.
+  await emit(page, 'session-activity', { pid: 1001, active: false });
+  await expect(wire).not.toHaveAttribute('data-live');
+});
+
+test('a staged question has nothing flowing through it', async ({ page }) => {
+  await openApp(page);
+
+  // A route already on the board is playing; the staged choice that would
+  // replace it is not, so its wire stays steady even while the program sounds.
+  await appRow(page, 'music.exe').click();
+  await routeConfirmButton(page).click();
+  await emit(page, 'session-activity', { pid: 1001, active: true });
+  await expect(page.locator('main [data-wire="1001:speakers"]')).toHaveAttribute(
+    'data-live',
+    'true',
+  );
+
+  await emit(page, 'session-activity', { pid: 1001, active: false });
+  await deviceRow(page, 'TV').click();
+  await expect(page.locator('main [data-wire="1001:tv"]')).toBeVisible();
+  await expect(page.locator('main [data-wire="1001:tv"]')).not.toHaveAttribute('data-live');
+});
+
 test('every routed program is on the board with a wire of its own', async ({ page }) => {
   await openApp(page);
 

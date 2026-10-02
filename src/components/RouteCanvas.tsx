@@ -22,6 +22,7 @@ import {
   type NodeRole,
 } from '@/lib/canvas';
 import { activeDeviceIds, engineRolesFor } from '@/lib/engineRole';
+import { useLiveness } from '@/hooks/useLiveness';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -68,6 +69,7 @@ export function RouteCanvas() {
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const deviceLatencyMs = useRouterStore((s) => s.deviceLatencyMs);
   const advancedMode = useRouterStore((s) => s.advancedMode);
+  const soundingPids = useRouterStore((s) => s.soundingPids);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const selectProcess = useRouterStore((s) => s.selectProcess);
   const toggleProcessSelection = useRouterStore((s) => s.toggleProcessSelection);
@@ -126,6 +128,9 @@ export function RouteCanvas() {
   // The subject's staged choice replaces the display of its own route while a
   // route is being decided — the board shows the question, not the state it is
   // about to replace. Every other source shows the route it has.
+  const liveness = useLiveness();
+  const sameRoute = (a: string[], b: string[] | undefined) =>
+    b !== undefined && a.length === b.length && a.every((id, index) => id === b[index]);
   const wires: Wire[] = [];
   for (const pid of sourcePids) {
     const isSubject = selectedPids.includes(pid);
@@ -134,6 +139,13 @@ export function RouteCanvas() {
     if (ids.length === 0) continue;
     const index = sourcePids.indexOf(pid);
     const fromY = sourceY + portY(sourceTop, index);
+    // A staged set that differs from the live route is the question on the
+    // board, and a question has nothing flowing through it yet — the wire only
+    // flows when what it draws is the route the program is actually playing
+    // through, and then only while the program is sounding and motion may run.
+    const drawsLiveRoute =
+      !isSubject || selectedDeviceIds.length === 0 || sameRoute(selectedDeviceIds, active);
+    const sounding = (soundingPids[pid] ?? false) && liveness;
     for (let target = 0; target < ids.length; target += 1) {
       const deviceId = ids[target];
       if (deviceId === undefined) continue;
@@ -152,6 +164,7 @@ export function RouteCanvas() {
         // question not yet answered, which is what passing it an empty staged
         // list arranges for every other source.
         tone: TONE[roleOf(deviceId, isSubject ? selectedDeviceIds : [], active ?? [])],
+        live: sounding && drawsLiveRoute,
       });
     }
   }

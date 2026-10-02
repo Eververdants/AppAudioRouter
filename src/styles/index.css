@@ -220,3 +220,30 @@ input[type='number']::-webkit-inner-spin-button {
       24px 24px;
   }
 }
+
+/* The flow on a live wire: the one place this interface is allowed to move of
+   its own accord. It is drawn with a keyframe rather than Motion on purpose —
+   Motion would drive the offset from JavaScript on every frame, while this is
+   handled by the compositor's animation machinery and costs nothing to mount
+   or unmount, which is the whole trick: `useLiveness` and the wire's sounding
+   state decide whether the element exists at all, so a resting board (window
+   hidden or unfocused, reduced motion requested, program silent) paints
+   nothing. One period is one dash: 12 px at 24 px a second, slow enough to be
+   read as current rather than as confetti. The media query is a second fence
+   behind the hook, not the only one. */
+@keyframes wire-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+.wire-flow {
+  stroke-dasharray: 3 9;
+  animation: wire-flow 0.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wire-flow {
+    animation: none;
+  }
+}

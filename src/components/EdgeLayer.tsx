@@ -5,6 +5,14 @@ export type Wire = {
   /** The cubic Bézier between the two ports, in board pixels. */
   d: string;
   tone: RoleTone;
+  /**
+   * Whether the wire may flow: its program is sounding right now and the
+   * window is in a state where motion may run at all (see `useLiveness`). A
+   * flowing wire replaces its steady centre line with moving dashes — when
+   * this is false the element is not there at all, so a resting board makes no
+   * repaints.
+   */
+  live?: boolean;
 };
 
 /**
@@ -15,15 +23,18 @@ export type Wire = {
  * the canvas geometry in `lib/canvas.ts` for why it is arithmetic instead of
  * measurement.
  *
- * Nothing here animates. A marching dash would be the obvious way to say the
- * route is alive, and it would also be a repaint on every frame of the rest of
- * the session: the wires are already coloured by what they carry, and the port
- * they arrive at is already ringed in the same colour. The route is legible
- * standing still, so it stands still.
- *
  * Each wire is drawn twice: a wide, faint copy underneath and the wire itself
  * on top. That is the whole of the glow — no filter, no blur, nothing the GPU
  * has to composite again when the window is not even in front.
+ *
+ * A wire whose program is sounding *flows*: a third path of moving dashes
+ * replaces the steady centre line, and the route reads as something moving
+ * rather than a diagram of it. This is the interface's one persistent repaint
+ * and it is gated hard — mounted only while the source is sounding and
+ * `useLiveness` allows motion at all, unmounted (not paused) otherwise, so a
+ * board at rest is as static as it was before the flow existed. The speed does
+ * not track the level; that would need a per-frame level the engines do not
+ * publish, and the wake-up cost of polling one would outprice the effect.
  */
 export function EdgeLayer({ wires }: { wires: Wire[] }) {
   return (
@@ -33,7 +44,7 @@ export function EdgeLayer({ wires }: { wires: Wire[] }) {
       fill="none"
     >
       {wires.map((wire) => (
-        <g key={wire.key} data-wire={wire.key}>
+        <g key={wire.key} data-wire={wire.key} data-live={wire.live ? 'true' : undefined}>
           <path
             d={wire.d}
             className={wire.tone.wire}
@@ -41,7 +52,16 @@ export function EdgeLayer({ wires }: { wires: Wire[] }) {
             strokeLinecap="round"
             opacity={0.14}
           />
-          <path d={wire.d} className={wire.tone.wire} strokeWidth={1.75} strokeLinecap="round" />
+          {wire.live ? (
+            <path
+              d={wire.d}
+              className={`${wire.tone.wire} wire-flow`}
+              strokeWidth={2.25}
+              strokeLinecap="round"
+            />
+          ) : (
+            <path d={wire.d} className={wire.tone.wire} strokeWidth={1.75} strokeLinecap="round" />
+          )}
         </g>
       ))}
     </svg>
