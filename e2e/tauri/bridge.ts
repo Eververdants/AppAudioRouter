@@ -21,6 +21,9 @@ export interface BridgeDevice {
 export interface BridgeSession {
   pid: number;
   exe_name: string;
+  /** Whether the session was rendering audio when enumerated; absent reads as
+   *  "not sounding". */
+  playing?: boolean;
 }
 
 export interface BridgeState {
@@ -30,6 +33,8 @@ export interface BridgeState {
   remembered: [string, string[]][];
   delays: [string, number][];
   volumes: [string, number][];
+  /** `(exe_name, percent)` — the per-program levels the store reads at boot. */
+  sourceVolumes: [string, number][];
 }
 
 /** Commands the fake backend should reject, by name. */
@@ -119,7 +124,16 @@ function tauriBridge(initial: BridgeState): void {
       case 'set_device_volume':
         return null;
       case 'get_source_volumes':
-        return [];
+        return state.sourceVolumes;
+      case 'set_source_volume': {
+        const exeName = String(payload.exeName);
+        const percent = Number(payload.percent);
+        // 100 is the neutral level and is stored as "no entry", the same rule
+        // the real backend follows.
+        const rest = state.sourceVolumes.filter(([name]) => name !== exeName);
+        state.sourceVolumes = percent === 100 ? rest : [...rest, [exeName, percent]];
+        return null;
+      }
       case 'set_source_volume':
       case 'align_source_levels':
       case 'set_tray_labels':
@@ -230,4 +244,5 @@ export const DEFAULT_STATE: BridgeState = {
   remembered: [],
   delays: [],
   volumes: [],
+  sourceVolumes: [],
 };

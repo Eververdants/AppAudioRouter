@@ -26,13 +26,16 @@ test.skip(
   'README screenshots are captured on demand: CAPTURE_SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts',
 );
 
-/** One program routed to three devices: the headset it was already on, plus two
- * wired outputs held back so all three arrive together. The rest of the hardware
- * is there and deliberately not part of the route, so the shot also shows where
- * the routed block ends — the one thing a picture of a route has to get across.
- * The list is filled out to a plausible desktop rather than trimmed to two rows:
- * a screenshot that is nine tenths empty white reads as a broken layout, not as
- * a quiet one. */
+/** Two programs routed: Music to three devices (the headset it was already on,
+ *  plus two wired outputs held back so all three arrive together), and Chrome
+ *  to the digital output. That is what the board is for — seeing where every
+ *  sound is going at once — so the shot has to show more than one source line.
+ *  The rest of the hardware is there and deliberately not part of any route, so
+ *  the shot also shows where the routed block ends. Both routed programs are
+ *  marked as playing, because that is the board's resting truth when music is
+ *  on: the wires carry their moving dash. The list is filled out to a plausible
+ *  desktop rather than trimmed to two rows: a screenshot that is nine tenths
+ *  empty white reads as a broken layout, not as a quiet one. */
 const STATE = {
   devices: [
     { id: 'bt', name: 'WH-1000XM5' },
@@ -43,8 +46,8 @@ const STATE = {
     { id: 'nv', name: 'NVIDIA High Definition Audio' },
   ],
   sessions: [
-    { pid: 4021, exe_name: 'Music.exe' },
-    { pid: 5233, exe_name: 'chrome.exe' },
+    { pid: 4021, exe_name: 'Music.exe', playing: true },
+    { pid: 5233, exe_name: 'chrome.exe', playing: true },
     { pid: 6180, exe_name: 'Game.exe' },
     { pid: 7102, exe_name: 'Discord.exe' },
     { pid: 8401, exe_name: 'spotify.exe' },
@@ -61,6 +64,9 @@ const STATE = {
   volumes: [
     ['hdmi', 70],
     ['usb', 85],
+  ],
+  sourceVolumes: [
+    ['Music.exe', 80],
   ],
 };
 
@@ -86,6 +92,12 @@ for (const theme of ['light', 'dark'] as const) {
     await deviceRow(page, 'WH-1000XM5').click();
     await deviceRow(page, 'HDMI output').click();
     await deviceRow(page, 'USB headphones').click();
+    await routeConfirmButton(page).click();
+
+    // A second program to a second output, so the board shows a fan of routes
+    // instead of one: the shot is of the board, not of a single route.
+    await appRow(page, 'chrome.exe').click();
+    await deviceRow(page, 'Digital Audio (S/PDIF)').click();
     await routeConfirmButton(page).click();
 
     // Let the undo offer expire: the shot is of the resting state, not of the
