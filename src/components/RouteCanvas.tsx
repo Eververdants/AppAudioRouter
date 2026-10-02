@@ -269,6 +269,11 @@ export function RouteCanvas() {
                           exeName={exeName}
                           pid={pid}
                           selected={selectedPids.includes(pid)}
+                          // A level has a path to act on only while an engine
+                          // carries this program's audio — the same rule the
+                          // old settings list used. A single-device route is
+                          // played by the system directly and starts none.
+                          showLevel={(routedPids[pid]?.length ?? 0) >= 2}
                           onSelect={(event) => {
                             // The same two gestures the app list offers: plain
                             // click makes this the subject, Ctrl+click adds it

@@ -74,8 +74,7 @@
     "sourceLevelsAlign": "对齐电平",
     "sourceLevelsAlignDesc": "把正在出声的程序统一拉到最响一台的电平",
     "sourceLevelsAlignAction": "对齐",
-    "sourceLevelsNote": "程序电平只作用在本应用复制出去的那份声音上，不改程序自身音量；100 为原样，对镜像设备生效。",
-    "sourceLevelsNone": "当前没有正在复制的程序；电平只在多设备同时输出时生效。",
+    "sourceLevelsNote": "每个正在复制的程序，它的电平环就画在路由板上的源节点里。电平只作用在本应用复制出去的那份声音上，不改程序自身音量；100 为原样，对镜像设备生效。",
     "noDevices": "暂无音频设备",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"

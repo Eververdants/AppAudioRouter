@@ -139,7 +139,9 @@ export const BOARD_PAD = 12;
 export const HEAD_H = 26;
 export const NODE_H = 52;
 export const NODE_GAP = 10;
-export const SOURCE_W = 132;
+/** Wide enough for the name, the PID line under it, and — for a program whose
+ *  route runs an engine — the level dial beside them. */
+export const SOURCE_W = 192;
 /** The name cell. Fixed, like the table's was, so the role word stays next to
  *  the name it belongs to instead of drifting into the middle of the node.
  *  Wide enough for a device name plus the `· System default` suffix, which is

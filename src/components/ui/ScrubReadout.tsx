@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 /** Travel after which a press counts as a scrub rather than a click. */
 const DRAG_SLOP_PX = 3;
@@ -31,6 +31,12 @@ export interface ScrubReadoutProps {
   neutral: boolean;
   /** Dim the control (e.g. the feature behind it is off). */
   dim?: boolean;
+  /**
+   * Rendered before the number, given the value currently shown — a scrub or
+   * step preview included — so a companion glyph can track the gesture rather
+   * than only the committed value.
+   */
+  lead?: (shown: number) => ReactNode;
   onCommit: (value: number) => void;
 }
 
@@ -62,6 +68,7 @@ export function ScrubReadout({
   hint,
   neutral,
   dim = false,
+  lead,
   onCommit,
 }: ScrubReadoutProps) {
   const [editing, setEditing] = useState(false);
@@ -225,6 +232,7 @@ export function ScrubReadout({
         dim ? 'opacity-50' : ''
       }`}
     >
+      {lead?.(shown)}
       {editing ? (
         <input
           autoFocus

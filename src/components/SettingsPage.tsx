@@ -2,7 +2,6 @@ import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { DelayStepper } from '@/components/ui/DelayStepper';
-import { ScrubReadout } from '@/components/ui/ScrubReadout';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
@@ -10,15 +9,6 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
 import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
-
-/** Top of the per-program level range, matching the engine's own ceiling. */
-const SOURCE_LEVEL_MAX = 400;
-/** The level that leaves a program's audio exactly as the program produced it —
- * the middle of this range, not the top of it. */
-const SOURCE_LEVEL_NEUTRAL = 100;
-/** One notch of the level, and the pointer travel that amounts to it. */
-const SOURCE_LEVEL_STEP = 5;
-const SOURCE_LEVEL_PX_PER_STEP = 3;
 
 /**
  * The settings-row button: the same shape as `ConfirmButton`'s pill, minus the
@@ -88,50 +78,18 @@ function DelayRow({ deviceId, name, rangeMs }: { deviceId: string; name: string;
   );
 }
 
-/** One routed program's level: its executable name, and the shared scrubbable
- * readout next to it. */
-function SourceLevelRow({ exeName }: { exeName: string }) {
-  const { t } = useTranslation();
-  const committed = useRouterStore((s) => s.sourceVolumes[exeName] ?? SOURCE_LEVEL_NEUTRAL);
-  const setSourceVolume = useRouterStore((s) => s.setSourceVolume);
-
-  return (
-    <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0">
-      {/* Monospaced: an executable name is an identifier, and this column is a
-          list of them. */}
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-secondary" title={exeName}>
-        {exeName}
-      </span>
-      <ScrubReadout
-        value={committed}
-        min={0}
-        max={SOURCE_LEVEL_MAX}
-        step={SOURCE_LEVEL_STEP}
-        pxPerStep={SOURCE_LEVEL_PX_PER_STEP}
-        format={(value) => String(value)}
-        unit="%"
-        label={t('sourceLevel.valueLabel', { process: exeName })}
-        hint={t('sourceLevel.hint', { step: SOURCE_LEVEL_STEP })}
-        neutral={committed === SOURCE_LEVEL_NEUTRAL}
-        onCommit={(next) => void setSourceVolume(exeName, next)}
-      />
-    </div>
-  );
-}
-
 /**
  * The executables this app is duplicating right now, one entry per program.
  *
  * Duplicating, not merely routed: a route to a single device is played by the
  * system directly and starts no engine at all, so there is no gain path for a
- * level to travel and setting one would do nothing. Listing such a program with
- * a live readout beside it would claim otherwise, which is the same lie the
- * device annotations refuse to tell.
+ * level to travel and no level to set — the same rule that decides which source
+ * nodes on the routing board wear a dial. A program with no route is out for
+ * the same reason.
  *
  * The level belongs to the program, not to a process — a browser is a dozen
- * PIDs all playing the same thing — so the rows are deduplicated by executable
- * name. A program with no route is out for the same reason as the single-device
- * one: no engine, so no level to set.
+ * PIDs all playing the same thing — so the names are deduplicated by
+ * executable.
  *
  * Ordered as the session list is, which is already by executable name, so the
  * rows do not shuffle between refreshes.
@@ -538,16 +496,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               {t('settings.sourceLevelsAlignAction')}
             </button>
           </Row>
-          <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+          {/* The levels themselves live on the board, as the ring each
+              duplicated program's source node wears — a value in the context it
+              acts in, not a second list here saying the same thing twice. */}
+          <p className="py-3 text-[11px] leading-relaxed text-text-muted">
             {t('settings.sourceLevelsNote')}
           </p>
-          {duplicated.length === 0 ? (
-            <p className="py-6 text-center text-[11px] text-text-muted">
-              {t('settings.sourceLevelsNone')}
-            </p>
-          ) : (
-            duplicated.map((exeName) => <SourceLevelRow key={exeName} exeName={exeName} />)
-          )}
         </SectionCard>
 
         <SectionCard

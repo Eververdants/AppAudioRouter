@@ -74,8 +74,7 @@
     "sourceLevelsAlign": "Align levels",
     "sourceLevelsAlignDesc": "Brings every duplicating program that is playing up to the loudest one's level",
     "sourceLevelsAlignAction": "Align",
-    "sourceLevelsNote": "A level is the gain applied to this app's own copy of a program's audio; the program's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the mirrored copies only.",
-    "sourceLevelsNone": "No program is being duplicated right now; a level applies in multi-device routes only.",
+    "sourceLevelsNote": "Every program being duplicated wears its level as a ring on its source node on the routing board. A level is the gain applied to this app's own copy of a program's audio; the program's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the mirrored copies only.",
     "noDevices": "No audio devices",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."

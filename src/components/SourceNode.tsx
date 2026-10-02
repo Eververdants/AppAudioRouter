@@ -2,6 +2,7 @@ import type { MouseEvent } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { NodePort } from '@/components/ui/NodePort';
+import { SourceLevelDial } from '@/components/SourceLevelDial';
 import { NODE_H, SOURCE_W, TONE } from '@/lib/canvas';
 import { SPRING_TAP } from '@/lib/motion';
 
@@ -28,12 +29,17 @@ export function SourceNode({
   exeName,
   pid,
   selected,
+  showLevel,
   onSelect,
 }: {
   exeName: string;
   pid: number;
   /** Whether this program is what the routing question is currently about. */
   selected: boolean;
+  /** Whether the level dial means anything here: only a route with at least
+   *  two devices runs a duplication engine, and only then does a level have a
+   *  path to act on. */
+  showLevel: boolean;
   /** Receives the pointer event so the owner can honour Ctrl+click the same
    *  way the app list does. */
   onSelect: (event: MouseEvent) => void;
@@ -63,14 +69,20 @@ export function SourceNode({
         onClick={onSelect}
         aria-pressed={selected}
         title={`${t('canvas.sourceHint')}\n${t('canvas.sourceSelectHint')}`}
-        className={`flex h-full w-full flex-col justify-center rounded-[10px] border bg-node px-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
+        className={`flex h-full w-full items-center rounded-[10px] border bg-node pr-2 pl-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${
           selected ? 'border-type-primary/50' : 'border-node-border'
         }`}
       >
-        <span className="min-w-0 truncate text-[13px] font-medium text-text-primary">
-          {exeName}
+        <span className="flex min-w-0 flex-1 flex-col justify-center">
+          <span className="min-w-0 truncate text-[13px] font-medium text-text-primary">
+            {exeName}
+          </span>
+          <span className="font-mono text-[10px] tabular-nums text-text-muted">PID {pid}</span>
         </span>
-        <span className="font-mono text-[10px] tabular-nums text-text-muted">PID {pid}</span>
+        {/* The program's own level, at the edge its sound leaves from. Only a
+            duplicated program gets one — the doc comment on `showLevel` says
+            why — so most nodes stay name and PID alone. */}
+        {showLevel && <SourceLevelDial exeName={exeName} />}
       </button>
 
       {/* Nothing feeds the program: the left pin exists so the node reads as a
