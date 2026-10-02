@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { DeviceTable } from '@/components/DeviceTable';
+import { RouteCanvas } from '@/components/RouteCanvas';
 import { ProcessList } from '@/components/ProcessList';
 import { LogPanel } from '@/components/LogPanel';
 import { RouteConfirmCapsule } from '@/components/RouteConfirmCapsule';
@@ -224,7 +224,7 @@ export default function App() {
               />
               {tab === 'router' ? (
                 <>
-                  <DeviceTable />
+                  <RouteCanvas />
                   <RouteConfirmCapsule />
                 </>
               ) : (

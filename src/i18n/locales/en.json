@@ -129,6 +129,14 @@
   "logPanel": {
     "empty": "Nothing logged yet"
   },
+  "canvas": {
+    "source": "Source",
+    "sourceHint": "Sound from this app is sent to the devices on the right",
+    "rolePrimaryHint": "Windows plays this device directly; the others are copies",
+    "roleMirrorHint": "Driven by the duplicator, so delay and volume apply here",
+    "roleStagedHint": "Picked — it takes effect once you confirm",
+    "roleIdleHint": "Not part of any route"
+  },
   "deviceTable": {
     "device": "Device",
     "role": "Role",
