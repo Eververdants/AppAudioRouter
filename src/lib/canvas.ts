@@ -140,18 +140,24 @@ export const HEAD_H = 26;
 export const NODE_H = 52;
 export const NODE_GAP = 10;
 /** Wide enough for the name, the PID line under it, and — for a program whose
- *  route runs an engine — the level dial beside them. */
-export const SOURCE_W = 192;
+ *  route runs an engine — the level dial beside them. Also the number the
+ *  board's total width is budgeted against: at the app's own default 900 px
+ *  window the work area is 636 px, and source + gap + the expert device width
+ *  has to stay inside it or the last column clips. */
+export const SOURCE_W = 168;
 /** The name cell. Fixed, like the table's was, so the role word stays next to
  *  the name it belongs to instead of drifting into the middle of the node.
  *  Wide enough for a device name plus the `· System default` suffix, which is
- *  the longest thing that cell ever says. */
-export const NAME_W = 196;
+ *  the longest thing that cell ever says — and, with the rest of the columns,
+ *  one of the numbers the board's width is budgeted from (see `SOURCE_W`). */
+export const NAME_W = 192;
 export const ROLE_W = 64;
 export const DELAY_W = 80;
-export const VOLUME_W = 60;
-/** The gap the wires cross. Wide enough that a fan of them reads as a fan. */
-export const COLUMN_GAP = 64;
+export const VOLUME_W = 56;
+/** The gap the wires cross. Narrow by design — the board's whole width is
+ *  budgeted (see `SOURCE_W`) — but wide enough that a fan of them still reads
+ *  as a fan. */
+export const COLUMN_GAP = 48;
 
 /** Full width of a device node: what it is called, what the route does with it,
  *  and — behind the expert gate — the two values it can be tuned by. */
