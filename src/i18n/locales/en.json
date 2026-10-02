@@ -97,7 +97,8 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "restore": "Restore",
-    "close": "Close"
+    "close": "Close",
+    "status": "{{n}} routed · {{m}} playing"
   },
   "tray": {
     "show": "Show / hide App Audio Router",

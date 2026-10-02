@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import appIcon from '@/assets/app-icon.png';
+import { useRouterStore } from '@/stores/routerStore';
 import {
   closeWindow,
   isWindowMaximized,
@@ -73,6 +74,19 @@ export function TitleBar({
 }) {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
+  // The state of the sound world, in two numbers: how many programs are routed
+  // away from the system default, and how many of those are sounding right
+  // now. It lives here — the one piece of chrome that never changes place —
+  // rather than in a status bar of its own, which would be a second strip
+  // saying what the board already shows.
+  const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
+  const soundingCount = useRouterStore((s) => {
+    let count = 0;
+    for (const [pid, sounding] of Object.entries(s.soundingPids)) {
+      if (sounding && s.routedPids[Number(pid)] !== undefined) count += 1;
+    }
+    return count;
+  });
 
   useEffect(() => {
     // Token-based subscription so a StrictMode double-mount cannot orphan the
@@ -124,6 +138,14 @@ export function TitleBar({
       </div>
 
       <div className="flex items-center">
+        {/* Reference information, like the version beside it: read, not acted
+            on. Worth saying only when something is routed — "0 routes" is not
+            a status, it is the absence of one. */}
+        {routedCount > 0 && (
+          <span className="mr-1 font-mono text-[10px] tabular-nums text-text-muted">
+            {t('titleBar.status', { n: routedCount, m: soundingCount })}
+          </span>
+        )}
         <button
           type="button"
           onClick={onToggleSettings}

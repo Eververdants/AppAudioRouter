@@ -97,7 +97,8 @@
     "minimize": "最小化",
     "maximize": "最大化",
     "restore": "向下还原",
-    "close": "关闭"
+    "close": "关闭",
+    "status": "已路由 {{n}} · 在响 {{m}}"
   },
   "tray": {
     "show": "显示 / 隐藏 App Audio Router",
