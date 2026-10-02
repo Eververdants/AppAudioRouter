@@ -20,18 +20,21 @@ use tauri::{AppHandle, Emitter};
 use windows::core::{implement, Interface, GUID, PCWSTR};
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Media::Audio::{
-    eRender, AudioSessionDisconnectReason, AudioSessionState, AudioSessionStateExpired, EDataFlow,
-    ERole, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
-    IAudioSessionEvents, IAudioSessionEvents_Impl, IAudioSessionManager2,
-    IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice, IMMDeviceEnumerator,
-    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, DEVICE_STATE,
-    DEVICE_STATE_ACTIVE,
+    eRender, AudioSessionDisconnectReason, AudioSessionState, AudioSessionStateActive,
+    AudioSessionStateExpired, AudioSessionStateInactive, EDataFlow, ERole, IAudioSessionControl,
+    IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionEvents, IAudioSessionEvents_Impl,
+    IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice,
+    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    DEVICE_STATE, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
 
 /// Event carrying an [`AudioChanged`] payload.
 pub const AUDIO_CHANGED_EVENT: &str = "audio-changed";
+
+/// Event carrying a [`SessionActivity`] payload.
+pub const SESSION_ACTIVITY_EVENT: &str = "session-activity";
 
 /// Which half of the frontend is stale.
 #[derive(Debug, Clone, Serialize)]
@@ -43,6 +46,21 @@ pub struct AudioChanged {
     pub sessions: bool,
 }
 
+/// One process began or stopped rendering audio.
+///
+/// Emitted on its own channel rather than folded into [`AudioChanged`]: a
+/// session going quiet is not a list change (the session survives), and the
+/// frontend uses this to animate the routes of the programs that are actually
+/// sounding — which wants to arrive now, not at the end of a re-enumeration.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionActivity {
+    /// The process whose audio state moved.
+    pub pid: u32,
+    /// Whether it is rendering audio now.
+    pub active: bool,
+}
+
 /// Work item handed from a COM callback thread back to the owner thread.
 enum Msg {
     /// An endpoint changed: its device is new, gone, or the new default.
@@ -51,6 +69,8 @@ enum Msg {
     SessionCreated,
     /// A watched session expired (the app stopped playing or exited).
     SessionExpired,
+    /// A watched session began or stopped rendering audio.
+    SessionState { pid: u32, active: bool },
 }
 
 /// Registered with `IMMDeviceEnumerator::RegisterEndpointNotificationCallback`.
@@ -125,13 +145,19 @@ impl IAudioSessionNotification_Impl for SessionWatcher_Impl {
     }
 }
 
-/// Registered on every session to learn when it expires.
+/// Registered on every session to learn when it expires or changes state.
 ///
-/// `RegisterSessionNotification` only reports *new* sessions, so without this the
-/// process list would keep showing apps that stopped playing long ago.
+/// `RegisterSessionNotification` only reports *new* sessions, so without this
+/// the process list would keep showing apps that stopped playing long ago, and
+/// nothing would say when a listed app actually began or stopped sounding.
+/// The PID is captured at registration because the state callback itself
+/// carries no identity — the event has to name the process it is about.
 #[implement(IAudioSessionEvents)]
 struct SessionEvents {
     tx: Sender<Msg>,
+    /// Process the watched session belongs to; `0` when it could not be read,
+    /// in which case state events are dropped (expiry still works).
+    pid: u32,
 }
 
 impl IAudioSessionEvents_Impl for SessionEvents_Impl {
@@ -180,10 +206,21 @@ impl IAudioSessionEvents_Impl for SessionEvents_Impl {
 
     fn OnStateChanged(&self, new_state: AudioSessionState) -> windows::core::Result<()> {
         // `Expired` is the session going away. `Inactive` — playback stopped but
-        // the session survives — is deliberately ignored: that app is still
-        // routable and must stay listed.
+        // the session survives — is deliberately *not* treated as expiry: that
+        // app is still routable and must stay listed. It is however exactly the
+        // transition the frontend's liveness display wants, so both state
+        // changes are forwarded on their own channel while the list is left
+        // alone. (These states are constants rather than enum variants in the
+        // bindings, so equality reads better than a match here anyway.)
         if new_state == AudioSessionStateExpired {
             let _ = self.tx.send(Msg::SessionExpired);
+        } else if self.pid != 0
+            && (new_state == AudioSessionStateActive || new_state == AudioSessionStateInactive)
+        {
+            let _ = self.tx.send(Msg::SessionState {
+                pid: self.pid,
+                active: new_state == AudioSessionStateActive,
+            });
         }
         Ok(())
     }
@@ -295,18 +332,38 @@ fn watch(app: AppHandle) {
                     sessions = true;
                 }
                 Msg::SessionCreated | Msg::SessionExpired => sessions = true,
+                // Not a list change: the session is still there, it just went
+                // quiet or started up. Forwarded below, without paying for a
+                // re-enumeration the lists do not need.
+                Msg::SessionState { .. } => {}
             }
         }
-        sync(
-            &enumerator,
-            &session_client,
-            &tx,
-            &mut watched_managers,
-            &mut watched_sessions,
-        );
-        let changed = AudioChanged { devices, sessions };
-        if let Err(e) = app.emit(AUDIO_CHANGED_EVENT, &changed) {
-            warn!("could not deliver {AUDIO_CHANGED_EVENT}: {e}");
+        // Every state transition in the batch goes out on its own, in order:
+        // a program that flips quickly (a voice chat opening and closing a
+        // stream) must not leave the frontend believing the older state.
+        for msg in &batch {
+            if let Msg::SessionState { pid, active } = msg {
+                let payload = SessionActivity {
+                    pid: *pid,
+                    active: *active,
+                };
+                if let Err(e) = app.emit(SESSION_ACTIVITY_EVENT, &payload) {
+                    warn!("could not deliver {SESSION_ACTIVITY_EVENT}: {e}");
+                }
+            }
+        }
+        if devices || sessions {
+            sync(
+                &enumerator,
+                &session_client,
+                &tx,
+                &mut watched_managers,
+                &mut watched_sessions,
+            );
+            let changed = AudioChanged { devices, sessions };
+            if let Err(e) = app.emit(AUDIO_CHANGED_EVENT, &changed) {
+                warn!("could not deliver {AUDIO_CHANGED_EVENT}: {e}");
+            }
         }
     }
 
@@ -394,7 +451,15 @@ fn sync(
                     if watched_sessions.contains_key(&id) {
                         continue;
                     }
-                    let events: IAudioSessionEvents = SessionEvents { tx: tx.clone() }.into();
+                    let events: IAudioSessionEvents = SessionEvents {
+                        tx: tx.clone(),
+                        // Read here, on the owner thread, while the control is
+                        // in hand: the state callback has no identity of its
+                        // own to report. `0` reads as "unknown" and only costs
+                        // the liveness events, never the expiry ones.
+                        pid: unsafe { session.GetProcessId() }.unwrap_or(0),
+                    }
+                    .into();
                     let Ok(control) = session.cast::<IAudioSessionControl>() else {
                         continue;
                     };

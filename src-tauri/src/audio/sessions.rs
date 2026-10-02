@@ -7,9 +7,9 @@
 use log::{debug, warn};
 use windows::core::Interface;
 use windows::Win32::Media::Audio::{
-    eRender, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
-    IAudioSessionManager2, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
-    DEVICE_STATE_ACTIVE,
+    eRender, AudioSessionStateActive, IAudioSessionControl, IAudioSessionControl2,
+    IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice, IMMDeviceCollection,
+    IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
@@ -41,7 +41,10 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
         };
 
         let mut sessions: Vec<AudioSession> = Vec::new();
-        let mut seen_pids = std::collections::HashSet::new();
+        // PID -> whether any of its sessions was Active. One process can own
+        // sessions on several devices; the router is per-process, so each PID is
+        // listed once — and "is it sounding" is the OR across them.
+        let mut seen_pids: std::collections::HashMap<u32, bool> = std::collections::HashMap::new();
 
         for d in 0..device_count {
             // SAFETY: d in [0, device_count).
@@ -68,10 +71,14 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
 }
 
 /// Collect the sessions of one render device into `sessions`.
+///
+/// `seen_pids` deduplicates across devices and carries the OR of every
+/// session's playing state, so a process sounding on any endpoint is listed as
+/// playing.
 fn collect_device_sessions(
     device: &IMMDevice,
     sessions: &mut Vec<AudioSession>,
-    seen_pids: &mut std::collections::HashSet<u32>,
+    seen_pids: &mut std::collections::HashMap<u32, bool>,
 ) -> Result<(), AudioError> {
     // SAFETY: Activate IAudioSessionManager2 on an active render device.
     let session_manager: IAudioSessionManager2 = unsafe {
@@ -101,9 +108,21 @@ fn collect_device_sessions(
             continue;
         };
         // One process can own sessions on several devices; the router is
-        // per-process, so list each PID once.
-        if seen_pids.insert(session.pid) {
-            sessions.push(session);
+        // per-process, so list each PID once — and OR the playing states
+        // together, because sounding on any endpoint is sounding.
+        match seen_pids.entry(session.pid) {
+            std::collections::hash_map::Entry::Occupied(mut listed) => {
+                if session.playing && !*listed.get() {
+                    *listed.get_mut() = true;
+                    if let Some(entry) = sessions.iter_mut().find(|s| s.pid == session.pid) {
+                        entry.playing = true;
+                    }
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(session.playing);
+                sessions.push(session);
+            }
         }
     }
 
@@ -134,8 +153,23 @@ fn read_session(session_enum: &IAudioSessionEnumerator, index: i32) -> Option<Au
         }
     };
     let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
-    debug!("session: {exe_name} (PID {pid})");
-    Some(AudioSession { pid, exe_name })
+    // "Has a session" and "is sounding" are different facts: a paused player
+    // keeps its session. The state is also the seed the notification thread's
+    // transitions hang off, so a program that was already playing at launch is
+    // not mistaken for a quiet one.
+    let playing = match unsafe { session_control.GetState() } {
+        Ok(state) => state == AudioSessionStateActive,
+        Err(e) => {
+            debug!("session state of {exe_name} unreadable: {e}");
+            false
+        }
+    };
+    debug!("session: {exe_name} (PID {pid}, playing {playing})");
+    Some(AudioSession {
+        pid,
+        exe_name,
+        playing,
+    })
 }
 
 /// Get the executable name for a PID.

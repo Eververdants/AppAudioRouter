@@ -97,6 +97,11 @@ pub struct AudioSession {
     pub pid: u32,
     /// Executable name (e.g. `chrome.exe`).
     pub exe_name: String,
+    /// Whether the process was actually rendering audio when it was
+    /// enumerated. `Inactive` sessions survive a pause, so "has a session" and
+    /// "is sounding" are different facts; this is the second one, and the seed
+    /// for the `session-activity` events that keep it current.
+    pub playing: bool,
 }
 
 /// Role for default endpoint selection.
