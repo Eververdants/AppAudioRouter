@@ -7,7 +7,12 @@
    the first paint already carries the right colours. Keep both copies in sync
    when adjusting the palette. */
 :root {
-  --bg-primary: #fafafa;
+  /* The routing screen is a draughting board, and this is the board itself: one
+     deliberate step below the sidebar in value and a few degrees colder. At the
+     old #fafafa the canvas and the `--surface-sunken` sidebar were within
+     rounding distance and the frame around the sheet disappeared — the nodes
+     looked like stickers on the same paper as the navigation. */
+  --bg-primary: #e4eaf1;
   --bg-tertiary: #e8e8ec;
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
@@ -18,18 +23,18 @@
   --success: #10b981;
   --error: #ef4444;
 
-  /* Editor surfaces. The main screen is built out of flat planes separated by
-     1px hairlines rather than floating glass cards. The window chrome and the
-     sidebar share the sunken plane and the work area is the raised one, so the
-     content sits on the lighter paper and the navigation sits behind it — the
-     way an editor arranges a file list and the file it opened. `--surface-hover`
-     is the wash under the pointer; `--hairline` divides rows and sections, and
-     `--hairline-strong` closes a group that has to read as one object. */
+  /* Surfaces. The chrome is one continuous frame — title bar, tabs, sidebar and
+     the canvas's own header all sit on `--surface-sunken` — and the board is the
+     part of the frame that is recessed. `--surface` is what a page that is not a
+     canvas gets (the settings page, which covers the whole work area).
+     `--surface-hover` is the wash under the pointer; `--hairline` divides rows
+     and sections, and `--hairline-strong` closes a group that has to read as one
+     object. Only things genuinely floating above the content use `raised`. */
   --surface: #ffffff;
-  /* Thirteen steps below the work area, not five. At #f7f7f8 the two planes were
-     within rounding distance of each other and the split did not read at all:
-     a sidebar that is the same white as the pane beside it stops looking like a
-     sidebar and starts looking like an unpainted part of the page. */
+  /* ⚠️ This is the frame's colour, and `--bg-primary` (the board) has to stay
+     well below it in value or the sidebar stops looking like a sidebar and
+     starts looking like an unpainted part of the page. At #f7f7f8 the two were
+     within rounding distance and the split did not read at all. */
   --surface-sunken: #f2f3f5;
   --surface-raised: #ffffff;
   --surface-hover: rgba(24, 24, 27, 0.035);
@@ -37,6 +42,32 @@
   --hairline-strong: #d4d4da;
   /* Text on top of the accent fill. */
   --accent-ink: #ffffff;
+
+  /* The board's ruling. Two weights of it — a minor rule every 24 px and a
+     major one every 120 — so the eye can measure a distance instead of only
+     seeing texture. Both are painted once and never animate. */
+  --canvas-grid: rgba(37, 63, 99, 0.075);
+  --canvas-grid-strong: rgba(37, 63, 99, 0.14);
+
+  /* The card a device is drawn as. `--node-border` is the node's edge, not a
+     hairline: a node is an object with an outline, which is the one place this
+     interface is allowed to draw a closed shape. */
+  --node: #ffffff;
+  --node-border: #cfd9e6;
+
+  /* Node type colours. Blueprint paints a node by what it is, and here the four
+     states a device can be in are the four colours — nothing else in the
+     interface is allowed to be one of them, or the encoding stops meaning
+     anything. One colour paints three things: the node's port, the wire that
+     reaches it, and the role word. `primary` is the accent because it is the
+     same fact accent already marks; `mirror` is its neighbour hue rather than a
+     second accent, since both describe a route that is live; `staged` is amber,
+     the colour of a question that has not been answered yet; `idle` is the
+     slate of hardware no route touches. There is no violet in either palette. */
+  --type-primary: #0891b2;
+  --type-mirror: #0f766e;
+  --type-staged: #d97706;
+  --type-idle: #94a3b8;
 
   /* RGB channel mirrors for the colours Tailwind combines with opacity
      modifiers (`bg-accent/15`, `hover:bg-error/10`, …). Tailwind can't apply
@@ -49,10 +80,16 @@
   --text-muted-rgb: 113 113 122;
   --hairline-rgb: 230 230 234;
   --surface-rgb: 255 255 255;
+  --node-rgb: 255 255 255;
+  --type-primary-rgb: 8 145 178;
+  --type-mirror-rgb: 15 118 110;
+  --type-staged-rgb: 217 119 6;
+  --type-idle-rgb: 148 163 184;
 }
 
 .dark {
-  --bg-primary: #09090b;
+  /* The board again, colder and darker than the sidebar it is framed by. */
+  --bg-primary: #05080c;
   --bg-tertiary: #27272a;
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
@@ -71,12 +108,32 @@
   --hairline-strong: #2e3742;
   --accent-ink: #05222b;
 
+  --canvas-grid: rgba(125, 175, 225, 0.075);
+  --canvas-grid-strong: rgba(125, 175, 225, 0.14);
+  --node: #141a23;
+  --node-border: #2a3441;
+  /* The same four states, lifted for a dark board. Amber and teal both have to
+     clear the node fill by enough to be read as a wire colour, which is why
+     they are the 400/500-level steps rather than the 600/700-level ones used on
+     paper — and why mirror sits two steps below primary rather than beside it:
+     they are the two halves of one fact, and two tints of one hue say that a
+     copy is the same kind of thing as what it copies. */
+  --type-primary: #22d3ee;
+  --type-mirror: #14b8a6;
+  --type-staged: #fbbf24;
+  --type-idle: #64748b;
+
   --accent-rgb: 34 211 238;
   --error-rgb: 248 113 113;
   --bg-tertiary-rgb: 39 39 42;
   --text-muted-rgb: 161 161 170;
   --hairline-rgb: 35 39 46;
   --surface-rgb: 18 21 26;
+  --node-rgb: 20 26 35;
+  --type-primary-rgb: 34 211 238;
+  --type-mirror-rgb: 20 184 166;
+  --type-staged-rgb: 251 191 36;
+  --type-idle-rgb: 100 116 139;
 }
 
 * {
@@ -143,4 +200,23 @@ input[type='number']::-webkit-outer-spin-button,
 input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* The draughting board the routing screen is drawn on. Four 1 px gradients
+   rather than a repeating image: no asset, scales with the board, and it is
+   static — nothing here is animated, which is the whole reason it is allowed to
+   be here. */
+@layer utilities {
+  .board-grid {
+    background-image:
+      linear-gradient(to right, var(--canvas-grid-strong) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--canvas-grid-strong) 1px, transparent 1px),
+      linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px);
+    background-size:
+      120px 120px,
+      120px 120px,
+      24px 24px,
+      24px 24px;
+  }
 }
