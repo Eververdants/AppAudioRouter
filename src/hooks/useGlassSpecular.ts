@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { isGlassLite } from '@/lib/glassLite';
 
 /** Selectors whose specular highlight follows the pointer. */
 const PANE_SELECTOR = '.glass, .glass-strong';
@@ -15,7 +16,10 @@ const PANE_SELECTOR = '.glass, .glass-strong';
  * recalculation of one pane and nothing else — and it stops the instant the
  * pointer leaves, leaving the highlight resting at the top like light from
  * above. Under `prefers-reduced-motion` the listener is never attached: a
- * highlight that slides is motion, and  */
+ * highlight that slides is motion, and the system asked for less of it. Low-spec
+ * glass parks the highlight too — a recalculation per pointer move is exactly
+ * what that mode exists to skip.
+ */
 export function useGlassSpecular(): void {
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -28,6 +32,13 @@ export function useGlassSpecular(): void {
     };
 
     const onMove = (event: PointerEvent) => {
+      // Read per event rather than at mount, so flipping the setting in the
+      // settings page takes effect without remounting the app.
+      if (isGlassLite()) {
+        if (current) clear(current);
+        current = null;
+        return;
+      }
       const target = event.target;
       if (!(target instanceof Element)) return;
       const pane = target.closest<HTMLElement>(PANE_SELECTOR);

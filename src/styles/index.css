@@ -220,7 +220,40 @@
   --type-idle-rgb: 100 116 139;
 }
 
+/* Low-spec glass. The same material without the refraction: `backdrop-filter`
+   re-samples everything behind a pane on every frame anything above it moves,
+   and that is the one cost a weak GPU cannot carry — so `--glass-filter`
+   drops to none, the ambient shadow layer goes, and the fill takes over the
+   blur's job of keeping text readable by going nearly opaque. The panes read
+   as solid acrylic; the specular and rim stay, since a gradient and inset
+   shadows are paint, not sampling. Resolved and applied on <html> by
+   lib/glassLite.ts (and the boot script in index.html); the two themes keep
+   recognisably the same panes. */
+.glass-lite {
+  --glass: rgba(255, 255, 255, 0.68);
+  --glass-strong: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.62);
+  --glass-thin-bg: rgba(255, 255, 255, 0.45);
+  --glass-thin-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 1px 2px rgba(24, 40, 66, 0.12), 0 10px 28px rgba(24, 40, 66, 0.1);
+  --glass-filter: none;
+  --glass-filter-thin: none;
+}
 
+.dark.glass-lite {
+  --glass: rgba(19, 24, 31, 0.74);
+  --glass-strong: rgba(23, 29, 37, 0.84);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-thin-bg: rgba(19, 24, 31, 0.55);
+  --glass-thin-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.42);
+  --glass-filter: none;
+  --glass-filter-thin: none;
+}
+
+* {
+  box-sizing: border-box;
+}
 
 html,
 body,

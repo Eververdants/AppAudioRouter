@@ -30,6 +30,26 @@
         root.classList.toggle('dark', theme === 'dark');
         root.dataset.theme = theme;
 
+        // Low-spec glass follows the same rule as the theme: the user's stored
+        // choice first, then what the machine says, applied before the first
+        // paint so the panes never paint a blur they are about to drop. Keep in
+        // sync with lib/glassLite.ts, which mirrors this reading after boot.
+        var lite;
+        try {
+          lite = localStorage.getItem('aar-glass-lite');
+        } catch (error) {
+          /* storage may be unavailable; fall through to the machine's verdict */
+        }
+        if (lite === '1' || lite === '0') {
+          root.classList.toggle('glass-lite', lite === '1');
+        } else {
+          var lowSpec =
+            (navigator.hardwareConcurrency || 8) <= 4 ||
+            (navigator.deviceMemory || 8) <= 4 ||
+            window.matchMedia('(prefers-reduced-transparency: reduce)').matches;
+          root.classList.toggle('glass-lite', lowSpec);
+        }
+
         // Match the language the bundle is about to render in, so CJK text is
         // not laid out with the wrong font on the first frame.
         try {
