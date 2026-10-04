@@ -501,12 +501,13 @@ describe('engine events', () => {
     expect(lastLog()).toBeUndefined();
   });
 
-  it('drops only the mirror that failed, and the whole route when it was the last copy', () => {
+  it('drops only the mirror that failed', () => {
     installBackend();
     reset({
       devices: [SPEAKERS, TV],
       sessions: [MUSIC],
-      routedPids: { 1001: ['tv', 'speakers'] },
+      // The first id is the primary the OS plays itself; 'tv' is the copy.
+      routedPids: { 1001: ['speakers', 'tv'] },
       engineGenerations: { 1001: 1 },
     });
 
@@ -514,9 +515,26 @@ describe('engine events', () => {
 
     expect(state().routedPids[1001]).toEqual(['speakers']);
     expect(lastLog()?.level).toBe('error');
+  });
+
+  it('ends the route when the device that failed is the one the OS plays', () => {
+    // The backend reports a mirror and never the primary, so this is the store
+    // and the engine disagreeing about the route. Dropping the primary would
+    // promote the copy into its place: drawn as the device Windows plays,
+    // driven as a duplicate of a stream that is no longer being produced.
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      routedPids: { 1001: ['speakers', 'tv'] },
+      engineGenerations: { 1001: 1 },
+    });
 
     state().handleMirrorFailed({ pid: 1001, generation: 1, deviceId: 'speakers', error: 'busy' });
-    expect(state().routedPids[1001]).toEqual([]);
+
+    expect(state().routedPids[1001]).toBeUndefined();
+    expect(state().engineGenerations[1001]).toBeUndefined();
+    expect(lastLog()?.level).toBe('error');
   });
 
   it('ignores a mirror failure from a superseded engine', () => {

@@ -1577,6 +1577,25 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     if (generation !== (get().engineGenerations[pid] ?? 0)) return;
     const routed = get().routedPids[pid];
     if (routed === undefined || !routed.includes(deviceId)) return;
+    // The first id is the primary — the endpoint the OS plays natively — and the
+    // backend reports a mirror, never the primary: an engine holds its primary
+    // apart from the copies it duplicates to. So a device reported at that
+    // position means this store and the engine disagree about the route, and
+    // simply dropping it would promote the next device into the primary slot —
+    // a copy the engine is still duplicating to, now drawn as the one Windows
+    // plays directly. The honest answer is to end the route instead of
+    // reassigning its roles.
+    if (routed[0] === deviceId) {
+      set((s) => {
+        const routedPids = { ...s.routedPids };
+        const engineGenerations = { ...s.engineGenerations };
+        delete routedPids[pid];
+        delete engineGenerations[pid];
+        return { routedPids, engineGenerations };
+      });
+      get().addLog(i18next.t('log.duplicationFailed', { pid, error }), 'error');
+      return;
+    }
     // The device is not playing anything, so it must not keep the live badge and
     // pulse that say otherwise. The rest of the route is unaffected.
     set((s) => ({
