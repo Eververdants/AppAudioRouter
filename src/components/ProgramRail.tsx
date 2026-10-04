@@ -258,7 +258,15 @@ export function ProgramRail() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={FADE}
-                className={`group/row squircle relative mb-1 flex items-center rounded-full px-2 py-1.5 transition-colors ${
+                className={`group/row squircle relative ${
+                  // The row carrying the selection pane sits below every other
+                  // row. Rows paint in document order, so a pane travelling
+                  // downwards would otherwise start out *over* the row being
+                  // left — its icon and name spend the first frames of the
+                  // slide frosted under the glass, which reads as the icon
+                  // flickering. Under them the pane slips beneath instead.
+                  isSubject ? 'z-0' : 'z-10'
+                } mb-1 flex items-center rounded-full px-2 py-1.5 transition-colors ${
                   isSelected ? '' : 'hover:bg-surface-hover'
                 }`}
               >
