@@ -183,42 +183,58 @@ export function ProgramRail() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={FADE}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2"
+        className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-2"
       >
+        {/* The "no programmes" placeholder is out of the flow on purpose. It
+            used to share one AnimatePresence with the rows, so a list filling
+            up measured its rows underneath a card that was already leaving —
+            and framer-motion then spent a second sliding them up the gap that
+            card had left, which is most of the rail when the list holds two
+            apps. Absolute here it weighs nothing and simply cross-fades. */}
+        <AnimatePresence initial={false}>
+          {visibleSessions.length === 0 && (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={FADE}
+              className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 py-10 text-center"
+            >
+              {!searching && (
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className="text-text-muted/60"
+                >
+                  <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                  <line x1="22" y1="9" x2="16" y2="15" />
+                  <line x1="16" y1="9" x2="22" y2="15" />
+                </svg>
+              )}
+              <p className="text-[11px] leading-relaxed text-text-muted">
+                {searching ? t('rail.noMatch') : t('rail.empty')}
+                {!searching && (
+                  <>
+                    <br />
+                    <span>{t('rail.emptyHint')}</span>
+                  </>
+                )}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Rows come and go as programmes start and stop making sound, and they
             reorder whenever one of them is routed — routed ones lead. Both are
             worth watching, so each row fades where it stands and *travels* to
             its new place rather than being redrawn there. */}
         <AnimatePresence initial={false}>
-        {visibleSessions.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-            {!searching && (
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="text-text-muted/60"
-              >
-                <path d="M11 5 6 9H2v6h4l5 4V5z" />
-                <line x1="22" y1="9" x2="16" y2="15" />
-                <line x1="16" y1="9" x2="22" y2="15" />
-              </svg>
-            )}
-            <p className="text-[11px] leading-relaxed text-text-muted">
-              {searching ? t('rail.noMatch') : t('rail.empty')}
-              {!searching && (
-                <>
-                  <br />
-                  <span>{t('rail.emptyHint')}</span>
-                </>
-              )}
-            </p>
-          </div>
-        ) : (
-          visibleSessions.map((session) => {
+        {visibleSessions.map((session) => {
             const targets = routedPids[session.pid] ?? [];
             const isSelected = selectedPids.includes(session.pid);
             const isSubject = selectedPids[0] === session.pid;
@@ -242,7 +258,7 @@ export function ProgramRail() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={FADE}
-                className={`group/row squircle relative flex items-center rounded-full px-2 py-1.5 transition-colors ${
+                className={`group/row squircle relative mb-1 flex items-center rounded-full px-2 py-1.5 transition-colors ${
                   isSelected ? '' : 'hover:bg-surface-hover'
                 }`}
               >
@@ -367,8 +383,7 @@ export function ProgramRail() {
                 </div>
               </motion.div>
             );
-          })
-        )}
+          })}
         </AnimatePresence>
       </motion.div>
     </div>
