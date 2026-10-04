@@ -188,8 +188,11 @@ interface RouterState {
   /** Read the stored per-program levels the engines apply. */
   loadSourceVolumes: () => Promise<void>;
   /** Ask the backend for the icons the current process list is missing, one
-   * command per process, without waiting for them: the rows render their
-   * letter tiles immediately and the icon lands whenever the shell is done. */
+   * command per executable, without waiting for them: the rows render their
+   * letter tiles immediately and the icon lands whenever the shell is done.
+   * A settled miss does not stick — the next refresh asks again, because the
+   * likeliest failure (the process died mid-ask) is one a later ask gets
+   * past; a success is final and never asked for again. */
   loadMissingIcons: () => void;
   /** Set one program's own level (percent, 0–400, 100 = unchanged). */
   setSourceVolume: (exeName: string, percent: number) => Promise<void>;
@@ -330,13 +333,16 @@ function readAutoRemember(): boolean {
 const autoRestoreDecided = new Set<number>();
 
 /**
- * Icon asks this run already made, as `pid:exe_name` — the natural twin of
- * [`autoRestoreDecided`]: a process whose ask failed is not retried on every
- * refresh (the backend caches per executable, so a retry could not succeed
- * better), and a program that relaunches gets a fresh pid and therefore a
- * fresh ask. Never pruned against the live list.
+ * Icon asks that have not settled yet, by executable name.
+ *
+ * One ask per exe at a time, ever: a program like an Electron game holds four
+ * sessions of the same executable, and asking per session meant four
+ * concurrent asks racing to write one map entry — a pid that died mid-ask
+ * (which is exactly what Electron children do) settled `null` last and
+ * clobbered the three good answers. The in-flight set also keeps a slow
+ * extraction from being asked twice across refreshes.
  */
-const iconAttempts = new Set<string>();
+const iconsInFlight = new Set<string>();
 
 /** A device's name for the log, or its id when it is not in the list. */
 function deviceName(deviceId: string | undefined, devices: AudioDevice[]): string {
@@ -1348,24 +1354,32 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   loadMissingIcons: () => {
+    // One ask per executable per pass: the icon belongs to the file, and the
+    // first session's pid is as good an address as any of its siblings'.
+    const seen = new Set<string>();
     for (const session of get().sessions) {
-      const key = `${session.pid}:${session.exe_name}`;
-      // One ask per process, ever: the exe's data URL (or its settled null)
-      // makes the second session of the same program skip through, and the
-      // attempts set makes every later refresh skip the process itself.
-      if (iconAttempts.has(key)) continue;
-      if (get().iconByExe[session.exe_name] !== undefined) continue;
-      iconAttempts.add(key);
+      const exeName = session.exe_name;
+      if (seen.has(exeName)) continue;
+      seen.add(exeName);
+      // A data URL is final. `null` and "not asked yet" both fall through:
+      // a miss is retried on the next refresh, not held against the exe.
+      if (typeof get().iconByExe[exeName] === 'string') continue;
+      if (iconsInFlight.has(exeName)) continue;
+      iconsInFlight.add(exeName);
       api
         .getProcessIcon(session.pid)
         .then((icon) => {
           const url = icon === null ? null : rgbaToDataUrl(icon);
-          set((s) => ({ iconByExe: { ...s.iconByExe, [session.exe_name]: url } }));
+          set((s) => ({ iconByExe: { ...s.iconByExe, [exeName]: url } }));
         })
         .catch(() => {
-          // Same settlement as "the file has no icon": the letter tile stays,
-          // and nothing anywhere logs an icon.
-          set((s) => ({ iconByExe: { ...s.iconByExe, [session.exe_name]: null } }));
+          // Same settlement as "the file has no icon": the letter tile stays
+          // for now, the next refresh asks again, and nothing anywhere logs
+          // an icon.
+          set((s) => ({ iconByExe: { ...s.iconByExe, [exeName]: null } }));
+        })
+        .finally(() => {
+          iconsInFlight.delete(exeName);
         });
     }
   },

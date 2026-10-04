@@ -270,12 +270,16 @@ pub struct IconImage {
 
 /// The icon of whatever executable `pid` is running, decoded and cached.
 ///
-/// The cache is keyed by image path and holds misses as well as hits: the
-/// shell's extraction is the expensive part, and every later ask — another
-/// session of the same program, the next refresh, a retried render — must not
-/// pay it twice. It lives for this run only; nothing persists to disk.
+/// The cache is keyed by image path and holds **hits only**: the shell's
+/// extraction is worth remembering when it succeeded, but a miss is retried
+/// the next time somebody asks. The failures a miss covers — a process mid-
+/// death, a file mid-update, a shell call that lost a race — are exactly the
+/// ones a later ask should be able to get past, and caching them once turned
+/// a transient loss into a whole run without an icon. Failed asks are cheap
+/// and the ask cadence is event-driven, so there is nothing to rate-limit
+/// here. The cache lives for this run only; nothing persists to disk.
 pub fn icon_for_process(pid: u32) -> Option<IconImage> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<IconImage>>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<IconImage>>>> = OnceLock::new();
 
     let (path, name) = process_image(pid)?;
     let key = path.to_ascii_lowercase();
@@ -285,23 +289,24 @@ pub fn icon_for_process(pid: u32) -> Option<IconImage> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(&key)
     {
-        return cached.as_deref().cloned();
+        return Some(cached.as_ref().clone());
     }
 
-    let icon = extract_icon(&path).map(Arc::new);
+    let icon = extract_icon(&path);
     log::debug!(
         "icon for {name}: {}",
         match &icon {
             Some(icon) => format!("{}x{}", icon.width, icon.height),
-            None => "none".to_string(),
+            None => "none (will retry on the next ask)".to_string(),
         }
     );
+    let icon = Arc::new(icon?);
     CACHE
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(key, icon.clone());
-    icon.as_deref().cloned()
+        .insert(key, Arc::clone(&icon));
+    Some(icon.as_ref().clone())
 }
 
 /// Ask the shell for the file's large icon and decode it into RGBA.
@@ -554,7 +559,7 @@ fn base64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{base64, file_description};
+    use super::{base64, extract_icon, file_description};
 
     #[test]
     fn base64_matches_the_standard_vectors() {
