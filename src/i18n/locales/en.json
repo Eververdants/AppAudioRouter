@@ -21,10 +21,10 @@
   },
   "sourceLevel": {
     "valueLabel": "Level this app gives the audio of {{process}}, in percent",
-    "hint": "Level this app gives this program's audio on its way to the devices it is duplicated to, as a percentage: 100 leaves it as the program produced it, below attenuates, above amplifies. Like the device volume and the delay, it acts on the mirrored copies — the device Windows plays directly is not affected by it. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value"
+    "hint": "Gain this app applies to this program's audio on its way to the devices it is duplicated to, as a percentage: 100 leaves it as produced, below attenuates, above amplifies. Like the device volume and the delay, it acts on the duplicated copies only — the device Windows plays directly is not affected. Drag sideways, or scroll / use the arrow keys for {{step}}% at a time (hold Shift for ×10); click to type an exact value"
   },
   "deviceLatency": {
-    "reading": "Measured on this device: {{ms}} ms. Software side only — what a codec or a Bluetooth link adds on top is invisible to the app"
+    "reading": "Measured here: {{ms}} ms. Covers the software side only — what a codec or a Bluetooth link adds on top cannot be observed from user mode"
   },
   "deviceVolume": {
     "valueLabel": "Volume of {{device}}, relative to the loudest device, in percent",
@@ -65,9 +65,9 @@
     "glassLiteDesc": "Skips the frosted refraction and the pointer-tracked highlight, so panes turn solid and weak GPUs stay cool. Windows with transparency effects turned off starts here automatically.",
     "routing": "Routing",
     "autoRemember": "Auto-remember",
-    "autoRememberDesc": "Remember each process's device routing and restore it automatically",
+    "autoRememberDesc": "Remember each program's device routing and restore it automatically",
     "rememberedRoutes": "Remembered",
-    "forgetRoute": "Forget the route remembered for {{process}}",
+    "forgetRoute": "Clear the route remembered for {{process}}",
     "resetEndpoints": "Reset per-app output",
     "resetEndpointsDesc": "Releases a program that no longer follows the system's playback device; routed programs are left alone",
     "resetEndpointsAction": "Reset",
@@ -77,11 +77,11 @@
     "stopAllRoutesConfirm": "Confirm?",
     "background": "Background",
     "closeToTray": "Minimize to tray when closed",
-    "closeToTrayDesc": "Close hides the window to the tray while routes keep running; turned off, closing quits and stops them",
+    "closeToTrayDesc": "When on, closing hides the window to the tray while routes keep running; when off, closing quits the app and stops them",
     "autostart": "Start with Windows",
     "autostartDesc": "Launches silently into the tray at sign-in; remembered routes are ready before you open anything",
     "delays": "Delay compensation",
-    "delayNote": "Delay is set per device: here, on the settings rows, or with the - / + under a copy on the stage. It applies only when one programme goes to several devices - a single-device route is played by the system directly.",
+    "delayNote": "Delay is set per device: here, on the settings rows, or with the − / + under a copy on the stage. It applies only when one program goes to several devices — a single-device route is played by the system directly.",
     "calibrationNote": "The measured latency covers the software side only; what a Bluetooth link itself adds cannot be measured here, so align by ear.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
@@ -91,7 +91,7 @@
     "sourceLevelsAlign": "Align levels",
     "sourceLevelsAlignDesc": "Brings every duplicating program that is playing up to the loudest one's level",
     "sourceLevelsAlignAction": "Align",
-    "sourceLevelsNote": "A programme playing through several devices wears its own level as the dial beside it at the centre of the stage. The level is the gain this app applies to its own copy of that sound - the programme's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the copies only.",
+    "sourceLevelsNote": "A program playing through several devices wears its level as the dial beside the hub at the centre of the stage. The level is the gain this app applies to its own copy of that sound — the program's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the copies only.",
     "noDevices": "No audio devices",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."

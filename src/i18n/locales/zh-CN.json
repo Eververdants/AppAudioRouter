@@ -20,11 +20,11 @@
     "stepDown": "减少 {{step}}"
   },
   "sourceLevel": {
-    "valueLabel": "本应用给 {{process}} 的声音加的电平（百分比）",
-    "hint": "本应用在把这个程序的声音送往它被复制到的设备时给它加的电平，按百分比计：100 表示原样，低于则衰减，高于则放大。和设备音量、延迟一样，它只作用在镜像副本上——Windows 直接播放的那台不受影响。左右拖动调节，滚轮/方向键每次 {{step}}%（按住 Shift 为十倍）；点击可键入精确值"
+    "valueLabel": "本应用对 {{process}} 的声音施加的电平（百分比）",
+    "hint": "本应用将该程序的声音复制送往其他设备时所施加的电平，按百分比计：100 表示原样，低于则衰减，高于则放大。与设备音量、延迟补偿一样，仅作用于复制出的副本——系统直接播放的设备不受影响。左右拖动调节，滚轮或方向键每次 {{step}}%（按住 Shift 为十倍）；点击可键入精确值"
   },
   "deviceLatency": {
-    "reading": "本机实测：{{ms}} ms。只含软件侧——解码器或蓝牙链路额外增加的部分，应用看不到"
+    "reading": "实测：{{ms}} ms。仅包含软件侧延迟——解码器或蓝牙链路额外引入的部分无法测得"
   },
   "deviceVolume": {
     "valueLabel": "{{device}} 的音量（相对最响的一台，百分比）",
@@ -65,11 +65,11 @@
     "glassLiteDesc": "关闭毛玻璃折射与跟随指针的高光，面板改为实底，低配置设备更流畅；Windows 关闭「透明效果」时会自动启用。",
     "routing": "路由",
     "autoRemember": "自动记忆",
-    "autoRememberDesc": "记住每个进程的设备路由，下次自动恢复",
+    "autoRememberDesc": "记住每个程序的设备路由，下次自动恢复",
     "rememberedRoutes": "已记忆的路由",
-    "forgetRoute": "忘记 {{process}} 的记忆路由",
+    "forgetRoute": "清除 {{process}} 的记忆路由",
     "resetEndpoints": "重置每应用音频输出",
-    "resetEndpointsDesc": "程序不再跟随系统播放设备时，点此释放；正在路由的程序不受影响",
+    "resetEndpointsDesc": "当程序不再跟随系统播放设备时，可在此重置其固定输出；正在路由的程序不受影响",
     "resetEndpointsAction": "重置",
     "stopAllRoutes": "停止全部路由",
     "stopAllRoutesDesc": "一次把所有已路由的程序交还系统默认设备；没有路由的程序不受影响。",
@@ -77,21 +77,21 @@
     "stopAllRoutesConfirm": "确认？",
     "background": "后台运行",
     "closeToTray": "关闭窗口时最小化到托盘",
-    "closeToTrayDesc": "点关闭只隐藏到托盘，路由继续生效；关闭后关闭窗口即退出并停止路由",
+    "closeToTrayDesc": "开启后，点击关闭仅隐藏到托盘，路由继续生效；关闭后，点击关闭将退出程序并停止路由",
     "autostart": "开机自动启动",
-    "autostartDesc": "登录后静默启动到托盘，记忆路由提前就绪",
+    "autostartDesc": "登录后静默启动至托盘，记忆的路由提前生效",
     "delays": "延迟补偿",
-    "delayNote": "每台设备的延迟在这里、在设置的行里、或在舞台上副本下面的 − / + 都能调。它只在同一个程序送到多台设备时生效——只送到一台时由系统直连播放。",
-    "calibrationNote": "实测延迟只包含软件侧；蓝牙等链路自身多出的部分无法测得，需要用耳朵对齐。",
+    "delayNote": "延迟按设备设置，可在此处、下方各行或舞台上副本下方的 − / + 中调整；仅当一个程序同时输出到多台设备时生效——仅输出到一台时由系统直接播放。",
+    "calibrationNote": "实测延迟仅包含软件侧；蓝牙等链路自身引入的部分无法测得，需以听感对齐。",
     "delayRange": "延迟范围",
     "delayRangeDesc": "每台设备的延迟可在该正负范围内设置",
     "delayStep": "调节步进",
-    "delayStepDesc": "点按 − / + 每次调整的幅度；数值也可直接键入",
+    "delayStepDesc": "每次点击 − / + 调整的幅度；也可直接键入数值",
     "sourceLevels": "程序电平",
     "sourceLevelsAlign": "对齐电平",
-    "sourceLevelsAlignDesc": "把正在出声的程序统一拉到最响一台的电平",
+    "sourceLevelsAlignDesc": "将正在播放的程序统一调整至最响一台的电平",
     "sourceLevelsAlignAction": "对齐",
-    "sourceLevelsNote": "正在同时送到多台设备的程序，它的电平就画在舞台中心、它旁边的电平环上。电平只作用在本应用复制出去的那份声音上，程序的自身音量和 Windows 存的东西都不动；100 为原样，只对副本生效。",
+    "sourceLevelsNote": "同时输出到多台设备的程序，其电平显示在舞台中心旁的电平环上。电平仅作用于本应用复制出去的那份声音，不改动程序自身音量与 Windows 保存的设置；100 为原样，仅对副本生效。",
     "noDevices": "暂无音频设备",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
