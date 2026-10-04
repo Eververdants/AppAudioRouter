@@ -39,25 +39,39 @@ const config: Config = {
           DEFAULT: 'rgb(var(--hairline-rgb) / <alpha-value>)',
           strong: 'var(--hairline-strong)',
         },
-        /* The routing canvas. `canvas.grid` rules the board the nodes sit on;
-           `node` is the card a device is drawn as and `node.border` its
-           outline. A wire is painted from the `type` group below — a wire to a
-           device in the route is that device's role colour. */
-        canvas: {
-          grid: 'var(--canvas-grid)',
+        /* The glass every floating surface is made of (see `.glass` in
+           styles/index.css for what composes a pane). Named as tokens rather
+           than written as utilities at the call site so the fill, its border
+           and its shadow stay one decision. */
+        glass: {
+          DEFAULT: 'var(--glass)',
+          strong: 'var(--glass-strong)',
+          border: 'var(--glass-border)',
         },
-        node: {
-          DEFAULT: 'rgb(var(--node-rgb) / <alpha-value>)',
-          border: 'var(--node-border)',
-        },
-        /* The four states a device can be in, as wire colours. Blueprint paints
-           a node by what it is; nothing else in the interface may use these. */
+        /* The three roles a device can be in, as spoke colours. One colour
+           paints three things on the stage; nothing else may use these. */
         type: {
           primary: 'rgb(var(--type-primary-rgb) / <alpha-value>)',
           mirror: 'rgb(var(--type-mirror-rgb) / <alpha-value>)',
-          staged: 'rgb(var(--type-staged-rgb) / <alpha-value>)',
           idle: 'rgb(var(--type-idle-rgb) / <alpha-value>)',
         },
+      },
+      /* Corner radii, in steps of "how far from the window edge is this".
+         Nested surfaces take the next step down, and the step between them is
+         the padding between them — that difference is what makes the curvature
+         read as continuous instead of as four independently rounded boxes.
+         The ladder runs generous on purpose: this is a liquid-glass surface,
+         and anything that floats is a capsule (`rounded-full`) or a true circle,
+         so the rectangular steps below are only for planes that sit still. */
+      borderRadius: {
+        window: '40px',
+        panel: '32px',
+        card: '26px',
+        ctl: '20px',
+        seg: '17px',
+      },
+      boxShadow: {
+        glass: 'var(--glass-shadow)',
       },
       fontFamily: {
         sans: [

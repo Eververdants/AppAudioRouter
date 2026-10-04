@@ -18,5 +18,29 @@ export const SPRING_GLIDE: Transition = { type: 'spring', stiffness: 380, dampin
 /** The route action itself — the hub and what it sets off. */
 export const SPRING_ROUTE: Transition = { type: 'spring', stiffness: 300, damping: 20 };
 
+/**
+ * Arrival: a disc leaving the hub for its place on the orbit.
+ *
+ * Softer than a press and slower than a glide, because travel has to be
+ * followable with the eye — a disc that snaps into place reads as an error
+ * being corrected, not as a thing arriving. Callers add a per-item delay from
+ * their own index, so a ring of six assembles clockwise instead of blinking
+ * into existence all at once.
+ */
+export const SPRING_ARRIVE: Transition = {
+  type: 'spring',
+  stiffness: 240,
+  damping: 24,
+  mass: 0.9,
+};
+
 /** Opacity-only changes, where a spring would just look slow. */
 export const FADE: Transition = { duration: 0.18, ease: 'easeOut' };
+
+/**
+ * A concentric ripple: one ring expanding out of the thing that just changed
+ * and fading as it goes. A tween rather than a spring because a ripple is a wave
+ * leaving, not a body settling — it must not overshoot or come back. One curve
+ * for every ripple so a disc and the hub ripple identically.
+ */
+export const RIPPLE: Transition = { duration: 0.7, ease: [0.16, 1, 0.3, 1] };

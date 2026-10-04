@@ -7,11 +7,9 @@
    the first paint already carries the right colours. Keep both copies in sync
    when adjusting the palette. */
 :root {
-  /* The routing screen is a draughting board, and this is the board itself: one
-     deliberate step below the sidebar in value and a few degrees colder. At the
-     old #fafafa the canvas and the `--surface-sunken` sidebar were within
-     rounding distance and the frame around the sheet disappeared — the nodes
-     looked like stickers on the same paper as the navigation. */
+  /* The window's own plane: what everything is floating over, and the colour
+     the rainbow behind the glass is lit by. Cool and a step below every surface
+     that sits on it, which is what lets a translucent panel read as raised. */
   --bg-primary: #e4eaf1;
   --bg-tertiary: #e8e8ec;
   --text-primary: #18181b;
@@ -23,18 +21,7 @@
   --success: #10b981;
   --error: #ef4444;
 
-  /* Surfaces. The chrome is one continuous frame — title bar, tabs, sidebar and
-     the canvas's own header all sit on `--surface-sunken` — and the board is the
-     part of the frame that is recessed. `--surface` is what a page that is not a
-     canvas gets (the settings page, which covers the whole work area).
-     `--surface-hover` is the wash under the pointer; `--hairline` divides rows
-     and sections, and `--hairline-strong` closes a group that has to read as one
-     object. Only things genuinely floating above the content use `raised`. */
   --surface: #ffffff;
-  /* ⚠️ This is the frame's colour, and `--bg-primary` (the board) has to stay
-     well below it in value or the sidebar stops looking like a sidebar and
-     starts looking like an unpainted part of the page. At #f7f7f8 the two were
-     within rounding distance and the split did not read at all. */
   --surface-sunken: #f2f3f5;
   --surface-raised: #ffffff;
   --surface-hover: rgba(24, 24, 27, 0.035);
@@ -43,30 +30,89 @@
   /* Text on top of the accent fill. */
   --accent-ink: #ffffff;
 
-  /* The board's ruling. Two weights of it — a minor rule every 24 px and a
-     major one every 120 — so the eye can measure a distance instead of only
-     seeing texture. Both are painted once and never animate. */
-  --canvas-grid: rgba(37, 63, 99, 0.075);
-  --canvas-grid-strong: rgba(37, 63, 99, 0.14);
+  /* Liquid glass.
+     A pane is a thick lens, not a frosted sheet: it stays see-through, it catches
+     a tight specular highlight where the light source reflects off its top, it
+     focuses that light into a bright caustic along its bottom edge, it traps a
+     pool of light inside near that bottom (the volumetric glow), and its whole
+     rim catches a thin bright line because a curved edge bends light from every
+     direction. Those four — specular, caustic, inner pool, rim — are what separate
+     liquid glass from frosted plastic; a flat alpha fill with one soft shadow has
+     none of them and reads as a sticker. */
+  --glass: rgba(255, 255, 255, 0.3);
+  --glass-strong: rgba(255, 255, 255, 0.42);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  /* The reflection of the light source: a tight bright pool that sits wherever
+     the pointer is (`--gx/--gy`, written by a single delegated listener in App)
+     and falls off fast, plus the caustic the lens focuses along its bottom. With
+     no pointer the pool rests at the top, like light from above. */
+  --glass-specular: radial-gradient(
+      140% 90% at var(--gx, 50%) var(--gy, -18%),
+      rgba(255, 255, 255, 0.6),
+      rgba(255, 255, 255, 0.14) 42%,
+      rgba(255, 255, 255, 0) 64%
+    ),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 34%);
+  --glass-specular-strong: radial-gradient(
+      140% 90% at var(--gx, 50%) var(--gy, -18%),
+      rgba(255, 255, 255, 0.72),
+      rgba(255, 255, 255, 0.18) 42%,
+      rgba(255, 255, 255, 0) 64%
+    ),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 34%);
+  /* The rim and the trapped light, as one token because lit discs restate their
+     whole box-shadow inline (lib/stage.ts bloom) and must not drift: an inner rim
+     line all the way round, a hot top edge, a bright bottom caustic, and the
+     volumetric pool glowing up from inside the bottom. */
+  --glass-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.55), inset 0 -16px 30px -16px rgba(255, 255, 255, 0.5);
+  --glass-rim-strong: inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -18px 34px -16px rgba(255, 255, 255, 0.6);
+  /* Depth under the lens: contact, body, ambient. */
+  --glass-shadow: 0 1px 2px rgba(24, 40, 66, 0.12), 0 8px 24px rgba(24, 40, 66, 0.14),
+    0 24px 60px rgba(24, 40, 66, 0.14);
 
-  /* The card a device is drawn as. `--node-border` is the node's edge, not a
-     hairline: a node is an object with an outline, which is the one place this
-     interface is allowed to draw a closed shape. */
-  --node: #ffffff;
-  --node-border: #cfd9e6;
+  /* A thinner, clearer piece of the same glass: hardware nothing is wired to and
+     a centre with nothing attached. Less fill, a fainter rim, only a contact
+     shadow — it sits closer to the surface, so the thick glossy lens stays the
+     thing that reads as live. */
+  --glass-thin-bg: rgba(255, 255, 255, 0.16);
+  --glass-thin-border: rgba(255, 255, 255, 0.35);
+  --glass-thin-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --glass-thin-shadow: 0 1px 2px rgba(24, 40, 66, 0.08);
 
-  /* Node type colours. Blueprint paints a node by what it is, and here the four
-     states a device can be in are the four colours — nothing else in the
-     interface is allowed to be one of them, or the encoding stops meaning
-     anything. One colour paints three things: the node's port, the wire that
-     reaches it, and the role word. `primary` is the accent because it is the
-     same fact accent already marks; `mirror` is its neighbour hue rather than a
-     second accent, since both describe a route that is live; `staged` is amber,
-     the colour of a question that has not been answered yet; `idle` is the
-     slate of hardware no route touches. There is no violet in either palette. */
+  /* How hard the lens bends what is behind it: clear enough to stay see-through,
+     saturated and a touch brightened so the refracted light reads as light. */
+  --glass-filter: blur(18px) saturate(190%) brightness(1.05);
+  --glass-filter-thin: blur(10px) saturate(160%);
+
+  /* A breath of noise over the aurora. Gradients this smooth read as vector
+     plastic; a static grain is what makes them read as light on a surface. */
+  --grain-alpha: 0.04;
+
+  /* What the glass has to refract. Three pools of light, tight enough and far
+     enough apart that a pane over one picks up a different tint than a pane over
+     another — that difference across a blurred surface is the refraction. Pushed
+     out of focus so they never read as shapes, but not so far that the whole
+     window becomes one even wash of candy. */
+  --spot-1: rgba(34, 211, 238, 0.48);
+  --spot-2: rgba(45, 212, 191, 0.36);
+  --spot-3: rgba(251, 191, 36, 0.26);
+
+  /* The three roles a device can be in, painted on the stage. One colour paints
+     three things: the ring on the device's disc, the spoke that reaches it, and
+     the role word under its name — nothing else in the interface is allowed to
+     be one of them, or the encoding stops meaning anything. `primary` is the
+     accent because it is the same fact accent already marks; `mirror` is its
+     neighbour hue rather than a second accent, since both describe a route that
+     is live; `idle` is the slate of hardware no route touches, and it gets no
+     spoke at all. There is no violet in either palette, and there is no fourth
+     colour for "picked but not applied": that difference belongs to the
+     sentence in the dock, not to the ring. */
   --type-primary: #0891b2;
   --type-mirror: #0f766e;
-  --type-staged: #d97706;
   --type-idle: #94a3b8;
 
   /* RGB channel mirrors for the colours Tailwind combines with opacity
@@ -80,15 +126,13 @@
   --text-muted-rgb: 113 113 122;
   --hairline-rgb: 230 230 234;
   --surface-rgb: 255 255 255;
-  --node-rgb: 255 255 255;
   --type-primary-rgb: 8 145 178;
   --type-mirror-rgb: 15 118 110;
-  --type-staged-rgb: 217 119 6;
   --type-idle-rgb: 148 163 184;
 }
 
 .dark {
-  /* The board again, colder and darker than the sidebar it is framed by. */
+  /* The plane again, cold and deep enough that a light ripple reads as light. */
   --bg-primary: #05080c;
   --bg-tertiary: #27272a;
   --text-primary: #fafafa;
@@ -108,19 +152,61 @@
   --hairline-strong: #2e3742;
   --accent-ink: #05222b;
 
-  --canvas-grid: rgba(125, 175, 225, 0.075);
-  --canvas-grid-strong: rgba(125, 175, 225, 0.14);
-  --node: #141a23;
-  --node-border: #2a3441;
-  /* The same four states, lifted for a dark board. Amber and teal both have to
-     clear the node fill by enough to be read as a wire colour, which is why
-     they are the 400/500-level steps rather than the 600/700-level ones used on
-     paper — and why mirror sits two steps below primary rather than beside it:
-     they are the two halves of one fact, and two tints of one hue say that a
-     copy is the same kind of thing as what it copies. */
+  /* The same lens in the dark. The fill stays near nothing — the glass is read
+     entirely by the light it catches: a cooler, tighter specular at the top, a
+     caustic and an inner pool at the bottom, and a rim line all the way round.
+     Without those a dark pane is just a slightly lighter rectangle. */
+  --glass: rgba(255, 255, 255, 0.07);
+  --glass-strong: rgba(255, 255, 255, 0.12);
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-specular: radial-gradient(
+      140% 90% at var(--gx, 50%) var(--gy, -18%),
+      rgba(255, 255, 255, 0.22),
+      rgba(255, 255, 255, 0.06) 42%,
+      rgba(255, 255, 255, 0) 64%
+    ),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 34%);
+  --glass-specular-strong: radial-gradient(
+      140% 90% at var(--gx, 50%) var(--gy, -18%),
+      rgba(255, 255, 255, 0.3),
+      rgba(255, 255, 255, 0.08) 42%,
+      rgba(255, 255, 255, 0) 64%
+    ),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 34%);
+  --glass-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16), inset 0 -16px 30px -16px rgba(255, 255, 255, 0.14);
+  --glass-rim-strong: inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -18px 34px -16px rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.45),
+    0 28px 64px rgba(0, 0, 0, 0.5);
+
+  /* The thinner, clearer piece of the same glass, in the dark. */
+  --glass-thin-bg: rgba(255, 255, 255, 0.04);
+  --glass-thin-border: rgba(255, 255, 255, 0.1);
+  --glass-thin-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --glass-thin-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+
+  --glass-filter: blur(18px) saturate(180%);
+  --glass-filter-thin: blur(10px) saturate(150%);
+
+  --grain-alpha: 0.06;
+
+  /* The same pools, cooled and separated: amber is kept low because on a near-
+     black plane it is what turns a teal wash olive. */
+  --spot-1: rgba(34, 211, 238, 0.4);
+  --spot-2: rgba(45, 212, 191, 0.26);
+  --spot-3: rgba(251, 191, 36, 0.13);
+
+  /* The same three roles, lifted for a dark stage. Teal has to clear the glass
+     by enough to be read as a spoke colour, which is why it sits at the
+     400-level step rather than the 600/700-level ones used on paper — and why
+     mirror sits beside primary rather than two steps below it: they are the two
+     halves of one fact, and two tints of one hue say that a copy is the same
+     kind of thing as what it copies. */
   --type-primary: #22d3ee;
   --type-mirror: #14b8a6;
-  --type-staged: #fbbf24;
   --type-idle: #64748b;
 
   --accent-rgb: 34 211 238;
@@ -129,16 +215,12 @@
   --text-muted-rgb: 161 161 170;
   --hairline-rgb: 35 39 46;
   --surface-rgb: 18 21 26;
-  --node-rgb: 20 26 35;
   --type-primary-rgb: 34 211 238;
   --type-mirror-rgb: 20 184 166;
-  --type-staged-rgb: 251 191 36;
   --type-idle-rgb: 100 116 139;
 }
 
-* {
-  box-sizing: border-box;
-}
+
 
 html,
 body,
@@ -202,48 +284,184 @@ input[type='number']::-webkit-inner-spin-button {
   margin: 0;
 }
 
-/* The draughting board the routing screen is drawn on. Four 1 px gradients
-   rather than a repeating image: no asset, scales with the board, and it is
-   static — nothing here is animated, which is the whole reason it is allowed to
-   be here. */
 @layer utilities {
-  .board-grid {
-    background-image:
-      linear-gradient(to right, var(--canvas-grid-strong) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--canvas-grid-strong) 1px, transparent 1px),
-      linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px);
-    background-size:
-      120px 120px,
-      120px 120px,
-      24px 24px,
-      24px 24px;
+  /* A pane of liquid glass: see-through, blurred-and-saturated refraction of
+     whatever sits behind it, a tight specular highlight at the top, a caustic and
+     a trapped pool of light at the bottom, a bright rim all the way round, and a
+     real shadow stack beneath. Static: no transition, no animation, because a
+     lens is not something that happens. */
+  .glass {
+    background-color: var(--glass);
+    background-image: var(--glass-specular);
+    backdrop-filter: var(--glass-filter);
+    -webkit-backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      var(--glass-shadow),
+      var(--glass-rim);
+  }
+
+  /* The same lens one step thicker and glossier — for the thing the user has
+     picked, or the thing floating closest to them. */
+  .glass-strong {
+    background-color: var(--glass-strong);
+    background-image: var(--glass-specular-strong);
+    backdrop-filter: var(--glass-filter);
+    -webkit-backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      var(--glass-shadow),
+      var(--glass-rim-strong);
+  }
+
+  /* A thinner, clearer piece of the same glass: less fill, a fainter rim, only a
+     contact shadow, so it sits closer to the surface and the thick glossy lens
+     stays the thing that reads as live. */
+  .glass-thin {
+    background-color: var(--glass-thin-bg);
+    backdrop-filter: var(--glass-filter-thin);
+    -webkit-backdrop-filter: var(--glass-filter-thin);
+    border: 1px solid var(--glass-thin-border);
+    box-shadow:
+      var(--glass-thin-shadow),
+      var(--glass-thin-rim);
+  }
+
+  /* Light for the glass to bend. Three pools blurred past legibility but kept
+     apart, so a pane picks up a different tint depending on where it sits — that
+     difference across a blurred surface is the whole reason a panel looks like
+     glass instead of like frosted plastic. Nothing here may ever animate. */
+  .aurora {
+    background:
+      radial-gradient(30% 34% at 14% 10%, var(--spot-1), transparent 70%),
+      radial-gradient(32% 36% at 86% 18%, var(--spot-2), transparent 72%),
+      radial-gradient(36% 32% at 60% 94%, var(--spot-3), transparent 74%);
+    filter: blur(40px);
+  }
+
+  /* A breath of static noise over the aurora. A gradient this smooth is a vector
+     gradient, and vector gradients read as plastic; grain is what makes the same
+     colours read as light falling on a surface. Painted once, never animated,
+     blended so it only ever modulates what is beneath it. */
+  .grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: var(--grain-alpha);
+    mix-blend-mode: overlay;
+  }
+
+  /* Continuous curvature. A squircle is a superellipse corner: the curve leaves
+     the straight edge gradually instead of meeting it at a fixed radius, so a
+     small card nested in a large one looks like the same material rather than
+     like a rectangle wearing round trousers. Ignored where unsupported — the
+     radius itself already carries the shape. */
+  .squircle {
+    corner-shape: squircle;
   }
 }
 
-/* The flow on a live wire: the one place this interface is allowed to move of
-   its own accord. It is drawn with a keyframe rather than Motion on purpose —
-   Motion would drive the offset from JavaScript on every frame, while this is
-   handled by the compositor's animation machinery and costs nothing to mount
-   or unmount, which is the whole trick: `useLiveness` and the wire's sounding
-   state decide whether the element exists at all, so a resting board (window
-   hidden or unfocused, reduced motion requested, program silent) paints
-   nothing. One period is one dash: 12 px at 24 px a second, slow enough to be
-   read as current rather than as confetti. The media query is a second fence
-   behind the hook, not the only one. */
-@keyframes wire-flow {
+@layer components {
+  /* The concentric indicator — the mark this interface is made of.
+     Two circles sharing a centre and nothing in the space between them: an
+     outer ring that says what the thing *is*, and a core that says whether it
+     is *happening*. Sizes come from the caller (width/height inline); nothing
+     here assumes one. */
+  .con-ring {
+    position: relative;
+    display: inline-block;
+    flex: none;
+    border-radius: 9999px;
+    border: 1.5px solid var(--hairline-strong);
+    transition:
+      border-color 0.2s ease,
+      transform 0.2s ease;
+  }
+  .con-ring::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 42%;
+    height: 42%;
+    border-radius: 9999px;
+    background: transparent;
+    transform: translate(-50%, -50%);
+    transition:
+      background 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  /* The device the system plays directly — accent, and a lit core. */
+  .con-ring-main {
+    border-color: var(--type-primary);
+  }
+  .con-ring-main::after {
+    background: var(--type-primary);
+    box-shadow: 0 0 0 3px rgb(var(--type-primary-rgb) / 0.16);
+  }
+
+  /* A copy: the next hue over, never a second accent, because both of them are
+     the same fact seen twice. */
+  .con-ring-copy {
+    border-color: var(--type-mirror);
+  }
+  .con-ring-copy::after {
+    background: var(--type-mirror);
+    box-shadow: 0 0 0 3px rgb(var(--type-mirror-rgb) / 0.16);
+  }
+
+  /* An empty ring: hardware nothing is sending sound to. Deliberately not
+     tinted — if every device wore a colour, the colour would say nothing. */
+  .con-ring-idle::after {
+    background: transparent;
+  }
+
+  /* Sound is coming out of this one right now. One slow expanding ring, and
+     the only standing loop left in the app: it reports something true, and it
+     is gated on visibility, focus and the system's motion preference. */
+  .con-ring-live::before {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border-radius: 9999px;
+    border: 1.5px solid var(--type-primary);
+    animation: ring-pulse 2.2s ease-out infinite;
+    pointer-events: none;
+  }
+}
+
+@keyframes ring-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+/* The flow on a wire that carries sound: the one place this interface moves of
+   its own accord, and it moves because something is playing, not as decoration.
+   A keyframe rather than Motion because the compositor can run this without
+   JavaScript touching it once mounted — and because `useLiveness` decides
+   whether the element exists at all, so a resting stage (window hidden, focus
+   elsewhere, reduced motion, program silent) paints nothing. One period is one
+   dash: 12 px at 24 px a second, slow enough to read as current. The media
+   query is a second fence behind the hook, not the only one. */
+@keyframes stage-flow {
   to {
     stroke-dashoffset: -12;
   }
 }
 
-.wire-flow {
+.stage-flow {
   stroke-dasharray: 3 9;
-  animation: wire-flow 0.5s linear infinite;
+  animation: stage-flow 0.5s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wire-flow {
+  .stage-flow,
+  .con-ring-live::before {
     animation: none;
   }
 }
