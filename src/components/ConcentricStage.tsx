@@ -321,8 +321,8 @@ function Ripple({ x, y, onDone }: { x: number; y: number; onDone: () => void }) 
 /** Left-to-right delay between two characters of the name swap, and the step
     count past which the rest of the wave arrives together — a long name must
     not spend a second trickling in. */
-const NAME_STAGGER = 0.024;
-const NAME_STAGGER_MAX_STEPS = 12;
+const NAME_STAGGER = 0.012;
+const NAME_STAGGER_MAX_STEPS = 8;
 
 /**
  * The programme's name, replaced one character at a time.
@@ -401,19 +401,20 @@ function Hub({
       <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
       {/* The icon belongs to the file, so it swaps only when the programme
           changes — a window that retitles itself swaps the name below and
-          leaves the icon standing. The swap is a cross-dissolve in place:
-          exit and enter run at the same time on the shared spring, because a
-          swap that waits for its own exit spends half a blink showing
-          nothing. Both layers live in one fixed slot (h-6 w-6, absolutely
+          leaves the icon standing. The swap is a cross-dissolve through the
+          same blur the name's characters use — the old one fogs out, the new
+          one comes into focus — so icon and name leave and arrive as one
+          event. Exit and enter run at the same time on the shared spring,
+          and both layers live in one fixed slot (h-6 w-6, absolutely
           positioned), so the overlap cannot push the column around. */}
       {exeName !== undefined && (
         <span className="relative h-6 w-6 flex-none">
           <AnimatePresence initial={false}>
             <motion.span
               key={exeName}
-              initial={{ opacity: 0, scale: 0.7 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.6 }}
+              initial={{ opacity: 0, scale: 0.7, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.6, filter: 'blur(4px)' }}
               transition={SPRING_TAP}
               className="absolute inset-0 flex items-center justify-center"
             >
