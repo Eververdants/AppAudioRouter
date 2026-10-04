@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { DelayStepper } from '@/components/ui/DelayStepper';
@@ -211,7 +211,13 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const toggleCloseToTray = useRouterStore((s) => s.toggleCloseToTray);
   const autostart = useRouterStore((s) => s.autostart);
   const toggleAutostart = useRouterStore((s) => s.toggleAutostart);
-  const duplicated = duplicatedExecutables(sessions, routedPids);
+  // Only ever disables one button, but it walks the whole session list, and
+  // this page re-renders for every store field it reads — several of which
+  // move whenever audio comes or goes.
+  const duplicated = useMemo(
+    () => duplicatedExecutables(sessions, routedPids),
+    [sessions, routedPids],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
