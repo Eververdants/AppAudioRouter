@@ -573,8 +573,9 @@ AppAudioRouter/
 - **辐条是长出来的**：`motion.line` 动画 `x2/y2` 从中心轮缘长到圆盘轮缘，撤下时缩回去——"接上了 / 断开了"是看得见的动作。
   `AnimatePresence initial={false}`：页面刚打开时辐条静态就位，只有之后新出现的才有入场戏。
 - **词与数字都是"替换"不是"改写"**：角色词用 `AnimatePresence mode="wait"` 换场（FADE + 4–5px 位移）；hub 里的程序名**逐字符替换**
-  （`CharSwapText`）——每个字符按「位置+字符」作键，没变的原地不动，变了的逐个从 blur 4px 里聚焦进来（FADE + 按 index 递进的延迟，
-  每步 12ms、封顶 8 步防长名拖尾）；整句平文本由按钮的 `aria-label` 携带，读屏不逐字。状态行（正在播放/未在播放）按 `sounding` 自己换场，不搭名字的车。
+  （`CharSwapText`）——键含整段文本，名字一变整行重挂载，**每个字符**（含与旧名相同的字符）都从 blur 4px 里聚焦进来
+  （FADE + 按 index 递进的延迟，每步 12ms、封顶 8 步防长名拖尾）；整句平文本由按钮的 `aria-label` 携带，读屏不逐字。
+  状态行（正在播放/未在播放）按 `sounding` 自己换场，不搭名字的车。
   hub 的 exe 图标在固定槽位（`h-6 w-6`）里**并行交叉**，且与名字共用同一个动词——旧的缩小入雾、新的从 blur 4px 里聚焦
   （`SPRING_TAP` + blur，默认 sync 模式，不写 `mode="wait"` 让进出场互相等）；键是 `exeName`：换程序才动，窗口改标题只换名字。
   副本的延迟/音量数值用 `mode="popLayout"` 纵向滚动。句子被原地改写没人会重读。

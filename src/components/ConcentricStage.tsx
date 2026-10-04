@@ -327,19 +327,20 @@ const NAME_STAGGER_MAX_STEPS = 8;
 /**
  * The programme's name, replaced one character at a time.
  *
- * Every character is keyed by its position and its letter, so a character the
- * swap keeps re-uses its element and stands still; only the positions that
- * actually changed remount, each coming into focus from a blur, left to
- * right. Blur rather than slide: the name is being re-read in place, not
- * moved. The flat string is carried by the hub button's accessible name —
- * these spans are what the eye gets, not the screen reader.
+ * Every position is keyed by the name it belongs to, so a new name remounts
+ * the whole row and every character — identical letters included — comes into
+ * focus from a blur, left to right. A swap that left the surviving letters
+ * standing would read as a stutter mid-word rather than as a replacement.
+ * Blur rather than slide: the name is being re-read in place, not moved. The
+ * flat string is carried by the hub button's accessible name — these spans
+ * are what the eye gets, not the screen reader.
  */
 function CharSwapText({ text, className }: { text: string; className?: string }) {
   return (
     <span className={className}>
       {Array.from(text).map((char, index) => (
         <motion.span
-          key={`${index}:${char}`}
+          key={`${text}:${index}`}
           initial={{ opacity: 0, filter: 'blur(4px)' }}
           animate={{ opacity: 1, filter: 'blur(0px)' }}
           transition={{
@@ -425,11 +426,11 @@ function Hub({
       )}
       {/* The name is replaced one character at a time, each replacement
           coming into focus from a blur — a name being re-read in place, not a
-          block being swapped. Characters keep their element for as long as
-          they survive the swap (keyed by position and letter), so only what
-          actually changed moves. The guide and the playing line bracket it:
-          whole words, swapped on their own keys, since neither is a
-          sequence. */}
+          block being swapped. A new name remounts the whole row, shared
+          characters included: a wave that skips the letters that happened to
+          survive reads as a stutter, not a replacement. The guide and the
+          playing line bracket it: whole words, swapped on their own keys,
+          since neither is a sequence. */}
       <AnimatePresence mode="wait" initial={false}>
         {name === undefined ? (
           <motion.span
