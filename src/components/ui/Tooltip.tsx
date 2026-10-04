@@ -22,7 +22,7 @@ export function Tooltip({ label, children }: { label: string; children: ReactNod
       {label !== '' && (
         <span
           role="tooltip"
-          className="pointer-events-none absolute bottom-full left-0 z-40 mb-2 w-max max-w-[250px] rounded-full bg-surface px-2.5 py-1.5 text-[11px] leading-relaxed text-text-secondary opacity-0 shadow-lg shadow-black/10 transition duration-150 translate-y-1 group-focus-within/tip:translate-y-0 group-focus-within/tip:opacity-100 group-focus-within/tip:delay-300 group-hover/tip:translate-y-0 group-hover/tip:opacity-100 group-hover/tip:delay-300"
+          className="pointer-events-none absolute bottom-full left-0 z-40 mb-2 w-max max-w-[250px] translate-y-1 rounded-full bg-surface px-2.5 py-1.5 text-[11px] leading-relaxed text-text-secondary opacity-0 shadow-lg shadow-black/10 transition duration-150 group-focus-within/tip:translate-y-0 group-focus-within/tip:opacity-100 group-focus-within/tip:delay-300 group-hover/tip:translate-y-0 group-hover/tip:opacity-100 group-hover/tip:delay-300"
         >
           {label}
         </span>

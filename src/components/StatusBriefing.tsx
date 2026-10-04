@@ -130,8 +130,7 @@ export function StatusBriefing() {
   // line, because "the picture and the sound disagree" is the one thing this
   // screen cannot say in a single glance.
   const staged = orderByDelay(selectedDeviceIds, deviceDelays);
-  const pending =
-    staged.length > 0 && !alreadyApplied(staged, selectedPids, routedPids);
+  const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routedPids);
 
   return (
     <div ref={rootRef} className="pointer-events-none absolute bottom-4 left-4 z-30">
@@ -152,9 +151,7 @@ export function StatusBriefing() {
                 {lines.map((line) => (
                   <li key={line.key} className="text-[12px] leading-relaxed text-text-secondary">
                     {line.text}
-                    {line.quiet && (
-                      <span className="text-text-muted"> {t('briefing.quiet')}</span>
-                    )}
+                    {line.quiet && <span className="text-text-muted"> {t('briefing.quiet')}</span>}
                   </li>
                 ))}
                 {pending && (

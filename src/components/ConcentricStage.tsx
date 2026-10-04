@@ -159,7 +159,14 @@ export function ConcentricStage() {
           >
             {/* The orbit itself: a faint circle the discs sit on, so the ring
                 reads as one object rather than as scattered coins. */}
-            <circle cx={cx} cy={cy} r={ORBIT_R} fill="none" stroke="var(--hairline)" strokeWidth={1} />
+            <circle
+              cx={cx}
+              cy={cy}
+              r={ORBIT_R}
+              fill="none"
+              stroke="var(--hairline)"
+              strokeWidth={1}
+            />
 
             {/* The halo. Two stacked circles rather than one animated between
                 colours: it has to be able to change with the theme, and a
@@ -358,9 +365,7 @@ function Hub({
       {/* The executable's identity next to its name, in the same fixed slot
           discipline the rail's rows use — the tile never resizes when the
           pixels land. */}
-      {exeName !== undefined && (
-        <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
-      )}
+      {exeName !== undefined && <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />}
       {/* The name is not overwritten when another programme is picked — or
           when this one's window retitles itself: it is swapped. Two names
           cross-fading would read as one programme being renamed, which is not
@@ -544,7 +549,7 @@ function Satellite({
               hover costs nothing and cannot fight the bloom beneath it. */}
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -inset-2 rounded-full border border-accent/45 opacity-0 transition-opacity duration-200 group-hover/disc:opacity-100 group-focus-within/disc:opacity-100"
+            className="pointer-events-none absolute -inset-2 rounded-full border border-accent/45 opacity-0 transition-opacity duration-200 group-focus-within/disc:opacity-100 group-hover/disc:opacity-100"
           />
           <motion.button
             type="button"
@@ -613,10 +618,10 @@ function Satellite({
                     aria-label={t('stage.promote')}
                     className="group/promote cursor-pointer rounded-[5px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
-                    <span className="underline decoration-dotted decoration-type-mirror/50 underline-offset-2 group-hover/promote:hidden group-focus-within/promote:hidden">
+                    <span className="underline decoration-type-mirror/50 decoration-dotted underline-offset-2 group-focus-within/promote:hidden group-hover/promote:hidden">
                       {t('stage.copy')}
                     </span>
-                    <span className="hidden group-hover/promote:inline group-focus-within/promote:inline">
+                    <span className="hidden group-focus-within/promote:inline group-hover/promote:inline">
                       {t('stage.promote')}
                     </span>
                   </button>
@@ -787,7 +792,7 @@ function MiniStep({
       whileHover={disabled ? undefined : { scale: 1.18 }}
       whileTap={disabled ? undefined : { scale: 0.82 }}
       transition={SPRING_TAP}
-      className="flex h-4 w-4 flex-none items-center justify-center rounded-[5px] squircle border border-glass-border bg-glass text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-40"
+      className="squircle flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border border-glass-border bg-glass text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-40"
     >
       <svg
         width="8"
