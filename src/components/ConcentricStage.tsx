@@ -362,10 +362,25 @@ function Hub({
   const content = (
     <>
       <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
-      {/* The executable's identity next to its name, in the same fixed slot
-          discipline the rail's rows use — the tile never resizes when the
-          pixels land. */}
-      {exeName !== undefined && <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />}
+      {/* The icon belongs to the file, so it swaps when the programme changes
+          and stands still when a window merely retitles itself — keyed by exe,
+          not by name. Like the name underneath: replaced, not rewritten, on
+          the same fade, so one programme leaves and the next arrives as a
+          single change rather than as two independent swaps. */}
+      <AnimatePresence mode="wait" initial={false}>
+        {exeName !== undefined && (
+          <motion.span
+            key={exeName}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            transition={FADE}
+            className="flex flex-none"
+          >
+            <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
+          </motion.span>
+        )}
+      </AnimatePresence>
       {/* The name is not overwritten when another programme is picked — or
           when this one's window retitles itself: it is swapped. Two names
           cross-fading would read as one programme being renamed, which is not
