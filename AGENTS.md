@@ -230,7 +230,8 @@ AppAudioRouter/
 - `stop_route` 返回 `StopOutcome`（`released` / `pinned_device`）：没释放成功时前端写一条 error 日志点名那台设备，而不是报"已恢复系统默认"；设置页的「重置每应用音频输出」、以及 `refreshSessions` 发现被路由的 pid 消失后调用的 `releaseStaleRoutes()`，都归到同一套端点归还逻辑（见下面「每应用端点分配的生命周期」）
 - **撤销是一个快照，不是一叠栈**：`undoSnapshot` 记下这一路由**替换掉的**每一条（原设备列表），撤销时逐条放回：非空按 `orderByDelay` 重排后重路由（延迟最小的那台必须回到主设备位，否则用户设的延迟被静默不施加），原本没有路由的走 `stopRoute`。
   **记忆也要跟着处理**，否则下次启动会把刚撤掉的路由装回来：重路由那条用**与当初相同的 `remember` 标志**，于是旧设备列表被写回去；而 `stopRoute` 那条会**清掉**记忆——这里没有「写任意记忆」的命令，所以是清掉而不是还原，丢的是一条当时并未生效的记忆，比「撤销被悄悄翻回去」小得多。手动停止路由会**丢弃**快照（那条路由已被用户改过，再对它撤销就是逆着用户最后一次操作走）。
-- **显示名是显示层，exe 是身份层，两层不许互换**（2026-10-04 起）：`AudioSession.display_name`（`process_meta.rs`）按「窗口标题 → FileDescription → 无（前端显示 `exe_name`）」取链。窗口标题用**一次 `EnumWindows` 扫全表**拿（Z 序、可见、无 owner、非 tool window 者优先），FileDescription 读一次后按镜像路径在本轮枚举内缓存——浏览器十几个进程共享一个文件。
+- **显示名是显示层，exe 是身份层，两层不许互换**（2026-10-04 起）：`AudioSession.display_name`（`process_meta.rs`）按「窗口标题 → FileDescription → 无（前端显示 `exe_name`）」取链。窗口标题用**一次 `EnumWindows` 扫全表**拿，且**只有可见窗口有资格**（Z 序、无 owner、非 tool window 者优先；隐藏窗口的标题是别人的管件——steam.exe 有个不可见窗口标题就叫「无标题」，而可见的 Steam 窗口属于 steamwebhelper.exe——托盘常驻的程序理应落到 FileDescription）。FileDescription 读一次后按镜像路径在本轮枚举内缓存——浏览器十几个进程共享一个文件。
+  - ⚠️ **`VerQueryValueW` 的长度单位有两套**：字符串值是**含 null 的字符数**，Translation 表才是**字节**——按字节读字符串曾把 "Microsoft Edge"（15 含 null）砍成 "Microso"。`file_description_reads_the_whole_string` 用真文件钉住这一点。
   - **它跟随窗口**：浏览器换标签 rail/中心就换名，这是有意的行为（与音量混合器一致），所以 `sessionSignature` **故意不含 display_name**——换标题不是"进程列表变化"，不许写日志。别把它加回签名。
   - **它不进任何键**：路由、记忆（route-memory.json）、源电平、固定端点全部按 exe；dock 的句子、舞台中心、左栏首行用显示名，左栏第二行在显示名与 exe 不同时**保留 exe**（`rail.pid` 前缀），因为用户对着托盘图标和任务管理器时认的是 exe。`exe_path` 只在 Rust 内部装配用，`skip_serializing`，前端永不收路径。
 - **图标按 exe 取、按 pid 问**：`get_process_icon(pid)` 在 Rust 侧自己解析镜像路径（`QueryFullProcessImageNameW`——`GetProcessImageFileNameA` 给的设备路径 shell 不认），`SHGetFileInfoW` → `GetIconInfo` → `GetDIBits` 解成 RGBA（有 alpha 用 alpha，老图标用 AND mask 兜底），base64 过线。**缓存在 Rust 侧按路径、含 miss**：shell 的提取是贵的部分，同 exe 的第二个会话、下一次刷新都不该再付。
@@ -713,7 +714,7 @@ cd src-tauri && cargo clippy -- -D warnings
 
 - [ ] `pnpm tauri dev` 启动无报错
 - [ ] 进程列表正确显示有音频会话的进程
-- [ ] 显示名：有窗口的程序在左栏首行、舞台中心、操作条句子里显示窗口标题（浏览器换标签跟着换名且不写「进程列表变化」日志），无窗口的程序显示版本资源描述，两者都没有时回退 exe 名；左栏第二行在两者不同时保留 exe；搜索两个名字都命中
+- [ ] 显示名：有窗口的程序在左栏首行、舞台中心、操作条句子里显示**可见**窗口标题（浏览器换标签跟着换名且不写「进程列表变化」日志）；托盘常驻或 UI 在别的进程里的程序显示版本资源描述（steam.exe → "Steam"，不是隐藏窗口的「无标题」；msedge.exe → "Microsoft Edge"，不是被砍半的 "Microso"），两者都没有时回退 exe 名；左栏第二行在两者不同时保留 exe；搜索两个名字都命中
 - [ ] 图标：左栏每行与中心显示 exe 图标（同 exe 的多个进程只有一份）；像素异步到达时行不移位（占位槽尺寸固定）；无图标的程序稳定显示首字母，不重试、不报错
 - [ ] 设备列表正确显示渲染设备
 - [ ] 路由操作成功（进程音频切换到目标设备）
