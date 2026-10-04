@@ -21,12 +21,21 @@ export function isTauri(): boolean {
 
 function loadWindowModule(): Promise<WindowModule> | null {
   if (!isTauri()) return null;
-  modulePromise ??= import('@tauri-apps/api/window');
-  // Reset on failure so a transient error doesn't cache the rejection forever.
-  modulePromise.catch(() => {
-    modulePromise = null;
-  });
-  return modulePromise;
+  if (modulePromise !== null) return modulePromise;
+
+  const loading = import('@tauri-apps/api/window');
+  // Reset on failure so a transient error doesn't cache the rejection forever:
+  // without this, one failed import leaves the window buttons dead for the rest
+  // of the session. The reset is attached once, here at the assignment, rather
+  // than on every call — a handler per call would pile onto a promise that
+  // outlives all of them. And it only clears a promise that is still the one
+  // that failed, so a later reload already in flight is never thrown away.
+  const forget = (): void => {
+    if (modulePromise === loading) modulePromise = null;
+  };
+  loading.catch(forget);
+  modulePromise = loading;
+  return loading;
 }
 
 /** Runs `action` against the current window, swallowing any failure. */
