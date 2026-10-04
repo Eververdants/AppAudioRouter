@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { FADE, SPRING_GLIDE } from '@/lib/motion';
+import { isEditableTarget } from '@/lib/productionGuards';
 import { useRouterStore } from '@/stores/routerStore';
 
 /** How long the offer stands before it takes itself away. */
@@ -48,7 +49,13 @@ export function Toast() {
   useEffect(() => {
     if (snapshot === null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismissUndo();
+      if (event.key !== 'Escape') return;
+      // Escape belongs to the field that has the focus first. Clearing the
+      // app list's search box is the same key, and the search box does not
+      // stop the event — so without this, dismissing a search silently spent
+      // the one offer that could still undo the route.
+      if (isEditableTarget(event.target)) return;
+      dismissUndo();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
