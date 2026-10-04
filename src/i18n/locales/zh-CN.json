@@ -45,6 +45,17 @@
     "applyAriaOne": "将「{{process}}」的声音改为通过 {{device}} 播放",
     "applyAriaMany": "将 {{n}} 个程序的声音改为通过 {{device}} 播放"
   },
+  "briefing": {
+    "button": "直说",
+    "tooltip": "让我用最直白、最简单、最不绕弯子的方式来告诉你现状",
+    "title": "现在的播放情况",
+    "empty": "没有任何程序被改道：所有声音都跟着系统默认设备「{{device}}」走。",
+    "emptyNoDevice": "没有任何程序被改道：所有声音都跟着系统默认设备走。",
+    "routeOne": "「{{process}}」现在只从 {{device}} 出声。",
+    "routeMulti": "「{{process}}」现在同时从 {{devices}} 出声。",
+    "quiet": "（此刻没在出声）",
+    "staged": "舞台上还有没生效的改动——点中间的圆，立刻生效。"
+  },
   "settings": {
     "title": "设置",
     "back": "返回",

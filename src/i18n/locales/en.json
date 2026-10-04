@@ -45,6 +45,17 @@
     "applyAriaOne": "Play {{process}} through {{device}} instead",
     "applyAriaMany": "Play {{n}} apps through {{device}} instead"
   },
+  "briefing": {
+    "button": "Straight talk",
+    "tooltip": "Let me tell you where things stand — plainly, simply, no beating around the bush.",
+    "title": "Where things stand",
+    "empty": "Nothing is redirected: every app follows the system default device, {{device}}.",
+    "emptyNoDevice": "Nothing is redirected: every app follows the system default device.",
+    "routeOne": "{{process}} plays from {{device}} now, and follows nothing else.",
+    "routeMulti": "{{process}} plays from {{devices}} at once.",
+    "quiet": "(silent right now)",
+    "staged": "The stage still has changes waiting — click the circle in the middle to make them real."
+  },
   "settings": {
     "title": "Settings",
     "back": "Back",

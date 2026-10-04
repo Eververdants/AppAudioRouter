@@ -380,3 +380,32 @@ test('the hub follows the programme the rail picks', async ({ page }) => {
   await appRow(page, 'music.exe').click();
   await expect(hub(page)).toContainText('music.exe');
 });
+
+test('the briefing button says where things stand, in so many words', async ({ page }) => {
+  await openApp(page);
+
+  // Nothing is routed: the plain truth is that everything follows the default.
+  const briefing = page.getByRole('button', { name: /no beating around the bush/ });
+  await briefing.click();
+  await expect(page.getByText('Nothing is redirected')).toBeVisible();
+
+  // Escape takes the bubble down...
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Nothing is redirected')).toBeHidden();
+
+  // ...and a route changes the answer: one line per programme, naming devices.
+  await appRow(page, 'music.exe').click();
+  await hub(page).click();
+  await briefing.click();
+  await expect(page.getByText(/plays from Speakers now/)).toBeVisible();
+
+  // A press somewhere else closes it too — and the route behind it still lands.
+  await deviceRow(page, 'TV').click();
+  await expect(page.getByText(/plays from Speakers now/)).toBeHidden();
+
+  // The Escape that closed the bubble was unregistered with it, so the search
+  // box still owns its own.
+  await page.getByLabel('Search apps').fill('music');
+  await page.getByLabel('Search apps').press('Escape');
+  await expect(appRow(page, 'game.exe')).toBeVisible();
+});

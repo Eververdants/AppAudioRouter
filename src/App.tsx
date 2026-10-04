@@ -6,6 +6,7 @@ import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
+import { StatusBriefing } from '@/components/StatusBriefing';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
 import { UnderlineTabs } from '@/components/ui/UnderlineTabs';
@@ -254,7 +255,16 @@ export default function App() {
                   { id: 'activity', label: t('tabs.activity') },
                 ]}
               />
-              {tab === 'router' ? <ConcentricStage /> : <LogPanel />}
+              {tab === 'router' ? (
+                <>
+                  <ConcentricStage />
+                  {/* The plain-language answer to "where is sound going", in
+                      the corner the action dock used to float over. */}
+                  <StatusBriefing />
+                </>
+              ) : (
+                <LogPanel />
+              )}
             </main>
           </motion.div>
         ) : (
