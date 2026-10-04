@@ -8,7 +8,7 @@
     "empty": "No apps are playing audio",
     "emptyHint": "Play sound in an app, then refresh",
     "pid": "PID {{pid}}",
-    "alsoHint": "Change this app too",
+    "alsoHint": "Apply the same change to this app",
     "stopRoute": "Stop output and return to the system default",
     "stopRouteConfirm": "Click again to confirm",
     "stopAll": "All back to system default",
@@ -127,7 +127,7 @@
     "activity": "Activity"
   },
   "logPanel": {
-    "empty": "Nothing logged yet"
+    "empty": "No activity yet"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",
@@ -155,8 +155,8 @@
     "routeRestoredMulti": "Restored the remembered route of {{process}} to {{device}} (+{{m}} copies)",
     "routeRestoreFailed": "Restoring the remembered route of {{process}} failed: {{error}}",
     "rememberedRoutesFailed": "Failed to load the remembered routes: {{error}}",
-    "rememberedRouteCleared": "Forgot the route remembered for {{process}}",
-    "rememberedRouteClearedFailed": "Forgetting the route of {{process}} failed: {{error}}",
+    "rememberedRouteCleared": "Cleared the route remembered for {{process}}",
+    "rememberedRouteClearedFailed": "Clearing the route of {{process}} failed: {{error}}",
     "stoppedAll": "Stopped all routing ({{n}} processes)",
     "deviceVolumeSet": "Volume of {{device}} set to {{n}}%",
     "deviceVolumeFailed": "Failed to set device volume: {{error}}",
