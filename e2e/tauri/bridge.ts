@@ -21,6 +21,10 @@ export interface BridgeDevice {
 export interface BridgeSession {
   pid: number;
   exe_name: string;
+  /** How the process names itself to a person — its window title or version
+   *  description. Absent reads as "no display name", the way a backend that
+   *  found no window and no description would report it. */
+  display_name?: string;
   /** Whether the session was rendering audio when enumerated; absent reads as
    *  "not sounding". */
   playing?: boolean;
@@ -90,6 +94,23 @@ function tauriBridge(initial: BridgeState): void {
         return state.devices;
       case 'list_sessions':
         return state.sessions;
+      case 'get_process_icon': {
+        // A deterministic tile hashed from the executable name, so the specs
+        // exercise the real RGBA→data-URL path without binary fixtures. An
+        // unknown pid reads as "no icon", the way a dead process would.
+        const session = state.sessions.find((s) => s.pid === Number(payload.pid));
+        if (session === undefined) return null;
+        let hash = 0;
+        for (const ch of session.exe_name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+        const rgba = new Uint8ClampedArray(8 * 8 * 4);
+        for (let i = 0; i < rgba.length; i += 4) {
+          rgba[i] = hash & 0xff;
+          rgba[i + 1] = (hash >> 8) & 0xff;
+          rgba[i + 2] = (hash >> 16) & 0xff;
+          rgba[i + 3] = 255;
+        }
+        return { width: 8, height: 8, rgba: btoa(String.fromCharCode(...rgba)) };
+      }
       case 'get_default_device':
         return (
           state.devices.find((d: BridgeDevice) => d.id === state.defaultDeviceId) ?? state.devices[0]
