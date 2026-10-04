@@ -179,3 +179,11 @@ export interface SessionActivityEvent {
   pid: number;
   active: boolean;
 }
+
+/** A process's executable icon, as top-down RGBA rows (4 bytes per pixel),
+ * base64-packed. Turned into an `img`-wearing data URL by `lib/icons.ts`. */
+export interface ProcessIcon {
+  width: number;
+  height: number;
+  rgba: string;
+}

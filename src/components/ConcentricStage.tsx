@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SourceLevelDial } from '@/components/SourceLevelDial';
+import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { formatStep } from '@/lib/delay';
@@ -319,6 +320,12 @@ function Hub({
         style={{ width: HUB_D, height: HUB_D }}
       >
         <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
+        {/* The executable's identity next to its name, in the same fixed slot
+            discipline the rail's rows use — the tile never resizes when the
+            pixels land. */}
+        {exeName !== undefined && (
+          <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
+        )}
         {/* The name is not overwritten when another programme is picked — or
             when this one's window retitles itself: it is swapped. Two names
             cross-fading would read as one programme being renamed, which is not

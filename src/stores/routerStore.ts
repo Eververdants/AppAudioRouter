@@ -24,6 +24,7 @@ import {
   rangeSeconds,
   readDelayStep,
 } from '@/lib/delay';
+import { rgbaToDataUrl } from '@/lib/icons';
 import * as api from '@/lib/invoke';
 
 interface RouterState {
@@ -87,6 +88,14 @@ interface RouterState {
    * level".
    */
   sourceVolumes: Record<string, number>;
+  /**
+   * Each executable's icon as a data URL, keyed by executable name — the icon
+   * belongs to the file, and one browser with a dozen processes has one icon.
+   * Display state only: filled in after a refresh by asks that never block the
+   * list, `null` meaning "asked, and there is none". Absent means "not asked
+   * yet", which is the letter tile's cue.
+   */
+  iconByExe: Record<string, string | null>;
   /** Whether a route is written to the memory as it is applied, and restored
    * from it when the program plays again. */
   autoRemember: boolean;
@@ -178,6 +187,10 @@ interface RouterState {
   setDeviceVolume: (deviceId: string, percent: number) => Promise<void>;
   /** Read the stored per-program levels the engines apply. */
   loadSourceVolumes: () => Promise<void>;
+  /** Ask the backend for the icons the current process list is missing, one
+   * command per process, without waiting for them: the rows render their
+   * letter tiles immediately and the icon lands whenever the shell is done. */
+  loadMissingIcons: () => void;
   /** Set one program's own level (percent, 0–400, 100 = unchanged). */
   setSourceVolume: (exeName: string, percent: number) => Promise<void>;
   /** Bring every routed program that is playing up to the loudest one's level,
@@ -316,6 +329,15 @@ function readAutoRemember(): boolean {
  */
 const autoRestoreDecided = new Set<number>();
 
+/**
+ * Icon asks this run already made, as `pid:exe_name` — the natural twin of
+ * [`autoRestoreDecided`]: a process whose ask failed is not retried on every
+ * refresh (the backend caches per executable, so a retry could not succeed
+ * better), and a program that relaunches gets a fresh pid and therefore a
+ * fresh ask. Never pruned against the live list.
+ */
+const iconAttempts = new Set<string>();
+
 /** A device's name for the log, or its id when it is not in the list. */
 function deviceName(deviceId: string | undefined, devices: AudioDevice[]): string {
   if (deviceId === undefined) return '';
@@ -406,6 +428,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
   sourceVolumes: {},
+  iconByExe: {},
   soundingPids: {},
   autoRemember: readAutoRemember(),
   rememberedRoutes: [],
@@ -523,6 +546,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // route is due; the same pass picks up everything that was already running
       // when the app launched.
       void swept.then(() => get().restoreRememberedRoutes());
+      // Icons ride behind the list, never in front of it: the rows are already
+      // on screen with their letter tiles by the time the shell answers.
+      get().loadMissingIcons();
       if (viaNotification && unchanged) return;
       get().addLog(
         viaNotification
@@ -1319,6 +1345,29 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // predicted: the backend rounds each gain and bounds it by that program's
     // own measured peak, and a run that failed halfway has still written some.
     await get().loadSourceVolumes();
+  },
+
+  loadMissingIcons: () => {
+    for (const session of get().sessions) {
+      const key = `${session.pid}:${session.exe_name}`;
+      // One ask per process, ever: the exe's data URL (or its settled null)
+      // makes the second session of the same program skip through, and the
+      // attempts set makes every later refresh skip the process itself.
+      if (iconAttempts.has(key)) continue;
+      if (get().iconByExe[session.exe_name] !== undefined) continue;
+      iconAttempts.add(key);
+      api
+        .getProcessIcon(session.pid)
+        .then((icon) => {
+          const url = icon === null ? null : rgbaToDataUrl(icon);
+          set((s) => ({ iconByExe: { ...s.iconByExe, [session.exe_name]: url } }));
+        })
+        .catch(() => {
+          // Same settlement as "the file has no icon": the letter tile stays,
+          // and nothing anywhere logs an icon.
+          set((s) => ({ iconByExe: { ...s.iconByExe, [session.exe_name]: null } }));
+        });
+    }
   },
 
   setDeviceDelayValue: async (deviceId, delayMs) => {

@@ -7,6 +7,7 @@ import type {
   AudioDevice,
   AudioSession,
   DeviceDelay,
+  ProcessIcon,
   RememberedRoute,
   ResetOutcome,
   SourceVolume,
@@ -20,6 +21,12 @@ export async function listDevices(): Promise<AudioDevice[]> {
 
 export async function listSessions(): Promise<AudioSession[]> {
   return invoke<AudioSession[]>('list_sessions');
+}
+
+/** One process's executable icon as raw RGBA, or null when the process is
+ * gone or its file carries no icon (the backend caches per executable). */
+export async function getProcessIcon(pid: number): Promise<ProcessIcon | null> {
+  return invoke<ProcessIcon | null>('get_process_icon', { pid });
 }
 
 export async function getDefaultDevice(): Promise<AudioDevice> {

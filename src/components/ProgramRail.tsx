@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { AudioSession } from '@/lib/types';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
+import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
@@ -272,33 +273,40 @@ export function ProgramRail() {
                       selectProcess(session.pid);
                     }
                   }}
-                  className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
-                  <span className="block truncate text-[12.5px] font-medium text-text-primary">
-                    {name}
-                  </span>
-                  {/* PID, the exe it really is when the window names it
-                      differently, and — only once something has actually been
-                      routed — where its sound goes. */}
-                  <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
-                    {exeDiffers && (
-                      <>
-                        {session.exe_name}
-                        <span aria-hidden="true" className="opacity-50">
-                          {' · '}
-                        </span>
-                      </>
-                    )}
-                    {t('rail.pid', { pid: session.pid })}
-                    {targets.length > 0 && through !== null && (
-                      <>
-                        <span aria-hidden="true" className="opacity-50">
-                          {' · '}
-                        </span>
-                        <span className="font-sans">{through}</span>
-                        {targets.length > 1 && <span className="text-accent"> +{targets.length - 1}</span>}
-                      </>
-                    )}
+                  {/* The executable's own icon, in a slot that is its size
+                      whether the pixels have arrived or not. */}
+                  <ProcessIcon exeName={session.exe_name} name={name} size={16} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] font-medium text-text-primary">
+                      {name}
+                    </span>
+                    {/* PID, the exe it really is when the window names it
+                        differently, and — only once something has actually been
+                        routed — where its sound goes. */}
+                    <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
+                      {exeDiffers && (
+                        <>
+                          {session.exe_name}
+                          <span aria-hidden="true" className="opacity-50">
+                            {' · '}
+                          </span>
+                        </>
+                      )}
+                      {t('rail.pid', { pid: session.pid })}
+                      {targets.length > 0 && through !== null && (
+                        <>
+                          <span aria-hidden="true" className="opacity-50">
+                            {' · '}
+                          </span>
+                          <span className="font-sans">{through}</span>
+                          {targets.length > 1 && (
+                            <span className="text-accent"> +{targets.length - 1}</span>
+                          )}
+                        </>
+                      )}
+                    </span>
                   </span>
                 </button>
 
