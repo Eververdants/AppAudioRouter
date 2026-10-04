@@ -3,6 +3,7 @@ import { type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { Ring } from '@/components/ui/Ring';
+import { orderByDelay } from '@/lib/delay';
 import { FADE, SPRING_ARRIVE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -51,6 +52,7 @@ export function ActionDock() {
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
+  const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const routedPids = useRouterStore((s) => s.routedPids);
   const applying = useRouterStore((s) => s.applying);
   const applyRoute = useRouterStore((s) => s.applyRoute);
@@ -60,11 +62,16 @@ export function ActionDock() {
 
   const pid = selectedPids[0];
   const session = pid === undefined ? undefined : sessions.find((s) => s.pid === pid);
-  const targets = selectedDeviceIds
-    .map((id) => devices.find((d) => d.id === id)?.name ?? id)
-    .join(' + ');
-  const answered = alreadyApplied(selectedDeviceIds, selectedPids, routedPids);
-  const nothingPicked = pid === undefined || selectedDeviceIds.length === 0;
+  // The plan reads in the order the apply will realize it — delay order, the
+  // order the route goes out in — so the sentence names the device the system
+  // will actually play first, and "already applied" compares like with like:
+  // live routes are kept in that same order. A pick order the delay order
+  // would overwrite has no plan of its own to describe, which is why the
+  // stage never drew one.
+  const staged = orderByDelay(selectedDeviceIds, deviceDelays);
+  const targets = staged.map((id) => devices.find((d) => d.id === id)?.name ?? id).join(' + ');
+  const answered = alreadyApplied(staged, selectedPids, routedPids);
+  const nothingPicked = pid === undefined || staged.length === 0;
 
   const sentenceKey = nothingPicked
     ? 'guide'

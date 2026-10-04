@@ -255,6 +255,30 @@ describe('process and device selection', () => {
     expect(state().selectedPids).toEqual([]);
     expect(state().selectedDeviceIds).toEqual([]);
   });
+
+  it('promotes a staged copy to the primary seat without touching membership', () => {
+    installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC], selectedDeviceIds: ['tv', 'speakers'] });
+
+    state().promoteDevice('speakers');
+
+    // A reorder of the plan and nothing else: the same devices, the copy now
+    // first, and nothing routed or logged — no route moves until Apply.
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+    expect(state().routedPids).toEqual({});
+    expect(state().logs).toHaveLength(0);
+  });
+
+  it('leaves the plan alone when the promoted device is already the primary or absent', () => {
+    installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC], selectedDeviceIds: ['tv', 'speakers'] });
+
+    state().promoteDevice('tv');
+    expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
+
+    state().promoteDevice('headphones');
+    expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
+  });
 });
 
 describe('applyRoute', () => {

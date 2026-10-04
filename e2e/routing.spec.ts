@@ -147,6 +147,48 @@ test('a second device makes a copy, and the copy carries its own delay and level
   expect(delayed[0]?.args.deviceId).toBe('speakers');
 });
 
+test('a copy can be promoted to what the system plays directly', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+
+  // The first click replaced the guess with the TV; the second added Speakers
+  // as the copy. With no delays set every device ties, so the plan's own order
+  // decides who plays directly — the TV, for being there first.
+  await deviceRow(page, 'TV').click();
+  await deviceRow(page, 'Speakers').click();
+  await expect(deviceRowShell(page, 'TV')).toContainText('Main');
+  await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
+
+  // The copy's own role word is the switch: one press trades the seats in the
+  // plan, the role words cross-fade on the spot, and Apply is what moves the
+  // hardware.
+  await deviceRowShell(page, 'Speakers').getByRole('button', { name: 'Make primary' }).click();
+  await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
+  await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
+  await expect(routeQuestion(page)).toContainText('Speakers + TV');
+  expect(await callsFor(page, 'apply_route')).toHaveLength(0);
+
+  await routeConfirmButton(page).click();
+  expect((await callsFor(page, 'apply_route'))[0]?.args.deviceIds).toEqual(['speakers', 'tv']);
+});
+
+test('the stage draws the primary the delay order will produce', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+  await deviceRow(page, 'TV').click();
+  await deviceRow(page, 'Speakers').click();
+  await expect(deviceRowShell(page, 'TV')).toContainText('Main');
+
+  // Stepping the copy earlier than the primary takes the primary's seat on the
+  // spot, before any Apply: the route goes out in delay order, so the stage
+  // would be lying if it kept the word on whoever was picked first. The tuner
+  // moves with the role — the device the system plays directly has no copy's
+  // controls to offer.
+  await page.locator('main').getByRole('button', { name: '10 ms earlier' }).click();
+  await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
+  await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
+});
+
 test('revert throws the picks away and sends nothing', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();

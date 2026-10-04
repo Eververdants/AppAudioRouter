@@ -7,6 +7,7 @@ import {
   clampStep,
   formatDelaySigned,
   formatStep,
+  orderByDelay,
   rangeSeconds,
   readDelayStep,
   stepDelay,
@@ -152,5 +153,24 @@ describe('rangeSeconds / formatStep', () => {
     expect(formatStep(2000)).toBe('2 s');
     expect(formatStep(50)).toBe('50 ms');
     expect(formatStep(1500)).toBe('1500 ms');
+  });
+});
+
+describe('orderByDelay', () => {
+  it('puts the earliest device first, where the OS plays it natively', () => {
+    expect(orderByDelay(['a', 'b', 'c'], { b: -50, c: 200 })).toEqual(['b', 'a', 'c']);
+  });
+
+  it('keeps the plan order among devices whose delays tie', () => {
+    // The stable sort is what makes promoting a copy honest: with every delay
+    // at zero, moving a device to the front of the plan is what puts it first.
+    expect(orderByDelay(['b', 'c', 'a'], { a: 10 })).toEqual(['b', 'c', 'a']);
+    expect(orderByDelay(['b', 'a'], {})).toEqual(['b', 'a']);
+  });
+
+  it('treats a missing delay as zero and leaves the input alone', () => {
+    const ids = ['a', 'b'];
+    expect(orderByDelay(ids, { a: 5 })).toEqual(['b', 'a']);
+    expect(ids).toEqual(['a', 'b']);
   });
 });

@@ -6,7 +6,7 @@ import { SourceLevelDial } from '@/components/SourceLevelDial';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
-import { formatStep } from '@/lib/delay';
+import { formatStep, orderByDelay } from '@/lib/delay';
 import { FADE, RIPPLE, SPRING_ARRIVE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import {
   DISC_D,
@@ -63,7 +63,9 @@ export function ConcentricStage() {
   const routedPids = useRouterStore((s) => s.routedPids);
   const soundingPids = useRouterStore((s) => s.soundingPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
+  const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
+  const promoteDevice = useRouterStore((s) => s.promoteDevice);
 
   const liveness = useLiveness();
 
@@ -83,8 +85,21 @@ export function ConcentricStage() {
   const pid = selectedPids[0];
   const session = pid === undefined ? undefined : sessions.find((s) => s.pid === pid);
   const live = pid === undefined ? undefined : routedPids[pid];
-  /** What the ring shows: the plan while a programme is being routed. */
-  const drawn = pid === undefined ? [] : selectedDeviceIds;
+  /**
+   * What the ring shows: the plan, drawn in the order the apply will realize
+   * it — delay order, the order the route itself goes out in (`orderByDelay`)
+   * — so the disc wearing `Main` is always the one Apply actually hands to the
+   * system. With no delays set every value ties and the plan's own order
+   * stands, which is the freedom the copy's promotion control spends; a copy
+   * whose delay is strictly larger is drawn where the apply would leave it,
+   * never where a click wished it were.
+   */
+  const drawn = pid === undefined ? [] : orderByDelay(selectedDeviceIds, deviceDelays);
+  // The plan's first device is its primary, and a copy can take that seat only
+  // when its own delay ties with it: the system plays the primary directly,
+  // and software delay cannot pull a later device earlier.
+  const [primaryId] = drawn;
+  const primaryDelayMs = primaryId === undefined ? 0 : (deviceDelays[primaryId] ?? 0);
 
   const sounding = pid !== undefined && soundingPids[pid] === true && liveness;
   /**
@@ -216,6 +231,7 @@ export function ConcentricStage() {
               role={roleOf(device.id, drawn)}
               isDefaultDevice={device.id === defaultDeviceId}
               showTuner={drawn.length > 1}
+              canPromote={drawn.length > 1 && (deviceDelays[device.id] ?? 0) === primaryDelayMs}
               canPick={pid !== undefined}
               index={index}
               count={count}
@@ -231,6 +247,7 @@ export function ConcentricStage() {
                 pushRipple(satellite(index, count).x, satellite(index, count).y);
                 toggleDeviceSelection(device.id);
               }}
+              onPromote={() => promoteDevice(device.id)}
             />
           ))}
 
@@ -374,6 +391,13 @@ function Hub({
  * least of all by keyboard. The label line is always reserved — one device
  * being the system default would otherwise push its own name half a line up,
  * and six names that do not share a baseline read as a mistake.
+ *
+ * In a plan with more than one device, the copy's role word is also the way to
+ * change the job: pointing at it turns "Copy" into the promotion, because
+ * which device plays directly is a position to move, not a fact to read. A
+ * copy whose delay compensation is larger than the primary's keeps the plain
+ * word and a title that says why — the system plays the primary directly, and
+ * software delay cannot pull a later device earlier.
  */
 function Satellite({
   deviceId,
@@ -381,22 +405,27 @@ function Satellite({
   role,
   isDefaultDevice,
   showTuner,
+  canPromote,
   canPick,
   index,
   count,
   position,
   onToggle,
+  onPromote,
 }: {
   deviceId: string;
   name: string;
   role: StageRole;
   isDefaultDevice: boolean;
   showTuner: boolean;
+  /** Whether promoting this device would survive the apply's delay order. */
+  canPromote: boolean;
   canPick: boolean;
   index: number;
   count: number;
   position: { x: number; y: number };
   onToggle: () => void;
+  onPromote: () => void;
 }) {
   const { t } = useTranslation();
   const tone = TONE[role];
@@ -468,7 +497,10 @@ function Satellite({
 
         {/* The role word is replaced, not rewritten: `Copy` slides out as
             `Main` slides in, so a device changing job is something you see
-            happen rather than something you have to notice afterwards. */}
+            happen rather than something you have to notice afterwards. In a
+            multi-device plan the copy's word wears a dotted underline and
+            offers the promotion on approach — the word that says what a device
+            is doing is the word that changes what it is doing. */}
         <span
           className={`mt-0.5 flex justify-center text-center text-[9.5px] leading-none ${tone.label}`}
           style={{ minHeight: 12 }}
@@ -482,7 +514,26 @@ function Satellite({
                 exit={{ opacity: 0, y: -4 }}
                 transition={FADE}
               >
-                {role === 'primary' ? t('stage.main') : t('stage.copy')}
+                {role === 'primary' ? (
+                  t('stage.main')
+                ) : canPromote ? (
+                  <button
+                    type="button"
+                    onClick={onPromote}
+                    title={t('stage.promoteTitle')}
+                    aria-label={t('stage.promote')}
+                    className="group/promote cursor-pointer rounded-[5px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  >
+                    <span className="underline decoration-dotted decoration-type-mirror/50 underline-offset-2 group-hover/promote:hidden group-focus-within/promote:hidden">
+                      {t('stage.copy')}
+                    </span>
+                    <span className="hidden group-hover/promote:inline group-focus-within/promote:inline">
+                      {t('stage.promote')}
+                    </span>
+                  </button>
+                ) : (
+                  <span title={t('stage.promoteBlockedTitle')}>{t('stage.copy')}</span>
+                )}
               </motion.span>
             ) : isDefaultDevice ? (
               <motion.span

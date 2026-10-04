@@ -21,6 +21,7 @@ import {
   DELAY_STEP_STORAGE_KEY,
   clampDelay,
   clampStep,
+  orderByDelay,
   rangeSeconds,
   readDelayStep,
 } from '@/lib/delay';
@@ -32,7 +33,11 @@ interface RouterState {
   sessions: AudioSession[];
   /** Processes targeted by the current selection (Ctrl+click to multi-select). */
   selectedPids: number[];
-  /** Devices targeted by the current selection, in route order (first = primary). */
+  /** Devices targeted by the current selection — the plan's membership, in the
+   * order the user built it. The route itself applies in delay order (see
+   * `orderByDelay`), and that is the order the stage draws; among devices whose
+   * delays tie this array's order is what stands, which is exactly the freedom
+   * `promoteDevice` spends. */
   selectedDeviceIds: string[];
   /**
    * Whether `selectedDeviceIds` is still the app's own guess (the process's
@@ -144,6 +149,11 @@ interface RouterState {
   selectProcess: (pid: number) => void;
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
+  /** Move one staged device to the front of the plan — the seat the system
+   * plays directly. A reorder of the plan and nothing else: membership belongs
+   * to the disc toggle, no route moves until Apply, and the stage offers the
+   * seat only where the apply's delay order would let the move stand. */
+  promoteDevice: (deviceId: string) => void;
   toggleAutoRemember: () => void;
   /** Read the close-to-tray preference and the startup registry entry. */
   loadShellSettings: () => Promise<void>;
@@ -263,19 +273,6 @@ function runQueuedRefresh(gate: RefreshGate, run: (viaNotification: boolean) => 
 function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
   const id = state.defaultDeviceId;
   return id !== null && state.devices.some((d) => d.id === id) ? [id] : [];
-}
-
-/**
- * Route order for a set of devices: earliest delay first.
- *
- * Delays are absolute — each device is measured against the app's audio — but
- * only the earliest device can stay where it is, because the OS plays the
- * primary one natively and software delay can only be added. Ordering the route
- * this way puts that earliest device first, so every other device really is
- * held back by exactly the difference the user configured.
- */
-function orderByDelay(ids: string[], delays: Record<string, number>): string[] {
-  return [...ids].sort((a, b) => (delays[a] ?? 0) - (delays[b] ?? 0));
 }
 
 /**
@@ -645,6 +642,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     }
+  },
+
+  promoteDevice: (deviceId) => {
+    const { selectedDeviceIds } = get();
+    // Not staged, or already the primary: nothing to move. A no-op must not
+    // churn the array the stage's role words are keyed against.
+    const index = selectedDeviceIds.indexOf(deviceId);
+    if (index <= 0) return;
+    set({
+      selectedDeviceIds: [deviceId, ...selectedDeviceIds.filter((id) => id !== deviceId)],
+    });
   },
 
   toggleAutoRemember: () => {

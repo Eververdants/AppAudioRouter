@@ -89,3 +89,22 @@ export function rangeSeconds(rangeMs: number): number {
 export function formatStep(stepMs: number): string {
   return stepMs >= 1000 && stepMs % 1000 === 0 ? `${stepMs / 1000} s` : `${stepMs} ms`;
 }
+
+/**
+ * Route order for a set of devices: earliest delay first.
+ *
+ * Delays are absolute — each device is measured against the app's audio — but
+ * only the earliest device can stay where it is, because the OS plays the
+ * primary one natively and software delay can only be added. Ordering the route
+ * this way puts that earliest device first, so every other device really is
+ * held back by exactly the difference the user configured.
+ *
+ * The sort is stable, and that stability is the one honest way to choose who
+ * plays directly: among devices whose delays tie — all of them, before the
+ * user sets any — the plan's own order stands, so moving a device to the
+ * front of the plan is what puts it first, and a device whose delay is
+ * strictly larger can never be moved there at all.
+ */
+export function orderByDelay(ids: string[], delays: Record<string, number>): string[] {
+  return [...ids].sort((a, b) => (delays[a] ?? 0) - (delays[b] ?? 0));
+}
