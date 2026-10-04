@@ -162,7 +162,6 @@ function reset(overrides: Partial<StoreState> = {}): void {
     applying: false,
     error: null,
     autoRemember: true,
-    advancedMode: false,
     closeToTray: false,
     autostart: false,
     ...overrides,
