@@ -1,8 +1,38 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { FADE } from '@/lib/motion';
+import type { LogEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
+
+/**
+ * One line of the log, remembered because a line never changes once written.
+ *
+ * The store caps the log at 200 entries and hands back a new array each time
+ * one arrives, so the panel re-renders on every line — and every one of those
+ * 200 rows re-rendered with it, each re-running the arrival animation for a
+ * line that was already on screen. A single refresh writes several entries at
+ * once, which is exactly the moment somebody is reading the panel.
+ */
+const LogRow = memo(function LogRow({ log }: { log: LogEntry }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={FADE}
+      className={`flex gap-3 py-0.5 [overflow-wrap:anywhere] ${
+        log.level === 'success'
+          ? 'text-success'
+          : log.level === 'error'
+            ? 'text-error'
+            : 'text-text-secondary'
+      }`}
+    >
+      <span className="flex-none tabular-nums text-text-muted">[{log.timestamp}]</span>
+      <span className="min-w-0">{log.message}</span>
+    </motion.div>
+  );
+});
 
 /**
  * What the app did, as a full-height list behind the activity tab.
@@ -36,22 +66,7 @@ export function LogPanel() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-2 font-mono text-[11px] leading-4">
       {logs.map((log) => (
-        <motion.div
-          key={log.id}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={FADE}
-          className={`flex gap-3 py-0.5 [overflow-wrap:anywhere] ${
-            log.level === 'success'
-              ? 'text-success'
-              : log.level === 'error'
-                ? 'text-error'
-                : 'text-text-secondary'
-          }`}
-        >
-          <span className="flex-none tabular-nums text-text-muted">[{log.timestamp}]</span>
-          <span className="min-w-0">{log.message}</span>
-        </motion.div>
+        <LogRow key={log.id} log={log} />
       ))}
       <div ref={bottomRef} />
     </div>
