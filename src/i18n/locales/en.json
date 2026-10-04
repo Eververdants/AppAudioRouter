@@ -32,7 +32,7 @@
     "stepDown": "{{step}} quieter"
   },
   "stage": {
-    "guide": "Pick an app on the left",
+    "guide": "Select an app on the left",
     "sounding": "Playing",
     "quiet": "Silent",
     "main": "Main",

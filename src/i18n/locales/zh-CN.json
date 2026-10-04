@@ -32,24 +32,24 @@
     "stepDown": "降低 {{step}}"
   },
   "stage": {
-    "guide": "先在左边选一个程序",
-    "sounding": "正在响",
-    "quiet": "没在响",
+    "guide": "请先在左侧选择一个程序",
+    "sounding": "正在播放",
+    "quiet": "未在播放",
     "main": "主输出",
     "copy": "副本",
     "promote": "设为主输出",
     "promoteTitle": "让这台设备成为主输出：由系统直接播放，其余设备成为它的副本",
-    "promoteBlockedTitle": "它的延迟补偿比主输出大，而主输出由系统直接播放、软件延迟只能往后加——它只能作为副本参与对齐",
+    "promoteBlockedTitle": "它的延迟补偿大于主输出，而主输出由系统直接播放、软件延迟只能向后追加——它只能作为副本参与对齐",
     "defaultLabel": "系统默认"
   },
   "dock": {
     "groupLabel": "当前输出",
-    "preview": "「{{process}}」的声音将从 {{device}} 出来",
-    "previewMany": "{{n}} 个程序的声音将从 {{device}} 出来",
-    "unchanged": "已经从 {{device}} 出来",
+    "preview": "「{{process}}」的声音将通过 {{device}} 播放",
+    "previewMany": "{{n}} 个程序的声音将通过 {{device}} 播放",
+    "unchanged": "当前正通过 {{device}} 播放",
     "revert": "还原",
     "apply": "应用",
-    "guide": "再点一下让它从哪儿出来",
+    "guide": "为程序选择播放设备",
     "backToDefault": "回到系统默认",
     "backToDefaultConfirm": "再点一次确认"
   },
