@@ -60,10 +60,17 @@ pub(crate) fn process_image(pid: u32) -> Option<(String, String)> {
 ///
 /// `EnumWindows` walks top-level windows in Z order, topmost first, so the
 /// first visible window that has a title, owns nothing and is not a tool
-/// window is the window the user would call "the app's window". Anything
-/// behind it counts only when no such window exists, and a process with only
-/// untitled windows — most background helpers — gets no entry at all, which
-/// the caller reads as "fall back to the file description".
+/// window is the window the user would call "the app's window". A visible
+/// window behind it counts only when no such window exists, and a process
+/// with no *visible* titled window — one whose UI lives in another process,
+/// or that sits in the tray — gets no entry at all, which the caller reads as
+/// "fall back to the file description".
+///
+/// Invisible windows never qualify, and that is the point: their captions are
+/// somebody's plumbing. Steam's main process owns a hidden window captioned
+/// literally 无标题 while the visible "Steam" window belongs to
+/// steamwebhelper.exe — a fallback that accepts hidden windows displays that
+/// junk, where the file description would have said "Steam".
 pub(crate) fn window_titles(pids: &[u32]) -> HashMap<u32, String> {
     use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 
@@ -97,10 +104,10 @@ struct TitleCollector {
     best: HashMap<u32, (u8, String)>,
 }
 
-/// Ranks for a window with a non-empty title; lower is better.
+/// Ranks for a window with a non-empty title; lower is better. Only visible
+/// windows rank at all.
 const RANK_MAIN: u8 = 0;
 const RANK_VISIBLE: u8 = 1;
-const RANK_ANY: u8 = 2;
 
 // SAFETY: `lparam` is the `TitleCollector` pointer passed to `EnumWindows`,
 // and USER32 invokes this on the calling thread, so the access is exclusive.
@@ -134,6 +141,14 @@ unsafe extern "system" fn collect_title(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let title = String::from_utf16_lossy(&buf[..len as usize]);
 
     let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+    if !visible {
+        // An invisible window's caption is plumbing, not a name: Steam's main
+        // process carries a hidden window titled 无标题, IME helpers say
+        // "Default IME". A window the user cannot see is never what "the
+        // app's window" means, so it is skipped entirely — the file
+        // description is the honest fallback for a tray-resident program.
+        return BOOL(1);
+    }
     let tool_window =
         unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } & WS_EX_TOOLWINDOW.0 as isize != 0;
     // GetWindow reports "no owner" as a NULL handle, which windows-rs turns
@@ -143,12 +158,10 @@ unsafe extern "system" fn collect_title(hwnd: HWND, lparam: LPARAM) -> BOOL {
         Err(_) => true,
     };
 
-    let rank = if visible && unowned && !tool_window {
+    let rank = if unowned && !tool_window {
         RANK_MAIN
-    } else if visible {
-        RANK_VISIBLE
     } else {
-        RANK_ANY
+        RANK_VISIBLE
     };
 
     if collector
@@ -222,9 +235,14 @@ pub(crate) fn file_description(path: &str) -> Option<String> {
         if !found.as_bool() || value.is_null() || value_len < 2 {
             continue;
         }
+        // VerQueryValueW's length word is **characters including the null**
+        // for a string value — it is bytes only for the Translation table
+        // above. Reading the string as bytes halved it, which is how
+        // "Microsoft Edge" (14 chars, 15 with the null) reached the screen as
+        // "Microso".
+        //
         // SAFETY: a NUL-terminated UTF-16 string inside `data`.
-        let text =
-            unsafe { std::slice::from_raw_parts(value as *const u16, value_len as usize / 2) };
+        let text = unsafe { std::slice::from_raw_parts(value as *const u16, value_len as usize) };
         let text = String::from_utf16_lossy(text);
         let text = text.trim_end_matches('\0').trim();
         if !text.is_empty() {
@@ -536,7 +554,7 @@ fn base64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::base64;
+    use super::{base64, file_description};
 
     #[test]
     fn base64_matches_the_standard_vectors() {
@@ -547,5 +565,18 @@ mod tests {
         assert_eq!(base64(b"foob"), "Zm9vYg==");
         assert_eq!(base64(b"fooba"), "Zm9vYmE=");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn file_description_reads_the_whole_string() {
+        // The brand in msedge.exe's version resource is not localized, and
+        // Edge ships at this path both here and on CI. "Microsoft Edge" is 14
+        // characters (15 with the null), so the bytes-as-length bug cut it to
+        // exactly "Microso" — this pins the whole string.
+        let path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+        if !std::path::Path::new(path).exists() {
+            return; // an install without Edge cannot pin this
+        }
+        assert_eq!(file_description(path).as_deref(), Some("Microsoft Edge"));
     }
 }
