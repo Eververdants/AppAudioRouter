@@ -3,6 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 /** Travel after which a press counts as a scrub rather than a click. */
 const DRAG_SLOP_PX = 3;
 
+/** Horizontal travel that amounts to one step, when a caller names none. */
+const DEFAULT_PX_PER_STEP = 4;
+
 /**
  * Quiet period before a stepped value is written. A wheel flick or a held arrow
  * key is one gesture, so it should cost one round-trip, one file write and one
@@ -61,7 +64,7 @@ export function ScrubReadout({
   min,
   max,
   step,
-  pxPerStep = 4,
+  pxPerStep = DEFAULT_PX_PER_STEP,
   format,
   unit,
   label,
@@ -89,6 +92,9 @@ export function ScrubReadout({
   // A non-positive step would divide by zero below and hand `onCommit` a NaN;
   // every caller passes a clamped positive one, this just makes sure of it.
   const safeStep = step > 0 ? step : 1;
+  // Same for the travel: `dx / 0` is infinity, and one pixel of a scrub would
+  // then slam the value onto whichever bound the drag was heading for.
+  const safePxPerStep = pxPerStep > 0 ? pxPerStep : DEFAULT_PX_PER_STEP;
 
   const clamp = (raw: number) => Math.max(min, Math.min(max, Math.round(raw)));
   const shown = scrub ?? stepped ?? value;
@@ -210,7 +216,7 @@ export function ScrubReadout({
         const dx = e.clientX - state.x;
         if (!state.moved && Math.abs(dx) < DRAG_SLOP_PX) return;
         state.moved = true;
-        setScrub(clamp(state.from + Math.trunc(dx / pxPerStep) * safeStep));
+        setScrub(clamp(state.from + Math.trunc(dx / safePxPerStep) * safeStep));
       }}
       onPointerUp={() => endDrag(true)}
       onPointerCancel={() => endDrag(false)}
