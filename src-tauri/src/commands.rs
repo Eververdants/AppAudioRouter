@@ -169,6 +169,12 @@ pub async fn apply_route(
     if device_ids.is_empty() {
         return Err("no devices selected".to_string());
     }
+    // A device named twice would be mirrored onto the very device the OS is
+    // already playing natively: the program is then heard twice, offset by the
+    // copy's own latency, which sounds like an echo rather than like a second
+    // output. A remembered route read back from a hand-edited config is one way
+    // to arrive here, so the check belongs at the boundary.
+    let device_ids = dedupe_device_ids(device_ids);
 
     // Primary: the OS-native per-app endpoint.
     audio::routing::set_process_default_device(&device_ids[0], pid, audio::Role::All)
@@ -201,6 +207,23 @@ pub async fn apply_route(
         info!("remembered route: {exe_name} -> {device_ids:?}");
     }
     Ok(generation)
+}
+
+/// Drop repeated device ids, keeping each id at the position it first appeared.
+///
+/// The position is what decides the primary, so a repeat is dropped rather than
+/// the list being sorted or reversed into a shape the caller did not ask for.
+fn dedupe_device_ids(device_ids: Vec<String>) -> Vec<String> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut unique = Vec::with_capacity(device_ids.len());
+    for id in &device_ids {
+        if !seen.insert(id.as_str()) {
+            warn!("apply_route: {id} was named twice; the route uses it once");
+            continue;
+        }
+        unique.push(id.clone());
+    }
+    unique
 }
 
 /// Stop routing a process: halt any duplication engine and hand the program
