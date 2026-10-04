@@ -7,8 +7,9 @@ import { useDelayValue } from '@/hooks/useDelayValue';
  * stepping by the configured step, with a directly editable millisecond value
  * in between so an exact figure can be entered too.
  *
- * The device table's delay cell is the same control through `ScrubReadout`;
- * both share the editing logic in `useDelayValue`.
+ * The settings page is the only place this control appears; the same delay is
+ * also stepped from the disc it belongs to on the stage (`ConcentricStage`),
+ * and both share the editing logic in `useDelayValue`.
  */
 export function DelayStepper({
   deviceId,

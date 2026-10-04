@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { RouteCanvas } from '@/components/RouteCanvas';
-import { ProcessList } from '@/components/ProcessList';
+import { ActionDock } from '@/components/ActionDock';
+import { ConcentricStage } from '@/components/ConcentricStage';
 import { LogPanel } from '@/components/LogPanel';
-import { RouteConfirmCapsule } from '@/components/RouteConfirmCapsule';
+import { ProgramRail } from '@/components/ProgramRail';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
 import { UnderlineTabs } from '@/components/ui/UnderlineTabs';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
+import { useGlassSpecular } from '@/hooks/useGlassSpecular';
 import { useRouterStore } from '@/stores/routerStore';
 import type {
   AudioChangedEvent,
@@ -57,6 +58,10 @@ export default function App() {
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
   const [tab, setTab] = useState<WorkTab>('router');
+
+  // The glass catches the pointer: one delegated listener writes the hovered
+  // pane's highlight position, so every lens in the window tracks the light.
+  useGlassSpecular();
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
@@ -190,8 +195,17 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
-      {/* The native caption bar is disabled, so this bar is the window frame. */}
+    // One wash of light behind everything, blurred past legibility. It exists so
+    // the glass panels have something to refract — a blur over a flat colour is
+    // grey plastic, and this app is made of glass. Painted once, never animated,
+    // and behind every other layer including the title bar, because the frame is
+    // part of the same window rather than a thing stuck onto it.
+    <div className="relative isolate flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
+      <div aria-hidden="true" className="aurora pointer-events-none absolute inset-0 -z-10" />
+      {/* A breath of grain over that wash, so the light reads as falling on a
+          surface rather than as a flat vector gradient. Static and blended. */}
+      <div aria-hidden="true" className="grain pointer-events-none absolute inset-0 -z-10" />
+
       <TitleBar
         settingsOpen={view === 'settings'}
         onToggleSettings={() => setView((v) => (v === 'settings' ? 'router' : 'settings'))}
@@ -210,16 +224,14 @@ export default function App() {
             transition={FADE}
             className="flex min-h-0 flex-1"
           >
-            <aside className="w-[264px] flex-none border-r border-line">
-              <ProcessList />
+            <aside className="w-[236px] flex-none border-r border-line">
+              <ProgramRail />
             </aside>
 
             {/* The work area: one tab row, then whatever that tab shows. The
-                plane is the raised one and the sidebar is the sunken one, the
-                way an editor puts its file list behind the file. The route
-                question floats over it, so it is anchored here rather than in
-                the layout — nothing is displaced while it is up. */}
-            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
+                route question floats over the stage, so it is anchored here
+                rather than in the layout — nothing is displaced while it is up. */}
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <UnderlineTabs
                 ariaLabel={t('tabs.label')}
                 layoutId="work-tab-rule"
@@ -232,8 +244,8 @@ export default function App() {
               />
               {tab === 'router' ? (
                 <>
-                  <RouteCanvas />
-                  <RouteConfirmCapsule />
+                  <ConcentricStage />
+                  <ActionDock />
                 </>
               ) : (
                 <LogPanel />

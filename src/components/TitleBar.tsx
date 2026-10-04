@@ -118,13 +118,14 @@ export function TitleBar({
       // labelled region. `data-tauri-drag-region` makes the empty space a drag
       // handle — interactive children must not carry it or they stop clicking.
       //
-      // Flat by design: a caption bar is chrome, and chrome that blurs what is
-      // behind it competes with the content it frames.
+      // Flat and transparent: the caption is chrome, and the window behind it is
+      // one continuous pane — the aurora and the stage run under it, which is
+      // what makes the frame and the content read as one piece of glass.
       role="toolbar"
       aria-label={t('productName')}
       data-tauri-drag-region
       style={{ height: BAR_HEIGHT }}
-      className="relative z-20 flex flex-none select-none items-stretch justify-between border-b border-line bg-surface-sunken"
+      className="relative z-20 flex flex-none select-none items-stretch justify-between border-b border-line"
     >
       {/* Brand. `pointer-events-none` keeps the whole area draggable instead of
           swallowing the press on the text. */}
