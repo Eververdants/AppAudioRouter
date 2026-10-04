@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { AudioSession } from '@/lib/types';
@@ -44,11 +44,27 @@ export function ProgramRail() {
   const routedCount = Object.keys(routedPids).length;
   const [query, setQuery] = useState('');
 
+  /**
+   * What the list is filtered by, one beat behind what was typed.
+   *
+   * A keystroke has to appear in the field on the keystroke; the list behind
+   * it does not. Every character re-filters and re-sorts every session and
+   * re-renders a row per one, and each of those rows measures its own box
+   * because rows travel to their new places — so typing used to race the list
+   * inside a single commit, and the character arrived with the work.
+   *
+   * Deferring the value lets the keystroke paint on its own and fits the list
+   * in around it. The list and the words under it both read the deferred
+   * value, so the two never disagree about what is on screen for a beat.
+   */
+  const filter = useDeferredValue(query);
+  const searching = filter.trim() !== '';
+
   /** The rows on screen: filtered by what was typed, routed programmes first.
    *  A stable sort keeps the enumeration order within each group, so rows do
    *  not reshuffle among themselves while audio comes and goes. */
   const visibleSessions = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = filter.trim().toLowerCase();
     const matches = (s: AudioSession) =>
       s.exe_name.toLowerCase().includes(q) ||
       (s.display_name ?? '').toLowerCase().includes(q);
@@ -56,7 +72,7 @@ export function ProgramRail() {
     return [...filtered].sort(
       (a, b) => (routedPids[b.pid]?.length ?? 0) - (routedPids[a.pid]?.length ?? 0),
     );
-  }, [sessions, query, routedPids]);
+  }, [sessions, filter, routedPids]);
 
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -176,7 +192,7 @@ export function ProgramRail() {
         <AnimatePresence initial={false}>
         {visibleSessions.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-            {query.trim() === '' && (
+            {!searching && (
               <svg
                 width="22"
                 height="22"
@@ -192,8 +208,8 @@ export function ProgramRail() {
               </svg>
             )}
             <p className="text-[11px] leading-relaxed text-text-muted">
-              {query.trim() === '' ? t('rail.empty') : t('rail.noMatch')}
-              {query.trim() === '' && (
+              {searching ? t('rail.noMatch') : t('rail.empty')}
+              {!searching && (
                 <>
                   <br />
                   <span>{t('rail.emptyHint')}</span>
