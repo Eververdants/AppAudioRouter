@@ -467,7 +467,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const devices = await api.listDevices();
       const liveIds = new Set(devices.map((d) => d.id));
       const unchanged = deviceSignature(devices) === deviceSignature(get().devices);
-      set({ devices });
+      // One commit, not two: the new list and what it implies for the routes
+      // arrive together. Published apart, there is a render in which the
+      // devices are the new ones while a route still names one that is gone —
+      // an unroutable badge, drawn for no longer than it takes to notice.
+      //
       // A physically-routed device may have been unplugged. Drop it from the
       // selection and from any route that referenced it; a route left pointing
       // at a gone device is silently unroutable and confuses the badges.
@@ -481,7 +485,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           if (remaining.length > 0) routedPids[numericPid] = remaining;
           else delete engineGenerations[numericPid];
         }
-        return { selectedDeviceIds, routedPids, engineGenerations };
+        return { devices, selectedDeviceIds, routedPids, engineGenerations };
       });
       // The device list is one of the three inputs a restore needs, and at boot
       // it is just as likely to be the last of them to arrive.
