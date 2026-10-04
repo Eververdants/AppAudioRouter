@@ -572,9 +572,10 @@ AppAudioRouter/
   环是**顺时针组装出来的**，不是整圈同时闪现。只有首次挂载播放：设备热插拔时只有新盘子动。
 - **辐条是长出来的**：`motion.line` 动画 `x2/y2` 从中心轮缘长到圆盘轮缘，撤下时缩回去——"接上了 / 断开了"是看得见的动作。
   `AnimatePresence initial={false}`：页面刚打开时辐条静态就位，只有之后新出现的才有入场戏。
-- **词与数字都是"替换"不是"改写"**：角色词、hub 里的程序名与 exe 图标都用 `AnimatePresence mode="wait"` 换场（FADE + 4–5px 位移）；
-  图标按 `exeName` 键——换程序才换图标，窗口改标题只换名字。
-  副本的延迟/音量数值用 `mode="popLayout"` 纵向滚动。句子被原地改写没人会重读。
+- **词是替换，图标是铸造**：角色词与 hub 里的程序名用 `AnimatePresence mode="wait"` 换场（FADE + 4–5px 位移）；
+  hub 的 exe 图标走同一条 `mode="wait"`，但动作是它自己的——旧的缩回上方那枚 Ring 里、新的从 Ring 里落座
+  （`HUB_ICON_MINT_Y`，飞行中 `-z-10` 藏在环后），曲线仍是共享的 `SPRING_TAP`；键同样是 `exeName`：
+  换程序才动，窗口改标题只换名字。副本的延迟/音量数值用 `mode="popLayout"` 纵向滚动。句子被原地改写没人会重读。
 - **hub 外圈虚线环**（`HUB_HALO_R`）：空闲时 hairline，有计划时换 accent 色——两层圆交叉淡入而不是动画颜色（颜色插值会脱离主题令牌）。
 - **空闲圆盘退后**：`animate` 的 opacity 目标是 `lit ? 1 : 0.72`，悬停任何圆盘都补足到 1 并放大 1.05；悬停还有一圈 `border-accent/45` 的外环以 opacity 淡入（不动阴影）。
 - **左栏选中是一块会滑的玻璃**：`layoutId="rail-selection"` 挂在 subject 行的高亮上，换选时整块玻璃滑过去；加入批量的行用静态 `bg-accent/[0.07]`。
