@@ -117,9 +117,25 @@ pub async fn set_route(
         .await
         .map_err(|e| e.to_string())?;
     // Same bookkeeping as `apply_route`: the assignment outlives this app.
-    let exe_name = audio::sessions::get_process_exe_name(pid).unwrap_or_default();
-    pins.mark(pid, &exe_name, &device_id);
+    pins.mark(pid, &exe_name_of(pid), &device_id);
     Ok(())
+}
+
+/// The executable name of `pid`, or an empty string when it cannot be read.
+///
+/// The name is bookkeeping for the assignments the audio service persists per
+/// executable, so failing to read it must not fail the route. It must not pass
+/// unnoticed either: a blank name is what later leaves a sweep unable to say
+/// which program an assignment belongs to, and looks like the assignment
+/// belongs to no program at all.
+fn exe_name_of(pid: u32) -> String {
+    match audio::sessions::get_process_exe_name(pid) {
+        Some(name) => name,
+        None => {
+            warn!("PID {pid} has no readable executable name; its assignment is recorded unnamed");
+            String::new()
+        }
+    }
 }
 
 /// Set the system-wide default render device.
@@ -288,7 +304,7 @@ pub async fn stop_route(
 async fn pin_to_default(pid: u32, device_id: &str, pins: &PinnedRoutes) -> StopOutcome {
     match audio::routing::set_process_default_device(device_id, pid, audio::Role::All).await {
         Ok(()) => {
-            let exe_name = audio::sessions::get_process_exe_name(pid).unwrap_or_default();
+            let exe_name = exe_name_of(pid);
             // Recorded as handed back, not as a route: nothing is routing this
             // program, and the reset in the settings page has to be able to
             // clear the assignment Windows would not release here.
