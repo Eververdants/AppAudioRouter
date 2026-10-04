@@ -318,6 +318,43 @@ function Ripple({ x, y, onDone }: { x: number; y: number; onDone: () => void }) 
   );
 }
 
+/** Left-to-right delay between two characters of the name swap, and the step
+    count past which the rest of the wave arrives together — a long name must
+    not spend a second trickling in. */
+const NAME_STAGGER = 0.024;
+const NAME_STAGGER_MAX_STEPS = 12;
+
+/**
+ * The programme's name, replaced one character at a time.
+ *
+ * Every character is keyed by its position and its letter, so a character the
+ * swap keeps re-uses its element and stands still; only the positions that
+ * actually changed remount, each coming into focus from a blur, left to
+ * right. Blur rather than slide: the name is being re-read in place, not
+ * moved. The flat string is carried by the hub button's accessible name —
+ * these spans are what the eye gets, not the screen reader.
+ */
+function CharSwapText({ text, className }: { text: string; className?: string }) {
+  return (
+    <span className={className}>
+      {Array.from(text).map((char, index) => (
+        <motion.span
+          key={`${index}:${char}`}
+          initial={{ opacity: 0, filter: 'blur(4px)' }}
+          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          transition={{
+            ...FADE,
+            delay: Math.min(index * NAME_STAGGER, NAME_STAGGER_MAX_STEPS * NAME_STAGGER),
+          }}
+          className="whitespace-pre"
+        >
+          {char}
+        </motion.span>
+      ))}
+    </span>
+  );
+}
+
 /** The programme at the centre of the ring — and, when a plan is waiting, the button that lands it. */
 function Hub({
   cx,
@@ -383,34 +420,52 @@ function Hub({
           </motion.span>
         )}
       </AnimatePresence>
-      {/* The name is not overwritten when another programme is picked — or
-          when this one's window retitles itself: it is swapped. Two names
-          cross-fading would read as one programme being renamed, which is not
-          a thing that happens here. */}
+      {/* The name is replaced one character at a time, each replacement
+          coming into focus from a blur — a name being re-read in place, not a
+          block being swapped. Characters keep their element for as long as
+          they survive the swap (keyed by position and letter), so only what
+          actually changed moves. The guide and the playing line bracket it:
+          whole words, swapped on their own keys, since neither is a
+          sequence. */}
       <AnimatePresence mode="wait" initial={false}>
-        <motion.span
-          key={name ?? '__none__'}
-          initial={{ opacity: 0, y: 5 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -5 }}
-          transition={FADE}
-          className="flex max-w-full flex-col items-center gap-1"
-        >
-          {name === undefined ? (
-            <span className="px-1 text-[11px] leading-tight text-text-muted">
-              {t('stage.guide')}
-            </span>
-          ) : (
-            <>
-              <span className="max-w-full truncate text-[12.5px] font-medium leading-tight text-text-primary">
-                {name}
-              </span>
-              <span className="text-[9.5px] leading-none text-text-muted">
+        {name === undefined ? (
+          <motion.span
+            key="guide"
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            transition={FADE}
+            className="px-1 text-[11px] leading-tight text-text-muted"
+          >
+            {t('stage.guide')}
+          </motion.span>
+        ) : (
+          <motion.span
+            key="subject"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={FADE}
+            className="flex max-w-full flex-col items-center gap-1"
+          >
+            <CharSwapText
+              text={name}
+              className="max-w-full truncate text-[12.5px] font-medium leading-tight text-text-primary"
+            />
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={sounding ? 'sounding' : 'quiet'}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={FADE}
+                className="text-[9.5px] leading-none text-text-muted"
+              >
                 {sounding ? t('stage.sounding') : t('stage.quiet')}
-              </span>
-            </>
-          )}
-        </motion.span>
+              </motion.span>
+            </AnimatePresence>
+          </motion.span>
+        )}
       </AnimatePresence>
     </>
   );
@@ -436,7 +491,10 @@ function Hub({
             type="button"
             data-source-node="subject"
             disabled={!canApply}
-            aria-label={canApply ? applyAria : undefined}
+            // The name below is drawn one span per character, so the flat
+            // string rides here: a screen reader reads the name, never spells
+            // it. While the hub is actionable the sentence wins.
+            aria-label={canApply ? applyAria : name}
             onClick={onApply}
             animate={{ scale: hasPlan ? 1.03 : 1 }}
             whileHover={canApply ? { scale: 1.05 } : undefined}
