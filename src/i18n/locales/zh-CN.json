@@ -1,27 +1,23 @@
 {
   "productName": "App Audio Router",
-  "processList": {
+  "rail": {
     "title": "应用程序",
     "refresh": "刷新",
     "search": "搜索程序",
     "noMatch": "没有匹配的程序",
     "empty": "未检测到正在播放音频的程序",
     "emptyHint": "让程序播放声音后刷新",
-    "routedBadge": "正在输出到 {{n}} 台设备",
+    "pid": "PID {{pid}}",
+    "alsoHint": "这个程序也一起改",
     "stopRoute": "停止输出，回到系统默认",
     "stopRouteConfirm": "再点一次确认停止",
     "stopAll": "全部回到系统默认",
-    "stopAllConfirm": "再点一次即全部回到系统默认",
-    "multiSelectHint": "点击选择；Ctrl+点击可多选，一起输出",
-    "associatedDevice": "该程序正播放到：{{device}}"
+    "stopAllConfirm": "再点一次即全部回到系统默认"
   },
   "deviceDelay": {
     "valueLabel": "{{device}} 的延迟补偿（毫秒）",
-    "hint": "左右拖动调节，滚轮/方向键每次 {{step}}（按住 Shift 为十倍）；点击可键入精确值",
     "stepUp": "增加 {{step}}",
-    "stepDown": "减少 {{step}}",
-    "inactive": "当前未生效：延迟补偿只在多设备复制路由中起作用；单设备路由由系统直连播放",
-    "primary": "这台设备由系统直连播放（路由的基准）；这里的数值只影响全组的对齐参考"
+    "stepDown": "减少 {{step}}"
   },
   "sourceLevel": {
     "valueLabel": "本应用给 {{process}} 的声音加的电平（百分比）",
@@ -32,9 +28,27 @@
   },
   "deviceVolume": {
     "valueLabel": "{{device}} 的音量（相对最响的一台，百分比）",
-    "hint": "相对同组里最响的一台衰减。左右拖动调节，滚轮/方向键每次 {{step}}%（按住 Shift 为十倍）；点击可键入精确值",
-    "inactive": "当前未生效：音量平衡只在多设备复制路由中起作用",
-    "primary": "这台设备由系统直连播放，软件无法衰减它；这个数值作为全组响度的基准"
+    "stepUp": "提高 {{step}}",
+    "stepDown": "降低 {{step}}"
+  },
+  "stage": {
+    "guide": "先在左边选一个程序",
+    "sounding": "正在响",
+    "quiet": "没在响",
+    "main": "主输出",
+    "copy": "副本",
+    "defaultLabel": "系统默认"
+  },
+  "dock": {
+    "groupLabel": "当前输出",
+    "preview": "「{{process}}」的声音将从 {{device}} 出来",
+    "previewMany": "{{n}} 个程序的声音将从 {{device}} 出来",
+    "unchanged": "已经从 {{device}} 出来",
+    "revert": "还原",
+    "apply": "应用",
+    "guide": "再点一下让它从哪儿出来",
+    "backToDefault": "回到系统默认",
+    "backToDefaultConfirm": "再点一次确认"
   },
   "settings": {
     "title": "设置",
@@ -49,8 +63,6 @@
     "autoRememberDesc": "记住每个进程的设备路由，下次自动恢复",
     "rememberedRoutes": "已记忆的路由",
     "forgetRoute": "忘记 {{process}} 的记忆路由",
-    "advancedMode": "高级调节",
-    "advancedModeDesc": "在设备表格里显示每台设备的延迟与音量两列",
     "resetEndpoints": "重置每应用音频输出",
     "resetEndpointsDesc": "程序不再跟随系统播放设备时，点此释放；正在路由的程序不受影响",
     "resetEndpointsAction": "重置",
@@ -64,7 +76,7 @@
     "autostart": "开机自动启动",
     "autostartDesc": "登录后静默启动到托盘，记忆路由提前就绪",
     "delays": "延迟补偿",
-    "delayNote": "延迟在设备表格的延迟列里直接拖动或滚轮调节；只在多设备同时输出时生效，单设备路由由系统直连播放。",
+    "delayNote": "每台设备的延迟在这里、在设置的行里、或在舞台上副本下面的 − / + 都能调。它只在同一个程序送到多台设备时生效——只送到一台时由系统直连播放。",
     "calibrationNote": "实测延迟只包含软件侧；蓝牙等链路自身多出的部分无法测得，需要用耳朵对齐。",
     "delayRange": "延迟范围",
     "delayRangeDesc": "每台设备的延迟可在该正负范围内设置",
@@ -74,7 +86,7 @@
     "sourceLevelsAlign": "对齐电平",
     "sourceLevelsAlignDesc": "把正在出声的程序统一拉到最响一台的电平",
     "sourceLevelsAlignAction": "对齐",
-    "sourceLevelsNote": "每个正在复制的程序，它的电平环就画在路由板上的源节点里。电平只作用在本应用复制出去的那份声音上，不改程序自身音量；100 为原样，对镜像设备生效。",
+    "sourceLevelsNote": "正在同时送到多台设备的程序，它的电平就画在舞台中心、它旁边的电平环上。电平只作用在本应用复制出去的那份声音上，程序的自身音量和 Windows 存的东西都不动；100 为原样，只对副本生效。",
     "noDevices": "暂无音频设备",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
@@ -90,7 +102,7 @@
     "resetRemaining": "{{processes}} 还没清掉——让它放一声再试一次。",
     "dismiss": "知道了",
     "firstRunTitle": "欢迎使用 {{product}}",
-    "firstRunBody": "左侧选择程序，点选设备，在下方浮起的确认条上确认后输出；多选设备即同时输出。若某程序无法跟随系统切换播放设备，设置里的「重置每应用音频输出」可解开。",
+    "firstRunBody": "在左边选一个程序，点它要从哪里出声，再点「应用」——不点就不会变。多选一台设备，两边同时响。若某个程序不再跟随你在 Windows 里切换的播放设备，设置里的「重置每应用音频输出」可以解开。",
     "startAction": "开始使用"
   },
   "titleBar": {
@@ -104,23 +116,6 @@
     "show": "显示 / 隐藏 App Audio Router",
     "quit": "退出"
   },
-  "router": {
-    "processCount": "{{n}} 个程序",
-    "defaultDevice": "系统默认播放设备",
-    "defaultLabel": "系统默认",
-    "guide": "选择程序，点选设备，确认输出",
-    "currentRoute": "当前路由",
-    "pending": "待确认",
-    "rolePrimary": "主设备",
-    "roleMirror": "复制",
-    "confirmAction": "确认路由",
-    "cancel": "取消",
-    "cancelHint": "取消（Esc）"
-  },
-  "statusBar": {
-    "backToDefault": "回到系统默认",
-    "backToDefaultConfirm": "再点一次确认"
-  },
   "tabs": {
     "label": "视图",
     "router": "路由",
@@ -128,22 +123,6 @@
   },
   "logPanel": {
     "empty": "还没有活动记录"
-  },
-  "canvas": {
-    "source": "声源",
-    "sourceHint": "这台程序的声音会输出到右侧设备",
-    "sourceSelectHint": "点击选中该程序",
-    "rolePrimaryHint": "系统直接播放这台设备，其余为复制",
-    "roleMirrorHint": "由复制引擎驱动，延迟与音量在这里生效",
-    "roleStagedHint": "已选中，确认后才生效",
-    "roleIdleHint": "未参与任何路由"
-  },
-  "deviceTable": {
-    "device": "设备",
-    "role": "角色",
-    "delay": "延迟",
-    "volume": "音量",
-    "selectedHint": "已选 {{n}} 台"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",

@@ -1,33 +1,23 @@
 {
   "productName": "App Audio Router",
-  "processList": {
+  "rail": {
     "title": "Apps",
     "refresh": "Refresh",
     "search": "Search apps",
     "noMatch": "No app matches the search",
     "empty": "No apps are playing audio",
     "emptyHint": "Play sound in an app, then refresh",
-    "routedBadge": "Playing to {{n}} device(s)",
+    "pid": "PID {{pid}}",
+    "alsoHint": "Change this app too",
     "stopRoute": "Stop output and return to the system default",
     "stopRouteConfirm": "Click again to confirm",
     "stopAll": "All back to system default",
-    "stopAllConfirm": "Click again to return everything to the system default",
-    "multiSelectHint": "Click to select; Ctrl+click to pick several and send them together",
-    "associatedDevice": "Plays through {{device}}"
-  },
-  "deviceVolume": {
-    "valueLabel": "Volume of {{device}}, relative to the loudest device, in percent",
-    "hint": "Attenuates this device relative to the loudest one in its group. Drag sideways, or scroll / press arrows for {{step}}% a time (hold Shift for ten); click to type an exact value",
-    "inactive": "Not applied right now: volume balancing only runs in multi-device duplication routes",
-    "primary": "The system plays this device directly, so software cannot attenuate it; its value anchors the group's loudest level"
+    "stopAllConfirm": "Click again to return everything to the system default"
   },
   "deviceDelay": {
     "valueLabel": "Delay compensation of {{device}} in milliseconds",
-    "hint": "Drag sideways, or scroll / press arrows for {{step}} a time (hold Shift for ten); click to type an exact value",
     "stepUp": "{{step}} later",
-    "stepDown": "{{step}} earlier",
-    "inactive": "Not applied right now: delay compensation only runs in multi-device duplication routes; a single-device route is played by the system directly",
-    "primary": "The system plays this device directly (the route's anchor); its value only shifts the alignment reference of the whole group"
+    "stepDown": "{{step}} earlier"
   },
   "sourceLevel": {
     "valueLabel": "Level this app gives the audio of {{process}}, in percent",
@@ -35,6 +25,30 @@
   },
   "deviceLatency": {
     "reading": "Measured on this device: {{ms}} ms. Software side only — what a codec or a Bluetooth link adds on top is invisible to the app"
+  },
+  "deviceVolume": {
+    "valueLabel": "Volume of {{device}}, relative to the loudest device, in percent",
+    "stepUp": "{{step}} louder",
+    "stepDown": "{{step}} quieter"
+  },
+  "stage": {
+    "guide": "Pick an app on the left",
+    "sounding": "Playing",
+    "quiet": "Silent",
+    "main": "Main",
+    "copy": "Copy",
+    "defaultLabel": "System default"
+  },
+  "dock": {
+    "groupLabel": "Current route",
+    "preview": "The sound of {{process}} will play through {{device}}",
+    "previewMany": "The sound of {{n}} apps will play through {{device}}",
+    "unchanged": "Already playing through {{device}}",
+    "revert": "Revert",
+    "apply": "Apply",
+    "guide": "Pick where this app should play",
+    "backToDefault": "Back to system default",
+    "backToDefaultConfirm": "Click again to confirm"
   },
   "settings": {
     "title": "Settings",
@@ -49,8 +63,6 @@
     "autoRememberDesc": "Remember each process's device routing and restore it automatically",
     "rememberedRoutes": "Remembered",
     "forgetRoute": "Forget the route remembered for {{process}}",
-    "advancedMode": "Advanced controls",
-    "advancedModeDesc": "Show the per-device delay and volume columns in the output table",
     "resetEndpoints": "Reset per-app output",
     "resetEndpointsDesc": "Releases a program that no longer follows the system's playback device; routed programs are left alone",
     "resetEndpointsAction": "Reset",
@@ -64,7 +76,7 @@
     "autostart": "Start with Windows",
     "autostartDesc": "Launches silently into the tray at sign-in; remembered routes are ready before you open anything",
     "delays": "Delay compensation",
-    "delayNote": "Drag or scroll the value in the device table's delay column. Applies in multi-device routes only — a single-device route is played by the system directly.",
+    "delayNote": "Delay is set per device: here, on the settings rows, or with the - / + under a copy on the stage. It applies only when one programme goes to several devices - a single-device route is played by the system directly.",
     "calibrationNote": "The measured latency covers the software side only; what a Bluetooth link itself adds cannot be measured here, so align by ear.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
@@ -74,7 +86,7 @@
     "sourceLevelsAlign": "Align levels",
     "sourceLevelsAlignDesc": "Brings every duplicating program that is playing up to the loudest one's level",
     "sourceLevelsAlignAction": "Align",
-    "sourceLevelsNote": "Every program being duplicated wears its level as a ring on its source node on the routing board. A level is the gain applied to this app's own copy of a program's audio; the program's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the mirrored copies only.",
+    "sourceLevelsNote": "A programme playing through several devices wears its own level as the dial beside it at the centre of the stage. The level is the gain this app applies to its own copy of that sound - the programme's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the copies only.",
     "noDevices": "No audio devices",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."
@@ -90,7 +102,7 @@
     "resetRemaining": "{{processes}} could not be cleared — let it play a sound and try again.",
     "dismiss": "Got it",
     "firstRunTitle": "Welcome to {{product}}",
-    "firstRunBody": "Select an app on the left, pick a device, then confirm in the capsule that floats up — output moves there. Pick several devices to output to all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
+    "firstRunBody": "Pick an app on the left, then pick where it should play and press Apply - nothing moves until you do. Pick a second device and it plays through both at once. If a programme ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
     "startAction": "Start routing"
   },
   "titleBar": {
@@ -104,23 +116,6 @@
     "show": "Show / hide App Audio Router",
     "quit": "Quit"
   },
-  "router": {
-    "processCount": "{{n}} apps",
-    "defaultDevice": "System default playback device",
-    "defaultLabel": "System default",
-    "guide": "Select an app, pick a device, then route it",
-    "currentRoute": "Current route",
-    "pending": "Pending",
-    "rolePrimary": "Primary",
-    "roleMirror": "Mirror",
-    "confirmAction": "Route it",
-    "cancel": "Cancel",
-    "cancelHint": "Cancel (Esc)"
-  },
-  "statusBar": {
-    "backToDefault": "Back to system default",
-    "backToDefaultConfirm": "Click again to confirm"
-  },
   "tabs": {
     "label": "Views",
     "router": "Routing",
@@ -128,22 +123,6 @@
   },
   "logPanel": {
     "empty": "Nothing logged yet"
-  },
-  "canvas": {
-    "source": "Sources",
-    "sourceHint": "Sound from this app is sent to the devices on the right",
-    "sourceSelectHint": "Click to make this the program being routed",
-    "rolePrimaryHint": "Windows plays this device directly; the others are copies",
-    "roleMirrorHint": "Driven by the duplicator, so delay and volume apply here",
-    "roleStagedHint": "Picked — it takes effect once you confirm",
-    "roleIdleHint": "Not part of any route"
-  },
-  "deviceTable": {
-    "device": "Device",
-    "role": "Role",
-    "delay": "Delay",
-    "volume": "Volume",
-    "selectedHint": "{{n}} selected"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",
