@@ -21,6 +21,7 @@ import type {
   SessionActivityEvent,
 } from '@/lib/types';
 import { FADE, SPRING_GLIDE } from '@/lib/motion';
+import { applyGlassLite, readStoredGlassLite, resolveGlassLite } from '@/lib/glassLite';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
 
@@ -62,6 +63,20 @@ export default function App() {
   // The glass catches the pointer: one delegated listener writes the hovered
   // pane's highlight position, so every lens in the window tracks the light.
   useGlassSpecular();
+
+  useEffect(() => {
+    // The boot script in index.html already applied low-spec glass before the
+    // first paint. This keeps following the machine's verdict while the user
+    // has made none of their own — flipping Windows' transparency effects
+    // takes effect without a relaunch. A stored choice always wins, so the
+    // check lives in the handler, not in the effect body.
+    const media = window.matchMedia('(prefers-reduced-transparency: reduce)');
+    const onChange = () => {
+      if (readStoredGlassLite() === null) applyGlassLite(resolveGlassLite());
+    };
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
