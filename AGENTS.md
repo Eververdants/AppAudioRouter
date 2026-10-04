@@ -575,8 +575,8 @@ AppAudioRouter/
 - **词与数字都是"替换"不是"改写"**：角色词用 `AnimatePresence mode="wait"` 换场（FADE + 4–5px 位移）；hub 里的程序名**逐字符替换**
   （`CharSwapText`）——每个字符按「位置+字符」作键，没变的原地不动，变了的逐个从 blur 4px 里聚焦进来（FADE + 按 index 递进的延迟，
   封顶 12 步防长名拖尾）；整句平文本由按钮的 `aria-label` 携带，读屏不逐字。状态行（正在播放/未在播放）按 `sounding` 自己换场，不搭名字的车。
-  hub 的 exe 图标同走 `mode="wait"`，动词是**缩放落座**——旧的略缩淡出、新的弹回原位（`SPRING_TAP`，不位移、不越过环）；
-  键是 `exeName`：换程序才动，窗口改标题只换名字。副本的延迟/音量数值用 `mode="popLayout"` 纵向滚动。句子被原地改写没人会重读。
+  hub 的 exe 图标在固定槽位（`h-6 w-6`）里**并行交叉**——旧的略缩淡出与新的弹入同时进行（`SPRING_TAP`，默认 sync 模式，
+  不写 `mode="wait"` 让进出场互相等）；键是 `exeName`：换程序才动，窗口改标题只换名字。副本的延迟/音量数值用 `mode="popLayout"` 纵向滚动。句子被原地改写没人会重读。
 - **hub 外圈虚线环**（`HUB_HALO_R`）：空闲时 hairline，有计划时换 accent 色——两层圆交叉淡入而不是动画颜色（颜色插值会脱离主题令牌）。
 - **空闲圆盘退后**：`animate` 的 opacity 目标是 `lit ? 1 : 0.72`，悬停任何圆盘都补足到 1 并放大 1.05；悬停还有一圈 `border-accent/45` 的外环以 opacity 淡入（不动阴影）。
 - **左栏选中是一块会滑的玻璃**：`layoutId="rail-selection"` 挂在 subject 行的高亮上，换选时整块玻璃滑过去；加入批量的行用静态 `bg-accent/[0.07]`。

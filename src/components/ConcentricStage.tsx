@@ -401,25 +401,27 @@ function Hub({
       <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
       {/* The icon belongs to the file, so it swaps only when the programme
           changes — a window that retitles itself swaps the name below and
-          leaves the icon standing. The swap is small and stays in the slot:
-          the old icon lets go (fades, shrinking a little), the new one
-          springs into place — a pop, not the name's slide, and no travel
-          across the hub. The wrapper is exactly the icon's slot, so nothing
-          shifts while one identity replaces the other. */}
-      <AnimatePresence mode="wait" initial={false}>
-        {exeName !== undefined && (
-          <motion.span
-            key={exeName}
-            initial={{ opacity: 0, scale: 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.6 }}
-            transition={SPRING_TAP}
-            className="flex flex-none"
-          >
-            <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
-          </motion.span>
-        )}
-      </AnimatePresence>
+          leaves the icon standing. The swap is a cross-dissolve in place:
+          exit and enter run at the same time on the shared spring, because a
+          swap that waits for its own exit spends half a blink showing
+          nothing. Both layers live in one fixed slot (h-6 w-6, absolutely
+          positioned), so the overlap cannot push the column around. */}
+      {exeName !== undefined && (
+        <span className="relative h-6 w-6 flex-none">
+          <AnimatePresence initial={false}>
+            <motion.span
+              key={exeName}
+              initial={{ opacity: 0, scale: 0.7 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.6 }}
+              transition={SPRING_TAP}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
+            </motion.span>
+          </AnimatePresence>
+        </span>
+      )}
       {/* The name is replaced one character at a time, each replacement
           coming into focus from a blur — a name being re-read in place, not a
           block being swapped. Characters keep their element for as long as
