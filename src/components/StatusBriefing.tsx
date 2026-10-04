@@ -23,13 +23,36 @@ function deviceNameOf(deviceId: string | undefined, devices: AudioDevice[]): str
   return devices.find((device) => device.id === deviceId)?.name ?? deviceId;
 }
 
+/**
+ * One list formatter per language, built the first time it is needed.
+ *
+ * `Intl.ListFormat` carries a locale's whole conjunction grammar, and
+ * building one is by far the expensive half of joining three device names.
+ * The briefing recomputes whenever a programme starts or stops making a
+ * sound — which on a live machine is often — and every line of it built
+ * its own, so the same object was being built several times a second.
+ *
+ * A language the runtime cannot build one for is remembered as such, so it
+ * costs one failed construction for the whole run instead of one per line.
+ */
+const listFormatters = new Map<string, Intl.ListFormat | null>();
+
+function listFormatter(language: string): Intl.ListFormat | null {
+  const cached = listFormatters.get(language);
+  if (cached !== undefined) return cached;
+  let built: Intl.ListFormat | null = null;
+  try {
+    built = new Intl.ListFormat(language, { type: 'conjunction' });
+  } catch {
+    built = null;
+  }
+  listFormatters.set(language, built);
+  return built;
+}
+
 /** "A, B and C" in the language the window is speaking. */
 function joinNames(names: string[], language: string): string {
-  try {
-    return new Intl.ListFormat(language, { type: 'conjunction' }).format(names);
-  } catch {
-    return names.join(', ');
-  }
+  return listFormatter(language)?.format(names) ?? names.join(', ');
 }
 
 /**
