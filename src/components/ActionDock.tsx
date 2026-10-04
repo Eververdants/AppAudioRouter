@@ -78,7 +78,10 @@ export function ActionDock() {
         ? t('dock.unchanged', { device: targets })
         : selectedPids.length > 1
           ? t('dock.previewMany', { n: selectedPids.length, device: targets })
-          : t('dock.preview', { process: session?.exe_name ?? '', device: targets });
+          : t('dock.preview', {
+              process: session?.display_name ?? session?.exe_name ?? '',
+              device: targets,
+            });
 
   /**
    * The way back to the system default, at whatever scope the selection implies:

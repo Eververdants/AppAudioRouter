@@ -186,11 +186,16 @@ export function ConcentricStage() {
             </AnimatePresence>
           </svg>
 
-          {/* The programme whose output this is. */}
+          {/* The programme whose output this is. The hub shows the display
+              name (the window's title when the program has one), while the
+              level dial below keeps working on the exe — the name a person
+              reads and the key the storage writes are deliberately different
+              strings. */}
           <Hub
             cx={cx}
             cy={cy}
             exeName={session?.exe_name}
+            name={session?.display_name ?? session?.exe_name}
             sounding={flows}
             hasPlan={hasPlan}
             showLevel={drawn.length > 1}
@@ -272,13 +277,17 @@ function Hub({
   cx,
   cy,
   exeName,
+  name,
   sounding,
   hasPlan,
   showLevel,
 }: {
   cx: number;
   cy: number;
+  /** The executable name, which the level storage is keyed by. */
   exeName: string | undefined;
+  /** What the hub says: the display name when the backend found one. */
+  name: string | undefined;
   sounding: boolean;
   hasPlan: boolean;
   showLevel: boolean;
@@ -286,7 +295,7 @@ function Hub({
   const { t } = useTranslation();
   return (
     <motion.div
-      data-source-node={exeName === undefined ? undefined : 'subject'}
+      data-source-node={name === undefined ? undefined : 'subject'}
       initial={{ scale: 0.88, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={SPRING_ARRIVE}
@@ -310,26 +319,27 @@ function Hub({
         style={{ width: HUB_D, height: HUB_D }}
       >
         <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
-        {/* The name is not overwritten when another programme is picked: it is
-            swapped. Two names cross-fading would read as one programme being
-            renamed, which is not a thing that happens here. */}
+        {/* The name is not overwritten when another programme is picked — or
+            when this one's window retitles itself: it is swapped. Two names
+            cross-fading would read as one programme being renamed, which is not
+            a thing that happens here. */}
         <AnimatePresence mode="wait" initial={false}>
           <motion.span
-            key={exeName ?? '__none__'}
+            key={name ?? '__none__'}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
             transition={FADE}
             className="flex max-w-full flex-col items-center gap-1"
           >
-            {exeName === undefined ? (
+            {name === undefined ? (
               <span className="px-1 text-[11px] leading-tight text-text-muted">
                 {t('stage.guide')}
               </span>
             ) : (
               <>
                 <span className="max-w-full truncate text-[12.5px] font-medium leading-tight text-text-primary">
-                  {exeName}
+                  {name}
                 </span>
                 <span className="text-[9.5px] leading-none text-text-muted">
                   {sounding ? t('stage.sounding') : t('stage.quiet')}
@@ -342,7 +352,9 @@ function Hub({
       {/* A level only has anywhere to act while an engine is carrying this
           programme's audio to more than one device, which is the same gate the
           copies' own sliders live behind. */}
-      {showLevel && exeName !== undefined && <SourceLevelDial exeName={exeName} />}
+      {showLevel && exeName !== undefined && (
+        <SourceLevelDial exeName={exeName} displayName={name} />
+      )}
     </motion.div>
   );
 }

@@ -272,7 +272,9 @@ function deviceSignature(devices: AudioDevice[]): string {
   return devices.map((d) => `${d.id}|${d.name}`).join('\n');
 }
 
-/** Same idea for the process list. */
+/** Same idea for the process list. `display_name` is deliberately left out:
+ *  it belongs to the window, not the list, and a browser switching tabs would
+ *  otherwise log "the process list changed" on every title change. */
 function sessionSignature(sessions: AudioSession[]): string {
   return sessions.map((s) => `${s.pid}|${s.exe_name}`).join('\n');
 }

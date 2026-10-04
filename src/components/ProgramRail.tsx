@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import type { AudioSession } from '@/lib/types';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
@@ -47,7 +48,10 @@ export function ProgramRail() {
    *  not reshuffle among themselves while audio comes and goes. */
   const visibleSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = q ? sessions.filter((s) => s.exe_name.toLowerCase().includes(q)) : sessions;
+    const matches = (s: AudioSession) =>
+      s.exe_name.toLowerCase().includes(q) ||
+      (s.display_name ?? '').toLowerCase().includes(q);
+    const filtered = q ? sessions.filter(matches) : sessions;
     return [...filtered].sort(
       (a, b) => (routedPids[b.pid]?.length ?? 0) - (routedPids[a.pid]?.length ?? 0),
     );
@@ -204,6 +208,14 @@ export function ProgramRail() {
             const joined = isSelected && !isSubject;
             const through = playsThrough(session.pid);
             const sounding = soundingPids[session.pid] === true && targets.length > 0 && liveness;
+            // The window names the program something a person can read; the exe
+            // is the identity this app remembers and routes by, so it stays on
+            // the record line whenever the display name differs from it.
+            const name = session.display_name ?? session.exe_name;
+            const exeDiffers =
+              session.display_name !== undefined &&
+              session.display_name !== null &&
+              session.display_name.toLowerCase() !== session.exe_name.toLowerCase();
 
             return (
               <motion.div
@@ -263,11 +275,20 @@ export function ProgramRail() {
                   className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   <span className="block truncate text-[12.5px] font-medium text-text-primary">
-                    {session.exe_name}
+                    {name}
                   </span>
-                  {/* PID, and — only once something has actually been routed —
-                      where its sound goes. */}
+                  {/* PID, the exe it really is when the window names it
+                      differently, and — only once something has actually been
+                      routed — where its sound goes. */}
                   <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
+                    {exeDiffers && (
+                      <>
+                        {session.exe_name}
+                        <span aria-hidden="true" className="opacity-50">
+                          {' · '}
+                        </span>
+                      </>
+                    )}
                     {t('rail.pid', { pid: session.pid })}
                     {targets.length > 0 && through !== null && (
                       <>

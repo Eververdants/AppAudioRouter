@@ -67,7 +67,15 @@ function levelRing(shown: number): ReactNode {
  * the shared "the number is the control": drag, wheel, arrow keys, or click to
  * type.
  */
-export function SourceLevelDial({ exeName }: { exeName: string }) {
+export function SourceLevelDial({
+  exeName,
+  displayName,
+}: {
+  /** The storage key: the level belongs to the program by executable name. */
+  exeName: string;
+  /** What the label says — the display name, when the backend found one. */
+  displayName?: string;
+}) {
   const { t } = useTranslation();
   const committed = useRouterStore((s) => s.sourceVolumes[exeName] ?? SOURCE_LEVEL_NEUTRAL);
   const setSourceVolume = useRouterStore((s) => s.setSourceVolume);
@@ -81,7 +89,7 @@ export function SourceLevelDial({ exeName }: { exeName: string }) {
       pxPerStep={SOURCE_LEVEL_PX_PER_STEP}
       format={(value) => String(value)}
       unit="%"
-      label={t('sourceLevel.valueLabel', { process: exeName })}
+      label={t('sourceLevel.valueLabel', { process: displayName ?? exeName })}
       hint={t('sourceLevel.hint', { step: SOURCE_LEVEL_STEP })}
       neutral={committed === SOURCE_LEVEL_NEUTRAL}
       lead={levelRing}

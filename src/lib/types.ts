@@ -8,6 +8,15 @@ export interface AudioDevice {
 export interface AudioSession {
   pid: number;
   exe_name: string;
+  /**
+   * How the process names itself to a person: its best window's title, or the
+   * executable's version-resource description when it has no window, or null
+   * when it carries neither (the UI then shows `exe_name` as it always has).
+   * Display only — routing, the memory and the levels stay keyed by
+   * `exe_name`, and the name follows the window rather than freezing at first
+   * sight, so a browser switching tabs renames itself here.
+   */
+  display_name?: string | null;
   /** Whether the process was rendering audio when it was enumerated. Absent on
    *  backends that do not report it (the e2e fake), which reads as "not
    *  sounding". Kept current by `session-activity` events afterwards. */
