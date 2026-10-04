@@ -26,7 +26,7 @@
 
 App Audio Router (**AAR**) is a per-application audio router for Windows. Windows itself only lets an application play to one output at a time; App Audio Router lifts that restriction. Pick a program, pick one or more playback devices, and the program's audio goes to all of them at once — live, without restarting the program.
 
-It is aimed at ordinary users rather than audio engineers. There is no mixer graph, no virtual cable and no driver installation: the whole app is one window — the programmes making sound in a sidebar on the left, and beside it a ring with the programme you picked at its centre and every playback device as a disc around it. A spoke from the centre to a lit disc *is* that part of the route, so "where is this sound going?" is answered by which discs are lit. One sentence at the bottom says what **Apply** will do before you press it, and the activity log sits one tab away.
+It is aimed at ordinary users rather than audio engineers. There is no mixer graph, no virtual cable and no driver installation: the whole app is one window — the programmes making sound in a sidebar on the left, and beside it a ring with the programme you picked at its centre and every playback device as a disc around it. A spoke from the centre to a lit disc *is* that part of the route, so "where is this sound going?" is answered by which discs are lit. A change becomes real only when you click the circle in the middle, and a small "Straight talk" pill in the corner will tell you where things stand in plain words. The activity log sits one tab away.
 
 | | |
 |---|---|
@@ -42,7 +42,7 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 
 ## Screenshots
 
-The same stage in both themes: `chrome.exe` is the programme being looked at, so it sits at the centre and its route — the digital output — is the one lit disc, joined by a spoke and labelled *Main*. `Music.exe` plays to three devices at once (a Bluetooth headset, USB headphones and an HDMI output); picking it redraws the ring around its own route. The sidebar lists the programmes making sound, with each routed one marked by its ring, and the bar at the bottom says exactly what **Apply** would do. The title bar keeps the count: two routed, two playing.
+The same stage in both themes: `chrome.exe` is the programme being looked at, so it sits at the centre and its route — the digital output — is the one lit disc, joined by a spoke and labelled *Main*. `Music.exe` plays to three devices at once (a Bluetooth headset, USB headphones and an HDMI output); picking it redraws the ring around its own route. The sidebar lists the programmes making sound, with each routed one marked by its ring, and the hub at the centre is the button that applies the plan — while a change is waiting, a badge on it says so. The title bar keeps the count: two routed, two playing.
 
 ![App Audio Router with chrome.exe at the centre of the ring playing through the digital output, Music.exe routed to three devices listed in the sidebar, and every playback device as a disc around the centre](docs/images/app-audio-router-light.png)
 
@@ -78,7 +78,7 @@ The same stage in both themes: `chrome.exe` is the programme being looked at, so
 
 ### Interface and overhead
 
-- **A stage, not a form** — the process list is a sidebar, and the routing screen is a ring: the programme you picked sits at the centre with its name inside, every playback device is a glass disc around it, and a spoke from the centre to a lit disc *is* that part of the route. The first device of a route is the one Windows plays itself (accent); the devices after it are copies (teal), and a copy is the only place delay and level exist, because it is the only place there is a stream of ours to hold back or attenuate. Nothing takes effect until you press **Apply**, and nothing can leave a programme with nowhere to play — a ring always keeps at least one device lit. Devices no route touches get no spoke and no colour, which is most devices most of the time. A programme playing to several devices carries its own level as a ring under the hub, and the title bar keeps a quiet count — *2 routed · 2 playing*. Glass instead of cards, sentences instead of pills, monospaced figures for every value.
+- **A stage, not a form** — the process list is a sidebar, and the routing screen is a ring: the programme you picked sits at the centre with its name inside, every playback device is a glass disc around it, and a spoke from the centre to a lit disc *is* that part of the route. The first device of a route is the one Windows plays itself (accent); the devices after it are copies (teal), and a copy is the only place delay and level exist, because it is the only place there is a stream of ours to hold back or attenuate. Nothing takes effect until you click the circle in the middle, and nothing can leave a programme with nowhere to play — a ring always keeps at least one device lit. Devices no route touches get no spoke and no colour, which is most devices most of the time. A programme playing to several devices carries its own level as a ring under the hub, and the title bar keeps a quiet count — *2 routed · 2 playing*. Glass instead of cards, sentences instead of pills, monospaced figures for every value.
 - **Process list search** — filter the list by name as you type, with the programs that are currently routed kept at the top so the one you are working with does not move under the cursor. `Escape` clears the search.
 - **Light and dark themes**, English and Simplified Chinese, both switchable from the title bar; the preferred theme and language are applied before the first frame paints, so there is no flash on startup.
 - **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. The interface has exactly two things that move on their own: the dash running along the spokes of a programme that is sounding, and the pulse on the ring beside a programme that is — only while the window is visible, focused and free of the system's reduced-motion request; hidden, unfocused or silent, everything stands still and nothing repaints. An active route is idle when its program is, too: a routed program that has produced no sound for a second and a half stops being fed to its mirrored devices, rather than having silence written at them a hundred times a second apiece.
@@ -121,7 +121,7 @@ Prefer building it yourself? See [Build from source](#build-from-source).
 1. **Play some sound in the app you want to route.** A program only appears in the process list while it has an active audio session — audio routing is per session, not per shortcut.
 2. **Pick it in the sidebar.** One programme at a time is what the ring shows; the circular button at the end of another row adds that programme to the same change.
 3. **Click the discs it should play through.** The first one is the device Windows itself drives, and every disc after it receives a copy carrying its own delay and level. One always stays lit: a programme with nowhere to play is not a state this app offers.
-4. **Press Apply** in the bar at the bottom, which says exactly what it is about to do. Once the route is live, the spokes to those discs stay on the stage, and they flow while the programme is sounding.
+4. **Click the circle in the middle of the stage.** While a change is waiting, the hub wears a "click to apply" badge, and its accessible name says exactly what the click will do. Once the route is live, the spokes to those discs stay on the stage, and they flow while the programme is sounding.
 5. **Tune a copy if you need to** — its delay and level sit under its own disc.
 6. **Turn on Auto-remember** in the settings so the route is restored the next time that program plays.
 
@@ -198,14 +198,14 @@ Routing rules are keyed by **executable name**, not by PID, so a remembered rout
 AppAudioRouter/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── ConcentricStage.tsx   # the ring: the picked programme at the centre, one glass disc per device, one spoke per lit disc
+│   │   ├── ConcentricStage.tsx   # the ring: the picked programme at the centre, one glass disc per device, one spoke per lit disc; the hub applies the plan
 │   │   ├── ProgramRail.tsx       # programmes with an audio session, and whether each one joins the change
-│   │   ├── ActionDock.tsx        # the floating bar: one sentence and Apply
+│   │   ├── StatusBriefing.tsx    # the "straight talk" pill: where sound is going, in plain words, on demand
 │   │   ├── SourceLevelDial.tsx   # a programme's own level, as a ring under the hub
 │   │   ├── SettingsPage.tsx      # theme, language, routing, background, delays, about
 │   │   ├── LogPanel.tsx          # activity log (the second tab)
 │   │   ├── TitleBar.tsx          # custom frameless title bar, with the routed/playing count
-│   │   └── ui/                   # Ring, Switch, UnderlineTabs, SegmentedControl, ConfirmButton, …
+│   │   └── ui/                   # Ring, Switch, UnderlineTabs, SegmentedControl, Tooltip, ConfirmButton, …
 │   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useLiveness
 │   ├── stores/routerStore.ts     # Zustand store
 │   ├── i18n/locales/             # en.json, zh-CN.json
