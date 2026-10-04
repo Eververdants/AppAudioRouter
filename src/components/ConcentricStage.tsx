@@ -688,7 +688,11 @@ function Satellite({
                 transition={FADE}
               >
                 {role === 'primary' ? (
-                  t('stage.main')
+                  // The word explains itself: the one role whose tuners are
+                  // missing *on purpose* — Windows plays this device and no
+                  // byte of it passes through this app — says so where the
+                  // tuners would have been, the same way a blocked copy does.
+                  <span title={t('stage.primaryTitle')}>{t('stage.main')}</span>
                 ) : canPromote ? (
                   <button
                     type="button"

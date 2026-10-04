@@ -36,6 +36,7 @@
     "sounding": "Playing",
     "quiet": "Silent",
     "main": "Main",
+    "primaryTitle": "The main device is played by Windows itself, and none of this app's audio passes through it — software volume and delay act on the copies only, so there is nothing here to adjust. To balance loudness, bring the other devices down towards it; to make this one adjustable too, make another device the main output and this becomes an adjustable copy",
     "copy": "Copy",
     "promote": "Make primary",
     "promoteTitle": "Make this the device the system plays directly; the others become copies of it",
