@@ -63,10 +63,10 @@ The same stage in both themes: `chrome.exe` is the programme being looked at, so
 ### Per-device fine-tuning
 
 - **Delay compensation** — a signed millisecond value per device to align a fast device with a slow one, for example wired speakers against a Bluetooth headset whose codec adds inherent latency. Range and step are configurable (±1/2/5/10 s; 1/10/50/100/1000 ms, 10 ms by default).
-- **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest one in the route, so a quiet headset and a loud speaker rig can be brought in line.
+- **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest copy in the route, so a quiet headset and a loud speaker rig can be brought in line. The device Windows plays directly gets a volume of its own: it moves the program's session volume, and the copies are compensated for it automatically, so it changes the main path alone.
 - **Reported latency** — the software-side latency each device is actually playing at, measured from the running stream. It is a reading and not a setting, so it lives in the tooltip of the delay value rather than beside it: the cell holds the value you asked for, and the tooltip holds what you got.
 - **Stepped, not scraped** — each value moves with the `−` and `+` beside it: delay by the configured step, level by 5 %, both stopped at the ends of their range. They are buttons rather than drag surfaces because these two change what you are hearing, and resting a finger on a scroll wheel should not be able to move them.
-- **Only where they can act** — both values belong to a copy, and appear only under the disc of one. A single-device route has no copy: Windows drives that device itself, so there is nothing of ours to hold back or attenuate, and the control is simply not drawn — a greyed-out control that could never work would promise otherwise.
+- **Only where they can act** — a copy carries a delay and a volume share under its disc; the main device carries a volume of its own (the program's session volume, compensated so the copies stay put) but no delay, because nothing of this app's sits on its path to hold back. A single-device route starts no engine, so no control is drawn there at all — a greyed-out control that could never work would promise otherwise.
 
 ### Stays out of the way
 
@@ -142,7 +142,7 @@ Delay fixes *when* the audio arrives; the volume value fixes *how loud* each dev
 
 - **Each device holds a 0–100 % value.** 100 % leaves the device exactly at the level the application produced; lower values attenuate it. 0 % is silence.
 - **The value is relative to the loudest device in the route.** The engine scales each mirrored copy by `own / max`, so software gain only ever attenuates and the loudest device is the reference the others are brought down towards.
-- **The primary device's value is not applied to it** — Windows renders that device natively — but it still counts towards the group's reference level, so it determines how much the other devices are attenuated.
+- **The primary device gets a volume of its own**, and it works through the program's session volume — the slider the Windows volume mixer shows for that program, which is the one lever that reaches the device Windows plays itself. The copies are compensated for it automatically, so it changes the main path alone. Stopping the route hands the program's previous loudness back, and so does quitting the app. It stops at 5 %: at 0 the audio this app captures would be true silence, and no gain could give the copies their loudness back.
 - **Like delay, it needs a mirrored copy to act on.** In a single-device route there is no copy and nothing is attenuated; the readout is dimmed and says as much, so a value that does nothing is never displayed as though it were doing something.
 - Volumes are stored per device and pushed to any route that is already running, so a change is audible immediately.
 
@@ -174,7 +174,7 @@ Delay fixes *when* the audio arrives and the device volume fixes *how loud each 
 | 3 | `IPolicyConfig` points the selected process's session (for all roles) at the chosen endpoint — the same mechanism Windows' own per-app output setting uses. |
 | 4 | For each further device, a **WASAPI process-loopback** capture client for that PID feeds an `IAudioClient` render client on the target device. Delay is implemented as ring-buffer backlog (silence is prepended, never appended, so raising a delay never lets a burst of audio through first); volume is a per-sample gain applied before the samples are written. |
 | 5 | Sample formats are parsed from the endpoint's `WAVEFORMATEX` — float32, float64 and PCM 16/24/32 are scaled; anything unrecognised is passed through untouched rather than mangled. A gain of exactly 1.0 short-circuits, so at 100 % the path costs nothing. |
-| 6 | Routing rules, delays and levels are persisted as JSON in the application data directory (`route-memory.json`, `device-delays.json`, `device-volumes.json`, `source-volumes.json`). |
+| 6 | Routing rules, delays and levels are persisted as JSON in the application data directory (`route-memory.json`, `device-delays.json`, `device-volumes.json`, `primary-volumes.json`, `source-volumes.json`). |
 | 7 | Each duplication engine reports its end (stopped by the user, the process exited, or an error) through a `duplication-stopped` event, and routes that outlived an app restart are reconciled on boot so the badges match reality. A single device that cannot be opened is reported on its own channel instead (`duplication-mirror-failed`), because the engine carries on for the rest of the route and the UI has to say which device went quiet. |
 
 Routing rules are keyed by **executable name**, not by PID, so a remembered route survives restarts.
@@ -288,7 +288,7 @@ A program only shows up while it holds an active audio session, so start playbac
 
 ### Where are the settings stored?
 
-In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent), `source-volumes.json` (executable → level percent, which may be above 100), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
+In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent), `primary-volumes.json` (executable → the program's primary volume, in percent), `source-volumes.json` (executable → level percent, which may be above 100), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
 
 ### Can the delay calibrate itself automatically?
 
