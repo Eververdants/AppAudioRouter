@@ -5,6 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use log::warn;
 use serde::{Deserialize, Deserializer, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -37,6 +38,31 @@ where
     })
 }
 
+/// Parse the contents of one config file, falling back to the default when they
+/// are not this schema's JSON.
+///
+/// The fallback is deliberate: a config that cannot be read must not keep the
+/// app from starting. What it must not be is *silent* — discarding every
+/// remembered route or delay without a line anywhere is indistinguishable from
+/// the feature being broken, and the difference matters because the file is
+/// still on disk for the user to look at. A rename, a truncation or a hand
+/// edit are all recoverable once someone knows which file to open.
+fn parse_or_default<T>(path: &std::path::Path, content: &str) -> T
+where
+    T: Default + for<'de> Deserialize<'de>,
+{
+    match serde_json::from_str::<T>(content) {
+        Ok(map) => map,
+        Err(e) => {
+            warn!(
+                "config {} does not parse ({e}); falling back to defaults and leaving the file as it is",
+                path.display()
+            );
+            T::default()
+        }
+    }
+}
+
 /// Persistent route memory: exe_name -> ordered target device ids.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RouteMap {
@@ -66,7 +92,7 @@ impl RouteConfig {
         let map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            serde_json::from_str(&content).unwrap_or_default()
+            parse_or_default(&path, &content)
         } else {
             RouteMap::default()
         };
@@ -194,7 +220,7 @@ impl DelayConfig {
         let map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            serde_json::from_str(&content).unwrap_or_default()
+            parse_or_default(&path, &content)
         } else {
             DelayMap::default()
         };
@@ -309,7 +335,7 @@ impl VolumeConfig {
         let map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            serde_json::from_str(&content).unwrap_or_default()
+            parse_or_default(&path, &content)
         } else {
             VolumeMap::default()
         };
@@ -443,7 +469,7 @@ impl SourceVolumeConfig {
         let map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            serde_json::from_str(&content).unwrap_or_default()
+            parse_or_default(&path, &content)
         } else {
             SourceVolumeMap::default()
         };
@@ -562,7 +588,7 @@ impl PrimaryVolumeConfig {
         let map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            serde_json::from_str(&content).unwrap_or_default()
+            parse_or_default(&path, &content)
         } else {
             PrimaryVolumeMap::default()
         };
@@ -646,7 +672,7 @@ impl AppSettings {
         let map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            serde_json::from_str(&content).unwrap_or_default()
+            parse_or_default(&path, &content)
         } else {
             SettingsMap::default()
         };
@@ -706,6 +732,27 @@ fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unparsable_config_falls_back_to_the_default() {
+        // The half that can be asserted here is the fallback: a truncated or
+        // hand-edited file must not stop the app from starting. The other half
+        // — that it says so — is the warning `parse_or_default` logs.
+        let path = std::path::Path::new("route-memory.json");
+        let map: RouteMap = parse_or_default(path, "{\"routes\": ");
+        assert!(map.routes.is_empty());
+    }
+
+    #[test]
+    fn a_schema_mismatch_falls_back_rather_than_partially_loading() {
+        // A file of the right shape but the wrong types is the likeliest real
+        // case: a delay written as a string, a volume as a float. Half of it
+        // loading would leave the app running on numbers nobody chose.
+        let path = std::path::Path::new("device-delays.json");
+        let map: DelayMap = parse_or_default(path, r#"{"delays": {"dev": "soon"}}"#);
+        assert!(map.delays.is_empty());
+        assert_eq!(map.delay_range_ms, DELAY_RANGE_DEFAULT_MS);
+    }
 
     #[test]
     fn loads_v2_single_device_string_format() {
