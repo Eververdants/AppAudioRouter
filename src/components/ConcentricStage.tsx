@@ -41,8 +41,9 @@ import { useRouterStore } from '@/stores/routerStore';
  * What is drawn is the *pending selection*, which the store prefills from the
  * programme's live route (or from the system default it plays through), so what
  * appears when you select a programme is reality, and what appears after a pick
- * is the plan. The dock below the stage is the half that says which of the two
- * you are looking at; the stage itself never claims a plan is a fact.
+ * is the plan. The hub is the press that lands the plan; while the drawn plan is
+ * already what is playing, the hub goes back to being a label, because a stage
+ * never asks anyone to confirm what they can hear.
  *
  * The sizes, the angles and therefore the spokes are all arithmetic
  * (`lib/stage.ts`), which is why nothing here measures anything: a disc and the

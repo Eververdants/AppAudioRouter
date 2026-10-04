@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { appRow, emit, hub, openApp, routeQuestion, setSessions } from './fixtures';
+import { appRow, emit, hub, openApp, setSessions } from './fixtures';
 
 /**
  * The display layer a person reads: the window's name leads, the executable
@@ -7,7 +7,7 @@ import { appRow, emit, hub, openApp, routeQuestion, setSessions } from './fixtur
  * without pretending the process list changed.
  */
 test.describe('display names', () => {
-  test('the rail, the hub and the dock lead with the window name', async ({ page }) => {
+  test('the rail and the hub lead with the window name', async ({ page }) => {
     await openApp(page, {
       sessions: [
         { pid: 1001, exe_name: 'music.exe', display_name: 'Music Player', playing: true },
@@ -24,7 +24,6 @@ test.describe('display names', () => {
 
     await appRow(page, 'music.exe').click();
     await expect(hub(page)).toContainText('Music Player');
-    await expect(routeQuestion(page)).toContainText('Music Player');
   });
 
   test('a program without a display name reads as it always has', async ({ page }) => {

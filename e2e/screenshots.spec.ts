@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { appRow, deviceRow, routeConfirmButton } from './fixtures';
+import { appRow, deviceRow, hub } from './fixtures';
 import { installBridge } from './tauri/bridge';
 
 /**
@@ -87,13 +87,13 @@ for (const theme of ['light', 'dark'] as const) {
     await deviceRow(page, 'HDMI output').click();
     await deviceRow(page, 'WH-1000XM5').click();
     await deviceRow(page, 'USB headphones').click();
-    await routeConfirmButton(page).click();
+    await hub(page).click();
 
     // A second programme to a second output, so the rail shows two of them with
     // somewhere to be rather than one.
     await appRow(page, 'chrome.exe').click();
     await deviceRow(page, 'Digital Audio (S/PDIF)').click();
-    await routeConfirmButton(page).click();
+    await hub(page).click();
 
     // Let the undo offer expire: the shot is of the resting state, not of the
     // moment after the click.

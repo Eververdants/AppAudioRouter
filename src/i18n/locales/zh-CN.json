@@ -45,17 +45,6 @@
     "applyAriaOne": "将「{{process}}」的声音改为通过 {{device}} 播放",
     "applyAriaMany": "将 {{n}} 个程序的声音改为通过 {{device}} 播放"
   },
-  "dock": {
-    "groupLabel": "当前输出",
-    "preview": "「{{process}}」的声音将通过 {{device}} 播放",
-    "previewMany": "{{n}} 个程序的声音将通过 {{device}} 播放",
-    "unchanged": "当前正通过 {{device}} 播放",
-    "revert": "还原",
-    "apply": "应用",
-    "guide": "为程序选择播放设备",
-    "backToDefault": "回到系统默认",
-    "backToDefaultConfirm": "再点一次确认"
-  },
   "settings": {
     "title": "设置",
     "back": "返回",
@@ -110,7 +99,7 @@
     "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。",
     "dismiss": "知道了",
     "firstRunTitle": "欢迎使用 {{product}}",
-    "firstRunBody": "在左侧选择一个程序，点选输出设备后按「应用」——未应用前不会有任何更改。可多选设备，声音将同时从各台设备播放。若某个程序不再跟随你在 Windows 中切换的播放设备，可使用设置中的「重置每应用音频输出」解除。",
+    "firstRunBody": "在左侧选择一个程序，点选输出设备，再点中间的圆——点它之前不会有任何更改。可多选设备，声音将同时从各台设备播放。若某个程序不再跟随你在 Windows 中切换的播放设备，可使用设置中的「重置每应用音频输出」解除。",
     "startAction": "开始使用"
   },
   "titleBar": {

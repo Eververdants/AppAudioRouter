@@ -45,17 +45,6 @@
     "applyAriaOne": "Play {{process}} through {{device}} instead",
     "applyAriaMany": "Play {{n}} apps through {{device}} instead"
   },
-  "dock": {
-    "groupLabel": "Current route",
-    "preview": "The sound of {{process}} will play through {{device}}",
-    "previewMany": "The sound of {{n}} apps will play through {{device}}",
-    "unchanged": "Already playing through {{device}}",
-    "revert": "Revert",
-    "apply": "Apply",
-    "guide": "Pick where this app should play",
-    "backToDefault": "Back to system default",
-    "backToDefaultConfirm": "Click again to confirm"
-  },
   "settings": {
     "title": "Settings",
     "back": "Back",
@@ -110,7 +99,7 @@
     "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again.",
     "dismiss": "Got it",
     "firstRunTitle": "Welcome to {{product}}",
-    "firstRunBody": "Select an app on the left, choose an output device, then press Apply — nothing changes until you do. Select further devices to play through all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
+    "firstRunBody": "Select an app on the left, choose an output device, then click the circle in the middle — nothing changes until you do. Select further devices to play through all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
     "startAction": "Start routing"
   },
   "titleBar": {

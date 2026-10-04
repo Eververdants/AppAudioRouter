@@ -73,7 +73,8 @@ export function appRow(page: Page, exeName: string) {
 }
 
 /**
- * The hub at the centre of the stage: the programme being routed.
+ * The hub at the centre of the stage: the programme being routed, and the
+ * button that lands the drawn plan.
  *
  * One of them, not one per routed programme — the rail is where every
  * programme's destination is read at once, and the stage is where the one you
@@ -84,31 +85,13 @@ export function hub(page: Page) {
 }
 
 /**
- * The bar along the bottom that says what will happen and applies it.
- *
- * Matched by role and accessible name rather than by its text: the app list and
- * the bar name the same programme and device, so a text match would be both.
- */
-export function routeQuestion(page: Page) {
-  return page.getByRole('group', { name: 'Current route' });
-}
-
-/** The bar's Apply. */
-export function routeConfirmButton(page: Page) {
-  return page.getByRole('button', { name: 'Apply' });
-}
-
-/** The bar's way of throwing a pick away without applying it. */
-export function routeCancelButton(page: Page) {
-  return page.getByRole('button', { name: 'Revert' });
-}
-
-/**
- * The table header's way back to the system default.
+ * The app list header's way back to the system default.
  *
  * A confirm-once button: the first press arms it and changes its accessible
  * name, so the same locator has to match both states.
  */
-export function backToDefault(page: Page) {
-  return page.getByRole('button', { name: /^Back to system default$|^Click again to confirm$/ });
+export function stopAllRail(page: Page) {
+  return page.getByRole('button', {
+    name: /^All back to system default$|^Click again to return everything to the system default$/,
+  });
 }

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { ActionDock } from '@/components/ActionDock';
 import { ConcentricStage } from '@/components/ConcentricStage';
 import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
@@ -243,9 +242,7 @@ export default function App() {
               <ProgramRail />
             </aside>
 
-            {/* The work area: one tab row, then whatever that tab shows. The
-                route question floats over the stage, so it is anchored here
-                rather than in the layout — nothing is displaced while it is up. */}
+            {/* The work area: one tab row, then whatever that tab shows. */}
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <UnderlineTabs
                 ariaLabel={t('tabs.label')}
@@ -257,14 +254,7 @@ export default function App() {
                   { id: 'activity', label: t('tabs.activity') },
                 ]}
               />
-              {tab === 'router' ? (
-                <>
-                  <ConcentricStage />
-                  <ActionDock />
-                </>
-              ) : (
-                <LogPanel />
-              )}
+              {tab === 'router' ? <ConcentricStage /> : <LogPanel />}
             </main>
           </motion.div>
         ) : (
