@@ -16,6 +16,7 @@ import {
   STAGE_H,
   STAGE_W,
   TONE,
+  alreadyApplied,
   approach,
   bloom,
   roleOf,
@@ -66,6 +67,8 @@ export function ConcentricStage() {
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const promoteDevice = useRouterStore((s) => s.promoteDevice);
+  const applying = useRouterStore((s) => s.applying);
+  const applyRoute = useRouterStore((s) => s.applyRoute);
 
   const liveness = useLiveness();
 
@@ -100,6 +103,20 @@ export function ConcentricStage() {
   // and software delay cannot pull a later device earlier.
   const [primaryId] = drawn;
   const primaryDelayMs = primaryId === undefined ? 0 : (deviceDelays[primaryId] ?? 0);
+
+  // The hub is the apply button: pressing it lands the plan that is drawn. When
+  // every selected programme already plays exactly that plan there is nothing
+  // to press — the hub goes back to being a label (see `alreadyApplied`).
+  const answered = alreadyApplied(drawn, selectedPids, routedPids);
+  const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
+  const targets = drawn.map((id) => devices.find((d) => d.id === id)?.name ?? id).join(' + ');
+  const applyAria =
+    selectedPids.length > 1
+      ? t('stage.applyAriaMany', { n: selectedPids.length, device: targets })
+      : t('stage.applyAriaOne', {
+          process: session?.display_name ?? session?.exe_name ?? '',
+          device: targets,
+        });
 
   const sounding = pid !== undefined && soundingPids[pid] === true && liveness;
   /**
@@ -215,6 +232,9 @@ export function ConcentricStage() {
             sounding={flows}
             hasPlan={hasPlan}
             showLevel={drawn.length > 1}
+            canApply={canApply}
+            applyAria={applyAria}
+            onApply={() => void applyRoute()}
           />
 
           {devices.length === 0 && (
@@ -290,7 +310,7 @@ function Ripple({ x, y, onDone }: { x: number; y: number; onDone: () => void }) 
   );
 }
 
-/** The programme at the centre of the ring. */
+/** The programme at the centre of the ring — and, when a plan is waiting, the button that lands it. */
 function Hub({
   cx,
   cy,
@@ -299,6 +319,9 @@ function Hub({
   sounding,
   hasPlan,
   showLevel,
+  canApply,
+  applyAria,
+  onApply,
 }: {
   cx: number;
   cy: number;
@@ -309,70 +332,135 @@ function Hub({
   sounding: boolean;
   hasPlan: boolean;
   showLevel: boolean;
+  /** Whether pressing the hub right now would change anything. */
+  canApply: boolean;
+  /** What the press would do, as a sentence for screen readers. */
+  applyAria: string;
+  onApply: () => void;
 }) {
   const { t } = useTranslation();
+
+  // The hub leans in by a hair once there is a plan: it is the thing the
+  // spokes come from, and a centre that acknowledges that reads as the
+  // cause of the ring rather than as a label floating in it. With nothing
+  // attached it is a thinner, clearer piece of the same glass; the thick
+  // glossy lens is reserved for a centre that is actually wired.
+  // A true circle, not a squircle: the hub is the innermost member of a
+  // concentric family (halo, orbit, discs, rings), and a superellipse here
+  // would make the whole ring read as squares standing on a circle.
+  const discClass = `group/hub relative flex flex-col items-center justify-center gap-1 rounded-full px-2 outline-none ${
+    hasPlan ? 'glass-strong' : 'glass-thin'
+  }`;
+  const content = (
+    <>
+      <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
+      {/* The executable's identity next to its name, in the same fixed slot
+          discipline the rail's rows use — the tile never resizes when the
+          pixels land. */}
+      {exeName !== undefined && (
+        <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
+      )}
+      {/* The name is not overwritten when another programme is picked — or
+          when this one's window retitles itself: it is swapped. Two names
+          cross-fading would read as one programme being renamed, which is not
+          a thing that happens here. */}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={name ?? '__none__'}
+          initial={{ opacity: 0, y: 5 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -5 }}
+          transition={FADE}
+          className="flex max-w-full flex-col items-center gap-1"
+        >
+          {name === undefined ? (
+            <span className="px-1 text-[11px] leading-tight text-text-muted">
+              {t('stage.guide')}
+            </span>
+          ) : (
+            <>
+              <span className="max-w-full truncate text-[12.5px] font-medium leading-tight text-text-primary">
+                {name}
+              </span>
+              <span className="text-[9.5px] leading-none text-text-muted">
+                {sounding ? t('stage.sounding') : t('stage.quiet')}
+              </span>
+            </>
+          )}
+        </motion.span>
+      </AnimatePresence>
+    </>
+  );
+
   return (
     <motion.div
-      data-source-node={name === undefined ? undefined : 'subject'}
       initial={{ scale: 0.88, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={SPRING_ARRIVE}
       className="absolute flex flex-col items-center justify-center gap-1 text-center"
       style={{ left: cx - HUB_D / 2, top: cy - HUB_D / 2, width: HUB_D, height: HUB_D }}
     >
-      <motion.div
-        // The hub leans in by a hair once there is a plan: it is the thing the
-        // spokes come from, and a centre that acknowledges that reads as the
-        // cause of the ring rather than as a label floating in it. With nothing
-        // attached it is a thinner, clearer piece of the same glass; the thick
-        // glossy lens is reserved for a centre that is actually wired.
-        // A true circle, not a squircle: the hub is the innermost member of a
-        // concentric family (halo, orbit, discs, rings), and a superellipse here
-        // would make the whole ring read as squares standing on a circle.
-        animate={{ scale: hasPlan ? 1.03 : 1 }}
-        transition={SPRING_TAP}
-        className={`flex flex-col items-center justify-center gap-1 rounded-full px-2 ${
-          hasPlan ? 'glass-strong' : 'glass-thin'
-        }`}
-        style={{ width: HUB_D, height: HUB_D }}
-      >
-        <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
-        {/* The executable's identity next to its name, in the same fixed slot
-            discipline the rail's rows use — the tile never resizes when the
-            pixels land. */}
-        {exeName !== undefined && (
-          <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
-        )}
-        {/* The name is not overwritten when another programme is picked — or
-            when this one's window retitles itself: it is swapped. Two names
-            cross-fading would read as one programme being renamed, which is not
-            a thing that happens here. */}
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span
-            key={name ?? '__none__'}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -5 }}
-            transition={FADE}
-            className="flex max-w-full flex-col items-center gap-1"
+      {/* The disc and its badge share one wrapper so the badge tracks the rim
+          even when the level dial below pulls the flex column taller than the
+          hub box itself. */}
+      <div className="relative flex-none">
+        {name === undefined ? (
+          <motion.div className={discClass} style={{ width: HUB_D, height: HUB_D }}>
+            {content}
+          </motion.div>
+        ) : (
+          <motion.button
+            type="button"
+            data-source-node="subject"
+            disabled={!canApply}
+            aria-label={canApply ? applyAria : undefined}
+            onClick={onApply}
+            animate={{ scale: hasPlan ? 1.03 : 1 }}
+            whileHover={canApply ? { scale: 1.05 } : undefined}
+            // The press is the confirmation now: this button changes what
+            // everybody hears, so it squashes rather than shrinking, the way a
+            // soft body deforms under a finger.
+            whileTap={canApply ? { scaleX: 1.06, scaleY: 0.9 } : undefined}
+            transition={SPRING_TAP}
+            className={`${discClass} ${canApply ? 'cursor-pointer' : 'cursor-default'} focus-visible:ring-2 focus-visible:ring-accent/60`}
+            style={{ width: HUB_D, height: HUB_D }}
           >
-            {name === undefined ? (
-              <span className="px-1 text-[11px] leading-tight text-text-muted">
-                {t('stage.guide')}
-              </span>
-            ) : (
-              <>
-                <span className="max-w-full truncate text-[12.5px] font-medium leading-tight text-text-primary">
-                  {name}
-                </span>
-                <span className="text-[9.5px] leading-none text-text-muted">
-                  {sounding ? t('stage.sounding') : t('stage.quiet')}
-                </span>
-              </>
+            {content}
+            {/* Approaching an actionable hub draws a second circle around it —
+                the same cue the discs use, so the pressable thing on this stage
+                all speak one language. */}
+            {canApply && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-2 rounded-full border border-accent/45 opacity-0 transition-opacity duration-200 group-hover/hub:opacity-100"
+              />
             )}
-          </motion.span>
+          </motion.button>
+        )}
+        {/* The press-me badge: when what is drawn is not what is playing, the
+            hub is the button that makes them the same. It straddles the rim so
+            it reads as attached to the disc rather than as a sixth satellite,
+            and it is gone the moment the answer is on screen. A press that
+            would change nothing leaves no badge and no cursor. */}
+        <AnimatePresence>
+          {canApply && (
+            <motion.span
+              key="hub-apply"
+              aria-hidden="true"
+              initial={{ opacity: 0, x: '-50%', y: 6, scale: 0.8 }}
+              animate={{ opacity: 1, x: '-50%', y: 0, scale: 1 }}
+              exit={{ opacity: 0, x: '-50%', y: 6, scale: 0.8 }}
+              transition={SPRING_TAP}
+              className="pointer-events-none absolute left-1/2 z-10"
+              style={{ top: HUB_D - 9 }}
+            >
+              <span className="squircle block rounded-full bg-accent px-2 py-[3px] text-[10px] font-medium leading-none text-accent-ink shadow-md shadow-accent/25">
+                {t('stage.applyHint')}
+              </span>
+            </motion.span>
+          )}
         </AnimatePresence>
-      </motion.div>
+      </div>
       {/* A level only has anywhere to act while an engine is carrying this
           programme's audio to more than one device, which is the same gate the
           copies' own sliders live behind. */}

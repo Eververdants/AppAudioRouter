@@ -5,32 +5,8 @@ import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { Ring } from '@/components/ui/Ring';
 import { orderByDelay } from '@/lib/delay';
 import { FADE, SPRING_ARRIVE, SPRING_TAP } from '@/lib/motion';
+import { alreadyApplied } from '@/lib/stage';
 import { useRouterStore } from '@/stores/routerStore';
-
-/**
- * Whether every selected programme is already playing through exactly what is
- * staged.
- *
- * Nothing here is a question when the answer is already on screen: this is the
- * state the store lands in right after a route, and the state a programme with a
- * remembered route starts in. Asking there would be asking someone to confirm
- * what they can hear.
- */
-function alreadyApplied(
-  staged: string[],
-  pids: number[],
-  routedPids: Record<number, string[] | undefined>,
-): boolean {
-  if (staged.length === 0 || pids.length === 0) return false;
-  return pids.every((pid) => {
-    const ids = routedPids[pid];
-    return (
-      ids !== undefined &&
-      ids.length === staged.length &&
-      ids.every((id, index) => id === staged[index])
-    );
-  });
-}
 
 /**
  * The bar along the bottom of the work area: one sentence and one button.

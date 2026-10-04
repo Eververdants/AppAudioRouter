@@ -40,7 +40,10 @@
     "promote": "Make primary",
     "promoteTitle": "Make this the device the system plays directly; the others become copies of it",
     "promoteBlockedTitle": "Its delay compensation is larger than the Main device's, and the system plays that one directly — software delay can only hold sound back, so this device can only align as a copy",
-    "defaultLabel": "System default"
+    "defaultLabel": "System default",
+    "applyHint": "Click to apply",
+    "applyAriaOne": "Play {{process}} through {{device}} instead",
+    "applyAriaMany": "Play {{n}} apps through {{device}} instead"
   },
   "dock": {
     "groupLabel": "Current route",

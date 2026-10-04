@@ -40,7 +40,10 @@
     "promote": "设为主输出",
     "promoteTitle": "让这台设备成为主输出：由系统直接播放，其余设备成为它的副本",
     "promoteBlockedTitle": "它的延迟补偿大于主输出，而主输出由系统直接播放、软件延迟只能向后追加——它只能作为副本参与对齐",
-    "defaultLabel": "系统默认"
+    "defaultLabel": "系统默认",
+    "applyHint": "点按生效",
+    "applyAriaOne": "将「{{process}}」的声音改为通过 {{device}} 播放",
+    "applyAriaMany": "将 {{n}} 个程序的声音改为通过 {{device}} 播放"
   },
   "dock": {
     "groupLabel": "当前输出",
