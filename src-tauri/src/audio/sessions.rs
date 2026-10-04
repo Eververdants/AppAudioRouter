@@ -13,6 +13,7 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
+use crate::audio::process_meta;
 use crate::audio::AudioError;
 use crate::audio::AudioSession;
 
@@ -61,6 +62,8 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
                 warn!("skipping the sessions of device {d}: {e}");
             }
         }
+
+        fill_display_names(&mut sessions);
 
         Ok(sessions)
     })();
@@ -152,7 +155,13 @@ fn read_session(session_enum: &IAudioSessionEnumerator, index: i32) -> Option<Au
             return None;
         }
     };
-    let exe_name = get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}"));
+    let (exe_name, exe_path) = match process_meta::process_image(pid) {
+        Some((path, name)) => (name, Some(path)),
+        None => (
+            get_process_exe_name(pid).unwrap_or_else(|| format!("PID {pid}")),
+            None,
+        ),
+    };
     // "Has a session" and "is sounding" are different facts: a paused player
     // keeps its session. The state is also the seed the notification thread's
     // transitions hang off, so a program that was already playing at launch is
@@ -168,8 +177,40 @@ fn read_session(session_enum: &IAudioSessionEnumerator, index: i32) -> Option<Au
     Some(AudioSession {
         pid,
         exe_name,
+        display_name: None,
+        exe_path,
         playing,
     })
+}
+
+/// Fill in the display names of a collected session list.
+///
+/// Window titles first — one `EnumWindows` pass for the whole list, not one
+/// per session — then the executable's version-resource description when the
+/// process has no titled window. The description is read once per image path:
+/// a browser's dozen processes share one file, and one version-resource read
+/// per session per refresh would be a dozen. A process that carries neither
+/// keeps `None`, and the frontend shows `exe_name` as it always has.
+///
+/// This runs per refresh and the refresh is event-driven, never a poll — the
+/// read of the title is what makes the display *follow* the window rather
+/// than freeze at first sight, which is the point of the field.
+fn fill_display_names(sessions: &mut [AudioSession]) {
+    let pids: Vec<u32> = sessions.iter().map(|session| session.pid).collect();
+    let titles = process_meta::window_titles(&pids);
+    let mut descriptions: std::collections::HashMap<String, Option<String>> =
+        std::collections::HashMap::new();
+    for session in sessions {
+        session.display_name = match titles.get(&session.pid) {
+            Some(title) => Some(title.clone()),
+            None => session.exe_path.as_deref().and_then(|path| {
+                descriptions
+                    .entry(path.to_ascii_lowercase())
+                    .or_insert_with(|| process_meta::file_description(path))
+                    .clone()
+            }),
+        };
+    }
 }
 
 /// Get the executable name for a PID.

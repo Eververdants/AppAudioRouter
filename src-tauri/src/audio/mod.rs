@@ -9,6 +9,7 @@ pub mod devices;
 pub mod duplication;
 pub mod levels;
 pub mod notifications;
+pub mod process_meta;
 pub mod routing;
 pub mod sessions;
 
@@ -97,6 +98,16 @@ pub struct AudioSession {
     pub pid: u32,
     /// Executable name (e.g. `chrome.exe`).
     pub exe_name: String,
+    /// How the process names itself to a person: its best window's title, or
+    /// the executable's version-resource description when it has no window.
+    /// Pure display — routing, the memory and the levels stay keyed by
+    /// `exe_name`, which is what the audio service stores assignments under.
+    pub display_name: Option<String>,
+    /// Full image path of the executable, when the process could be opened.
+    /// Internal plumbing: the description lookup reads it during enumeration,
+    /// and the frontend identifies processes by PID and never needs the path.
+    #[serde(skip_serializing)]
+    pub exe_path: Option<String>,
     /// Whether the process was actually rendering audio when it was
     /// enumerated. `Inactive` sessions survive a pause, so "has a session" and
     /// "is sounding" are different facts; this is the second one, and the seed
