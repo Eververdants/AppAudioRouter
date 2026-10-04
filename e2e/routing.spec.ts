@@ -6,21 +6,20 @@ import {
   deviceRow,
   deviceRowShell,
   emit,
+  hub,
   openApp,
   routeCancelButton,
   routeConfirmButton,
   routeQuestion,
   setFailing,
   setSessions,
-  sourceNode,
 } from './fixtures';
 
 /**
- * The flows a user actually performs, end to end: pick an app, pick a device,
- * confirm at the floating capsule, undo it, search, and let a Core Audio
- * notification change the list. The audio backend behind them is the fake
- * runtime in `e2e/tauri/bridge.ts`, so these run the same on any machine —
- * including CI.
+ * The flows a user actually performs, end to end: pick an app, pick where it
+ * should play, apply, undo it, search, and let a Core Audio notification change
+ * the list. The audio backend behind them is the fake runtime in
+ * `e2e/tauri/bridge.ts`, so these run the same on any machine — including CI.
  */
 
 test('shows the apps and the devices the backend reports', async ({ page }) => {
@@ -30,15 +29,9 @@ test('shows the apps and the devices the backend reports', async ({ page }) => {
   await expect(appRow(page, 'game.exe')).toBeVisible();
   await expect(deviceRow(page, 'Speakers')).toBeVisible();
   await expect(deviceRow(page, 'TV')).toBeVisible();
-  // The device table names its columns; with the expert columns switched off
-  // (the default) there are two of them, and the delay and volume headings are
-  // simply not there.
-  await expect(page.locator('main').getByText('Role', { exact: true })).toBeVisible();
-  await expect(page.locator('main').getByText('Delay', { exact: true })).toBeHidden();
-  // Nothing is selected, so there is nothing to confirm and no question is
-  // being asked.
-  await expect(routeQuestion(page)).toBeHidden();
-  await expect(page.getByText('Select an app, pick a device, then route it')).toBeVisible();
+  // Nothing is picked, so the bar has nothing to propose and nothing to do.
+  await expect(routeQuestion(page)).toContainText('Pick where this app should play');
+  await expect(routeConfirmButton(page)).toBeDisabled();
 });
 
 test('selecting an app stages the device it plays through, without routing it', async ({ page }) => {
@@ -47,24 +40,24 @@ test('selecting an app stages the device it plays through, without routing it', 
   await appRow(page, 'music.exe').click();
 
   // The system default is what an unrouted app plays through, and it is what
-  // the capsule offers to change.
+  // the bar offers to change.
   await expect(routeQuestion(page)).toContainText('music.exe');
   await expect(routeQuestion(page)).toContainText('Speakers');
-  // The app list stays quiet about it: every unrouted program plays through the
-  // same system default, so replaying that down the list would be a column of
-  // identical text. Where a program is going is the table's business — until a
-  // route actually exists, and then the row says so (see the confirm test).
+  await expect(hub(page)).toContainText('music.exe');
+  // The app list stays quiet about it: every unrouted programme plays through
+  // the same system default, so replaying that down the list would be a column
+  // of identical text. Where a programme is going is that row's business —
+  // until a route actually exists, and then the row says so.
   await expect(appRow(page, 'music.exe')).not.toContainText('Speakers');
-  // The table shows the staged target as staged, not as a fact.
-  await expect(page.locator('main').getByText('Pending', { exact: true })).toHaveCount(1);
+  // The disc it will play through is lit, and only one of them is — the ring
+  // names the first device "Main" and every device after it "Copy".
+  await expect(page.locator('main').getByText('Main', { exact: true })).toHaveCount(1);
 
   // Staging is a question, not an action.
   expect(await callsFor(page, 'apply_route')).toHaveLength(0);
 });
 
-test('confirming the capsule routes it, and a re-selected app is not asked again', async ({
-  page,
-}) => {
+test('applying routes it, and a re-selected app is not asked again', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
@@ -73,11 +66,15 @@ test('confirming the capsule routes it, and a re-selected app is not asked again
 
   const applied = await callsFor(page, 'apply_route');
   expect(applied).toHaveLength(1);
-  expect(applied[0]?.args).toMatchObject({ pid: 1001, exeName: 'music.exe', deviceIds: ['speakers'] });
+  expect(applied[0]?.args).toMatchObject({
+    pid: 1001,
+    exeName: 'music.exe',
+    deviceIds: ['speakers'],
+  });
 
-  // What was staged is now playing, so the question is answered and the
-  // capsule takes itself away.
-  await expect(routeQuestion(page)).toBeHidden();
+  // What was staged is now playing, so the bar says so instead of proposing it
+  // again — asking would be asking the user to confirm what they can hear.
+  await expect(routeQuestion(page)).toContainText('Already playing through Speakers');
 
   // Another app stages its own target...
   await appRow(page, 'game.exe').click();
@@ -85,48 +82,35 @@ test('confirming the capsule routes it, and a re-selected app is not asked again
   // ...and coming back to the routed one does not ask to confirm what the user
   // is already looking at.
   await appRow(page, 'music.exe').click();
-  await expect(routeQuestion(page)).toBeHidden();
-  // The table names the system default as the primary: the system plays this
-  // one directly, and its readout agrees about that. The app list now says
-  // where the program is going, because now there is somewhere to name.
-  await expect(page.locator('main').getByText('Primary', { exact: true })).toHaveCount(1);
+  await expect(routeQuestion(page)).toContainText('Already playing through Speakers');
+  // The rail now says where the programme is going, because now there is
+  // somewhere to name.
   await expect(appRow(page, 'music.exe')).toContainText('Speakers');
 });
 
-test('the routed devices sort to the top of the table', async ({ page }) => {
+test('the disc that carries the route is the one that lights up', async ({ page }) => {
   await openApp(page);
 
-  const yOf = async (name: string) => {
-    const box = await deviceRow(page, name).boundingBox();
-    return box?.y ?? Number.NaN;
-  };
-
-  // Nothing is routed, so the table is in the order the backend reported.
-  expect(await yOf('Speakers')).toBeLessThan(await yOf('TV'));
-
-  // Routing to the TV lifts it above the device the route does not use: the
-  // leading rows of the table are the route, and the device it replaced is
-  // hardware nothing is using. That is what the diagram above the table used to
-  // say, drawn a second time and in an order of its own.
   await appRow(page, 'music.exe').click();
   await deviceRow(page, 'TV').click();
   await routeConfirmButton(page).click();
 
-  // The role the route gave it is written beside the device name, a sibling of
-  // the name button rather than inside it, so the assertion reads the row.
-  await expect(deviceRowShell(page, 'TV')).toContainText('Primary');
-  // The rows move on a spring, so this is polled rather than read once.
-  await expect(async () => {
-    expect(await yOf('TV')).toBeLessThan(await yOf('Speakers'));
-  }).toPass();
+  // The route's first device is the one Windows plays itself, and the ring
+  // names it. The device the route does not use is not a copy of anything.
+  await expect(deviceRowShell(page, 'TV')).toContainText('Main');
+  await expect(deviceRow(page, 'TV')).toHaveAttribute('aria-pressed', 'true');
+  await expect(deviceRow(page, 'Speakers')).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('the first click on another device replaces the staged guess', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The capsule staged "Speakers" on its own. Choosing the TV must mean "play
-  // through the TV instead" — never "play through both".
+  // The bar staged "Speakers" on its own — that is the app's guess about where
+  // the programme plays, not something the user asked for. Choosing the TV must
+  // mean "play through the TV instead", never "play through both": a second
+  // copy of the audio appearing on a device nobody picked is the one mistake
+  // this screen exists to prevent.
   await deviceRow(page, 'TV').click();
   await expect(routeQuestion(page)).toContainText('TV');
   await expect(routeQuestion(page)).not.toContainText('Speakers');
@@ -137,23 +121,56 @@ test('the first click on another device replaces the staged guess', async ({ pag
   expect(applied[0]?.args.deviceIds).toEqual(['tv']);
 });
 
-test('cancelling the capsule drops the staged route and sends nothing', async ({ page }) => {
+test('a second device makes a copy, and the copy carries its own delay and level', async ({
+  page,
+}) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
-  await expect(routeQuestion(page)).toBeVisible();
 
-  await routeCancelButton(page).click();
-  await expect(routeQuestion(page)).toBeHidden();
-  await expect(page.locator('main').getByText('Pending', { exact: true })).toBeHidden();
+  // The first click replaced the guess; from here on a click adds. Two devices
+  // means one of them is a copy this app duplicates to — and a copy is the only
+  // thing here a delay can hold back or a gain can attenuate, which is why the
+  // controls appear with it and nowhere else.
+  await deviceRow(page, 'TV').click();
+  await deviceRow(page, 'Speakers').click();
 
-  // Escape is the same answer as the button. Selecting the app again stages the
-  // same guess, so the question comes back before it is dismissed.
+  await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
+  await expect(deviceRowShell(page, 'TV')).toContainText('Main');
+
+  await routeConfirmButton(page).click();
+  expect((await callsFor(page, 'apply_route'))[0]?.args.deviceIds).toEqual(['tv', 'speakers']);
+
+  // Stepping the copy's delay talks to the backend for that device alone.
+  await page.locator('main').getByRole('button', { name: /later/ }).first().click();
+  const delayed = await callsFor(page, 'set_device_delay');
+  expect(delayed).toHaveLength(1);
+  expect(delayed[0]?.args.deviceId).toBe('speakers');
+});
+
+test('revert throws the picks away and sends nothing', async ({ page }) => {
+  await openApp(page);
   await appRow(page, 'music.exe').click();
-  await expect(routeQuestion(page)).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(routeQuestion(page)).toBeHidden();
+
+  await deviceRow(page, 'TV').click();
+  await expect(routeQuestion(page)).toContainText('TV');
+
+  // Re-reading the programme's own route back into the stage is the whole of
+  // "undo my picks": nothing has been applied, so there is nothing to reverse.
+  await routeCancelButton(page).click();
+  await expect(routeQuestion(page)).toContainText('Speakers');
 
   expect(await callsFor(page, 'apply_route')).toHaveLength(0);
+});
+
+test('a route may never be left with nowhere to play', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+
+  // The only device in the plan cannot be switched off: a programme whose sound
+  // goes nowhere is not a state this app offers, and there is no way back from
+  // it that does not involve the system default anyway.
+  await deviceRow(page, 'Speakers').click();
+  await expect(deviceRow(page, 'Speakers')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('a routed app can be sent back to the system default from the toast', async ({ page }) => {
@@ -176,15 +193,15 @@ test('a route the backend rejects leaves the app where it was', async ({ page })
   await routeConfirmButton(page).click();
 
   // The attempt was made, nothing was routed, and no undo is offered for a
-  // route that never happened. The question stays up, because it is still
+  // route that never happened. The proposal stands, because it is still
   // unanswered.
   expect(await callsFor(page, 'apply_route')).toHaveLength(1);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeHidden();
-  await expect(routeQuestion(page)).toBeVisible();
+  await expect(routeConfirmButton(page)).toBeEnabled();
   await expect(appRow(page, 'music.exe')).toBeVisible();
 });
 
-test('the table offers a way back, and asks once before taking it', async ({ page }) => {
+test('the bar offers a way back, and asks once before taking it', async ({ page }) => {
   await openApp(page);
 
   // Nothing is routed, so there is nothing to take back.
@@ -193,7 +210,7 @@ test('the table offers a way back, and asks once before taking it', async ({ pag
   await appRow(page, 'music.exe').click();
   await routeConfirmButton(page).click();
 
-  // A routed selection puts the way out next to the table it concerns.
+  // A routed selection puts the way out next to the ring it concerns.
   await expect(backToDefault(page)).toBeVisible();
   await backToDefault(page).click();
   // First press only asks.
@@ -215,24 +232,6 @@ test('the activity tab shows what the app did, behind an underlined rule', async
 
   await page.getByRole('tab', { name: 'Routing' }).click();
   await expect(deviceRow(page, 'Speakers')).toBeVisible();
-});
-
-test('the advanced switch adds the delay and volume columns', async ({ page }) => {
-  await openApp(page);
-  const columns = page.locator('main');
-  await expect(columns.getByText('Volume', { exact: true })).toBeHidden();
-
-  await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
-  await page.getByRole('switch', { name: 'Advanced controls' }).click();
-
-  // Escape leaves the page the way the back button does.
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
-
-  await expect(columns.getByText('Delay', { exact: true })).toBeVisible();
-  await expect(columns.getByText('Volume', { exact: true })).toBeVisible();
 });
 
 test('search narrows the app list', async ({ page }) => {
@@ -262,12 +261,12 @@ test('a backend notification brings a newly playing app onto the list', async ({
   await expect(appRow(page, 'browser.exe')).toBeVisible();
 });
 
-test('a wire flows only while its program is sounding', async ({ page }) => {
+test('a spoke flows only while its programme is sounding', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
   await routeConfirmButton(page).click();
 
-  // Nothing said music.exe was rendering audio, so its wire is a steady line.
+  // Nothing said music.exe was rendering audio, so its spoke is a steady line.
   const wire = page.locator('main [data-wire="1001:speakers"]');
   await expect(wire).toHaveCount(1);
   await expect(wire).not.toHaveAttribute('data-live');
@@ -282,11 +281,11 @@ test('a wire flows only while its program is sounding', async ({ page }) => {
   await expect(wire).not.toHaveAttribute('data-live');
 });
 
-test('a staged question has nothing flowing through it', async ({ page }) => {
+test('a plan that is not the route has nothing flowing through it', async ({ page }) => {
   await openApp(page);
 
-  // A route already on the board is playing; the staged choice that would
-  // replace it is not, so its wire stays steady even while the program sounds.
+  // A route already on the stage is playing; the plan that would replace it is
+  // not, so its spoke stays steady even while the programme sounds.
   await appRow(page, 'music.exe').click();
   await routeConfirmButton(page).click();
   await emit(page, 'session-activity', { pid: 1001, active: true });
@@ -297,11 +296,16 @@ test('a staged question has nothing flowing through it', async ({ page }) => {
 
   await emit(page, 'session-activity', { pid: 1001, active: false });
   await deviceRow(page, 'TV').click();
-  await expect(page.locator('main [data-wire="1001:tv"]')).toBeVisible();
+  // Counted rather than checked for visibility: with two devices the spoke to
+  // the lower one is exactly vertical, and a vertical line has no width to be
+  // seen by.
+  await expect(page.locator('main [data-wire="1001:tv"]')).toHaveCount(1);
   await expect(page.locator('main [data-wire="1001:tv"]')).not.toHaveAttribute('data-live');
 });
 
-test('every routed program is on the board with a wire of its own', async ({ page }) => {
+test('the rail says where every routed programme plays; the stage draws the one being changed', async ({
+  page,
+}) => {
   await openApp(page);
 
   await appRow(page, 'music.exe').click();
@@ -310,33 +314,25 @@ test('every routed program is on the board with a wire of its own', async ({ pag
   await deviceRow(page, 'TV').click();
   await routeConfirmButton(page).click();
 
-  // Both programs are drawn as sources, each with the wire its own route is —
-  // the board is where every sound's destination is read at once, not just the
-  // newest route's. The keys name the pair a wire joins.
-  await expect(sourceNode(page, 'music.exe')).toBeVisible();
-  await expect(sourceNode(page, 'game.exe')).toBeVisible();
-  await expect(page.locator('main [data-wire="1001:speakers"]')).toHaveCount(1);
+  // Both programmes are named where they play in the list — that is the answer
+  // to "where is sound going" for everything at once — while the ring is the
+  // one being worked on, so it draws a single fan.
+  await expect(appRow(page, 'music.exe')).toContainText('Speakers');
+  await expect(appRow(page, 'game.exe')).toContainText('TV');
+  await expect(page.locator('main [data-wire]')).toHaveCount(1);
   await expect(page.locator('main [data-wire="1002:tv"]')).toHaveCount(1);
-  await expect(page.locator('main [data-wire]')).toHaveCount(2);
 });
 
-test('clicking a source node makes that program the subject', async ({ page }) => {
+test('the hub follows the programme the rail picks', async ({ page }) => {
   await openApp(page);
 
   await appRow(page, 'music.exe').click();
   await routeConfirmButton(page).click();
   await appRow(page, 'game.exe').click();
-  await deviceRow(page, 'TV').click();
-  await routeConfirmButton(page).click();
 
-  // The game was routed last, so it is the subject; the music node is not.
-  await expect(sourceNode(page, 'music.exe')).toHaveAttribute('aria-pressed', 'false');
+  // The game was routed last, so it is the one at the centre.
+  await expect(hub(page)).toContainText('game.exe');
 
-  await sourceNode(page, 'music.exe').click();
-
-  // Selected, exactly as its row in the app list would have done — and since
-  // its staged state is its own live route, no question is asked about it.
-  await expect(sourceNode(page, 'music.exe')).toHaveAttribute('aria-pressed', 'true');
-  await expect(sourceNode(page, 'game.exe')).toHaveAttribute('aria-pressed', 'false');
-  await expect(routeQuestion(page)).toBeHidden();
+  await appRow(page, 'music.exe').click();
+  await expect(hub(page)).toContainText('music.exe');
 });

@@ -227,6 +227,14 @@ function tauriBridge(initial: BridgeState): void {
 
 /** Installs the fake runtime into every page this context opens. */
 export async function installBridge(page: Page, state: BridgeState): Promise<void> {
+  // The liveness gate reads `document.hasFocus()`, which in a headless browser
+  // belongs to whichever parallel worker last held focus — a coin flip unrelated
+  // to what a spec asserts. The gate's three conditions stay the app's business;
+  // here the focus half is pinned so the flow tests only depend on the events
+  // they themselves emit.
+  await page.addInitScript(() => {
+    Object.defineProperty(document, 'hasFocus', { value: () => true });
+  });
   await page.addInitScript(tauriBridge, state);
 }
 

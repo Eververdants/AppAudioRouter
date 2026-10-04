@@ -26,16 +26,16 @@ test.skip(
   'README screenshots are captured on demand: CAPTURE_SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts',
 );
 
-/** Two programs routed: Music to three devices (the headset it was already on,
- *  plus two wired outputs held back so all three arrive together), and Chrome
- *  to the digital output. That is what the board is for — seeing where every
- *  sound is going at once — so the shot has to show more than one source line.
- *  The rest of the hardware is there and deliberately not part of any route, so
- *  the shot also shows where the routed block ends. Both routed programs are
- *  marked as playing, because that is the board's resting truth when music is
- *  on: the wires carry their moving dash. The list is filled out to a plausible
- *  desktop rather than trimmed to two rows: a screenshot that is nine tenths
- *  empty white reads as a broken layout, not as a quiet one. */
+/** One programme routed to three devices at once — the case the stage is for,
+ *  and the only one in which a delay or a level has anything to act on: the
+ *  copies carry theirs under their discs. Chrome goes to the digital output as
+ *  well, so the rail shows two programmes with somewhere to be. The rest of the
+ *  hardware is there and deliberately not part of any route, so the shot also
+ *  shows where the lit part of the ring ends. Both routed programmes are marked
+ *  as playing, because that is the resting truth when music is on: the spokes
+ *  carry their moving dash. The list is filled out to a plausible desktop rather
+ *  than trimmed to two rows: a screenshot that is nine tenths empty reads as a
+ *  broken layout, not as a quiet one. */
 const STATE = {
   devices: [
     { id: 'bt', name: 'WH-1000XM5' },
@@ -73,29 +73,24 @@ const STATE = {
 for (const theme of ['light', 'dark'] as const) {
   test(`capture the ${theme} theme`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme });
-    // The expert columns carry the delay and volume values the README talks
-    // about, and they are off until the advanced switch says otherwise.
-    await page.addInitScript(() => window.localStorage.setItem('aar-advanced-mode', '1'));
 
     await installBridge(page, STATE);
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
     await expect(page.getByText('Music.exe').first()).toBeVisible();
 
-    // Selecting the app stages the system default device, and the first click
-    // on another device replaces that guess rather than adding to it — so the
-    // click is undone first, which is what leaves the headset as the primary
-    // and the two wired outputs as the copies.
+    // Selecting the app stages the system default device, which is a guess the
+    // app made — so the first click on another device replaces it rather than
+    // adding to it, and every click after that adds. Two wired outputs and the
+    // headset, which is what puts a delay and a level under the two copies.
     await appRow(page, 'Music.exe').click();
     await deviceRow(page, 'HDMI output').click();
-    await deviceRow(page, 'HDMI output').click();
     await deviceRow(page, 'WH-1000XM5').click();
-    await deviceRow(page, 'HDMI output').click();
     await deviceRow(page, 'USB headphones').click();
     await routeConfirmButton(page).click();
 
-    // A second program to a second output, so the board shows a fan of routes
-    // instead of one: the shot is of the board, not of a single route.
+    // A second programme to a second output, so the rail shows two of them with
+    // somewhere to be rather than one.
     await appRow(page, 'chrome.exe').click();
     await deviceRow(page, 'Digital Audio (S/PDIF)').click();
     await routeConfirmButton(page).click();

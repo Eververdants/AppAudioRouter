@@ -44,23 +44,24 @@ export async function resetCalls(page: Page): Promise<void> {
 }
 
 /**
- * The name cell of one device row in the output table.
+ * One device disc on the stage.
  *
- * Scoped to `main` and to buttons: the app list lives in `aside`, and the only
- * clickable thing in a device row is its name — the delay and volume cells are
- * separate controls beside it, not inside it.
+ * The disc is a circle with a ring drawn inside it and its name written under
+ * it, so there is no text to match — it carries the device's name as its
+ * accessible name instead, which is what a click needs and what a screen reader
+ * reads. Matched by role and name, scoped to `main` because the app list lives
+ * in `aside`.
  */
 export function deviceRow(page: Page, name: string) {
-  return page.locator('main button').filter({ hasText: name });
+  return page.locator('main').getByRole('button', { name, exact: true });
 }
 
 /**
- * One whole device row of the output table, name and role together.
+ * One whole device: the disc, its name and the role word under it.
  *
- * `deviceRow` is the button, which is what a click needs; the role the route
- * gave the device is a sibling of that button, so anything asserting on it has
- * to read the row around both. Matched by the row's own hook rather than by a
- * Tailwind class, which is not a name anything should depend on.
+ * `deviceRow` is the button a click needs; the role word the route gave the
+ * device is a sibling of that button, so anything asserting on it has to read
+ * the block around both. Matched by the device's own hook.
  */
 export function deviceRowShell(page: Page, name: string) {
   return page.locator('main [data-device-row]').filter({ hasText: name });
@@ -72,33 +73,34 @@ export function appRow(page: Page, exeName: string) {
 }
 
 /**
- * One source node on the routing board, matched by its own hook rather than a
- * Tailwind class. The locator is the node's button — the thing a click selects
- * the program with and the thing that carries `aria-pressed` — so it reads and
- * drives both.
+ * The hub at the centre of the stage: the programme being routed.
+ *
+ * One of them, not one per routed programme — the rail is where every
+ * programme's destination is read at once, and the stage is where the one you
+ * are changing is. Matched by its own hook.
  */
-export function sourceNode(page: Page, exeName: string) {
-  return page.locator('main [data-source-node]').filter({ hasText: exeName }).locator('button');
+export function hub(page: Page) {
+  return page.locator('main [data-source-node]');
 }
 
 /**
- * The floating capsule that asks whether to route.
+ * The bar along the bottom that says what will happen and applies it.
  *
- * Matched by role and accessible name rather than by its text: the app list,
- * the route tree and the capsule all name the same program and device, so a
- * text match would be all three at once.
+ * Matched by role and accessible name rather than by its text: the app list and
+ * the bar name the same programme and device, so a text match would be both.
  */
 export function routeQuestion(page: Page) {
   return page.getByRole('group', { name: 'Current route' });
 }
 
-/** The capsule's two answers. */
+/** The bar's Apply. */
 export function routeConfirmButton(page: Page) {
-  return page.getByRole('button', { name: 'Route it' });
+  return page.getByRole('button', { name: 'Apply' });
 }
 
+/** The bar's way of throwing a pick away without applying it. */
 export function routeCancelButton(page: Page) {
-  return page.getByRole('button', { name: 'Cancel' });
+  return page.getByRole('button', { name: 'Revert' });
 }
 
 /**
