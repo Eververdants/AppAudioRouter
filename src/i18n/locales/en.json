@@ -31,12 +31,15 @@
     "stepUp": "{{step}} louder",
     "stepDown": "{{step}} quieter"
   },
+  "primaryVolume": {
+    "hint": "Primary volume: this is the program's own session volume, so only the main path gets quieter — the engine compensates the copies, and they are unaffected. It stops at 5%; to silence the main device while the copies keep playing, make another device the main output and turn this one down as a copy"
+  },
   "stage": {
     "guide": "Select an app on the left",
     "sounding": "Playing",
     "quiet": "Silent",
     "main": "Main",
-    "primaryTitle": "The main device is played by Windows itself, and none of this app's audio passes through it — software volume and delay act on the copies only, so there is nothing here to adjust. To balance loudness, bring the other devices down towards it; to make this one adjustable too, make another device the main output and this becomes an adjustable copy",
+    "primaryTitle": "The main device is played by Windows itself, so software delay has nothing to hold back — that is why there is no delay row here. Volume works through the program's own session volume: only the main path gets quieter, and the copies are compensated so they are unaffected",
     "copy": "Copy",
     "promote": "Make primary",
     "promoteTitle": "Make this the device the system plays directly; the others become copies of it",
@@ -165,6 +168,9 @@
     "deviceVolumeSet": "Volume of {{device}} set to {{n}}%",
     "deviceVolumeFailed": "Failed to set device volume: {{error}}",
     "deviceVolumesFailed": "Failed to load device volumes: {{error}}",
+    "primaryVolumeSet": "Primary volume of {{process}} set to {{n}}%",
+    "primaryVolumeFailed": "Failed to set the primary volume: {{error}}",
+    "primaryVolumesFailed": "Failed to load the primary volumes: {{error}}",
     "sourceVolumeSet": "Level of {{process}} set to {{n}}%",
     "sourceVolumeFailed": "Failed to set the program level: {{error}}",
     "sourceVolumesFailed": "Failed to load program levels: {{error}}",

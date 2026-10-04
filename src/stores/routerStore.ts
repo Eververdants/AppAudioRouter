@@ -73,6 +73,15 @@ interface RouterState {
   /** Per-device volume in percent (100 = the level the app produced). */
   deviceVolumes: Record<string, number>;
   /**
+   * Per-program primary volume in percent, keyed by executable name — the
+   * program's session volume, which is what its primary device plays at and
+   * the one lever that reaches it. Running engines divide their mirrors' gain
+   * by the same factor, so the copies are unaffected; 5 is the floor, because
+   * a session volume of 0 is true silence no gain can undo. A missing entry is
+   * the neutral 100, which is also what the backend stores as "no value".
+   */
+  primaryVolumes: Record<string, number>;
+  /**
    * Which processes are rendering audio right now, keyed by PID.
    *
    * Seeded from the session list's `playing` flag on every refresh — the list
@@ -195,6 +204,10 @@ interface RouterState {
   loadDelaySettings: () => Promise<void>;
   loadDeviceVolumes: () => Promise<void>;
   setDeviceVolume: (deviceId: string, percent: number) => Promise<void>;
+  /** Read the stored per-program primary volumes. */
+  loadPrimaryVolumes: () => Promise<void>;
+  /** Set one program's primary volume (percent, 5–100, 100 = untouched). */
+  setPrimaryVolume: (exeName: string, percent: number) => Promise<void>;
   /** Read the stored per-program levels the engines apply. */
   loadSourceVolumes: () => Promise<void>;
   /** Ask the backend for the icons the current process list is missing, one
@@ -430,6 +443,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   delayRangeMs: DEFAULT_DELAY_RANGE_MS,
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
+  primaryVolumes: {},
   sourceVolumes: {},
   iconByExe: {},
   soundingPids: {},
@@ -1278,6 +1292,53 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         return { deviceVolumes };
       });
       get().addLog(i18next.t('log.deviceVolumeFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  loadPrimaryVolumes: async () => {
+    try {
+      const pairs = await api.getPrimaryVolumes();
+      const primaryVolumes: Record<string, number> = {};
+      for (const [exeName, percent] of pairs) {
+        primaryVolumes[exeName] = percent;
+      }
+      set({ primaryVolumes });
+    } catch (e) {
+      get().addLog(i18next.t('log.primaryVolumesFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  setPrimaryVolume: async (exeName, percent) => {
+    const current = get().primaryVolumes[exeName] ?? 100;
+    if (current === percent) return;
+    set((s) => {
+      const primaryVolumes = { ...s.primaryVolumes };
+      // Only an exact 100 is dropped: it is the neutral point ("the program's
+      // own loudness") rather than a boundary, and 5–99 are values of their
+      // own the backend keeps.
+      if (percent === 100) {
+        delete primaryVolumes[exeName];
+      } else {
+        primaryVolumes[exeName] = percent;
+      }
+      return { primaryVolumes };
+    });
+    try {
+      await api.setPrimaryVolume(exeName, percent);
+      get().addLog(i18next.t('log.primaryVolumeSet', { process: exeName, n: percent }), 'info');
+    } catch (e) {
+      // The backend rejected the value; undo the optimistic update so the UI
+      // keeps matching the session volume the engines actually apply.
+      set((s) => {
+        const primaryVolumes = { ...s.primaryVolumes };
+        if (current === 100) {
+          delete primaryVolumes[exeName];
+        } else {
+          primaryVolumes[exeName] = current;
+        }
+        return { primaryVolumes };
+      });
+      get().addLog(i18next.t('log.primaryVolumeFailed', { error: String(e) }), 'error');
     }
   },
 

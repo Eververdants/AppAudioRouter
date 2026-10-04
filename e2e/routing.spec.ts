@@ -146,6 +146,50 @@ test('a second device makes a copy, and the copy carries its own delay and level
   expect(delayed[0]?.args.deviceId).toBe('speakers');
 });
 
+test('the primary tunes the volume of the programme; the copy keeps its own two', async ({
+  page,
+}) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+
+  // One staged device and no engine: neither control has anything it could act
+  // on, so no tuner is drawn at all.
+  await expect(deviceRowShell(page, 'Speakers').getByText('%')).toHaveCount(0);
+
+  // A second device starts an engine: the primary (the TV) carries the
+  // programme's session volume, the copy carries its delay and its share —
+  // and only the copy has a delay, because nothing of ours sits on the
+  // primary's path to hold back.
+  await deviceRow(page, 'TV').click();
+  await deviceRow(page, 'Speakers').click();
+  await expect(deviceRowShell(page, 'TV').getByText('100%')).toBeVisible();
+  await expect(deviceRowShell(page, 'Speakers').getByText('100%')).toBeVisible();
+  await expect(deviceRowShell(page, 'TV').getByText('ms')).toHaveCount(0);
+  await expect(deviceRowShell(page, 'Speakers').getByText('ms')).toBeVisible();
+
+  // Stepping the primary's volume talks to the backend per *programme* —
+  // music.exe, not per device — because it is the session volume that moves.
+  await deviceRowShell(page, 'TV')
+    .getByRole('button', { name: /quieter/ })
+    .click();
+  const applied = await callsFor(page, 'set_primary_volume');
+  expect(applied).toHaveLength(1);
+  expect(applied[0]?.args).toMatchObject({ exeName: 'music.exe', percent: 95 });
+  await expect(deviceRowShell(page, 'TV').getByText('95%')).toBeVisible();
+
+  // The floor: 5, because a session volume of 0 is true silence and no gain
+  // could give the copies their loudness back.
+  const quieter = deviceRowShell(page, 'TV').getByRole('button', { name: /quieter/ });
+  for (let step = 0; step < 18; step += 1) {
+    await quieter.click();
+  }
+  await expect(quieter).toBeDisabled();
+  // Asserted on the last call rather than on the value's text: the rolling
+  // readout keeps its exiting values around, and "95%" contains "5%".
+  const walked = await callsFor(page, 'set_primary_volume');
+  expect(walked[walked.length - 1]?.args.percent).toBe(5);
+});
+
 test('a copy can be promoted to what the system plays directly', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();

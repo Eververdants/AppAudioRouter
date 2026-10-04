@@ -39,6 +39,8 @@ export interface BridgeState {
   volumes: [string, number][];
   /** `(exe_name, percent)` — the per-program levels the store reads at boot. */
   sourceVolumes: [string, number][];
+  /** `(exe_name, percent)` — the per-program primary (session) volumes. */
+  primaryVolumes: [string, number][];
 }
 
 /** Commands the fake backend should reject, by name. */
@@ -144,6 +146,17 @@ function tauriBridge(initial: BridgeState): void {
         return state.volumes;
       case 'set_device_volume':
         return null;
+      case 'get_primary_volumes':
+        return state.primaryVolumes;
+      case 'set_primary_volume': {
+        const exeName = String(payload.exeName);
+        const percent = Number(payload.percent);
+        // 100 is the neutral volume and is stored as "no entry", the same rule
+        // the real backend follows.
+        const rest = state.primaryVolumes.filter(([name]) => name !== exeName);
+        state.primaryVolumes = percent === 100 ? rest : [...rest, [exeName, percent]];
+        return null;
+      }
       case 'get_source_volumes':
         return state.sourceVolumes;
       case 'set_source_volume': {
@@ -273,5 +286,6 @@ export const DEFAULT_STATE: BridgeState = {
   remembered: [],
   delays: [],
   volumes: [],
+  primaryVolumes: [],
   sourceVolumes: [],
 };

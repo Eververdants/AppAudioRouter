@@ -107,6 +107,18 @@ export async function getDeviceVolumes(): Promise<[string, number][]> {
   return invoke<[string, number][]>('get_device_volumes');
 }
 
+/** All stored per-program primary volumes as `(exe_name, percent)` pairs. */
+export async function getPrimaryVolumes(): Promise<[string, number][]> {
+  return invoke<[string, number][]>('get_primary_volumes');
+}
+
+/** Set a routed program's primary volume — its session volume (percent,
+ * floored at 5) — which is what the primary device plays at; running engines
+ * compensate their mirrors, so the copies are unaffected. */
+export async function setPrimaryVolume(exeName: string, percent: number): Promise<void> {
+  await invoke('set_primary_volume', { exeName, percent });
+}
+
 /** All stored per-program levels as `(exe_name, percent)` pairs. */
 export async function getSourceVolumes(): Promise<SourceVolume[]> {
   return invoke<SourceVolume[]>('get_source_volumes');

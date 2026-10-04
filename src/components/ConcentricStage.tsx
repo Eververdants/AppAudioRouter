@@ -251,33 +251,39 @@ export function ConcentricStage() {
             </p>
           )}
 
-          {devices.map((device, index) => (
-            <Satellite
-              key={device.id}
-              deviceId={device.id}
-              name={device.name}
-              role={roleOf(device.id, drawn)}
-              isDefaultDevice={device.id === defaultDeviceId}
-              showTuner={drawn.length > 1}
-              canPromote={drawn.length > 1 && (deviceDelays[device.id] ?? 0) === primaryDelayMs}
-              canPick={pid !== undefined}
-              index={index}
-              count={count}
-              position={satellite(index, count)}
-              onToggle={() => {
-                // Picking devices is a toggle, not a mode: the first one chosen
-                // is what the system plays directly, the ones after it are
-                // copies. The route may never be empty, so the last one out
-                // stays in — a programme with nowhere to play is not a state
-                // this app offers. A press that changes nothing sends no ripple.
-                const onlyOneLeft = drawn.length === 1 && drawn[0] === device.id;
-                if (onlyOneLeft) return;
-                pushRipple(satellite(index, count).x, satellite(index, count).y);
-                toggleDeviceSelection(device.id);
-              }}
-              onPromote={() => promoteDevice(device.id)}
-            />
-          ))}
+          {devices.map((device, index) => {
+            const role = roleOf(device.id, drawn);
+            return (
+              <Satellite
+                key={device.id}
+                deviceId={device.id}
+                name={device.name}
+                role={role}
+                isDefaultDevice={device.id === defaultDeviceId}
+                showTuner={drawn.length > 1}
+                canPromote={drawn.length > 1 && (deviceDelays[device.id] ?? 0) === primaryDelayMs}
+                canPick={pid !== undefined}
+                // The primary's volume row tunes the *program* (its session
+                // volume), so the disc has to know whose loudness it moves.
+                primaryVolumeExe={role === 'primary' ? session?.exe_name : undefined}
+                index={index}
+                count={count}
+                position={satellite(index, count)}
+                onToggle={() => {
+                  // Picking devices is a toggle, not a mode: the first one chosen
+                  // is what the system plays directly, the ones after it are
+                  // copies. The route may never be empty, so the last one out
+                  // stays in — a programme with nowhere to play is not a state
+                  // this app offers. A press that changes nothing sends no ripple.
+                  const onlyOneLeft = drawn.length === 1 && drawn[0] === device.id;
+                  if (onlyOneLeft) return;
+                  pushRipple(satellite(index, count).x, satellite(index, count).y);
+                  toggleDeviceSelection(device.id);
+                }}
+                onPromote={() => promoteDevice(device.id)}
+              />
+            );
+          })}
 
           {/* Ripples ride above the discs: a concentric wave leaving the thing
               that was just pressed, then gone. */}
@@ -580,6 +586,7 @@ function Satellite({
   showTuner,
   canPromote,
   canPick,
+  primaryVolumeExe,
   index,
   count,
   position,
@@ -594,6 +601,9 @@ function Satellite({
   /** Whether promoting this device would survive the apply's delay order. */
   canPromote: boolean;
   canPick: boolean;
+  /** The routed program whose session volume this disc tunes, when it is the
+   * primary of the drawn plan — the one case the primary carries a control. */
+  primaryVolumeExe?: string;
   index: number;
   count: number;
   position: { x: number; y: number };
@@ -726,12 +736,15 @@ function Satellite({
           </AnimatePresence>
         </span>
 
-        {/* Delay and level belong to a copy for one reason: the system plays the
-            route's first device itself, so there is no stream of ours on it for a
-            delay to hold back or a gain to attenuate. Shown only when there is a
-            copy to tune, which is also the only time they can do anything. */}
+        {/* Delay belongs to a copy alone — the system plays the route's first
+            device itself, and no software delay can hold that path back.
+            Volume exists on both: a copy's share of the group's loudest copy,
+            and the primary's program-level session volume, whose copies are
+            compensated so it moves the primary path alone. Shown only while an
+            engine is actually running, which is also the only time either can
+            do anything. */}
         <AnimatePresence initial={false}>
-          {canPick && role === 'mirror' && showTuner && (
+          {canPick && showTuner && (role === 'mirror' || role === 'primary') && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
@@ -739,7 +752,7 @@ function Satellite({
               transition={SPRING_GLIDE}
               className="overflow-hidden"
             >
-              <Tuner deviceId={deviceId} />
+              <Tuner deviceId={deviceId} primaryVolumeExe={primaryVolumeExe} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -751,22 +764,59 @@ function Satellite({
 /** How much one press moves a device's level, in percent. */
 const VOLUME_STEP = 5;
 
+/** Floor of a primary volume, in percent. The mirror of
+ *  `PRIMARY_VOLUME_MIN_PERCENT` on the Rust side — the two literals are bound
+ *  together by the note in `config.rs`, and nothing else: at a session volume
+ *  of zero the capture is true silence and no gain can restore the copies. */
+const PRIMARY_VOLUME_MIN = 5;
+
 /**
- * One copy's two controls: how far behind the others it plays, and how loud.
+ * One disc's controls under its name: what a copy plays at and how late, or —
+ * for the primary — the program's session volume.
  *
  * Buttons and nothing else — no dragging, no wheel. Twenty devices' worth of
  * scrolling in a list of numbers is not a mistake anyone should be able to make
- * by resting a finger, and these two change what you hear.
+ * by resting a finger, and these change what you hear.
  */
-function Tuner({ deviceId }: { deviceId: string }) {
+function Tuner({ deviceId, primaryVolumeExe }: { deviceId: string; primaryVolumeExe?: string }) {
   const { t } = useTranslation();
   const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const stepMs = useRouterStore((s) => s.delayStepMs);
   const delayMs = useRouterStore((s) => s.deviceDelays[deviceId] ?? 0);
-  const volume = useRouterStore((s) => s.deviceVolumes[deviceId] ?? 100);
+  const deviceVolume = useRouterStore((s) => s.deviceVolumes[deviceId] ?? 100);
+  const primaryVolume = useRouterStore((s) =>
+    primaryVolumeExe === undefined ? 100 : (s.primaryVolumes[primaryVolumeExe] ?? 100),
+  );
   const latencyMs = useRouterStore((s) => s.deviceLatencyMs[deviceId]);
   const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);
   const setDeviceVolume = useRouterStore((s) => s.setDeviceVolume);
+  const setPrimaryVolume = useRouterStore((s) => s.setPrimaryVolume);
+
+  // The primary has no delay row because there is nothing of ours on its path
+  // for a delay to hold back; its volume row tunes the *program's* session
+  // volume, which is why it carries the program's hint rather than the
+  // device's.
+  if (primaryVolumeExe !== undefined) {
+    return (
+      <div className="mt-1 flex flex-col items-center gap-1">
+        <Row
+          title={t('primaryVolume.hint')}
+          downLabel={t('deviceVolume.stepDown', { step: VOLUME_STEP })}
+          upLabel={t('deviceVolume.stepUp', { step: VOLUME_STEP })}
+          value={`${primaryVolume}%`}
+          atMin={primaryVolume <= PRIMARY_VOLUME_MIN}
+          atMax={primaryVolume >= 100}
+          onChange={(direction) => {
+            const next = Math.max(
+              PRIMARY_VOLUME_MIN,
+              Math.min(100, primaryVolume + direction * VOLUME_STEP),
+            );
+            void setPrimaryVolume(primaryVolumeExe, next);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mt-1 flex flex-col items-center gap-1">
@@ -789,11 +839,11 @@ function Tuner({ deviceId }: { deviceId: string }) {
         title={undefined}
         downLabel={t('deviceVolume.stepDown', { step: VOLUME_STEP })}
         upLabel={t('deviceVolume.stepUp', { step: VOLUME_STEP })}
-        value={`${volume}%`}
-        atMin={volume <= 0}
-        atMax={volume >= 100}
+        value={`${deviceVolume}%`}
+        atMin={deviceVolume <= 0}
+        atMax={deviceVolume >= 100}
         onChange={(direction) => {
-          const next = Math.max(0, Math.min(100, volume + direction * VOLUME_STEP));
+          const next = Math.max(0, Math.min(100, deviceVolume + direction * VOLUME_STEP));
           void setDeviceVolume(deviceId, next);
         }}
       />

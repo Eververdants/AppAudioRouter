@@ -31,12 +31,15 @@
     "stepUp": "提高 {{step}}",
     "stepDown": "降低 {{step}}"
   },
+  "primaryVolume": {
+    "hint": "主输出音量：走的是该程序自己的会话音量，只有主输出这一路变小；本应用会把副本等比补回，副本不受影响。下限 5%——要让主输出没声而副本继续，把另一台设备「设为主输出」后再把这台当作副本调到 0"
+  },
   "stage": {
     "guide": "请先在左侧选择一个程序",
     "sounding": "正在播放",
     "quiet": "未在播放",
     "main": "主输出",
-    "primaryTitle": "主输出由 Windows 直接播放，本应用没有经手它的声音——软件音量与延迟只作用于复制出的副本，对它无处可施。要平衡响度，把其他设备向它调低即可；想让这台也可调，把另一台设备「设为主输出」，它就会成为可调的副本",
+    "primaryTitle": "主输出由 Windows 直接播放：软件延迟对它无处可施，所以这里没有延迟一行。音量走的是该程序自己的会话音量——只有主输出这一路变小，副本会被等比补回、不受影响",
     "copy": "副本",
     "promote": "设为主输出",
     "promoteTitle": "让这台设备成为主输出：由系统直接播放，其余设备成为它的副本",
@@ -165,6 +168,9 @@
     "deviceVolumeSet": "已将 {{device}} 的音量设为 {{n}}%",
     "deviceVolumeFailed": "设置设备音量失败：{{error}}",
     "deviceVolumesFailed": "加载设备音量失败：{{error}}",
+    "primaryVolumeSet": "已将 {{process}} 的主输出音量设为 {{n}}%",
+    "primaryVolumeFailed": "设置主输出音量失败：{{error}}",
+    "primaryVolumesFailed": "加载主输出音量失败：{{error}}",
     "sourceVolumeSet": "已将 {{process}} 的电平设为 {{n}}%",
     "sourceVolumeFailed": "设置程序电平失败：{{error}}",
     "sourceVolumesFailed": "加载程序电平失败：{{error}}",
