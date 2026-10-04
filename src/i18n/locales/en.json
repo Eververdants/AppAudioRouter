@@ -98,16 +98,16 @@
   },
   "startup": {
     "upgradeTitle": "An earlier version ran on this PC",
-    "upgradeBody": "It may have left some programs fixed to one output device: they no longer follow the device you switch to in Windows, and a reboot does not bring them back. If you hit one, clear it with the button below; if not, there is nothing to do.",
-    "upgradeBodyVersion": "The last version to run on this PC was {{version}}, and it may have left some programs fixed to one output device: they no longer follow the device you switch to in Windows, and a reboot does not bring them back. If you hit one, clear it with the button below; if not, there is nothing to do.",
+    "upgradeBody": "It may have left some programs fixed to one output device: they no longer follow the device you switch to in Windows, and a reboot does not bring them back. If you encounter this, clear it with the button below; otherwise no action is needed.",
+    "upgradeBodyVersion": "The last version to run on this PC was {{version}}, and it may have left some programs fixed to one output device: they no longer follow the device you switch to in Windows, and a reboot does not bring them back. If you encounter this, clear it with the button below; otherwise no action is needed.",
     "resetHint": "This clears every program that is running now, including a device you set by hand in the volume mixer. A program that is not running keeps its device until it starts.",
     "resetAction": "Reset per-app output",
     "resetting": "Clearing…",
     "resetDone": "Cleared the fixed output device of {{n}} program(s).",
-    "resetRemaining": "{{processes}} could not be cleared — let it play a sound and try again.",
+    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again.",
     "dismiss": "Got it",
     "firstRunTitle": "Welcome to {{product}}",
-    "firstRunBody": "Pick an app on the left, then pick where it should play and press Apply - nothing moves until you do. Pick a second device and it plays through both at once. If a programme ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
+    "firstRunBody": "Select an app on the left, choose an output device, then press Apply — nothing changes until you do. Select further devices to play through all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
     "startAction": "Start routing"
   },
   "titleBar": {
