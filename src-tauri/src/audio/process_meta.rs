@@ -8,9 +8,13 @@
 //! (see `notifications.rs`).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use serde::Serialize;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM};
+use windows::Win32::Graphics::Gdi::{HBITMAP, HDC};
+use windows::Win32::UI::WindowsAndMessaging::ICONINFO;
 
 /// The full image path (drive-letter form) and file name of a process.
 ///
@@ -233,4 +237,315 @@ pub(crate) fn file_description(path: &str) -> Option<String> {
 /// A NUL-terminated UTF-16 copy of `s`, for the `PCWSTR` parameters above.
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// One executable's icon as raw pixels.
+#[derive(Debug, Clone, Serialize)]
+pub struct IconImage {
+    pub width: u32,
+    pub height: u32,
+    /// Base64 of the RGBA rows, top-down, four bytes per pixel. Base64 rather
+    /// than raw bytes so the payload rides through JSON as one string instead
+    /// of thousands of numbers; the frontend decodes it into an `ImageData`.
+    pub rgba: String,
+}
+
+/// The icon of whatever executable `pid` is running, decoded and cached.
+///
+/// The cache is keyed by image path and holds misses as well as hits: the
+/// shell's extraction is the expensive part, and every later ask — another
+/// session of the same program, the next refresh, a retried render — must not
+/// pay it twice. It lives for this run only; nothing persists to disk.
+pub fn icon_for_process(pid: u32) -> Option<IconImage> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<IconImage>>>>> = OnceLock::new();
+
+    let (path, name) = process_image(pid)?;
+    let key = path.to_ascii_lowercase();
+    if let Some(cached) = CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&key)
+    {
+        return cached.as_deref().cloned();
+    }
+
+    let icon = extract_icon(&path).map(Arc::new);
+    log::debug!(
+        "icon for {name}: {}",
+        match &icon {
+            Some(icon) => format!("{}x{}", icon.width, icon.height),
+            None => "none".to_string(),
+        }
+    );
+    CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key, icon.clone());
+    icon.as_deref().cloned()
+}
+
+/// Ask the shell for the file's large icon and decode it into RGBA.
+fn extract_icon(path: &str) -> Option<IconImage> {
+    use windows::Win32::Graphics::Gdi::DeleteObject;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
+
+    let path_w = wide(path);
+    let mut info = SHFILEINFOW::default();
+    // SAFETY: path_w is a NUL-terminated wide string and info is the output
+    // record the size argument describes. The file-attributes argument only
+    // matters with SHGFI_USEFILEATTRIBUTES, which is not set here.
+    let ok = unsafe {
+        SHGetFileInfoW(
+            PCWSTR(path_w.as_ptr()),
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+
+    let mut icon = ICONINFO::default();
+    // SAFETY: icon is a valid output record for this HICON.
+    let decoded = unsafe { GetIconInfo(info.hIcon, &mut icon) }
+        .ok()
+        .and_then(|()| decode_icon(&icon));
+    // SAFETY: GetIconInfo handed us the two bitmaps and SHGetFileInfoW the
+    // icon; each is balanced with its own destructor.
+    unsafe {
+        let _ = DeleteObject(icon.hbmMask);
+        if !icon.hbmColor.is_invalid() {
+            let _ = DeleteObject(icon.hbmColor);
+        }
+        let _ = DestroyIcon(info.hIcon);
+    }
+    decoded
+}
+
+/// Decode an `ICONINFO`'s bitmaps into RGBA rows, top-down.
+///
+/// A colour icon brings its own 32-bit bitmap; the alpha channel is used when
+/// the icon has one, and the AND mask stands in when it does not — that is the
+/// classic (pre-XP) icon format, and without the fallback it would read as a
+/// solid rectangle. A monochrome icon has no colour bitmap at all: its mask
+/// bitmap's top half is the image (1 = white), the bottom half the
+/// transparency.
+fn decode_icon(icon: &ICONINFO) -> Option<IconImage> {
+    use windows::Win32::Graphics::Gdi::{GetDC, GetObjectW, ReleaseDC, BITMAP};
+
+    let have_color = !icon.hbmColor.is_invalid();
+    let mut bmp = BITMAP::default();
+    // SAFETY: bmp is a valid out parameter sized for this handle.
+    let filled = unsafe {
+        GetObjectW(
+            if have_color {
+                icon.hbmColor
+            } else {
+                icon.hbmMask
+            },
+            std::mem::size_of::<BITMAP>() as i32,
+            Some(&mut bmp as *mut BITMAP as *mut core::ffi::c_void),
+        )
+    };
+    if filled == 0 || bmp.bmWidth <= 0 || bmp.bmHeight <= 0 {
+        return None;
+    }
+    let width = bmp.bmWidth as usize;
+    let height = if have_color {
+        bmp.bmHeight as usize
+    } else {
+        // The mask bitmap of a monochrome icon holds XOR half and AND half.
+        bmp.bmHeight as usize / 2
+    };
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    // SAFETY: a screen DC is only the context GetDIBits needs; the bitmaps are
+    // not selected into it, and every call below reads handles it was given.
+    let hdc = unsafe { GetDC(None) };
+    if hdc.is_invalid() {
+        return None;
+    }
+    let decoded = if have_color {
+        decode_color_icon(hdc, icon, width, height)
+    } else {
+        decode_monochrome_icon(hdc, icon, width, height)
+    };
+    // SAFETY: balances GetDC.
+    unsafe {
+        let _ = ReleaseDC(None, hdc);
+    }
+    decoded
+}
+
+/// The colour half: 32-bit BGRA rows, with the AND mask filling in the alpha
+/// when the icon predates per-pixel alpha.
+fn decode_color_icon(hdc: HDC, icon: &ICONINFO, width: usize, height: usize) -> Option<IconImage> {
+    let bgra = dib_bits(hdc, icon.hbmColor, width, height, 32)?;
+    let mask = dib_bits(hdc, icon.hbmMask, width, height, 1)?;
+    let has_alpha = bgra.iter().skip(3).step_by(4).any(|&a| a != 0);
+    let row_bytes = width.div_ceil(32) * 4;
+    let mask_bit =
+        |x: usize, y: usize| -> bool { mask[y * row_bytes + x / 8] >> (7 - (x % 8)) & 1 == 1 };
+
+    let mut rgba = vec![0u8; width * height * 4];
+    for (pixel, out) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        out[0] = bgra[pixel * 4 + 2];
+        out[1] = bgra[pixel * 4 + 1];
+        out[2] = bgra[pixel * 4];
+        // AND mask bit 1 means "transparent"; with a real alpha channel the
+        // mask says nothing and is ignored.
+        out[3] = if has_alpha {
+            bgra[pixel * 4 + 3]
+        } else if mask_bit(pixel % width, pixel / width) {
+            0
+        } else {
+            255
+        };
+    }
+    Some(IconImage {
+        width: width as u32,
+        height: height as u32,
+        rgba: base64(&rgba),
+    })
+}
+
+/// The monochrome half: the mask bitmap's top half is the XOR image (1 =
+/// white), the bottom half the AND mask (1 = transparent).
+fn decode_monochrome_icon(
+    hdc: HDC,
+    icon: &ICONINFO,
+    width: usize,
+    height: usize,
+) -> Option<IconImage> {
+    let bits = dib_bits(hdc, icon.hbmMask, width, height * 2, 1)?;
+    let row_bytes = width.div_ceil(32) * 4;
+    let bit =
+        |x: usize, y: usize| -> bool { bits[y * row_bytes + x / 8] >> (7 - (x % 8)) & 1 == 1 };
+
+    let mut rgba = vec![0u8; width * height * 4];
+    for (pixel, out) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let level = if bit(pixel % width, pixel / width) {
+            255u8
+        } else {
+            0
+        };
+        out[0] = level;
+        out[1] = level;
+        out[2] = level;
+        out[3] = if bit(pixel % width, pixel / width + height) {
+            0
+        } else {
+            255
+        };
+    }
+    Some(IconImage {
+        width: width as u32,
+        height: height as u32,
+        rgba: base64(&rgba),
+    })
+}
+
+/// Read an HBITMAP into top-down rows: four bytes per pixel at 32 bpp (BGRA),
+/// packed bits at 1 bpp, rows padded to 32-bit boundaries.
+fn dib_bits(hdc: HDC, bitmap: HBITMAP, width: usize, height: usize, bpp: u16) -> Option<Vec<u8>> {
+    use windows::Win32::Graphics::Gdi::{
+        GetDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+
+    let row_bytes = match bpp {
+        32 => width * 4,
+        1 => width.div_ceil(32) * 4,
+        _ => return None,
+    };
+    // GetDIBits fills the colour table of this record as well as the buffer.
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            // Negative height reads the rows top-down, which is the order the
+            // frontend's `ImageData` expects.
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: bpp,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut buf = vec![0u8; row_bytes * height];
+    // SAFETY: buf is exactly the buffer this header describes, and the bitmap
+    // is not selected into hdc.
+    let rows = unsafe {
+        GetDIBits(
+            hdc,
+            bitmap,
+            0,
+            height as u32,
+            Some(buf.as_mut_ptr().cast()),
+            &mut info,
+            DIB_RGB_COLORS,
+        )
+    };
+    if rows == 0 {
+        return None;
+    }
+    Some(buf)
+}
+
+/// Standard base64, local because a whole dependency for one encode is not
+/// worth it and the payload should be text, not four thousand JSON numbers.
+fn base64(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    let full = data.len() / 3 * 3;
+    for chunk in data[..full].as_chunks::<3>().0 {
+        let n = ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | chunk[2] as u32;
+        for shift in [18, 12, 6, 0] {
+            out.push(ALPHABET[((n >> shift) & 63) as usize] as char);
+        }
+    }
+    let rest = &data[full..];
+    if let Some(&first) = rest.first() {
+        // Assemble the final 24-bit group first and emit from it: emitting a
+        // code before the byte it covers has been folded in is exactly the bug
+        // the test vectors are here to catch.
+        let mut n = (first as u32) << 16;
+        let padded = rest.len() == 1;
+        if let Some(&second) = rest.get(1) {
+            n |= (second as u32) << 8;
+        }
+        out.push(ALPHABET[(n >> 18 & 63) as usize] as char);
+        out.push(ALPHABET[(n >> 12 & 63) as usize] as char);
+        if padded {
+            out.push_str("==");
+        } else {
+            out.push(ALPHABET[(n >> 6 & 63) as usize] as char);
+            out.push('=');
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base64;
+
+    #[test]
+    fn base64_matches_the_standard_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
 }

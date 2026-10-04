@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
@@ -56,6 +56,25 @@ pub struct AlignOutcome {
     /// counting the live readings instead would tell a user who can hear sound
     /// that none of their programs made any.
     pub playing: usize,
+}
+
+/// One process's executable icon, decoded to RGBA for the frontend's canvas.
+///
+/// The frontend asks per process it lists; the backend caches per executable,
+/// so the shell's extraction is paid once and every later ask — another
+/// session of the same program, the next refresh — reads the cache. Returns
+/// `None` when the process is gone or its file carries no icon: the frontend
+/// keeps its letter tile and does not retry this process.
+#[tauri::command]
+pub async fn get_process_icon(pid: u32) -> Result<Option<audio::process_meta::IconImage>, String> {
+    debug!("cmd: get_process_icon pid={pid}");
+    // pid 0 is the system-sounds session and not a process to open.
+    if pid == 0 {
+        return Ok(None);
+    }
+    tokio::task::spawn_blocking(move || audio::process_meta::icon_for_process(pid))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// List all active render (playback) devices.

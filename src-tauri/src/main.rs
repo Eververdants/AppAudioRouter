@@ -117,6 +117,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::list_devices,
             commands::list_sessions,
+            commands::get_process_icon,
             commands::set_route,
             commands::set_default_device,
             commands::get_default_device,
