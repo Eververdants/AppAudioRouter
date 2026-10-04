@@ -28,15 +28,6 @@ import {
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
- * How far the hub's icon travels to be minted, in CSS pixels: from its seat up
- * to the centre of the Ring above it — the ring's half (11) plus the column
- * gap (4) plus the icon's own half (12). The old identity is withdrawn into
- * the ring and the new one drops out of it, which is the hub's own version of
- * what its discs do: everything on this stage comes from the centre.
- */
-const HUB_ICON_MINT_Y = -27;
-
-/**
  * The concentric stage: one programme at the centre, every output device on a
  * ring around it, and a spoke from the hub to each lit disc.
  *
@@ -373,23 +364,20 @@ function Hub({
       <Ring size={22} tone={hasPlan ? 'main' : 'idle'} live={sounding} />
       {/* The icon belongs to the file, so it swaps only when the programme
           changes — a window that retitles itself swaps the name below and
-          leaves the icon standing. The swap is the hub's own verb, though,
-          not the name's: discs arrive out of this centre and spokes grow out
-          of it, so the identity is minted the same way. The old icon is
-          drawn back up into the ring that says what the centre is, the new
-          one drops out of it to its seat, and while in flight it rides
-          *behind* the ring (negative z), so it reads as coming from within
-          it rather than sliding over it. The wrapper is exactly the icon's
-          slot, so nothing shifts while one identity replaces the other. */}
+          leaves the icon standing. The swap is small and stays in the slot:
+          the old icon lets go (fades, shrinking a little), the new one
+          springs into place — a pop, not the name's slide, and no travel
+          across the hub. The wrapper is exactly the icon's slot, so nothing
+          shifts while one identity replaces the other. */}
       <AnimatePresence mode="wait" initial={false}>
         {exeName !== undefined && (
           <motion.span
             key={exeName}
-            initial={{ opacity: 0, y: HUB_ICON_MINT_Y, scale: 0.35 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: HUB_ICON_MINT_Y, scale: 0.35 }}
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.6 }}
             transition={SPRING_TAP}
-            className="relative -z-10 flex flex-none"
+            className="flex flex-none"
           >
             <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
           </motion.span>
