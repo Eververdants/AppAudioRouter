@@ -12,7 +12,8 @@ use crate::audio::duplication::{ActiveRoute, DuplicationManager};
 use crate::audio::levels::{aligned_gains, SourceLevel, SourceLevels, LEVEL_MAX_AGE};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
 use crate::config::{
-    AppSettings, DelayConfig, RouteConfig, SourceVolumeConfig, VolumeConfig, SOURCE_VOLUME_MAX,
+    AppSettings, DelayConfig, PrimaryVolumeConfig, RouteConfig, SourceVolumeConfig, VolumeConfig,
+    SOURCE_VOLUME_MAX,
 };
 use crate::install::{StartupNotice, StartupNoticeState};
 
@@ -493,13 +494,14 @@ pub fn set_delay_range(
 }
 
 /// Set a device's volume (percent, 0–100) and push it to any live engine using
-/// that device.
+/// that device as a mirror.
 ///
-/// The value is the device's share of the loudest device in its group: the
+/// The value is the device's share of the loudest copy in its group: the
 /// engine scales every mirror by `own / max`, so 100 leaves that device at the
-/// level the app produced and smaller values attenuate it. Only the mirrors can
-/// be scaled — the primary device is played by the OS — but its value still
-/// counts towards the group's reference level.
+/// level the app produced and smaller values attenuate it. The primary device
+/// takes no share — its loudness is the program's session volume (see
+/// [`set_primary_volume`]), and a value stored for the device applies whenever
+/// it plays as a copy.
 #[tauri::command]
 pub fn set_device_volume(
     device_id: String,
@@ -543,6 +545,37 @@ pub fn set_source_volume(
 #[tauri::command]
 pub fn get_source_volumes(sources: State<'_, Arc<SourceVolumeConfig>>) -> Vec<(String, u32)> {
     sources.all()
+}
+
+/// Set a routed program's primary volume — its **session volume**, the value
+/// the Windows volume mixer shows for it — and push it to the engines already
+/// running for it.
+///
+/// This is the one lever that reaches the primary device's loudness: Windows
+/// plays that device itself, and the loopback tap sits behind the session
+/// volume, so attenuating the session attenuates the primary path. The engines
+/// divide every mirror's gain by the same factor, so the copies play on
+/// exactly as before and only the primary path moves. The value is floored at
+/// [`config::PRIMARY_VOLUME_MIN_PERCENT`] because at 0 the capture is true
+/// silence and no gain could restore the copies. Stopping the route hands the
+/// program's previous loudness back.
+#[tauri::command]
+pub fn set_primary_volume(
+    exe_name: String,
+    percent: u32,
+    primaries: State<'_, Arc<PrimaryVolumeConfig>>,
+    duplications: State<'_, DuplicationManager>,
+) -> Result<(), String> {
+    info!("cmd: set_primary_volume exe={exe_name} volume={percent}%");
+    primaries.set(&exe_name, percent)?;
+    duplications.update_primary_volume(&exe_name, percent);
+    Ok(())
+}
+
+/// Every stored primary volume as `(exe_name, percent)` pairs.
+#[tauri::command]
+pub fn get_primary_volumes(primaries: State<'_, Arc<PrimaryVolumeConfig>>) -> Vec<(String, u32)> {
+    primaries.all()
 }
 
 /// Bring every routed program that is playing up to the level of the loudest

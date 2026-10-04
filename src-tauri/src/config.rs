@@ -489,6 +489,125 @@ impl SourceVolumeConfigInner {
     }
 }
 
+/// Lower bound of a routed program's session volume, as a percent.
+///
+/// The session volume is the one lever that reaches the primary device's
+/// loudness, and the engine compensates the copies by dividing their gain by
+/// it — so it can never reach zero: at 0 the captured stream is true silence
+/// and no gain can give the copies their loudness back. 5 % keeps that
+/// compensation at ×20 and the "the copies are unaffected" promise honest all
+/// the way down. The frontend's `PRIMARY_VOLUME_MIN` is the same literal; the
+/// two are not bound together by anything but this note.
+pub const PRIMARY_VOLUME_MIN_PERCENT: u32 = 5;
+
+/// Per-program primary volumes, keyed by executable name.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct PrimaryVolumeMap {
+    #[serde(default)]
+    volumes: HashMap<String, u32>,
+}
+
+impl PrimaryVolumeMap {
+    /// The volume for `exe_name`, neutral when nothing is stored.
+    pub fn volume(&self, exe_name: &str) -> u32 {
+        self.volumes
+            .get(exe_name)
+            .copied()
+            .unwrap_or(SOURCE_VOLUME_NEUTRAL)
+    }
+
+    /// Store one program's primary volume, or clear it at the neutral value.
+    pub fn store(&mut self, exe_name: &str, percent: u32) -> Result<(), String> {
+        if !(PRIMARY_VOLUME_MIN_PERCENT..=SOURCE_VOLUME_NEUTRAL).contains(&percent) {
+            return Err(format!(
+                "primary volume {percent} is out of range ({PRIMARY_VOLUME_MIN_PERCENT}–{SOURCE_VOLUME_NEUTRAL})"
+            ));
+        }
+        if percent == SOURCE_VOLUME_NEUTRAL {
+            self.volumes.remove(exe_name);
+        } else {
+            self.volumes.insert(exe_name.to_string(), percent);
+        }
+        Ok(())
+    }
+}
+
+/// Manages the per-program primary volume file (interior mutability for Tauri
+/// State).
+///
+/// Keyed by **executable name, not PID**, for the same reason the routing
+/// assignments are: the session volume belongs to the program, and one program
+/// can hold several sessions. It is the loudness of the program's *primary
+/// path* — the endpoint Windows plays for it — and the engines running for
+/// this program divide their mirrors' gain by the same factor, so the copies
+/// are unaffected.
+pub struct PrimaryVolumeConfig {
+    inner: Mutex<PrimaryVolumeConfigInner>,
+}
+
+struct PrimaryVolumeConfigInner {
+    path: PathBuf,
+    map: PrimaryVolumeMap,
+}
+
+impl PrimaryVolumeConfig {
+    /// Load config from the app data directory.
+    pub fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let path = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir failed: {e}"))?
+            .join("primary-volumes.json");
+
+        let map = if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            PrimaryVolumeMap::default()
+        };
+
+        Ok(Self {
+            inner: Mutex::new(PrimaryVolumeConfigInner { path, map }),
+        })
+    }
+
+    /// One program's primary volume (neutral when unset).
+    pub fn get(&self, exe_name: &str) -> u32 {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .volume(exe_name)
+    }
+
+    /// Set one program's primary volume and persist.
+    pub fn set(&self, exe_name: &str, percent: u32) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.map.store(exe_name, percent)?;
+        inner.persist()
+    }
+
+    /// All entries as `(exe_name, percent)` pairs.
+    pub fn all(&self) -> Vec<(String, u32)> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map
+            .volumes
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+}
+
+impl PrimaryVolumeConfigInner {
+    /// Persist to disk.
+    fn persist(&self) -> Result<(), String> {
+        persist_json(&self.path, &self.map)
+    }
+}
+
 /// Window and shell behaviour the **native** side has to know about.
 ///
 /// Theme, language and delay step are pure webview preferences and stay in

@@ -75,7 +75,9 @@ use windows::Win32::System::Threading::{
 
 use crate::audio::levels::SourceLevels;
 use crate::audio::AudioError;
-use crate::config::{DelayConfig, SourceVolumeConfig, VolumeConfig, DELAY_RANGE_MAX_MS};
+use crate::config::{
+    DelayConfig, PrimaryVolumeConfig, SourceVolumeConfig, VolumeConfig, DELAY_RANGE_MAX_MS,
+};
 
 /// Shared-mode stream buffer, in hundreds of nanoseconds (200 ms).
 const STREAM_BUFFER_DURATION: i64 = 2_000_000;
@@ -524,17 +526,31 @@ struct EngineShared {
     mirrors: Vec<Arc<MirrorChannel>>,
     /// Device the OS plays natively, i.e. the one endpoint this engine cannot
     /// hold back in software. Only used to route delay updates to
-    /// `primary_delay_ms`.
+    /// `primary_delay_ms` — the primary's *volume* is the program's session
+    /// volume (see `session_volume_percent`), not a property of the device.
     primary_device_id: String,
     /// The primary device's configured delay. It cannot be applied, but it is
     /// the reference the mirrors are measured against (see
     /// `group_min_delay_ms`), so a change has to reach live engines.
     primary_delay_ms: AtomicI32,
-    /// The primary device's configured volume. The OS plays that endpoint
-    /// natively, so the value cannot be applied to it — but it still counts
-    /// towards the group's reference level (see `group_max_volume`), which is
-    /// what every mirror is scaled against.
-    primary_volume_percent: AtomicU32,
+    /// The routed program's session volume, in percent — what the Windows
+    /// volume mixer shows for it, and the one lever that reaches the primary
+    /// device's loudness, because the loopback tap sits *behind* the session
+    /// volume. The mirrors divide their gain by the same factor (see
+    /// `session_compensation`), so moving this moves the primary path alone.
+    /// Floored at [`crate::config::PRIMARY_VOLUME_MIN_PERCENT`]: at 0 the
+    /// capture is true silence and no gain can give the copies back.
+    session_volume_percent: AtomicU32,
+    /// The session volume the program had before this engine claimed it, in
+    /// percent. Giving it back is what keeps this control a property of the
+    /// *route*: without it, stopping the route would leave the program quietly
+    /// playing everywhere — and the volume mixer remembers the value for the
+    /// next launch. Only set when a live session was actually read at start.
+    restore_volume_percent: AtomicU32,
+    /// Whether `restore_volume_percent` is worth writing back: set only when
+    /// the pre-route volume was read from a live session, so a program we
+    /// never touched keeps whatever the user had set in the mixer.
+    restore_volume: AtomicBool,
     /// The program's own level as a percentage of what it produced, applied to
     /// its audio before it reaches any device. Unlike a device's share of the
     /// group, this may exceed 100 — see `source_gain`. Live-adjustable.
@@ -575,6 +591,25 @@ struct EngineShared {
     /// its route is applied goes idle on the same schedule as one that falls
     /// silent later.
     last_audio_ms: AtomicU64,
+}
+
+impl EngineShared {
+    /// Write the program's session volume back to what it was before this
+    /// engine claimed it. Best effort and idempotent: a program whose session
+    /// is gone has nothing left to restore, and one whose mixer value could
+    /// not be read at start was never touched.
+    fn restore_session_volume(&self) {
+        if !self.restore_volume.load(Ordering::Relaxed) {
+            return;
+        }
+        self.restore_volume.store(false, Ordering::Relaxed);
+        let percent = self.restore_volume_percent.load(Ordering::Relaxed);
+        let touched =
+            super::sessions::set_session_volume(self.pid, percent as f32 / 100.0).unwrap_or(0);
+        if touched > 0 {
+            info!("restored session volume of PID {} to {percent}%", self.pid);
+        }
+    }
 }
 
 /// Record that the source just produced audio. Called by the capture thread,
@@ -631,6 +666,8 @@ pub struct DuplicationManager {
     volumes: Arc<VolumeConfig>,
     /// Persisted per-program level values.
     sources: Arc<SourceVolumeConfig>,
+    /// Persisted per-program primary (session) volume values.
+    primary_volumes: Arc<PrimaryVolumeConfig>,
     /// Shared per-program level measurements.
     levels: Arc<SourceLevels>,
     /// Whether delay compensation is enabled. Always on: the compensation is
@@ -645,6 +682,7 @@ impl DuplicationManager {
         delays: Arc<DelayConfig>,
         volumes: Arc<VolumeConfig>,
         sources: Arc<SourceVolumeConfig>,
+        primary_volumes: Arc<PrimaryVolumeConfig>,
         levels: Arc<SourceLevels>,
     ) -> Self {
         Self {
@@ -652,6 +690,7 @@ impl DuplicationManager {
             delays,
             volumes,
             sources,
+            primary_volumes,
             levels,
             delay_sync: AtomicBool::new(true),
         }
@@ -678,8 +717,15 @@ impl DuplicationManager {
         }
     }
 
-    /// Push a new volume value to any live engine using `device_id`, mirror or
-    /// primary. Persisting the value is the caller's job (see `VolumeConfig`).
+    /// Push a new volume value to any live engine using `device_id` as a
+    /// mirror. Persisting the value is the caller's job (see `VolumeConfig`).
+    ///
+    /// The primary device takes no share anymore: its loudness is the
+    /// program's session volume (`update_primary_volume`), which is a
+    /// property of the program rather than of the device. A value stored for
+    /// a device applies whenever that device plays as a copy — including for
+    /// an engine where it is the primary of one route and a mirror of
+    /// another.
     pub fn update_volume(&self, device_id: &str, percent: u32) {
         for engine in self
             .engines
@@ -687,16 +733,57 @@ impl DuplicationManager {
             .unwrap_or_else(|e| e.into_inner())
             .values()
         {
-            if engine.primary_device_id == device_id {
-                engine
-                    .primary_volume_percent
-                    .store(percent, Ordering::Relaxed);
-            }
             for mirror in &engine.mirrors {
                 if mirror.device_id == device_id {
                     mirror.volume_percent.store(percent, Ordering::Relaxed);
                 }
             }
+        }
+    }
+
+    /// Push a program's primary volume — its session volume — to every engine
+    /// running for it, and write it onto the live sessions so it takes effect
+    /// now. Matched by executable name, the same ownership rule the level
+    /// uses; persisting the value is the caller's job (see
+    /// `PrimaryVolumeConfig`).
+    ///
+    /// A program with no live session is left as it is: the value is stored,
+    /// and the next engine this program gets applies it at start.
+    pub fn update_primary_volume(&self, exe_name: &str, percent: u32) {
+        for engine in self
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .filter(|engine| engine.exe_name == exe_name)
+        {
+            engine
+                .session_volume_percent
+                .store(percent, Ordering::Relaxed);
+            let touched = super::sessions::set_session_volume(engine.pid, percent as f32 / 100.0)
+                .unwrap_or(0);
+            if touched == 0 {
+                log::warn!(
+                    "no live session for PID {} — primary volume stored for its next route",
+                    engine.pid
+                );
+            }
+        }
+    }
+
+    /// Give every engine's program its pre-route session volume back.
+    ///
+    /// Called on app exit: the route ends with the process, and a session
+    /// volume left behind would keep the program quietly playing everywhere —
+    /// the volume mixer remembers the value for its next launch.
+    pub fn restore_all_session_volumes(&self) {
+        for engine in self
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+        {
+            engine.restore_session_volume();
         }
     }
 
@@ -818,7 +905,9 @@ impl DuplicationManager {
             mirrors,
             primary_device_id: primary_device_id.to_string(),
             primary_delay_ms: AtomicI32::new(self.delays.get(primary_device_id)),
-            primary_volume_percent: AtomicU32::new(self.volumes.get(primary_device_id)),
+            session_volume_percent: AtomicU32::new(self.primary_volumes.get(exe_name)),
+            restore_volume_percent: AtomicU32::new(100),
+            restore_volume: AtomicBool::new(false),
             source_volume_percent: AtomicU32::new(self.sources.get(exe_name)),
             levels: self.levels.clone(),
             format,
@@ -834,6 +923,29 @@ impl DuplicationManager {
             started: Instant::now(),
             last_audio_ms: AtomicU64::new(0),
         });
+
+        // Claim the program's session volume for this route: the stored
+        // primary volume is what the primary device plays at, and the mirrors
+        // compensate for it (see `session_compensation`). What the program
+        // played at before is remembered so the route can give it back on
+        // stop — a session volume that outlived the route would keep the
+        // program quiet everywhere, and the volume mixer remembers the value
+        // for its next launch. Read before the set, so the restore hands back
+        // the user's own value rather than ours.
+        if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
+            shared.restore_volume_percent.store(
+                (pre_route * 100.0).round().clamp(0.0, 100.0) as u32,
+                Ordering::Relaxed,
+            );
+            shared.restore_volume.store(true, Ordering::Relaxed);
+        }
+        let session_percent = shared.session_volume_percent.load(Ordering::Relaxed);
+        let touched =
+            super::sessions::set_session_volume(pid, session_percent as f32 / 100.0).unwrap_or(0);
+        if touched == 0 {
+            warn!("no live session for PID {pid} — primary volume applies when it next sounds");
+        }
+
         self.engines
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -868,6 +980,12 @@ impl DuplicationManager {
             for mirror in &shared.mirrors {
                 mirror.wake();
             }
+            // Synchronously, before this returns: the next thing the caller
+            // may do is start a new engine for the same program (a re-route),
+            // and that engine reads the program's current session volume as
+            // its own pre-route value. A restore racing that read would hand
+            // the new engine the wrong baseline.
+            shared.restore_session_volume();
         }
     }
 
@@ -908,12 +1026,16 @@ impl DuplicationManager {
     }
 
     /// Remove `pid`'s engine unless a newer engine replaced it. Called by the
-    /// engine's own capture thread on exit.
-    fn unregister(&self, pid: u32, generation: u64) {
+    /// engine's own capture thread on exit; `true` when this engine was still
+    /// the one serving `pid`, which is what makes its own teardown steps (the
+    /// session-volume restore) safe to run.
+    fn unregister(&self, pid: u32, generation: u64) -> bool {
         let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
         if engines.get(&pid).map(|e| e.generation) == Some(generation) {
             engines.remove(&pid);
+            return true;
         }
+        false
     }
 }
 
@@ -947,8 +1069,17 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
         shared.capture_wakeups.load(Ordering::Relaxed),
         mirror_wakes
     );
-    app.state::<DuplicationManager>()
+    let was_current = app
+        .state::<DuplicationManager>()
         .unregister(shared.pid, shared.generation);
+    // An engine that died on its own error leaves the program playing at the
+    // session volume this route claimed — give it back, unless the process
+    // (and with it the session) is gone. A clean `Stopped` exit was already
+    // restored synchronously by `stop`, and restoring again here could clobber
+    // a successor engine's freshly claimed volume.
+    if was_current && matches!(reason, ExitReason::Error(_)) {
+        shared.restore_session_volume();
+    }
     let _ = app.emit(
         "duplication-stopped",
         json!({
@@ -1126,28 +1257,45 @@ fn group_min_delay_ms(shared: &EngineShared) -> i32 {
         .unwrap_or(0)
 }
 
-/// Volume of the group's loudest device, which is the level every other device
-/// is scaled against.
+/// Volume of the loudest *copy* in the group, which is the level every other
+/// mirror is scaled against.
 ///
-/// This is the volume counterpart of the delay reference: the engine only
-/// writes mirrors, and software gain attenuates but never boosts, so the
-/// loudest device of the group stays exactly where the app put it and the rest
-/// are brought down towards it. The primary counts towards the reference even
-/// though its own value cannot be applied. Mirrors that failed to open are
-/// ignored, exactly as they are for delays. Floored at 1 so an all-zero group
-/// stays a valid (silent) division.
+/// Software gain attenuates but never boosts, so the loudest mirror stays
+/// where the app put it and the rest are brought down towards it. The primary
+/// is deliberately not in the reference: its loudness is the program's session
+/// volume (`session_volume_percent`) — a property of the program, and the one
+/// thing about the primary that *can* move — while a mirror's share stays a
+/// property of the device. Mixing the two into one reference would make every
+/// mirror chase a number a session-volume change moves without any mirror
+/// click. Mirrors that failed to open are ignored, exactly as they are for
+/// delays. Floored at 1 so an all-zero group stays a valid (silent) division.
 fn group_max_volume(shared: &EngineShared) -> u32 {
     shared
         .mirrors
         .iter()
         .filter(|m| m.enabled.load(Ordering::Relaxed))
         .map(|m| m.volume_percent.load(Ordering::Relaxed))
-        .chain(std::iter::once(
-            shared.primary_volume_percent.load(Ordering::Relaxed),
-        ))
         .max()
         .unwrap_or(100)
         .max(1)
+}
+
+/// Gain that undoes the program's session volume on the copies.
+///
+/// The loopback tap sits behind the session volume, so lowering it lowers what
+/// the mirrors receive too — and with it everything the copies would play.
+/// Dividing their gain by the same factor puts the copies back exactly where
+/// they were, which is what makes the primary's volume control move the
+/// primary path alone: in a mirror's arithmetic the session volume cancels,
+/// and in the primary's path it is the whole change. The percentage is
+/// floored at [`crate::config::PRIMARY_VOLUME_MIN_PERCENT`], both because the
+/// stored value is clamped there and so an out-of-band zero can never divide.
+fn session_compensation(shared: &EngineShared) -> f32 {
+    let percent = shared
+        .session_volume_percent
+        .load(Ordering::Relaxed)
+        .max(crate::config::PRIMARY_VOLUME_MIN_PERCENT) as f32;
+    100.0 / percent
 }
 
 /// Gain to apply to `mirror`'s frames: its own share of the group's loudest
@@ -1644,16 +1792,20 @@ fn pump_render(
                         .map_err(|e| com_err("ReleaseBuffer(render)", e))?;
                 }
             } else {
-                // Both gains are applied here, the one place where the app's
-                // audio is in our hands: the chunk is in the capture format,
-                // which is also what this mirror's render client was initialized
-                // with, so the device gets the shape it expects. The program's
-                // own level is a property of the source and the device's share
-                // is a property of where this copy is going, so they multiply.
+                // All three gains are applied here, the one place where the
+                // app's audio is in our hands: the chunk is in the capture
+                // format, which is also what this mirror's render client was
+                // initialized with, so the device gets the shape it expects.
+                // The program's own level is a property of the source, the
+                // device's share is a property of where this copy is going,
+                // and the session compensation undoes the session volume the
+                // capture has already been through — so they multiply.
                 apply_gain(
                     &mut chunk,
                     shared.sample,
-                    source_gain(shared) * volume_gain(shared, mirror),
+                    source_gain(shared)
+                        * volume_gain(shared, mirror)
+                        * session_compensation(shared),
                 );
                 let frames = (chunk.len() / shared.block_align) as u32;
                 // SAFETY: copy of exactly frames * block_align bytes into the
@@ -2011,7 +2163,9 @@ mod tests {
                 .collect(),
             primary_device_id: "primary".to_string(),
             primary_delay_ms: AtomicI32::new(primary_ms),
-            primary_volume_percent: AtomicU32::new(100),
+            session_volume_percent: AtomicU32::new(100),
+            restore_volume_percent: AtomicU32::new(100),
+            restore_volume: AtomicBool::new(false),
             source_volume_percent: AtomicU32::new(100),
             levels: Arc::new(SourceLevels::new()),
             format: Vec::new(),
@@ -2226,37 +2380,61 @@ mod tests {
         }
     }
 
-    /// Engine whose mirrors carry the given volumes, with the primary at
-    /// `primary_percent`.
-    fn engine_with_volumes(mirror_percents: &[u32], primary_percent: u32) -> EngineShared {
+    /// Engine whose mirrors carry the given volumes, with the program's
+    /// session volume at `session_percent`.
+    fn engine_with_volumes(mirror_percents: &[u32], session_percent: u32) -> EngineShared {
         let shared = engine(&vec![0; mirror_percents.len()], 0, true);
         for (mirror, percent) in shared.mirrors.iter().zip(mirror_percents) {
             mirror.volume_percent.store(*percent, Ordering::Relaxed);
         }
         shared
-            .primary_volume_percent
-            .store(primary_percent, Ordering::Relaxed);
+            .session_volume_percent
+            .store(session_percent, Ordering::Relaxed);
         shared
     }
 
     #[test]
-    fn the_loudest_device_is_the_reference_volume() {
+    fn the_loudest_copy_is_the_reference_volume() {
         let shared = engine_with_volumes(&[50, 100], 80);
         assert_eq!(group_max_volume(&shared), 100);
-        // The loudest device plays as the app produced it; the quieter one is
+        // The loudest copy plays as the app produced it; the quieter one is
         // brought down to half.
         assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.5);
         assert_eq!(volume_gain(&shared, &shared.mirrors[1]), 1.0);
     }
 
     #[test]
-    fn the_primary_counts_towards_the_reference_volume() {
-        // The primary is the loudest, so every mirror is measured against it
-        // even though its own value cannot be applied to the audio.
+    fn the_session_volume_is_not_in_the_copies_reference() {
+        // The primary's loudness is the program's session volume — a property
+        // of the program, not of a device — so it stays out of the reference
+        // the mirrors are measured against. A session-volume change must not
+        // move a single mirror's share gain.
         let shared = engine_with_volumes(&[25, 50], 100);
-        assert_eq!(group_max_volume(&shared), 100);
-        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.25);
-        assert_eq!(volume_gain(&shared, &shared.mirrors[1]), 0.5);
+        assert_eq!(group_max_volume(&shared), 50);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.5);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[1]), 1.0);
+    }
+
+    #[test]
+    fn the_copies_are_compensated_for_the_session_volume() {
+        // The capture sits behind the session volume, so a mirror's total gain
+        // divides it back out: at a session volume of 50 the captured stream
+        // is half of what the program produced, and the copies play at exactly
+        // the share the device asked for — 100 here, i.e. untouched.
+        let shared = engine_with_volumes(&[100], 50);
+        let mirror = &shared.mirrors[0];
+        assert_eq!(session_compensation(&shared), 2.0);
+        assert_eq!(
+            source_gain(&shared) * volume_gain(&shared, mirror) * session_compensation(&shared),
+            2.0
+        );
+
+        // And the floor keeps an out-of-band zero from dividing.
+        shared.session_volume_percent.store(0, Ordering::Relaxed);
+        assert_eq!(
+            source_gain(&shared) * volume_gain(&shared, mirror) * session_compensation(&shared),
+            20.0
+        );
     }
 
     #[test]
@@ -2267,11 +2445,11 @@ mod tests {
     }
 
     #[test]
-    fn disabled_mirrors_do_not_raise_the_reference_volume() {
+    fn disabled_mirrors_do_not_raise_the_copies_reference_volume() {
         let shared = engine_with_volumes(&[20, 100], 50);
         shared.mirrors[1].enabled.store(false, Ordering::Relaxed);
-        assert_eq!(group_max_volume(&shared), 50);
-        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 0.4);
+        assert_eq!(group_max_volume(&shared), 20);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 1.0);
     }
 
     #[test]

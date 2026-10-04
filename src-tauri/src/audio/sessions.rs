@@ -9,7 +9,7 @@ use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, AudioSessionStateActive, IAudioSessionControl, IAudioSessionControl2,
     IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice, IMMDeviceCollection,
-    IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+    IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
@@ -247,4 +247,147 @@ pub(crate) fn get_process_exe_name(pid: u32) -> Option<String> {
     }
 
     result
+}
+
+/// Apply `f` to the [`ISimpleAudioVolume`] of every live session owned by
+/// `pid`, across all active render devices.
+///
+/// Returns whatever the closures produced — one entry per session volume they
+/// answered for. An empty result means the process has no live audio session
+/// right now, which is a normal state around a session's edges rather than an
+/// error.
+fn with_session_volumes<T>(
+    pid: u32,
+    mut f: impl FnMut(&ISimpleAudioVolume) -> Result<Option<T>, AudioError>,
+) -> Result<Vec<T>, AudioError> {
+    let com_owned = crate::audio::init_com()?;
+
+    let result = (|| -> Result<Vec<T>, AudioError> {
+        // SAFETY: MMDeviceEnumerator is the registered coclass for IMMDeviceEnumerator.
+        let enumerator: IMMDeviceEnumerator = unsafe {
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| AudioError::Api(format!("CoCreateInstance failed: {e}")))?
+        };
+        // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
+        let devices: IMMDeviceCollection = unsafe {
+            enumerator
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints failed: {e}")))?
+        };
+        let device_count = unsafe {
+            devices
+                .GetCount()
+                .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
+        };
+
+        let mut produced: Vec<T> = Vec::new();
+        for d in 0..device_count {
+            // SAFETY: d in [0, device_count).
+            let device: IMMDevice = unsafe {
+                devices
+                    .Item(d)
+                    .map_err(|e| AudioError::Api(format!("Item({d}) failed: {e}")))?
+            };
+            // One endpoint whose session manager will not activate must not
+            // lose the program's volume elsewhere: skip it the way the
+            // process list does.
+            if let Err(e) = with_device_session_volumes(&device, pid, &mut f, &mut produced) {
+                warn!("skipping the sessions of device {d}: {e}");
+            }
+        }
+        Ok(produced)
+    })();
+
+    crate::audio::uninit_com(com_owned);
+
+    result
+}
+
+/// Feed every session of `device` that belongs to `pid` to `f`.
+fn with_device_session_volumes<T>(
+    device: &IMMDevice,
+    pid: u32,
+    f: &mut impl FnMut(&ISimpleAudioVolume) -> Result<Option<T>, AudioError>,
+    produced: &mut Vec<T>,
+) -> Result<(), AudioError> {
+    // SAFETY: Activate IAudioSessionManager2 on an active render device.
+    let manager: IAudioSessionManager2 = unsafe {
+        device
+            .Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
+            .map_err(|e| AudioError::Api(format!("Activate(IAudioSessionManager2) failed: {e}")))?
+    };
+    // SAFETY: GetSessionEnumerator on an active session manager.
+    let session_enum: IAudioSessionEnumerator = unsafe {
+        manager
+            .GetSessionEnumerator()
+            .map_err(|e| AudioError::Api(format!("GetSessionEnumerator failed: {e}")))?
+    };
+    let session_count = unsafe {
+        session_enum
+            .GetCount()
+            .map_err(|e| AudioError::Api(format!("GetCount failed: {e}")))?
+    };
+
+    for i in 0..session_count {
+        // SAFETY: i in [0, session_count).
+        let control: IAudioSessionControl = unsafe {
+            session_enum
+                .GetSession(i)
+                .map_err(|e| AudioError::Api(format!("GetSession({i}) failed: {e}")))?
+        };
+        // SAFETY: cast to IAudioSessionControl2.
+        let control2: IAudioSessionControl2 = control
+            .cast()
+            .map_err(|e| AudioError::Api(format!("cast(IAudioSessionControl2) failed: {e}")))?;
+        let session_pid = unsafe {
+            control2
+                .GetProcessId()
+                .map_err(|e| AudioError::Api(format!("GetProcessId({i}) failed: {e}")))?
+        };
+        if session_pid != pid {
+            continue;
+        }
+        // SAFETY: the session control object implements ISimpleAudioVolume;
+        // this is the documented per-session volume path.
+        let volume: ISimpleAudioVolume = control
+            .cast()
+            .map_err(|e| AudioError::Api(format!("cast(ISimpleAudioVolume) failed: {e}")))?;
+        if let Some(value) = f(&volume)? {
+            produced.push(value);
+        }
+    }
+    Ok(())
+}
+
+/// Set the master volume (0.0–1.0) of every live audio session owned by
+/// `pid`. Returns the number of sessions touched — 0 means the program has no
+/// live session to speak of, and the caller should say so rather than claim
+/// the value was applied.
+pub fn set_session_volume(pid: u32, volume: f32) -> Result<usize, AudioError> {
+    let volume = volume.clamp(0.0, 1.0);
+    let touched = with_session_volumes(pid, |v| {
+        // SAFETY: eventcontext = null means no session event notification GUID.
+        unsafe { v.SetMasterVolume(volume, std::ptr::null()) }
+            .map_err(|e| AudioError::Api(format!("SetMasterVolume failed: {e}")))?;
+        Ok(Some(()))
+    })?;
+    Ok(touched.len())
+}
+
+/// The master volume (0.0–1.0) of the first live session owned by `pid`, or
+/// `None` when it has no live session. A process's sessions share what the
+/// volume mixer shows, so the first one found is as good as any.
+pub fn get_session_volume(pid: u32) -> Result<Option<f32>, AudioError> {
+    let mut taken = false;
+    let found = with_session_volumes(pid, |v| {
+        if taken {
+            return Ok(None);
+        }
+        // SAFETY: read-only query on a live session volume.
+        let value = unsafe { v.GetMasterVolume() }
+            .map_err(|e| AudioError::Api(format!("GetMasterVolume failed: {e}")))?;
+        taken = true;
+        Ok(Some(value))
+    })?;
+    Ok(found.into_iter().next())
 }

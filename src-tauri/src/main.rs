@@ -67,6 +67,10 @@ fn main() {
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             let sources = std::sync::Arc::new(sources);
             app.manage(sources.clone());
+            let primary_volumes = config::PrimaryVolumeConfig::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            let primary_volumes = std::sync::Arc::new(primary_volumes);
+            app.manage(primary_volumes.clone());
             let settings = config::AppSettings::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(settings);
@@ -76,7 +80,11 @@ fn main() {
             let levels = std::sync::Arc::new(audio::levels::SourceLevels::new());
             app.manage(levels.clone());
             app.manage(audio::duplication::DuplicationManager::new(
-                delays, volumes, sources, levels,
+                delays,
+                volumes,
+                sources,
+                primary_volumes,
+                levels,
             ));
             // Every per-app endpoint assignment this app writes is written down
             // here, so it can be taken back on stop and on quit: Windows keeps
@@ -134,6 +142,8 @@ fn main() {
             commands::clear_route,
             commands::set_device_volume,
             commands::get_device_volumes,
+            commands::set_primary_volume,
+            commands::get_primary_volumes,
             commands::set_source_volume,
             commands::get_source_volumes,
             commands::align_source_levels,
@@ -155,9 +165,22 @@ fn main() {
             // though the user switched to another one afterwards. (`ExitRequested`
             // covers both the tray's Quit and closing the last window.)
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                restore_session_volumes(app);
                 release_pinned_routes(app);
             }
         });
+}
+
+/// Give every routed program its pre-route loudness back before quitting.
+///
+/// The session volume a route wrote for its primary device would otherwise
+/// follow the program into its unrouted life — and the volume mixer remembers
+/// the value for the next launch — so it is handed back the same way the
+/// endpoint assignments are.
+fn restore_session_volumes(app: &AppHandle) {
+    if let Some(duplications) = app.try_state::<audio::duplication::DuplicationManager>() {
+        duplications.restore_all_session_volumes();
+    }
 }
 
 /// Release every endpoint assignment this run wrote, before the app goes away.
