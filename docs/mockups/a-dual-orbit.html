@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方案 A · 双环舞台 — App Audio Router 2.3.0 主界面提案</title>
+<style>
+:root{
+  --bg-primary:#eef0f3;--bg-tertiary:#e8e8ec;
+  --text-primary:#18181b;--text-secondary:#3f3f46;--text-muted:#71717a;
+  --accent:#0891b2;--accent-hover:#0e7490;--accent-muted:rgba(8,145,178,.12);--accent-ink:#ffffff;
+  --surface:#ffffff;--surface-sunken:#f2f3f5;--surface-hover:rgba(24,24,27,.035);
+  --hairline:#e6e6ea;--hairline-strong:#d4d4da;
+  --shadow-float:0 1px 2px rgba(24,40,66,.06),0 8px 24px rgba(24,40,66,.1);
+  --type-primary:#0891b2;--type-mirror:#0f766e;--type-idle:#94a3b8;--type-feed:#b45309;
+}
+.dark{
+  --bg-primary:#0b0e14;--bg-tertiary:#27272a;
+  --text-primary:#fafafa;--text-secondary:#d4d4d8;--text-muted:#a1a1aa;
+  --accent:#22d3ee;--accent-hover:#06b6d4;--accent-muted:rgba(34,211,238,.14);--accent-ink:#05222b;
+  --surface:#12151a;--surface-sunken:#0e1114;--surface-hover:rgba(255,255,255,.035);
+  --hairline:#23272e;--hairline-strong:#2e3742;
+  --shadow-float:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.35);
+  --type-primary:#22d3ee;--type-mirror:#14b8a6;--type-idle:#64748b;--type-feed:#fbbf24;
+}
+*{margin:0;box-sizing:border-box}
+body{min-height:100vh;background:#e3e5ea;padding:22px 0 34px;display:flex;flex-direction:column;align-items:center;gap:14px;
+  font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;color:#18181b}
+body.dark{background:#04060a;color:#fafafa}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+.mnote{width:980px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#52525b}
+body.dark .mnote{color:#9494a0}
+.mnote b{font-size:13px;color:#18181b}
+body.dark .mnote b{color:#fafafa}
+.mnote a{color:#0e7490;text-decoration:none;border-bottom:1px dotted currentColor;cursor:pointer;white-space:nowrap}
+body.dark .mnote a{color:#22d3ee}
+.mnote .sp{flex:1}
+.tbtn2{border:1px solid #d4d4da;background:#fff;border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;color:#18181b}
+body.dark .tbtn2{border-color:#2e3742;background:#161c24;color:#fafafa}
+.win{width:980px;height:680px;flex:none;background:var(--bg-primary);border:1px solid var(--hairline-strong);border-radius:14px;
+  box-shadow:0 24px 64px rgba(0,0,0,.30);display:flex;flex-direction:column;overflow:hidden;color:var(--text-primary)}
+/* title bar */
+.tbar{height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 6px 0 14px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+.branddot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.ver{font-size:10.5px;color:var(--text-muted);border:1px solid var(--hairline-strong);padding:1px 7px;border-radius:999px}
+.tcount{margin-left:auto;font-size:11.5px;color:var(--text-muted)}
+.tbtn{width:32px;height:26px;display:grid;place-items:center;border-radius:7px;color:var(--text-muted);cursor:pointer;font-size:12px}
+.tbtn:hover{background:var(--surface-hover);color:var(--text-primary)}
+.tbtn.close:hover{background:rgba(239,68,68,.14);color:var(--error)}
+.wbody{flex:1;display:flex;min-height:0}
+/* rail */
+.rail{width:236px;flex:none;border-right:1px solid var(--hairline);padding:8px;display:flex;flex-direction:column;gap:2px;overflow:auto}
+.railhead{display:flex;align-items:center;padding:4px 10px 8px;font-size:11.5px;color:var(--text-muted)}
+.railhead .sp{flex:1}
+.railhead .clr{font-size:11px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:4px}
+.rrow{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:10px;cursor:pointer;position:relative}
+.rrow:hover{background:var(--surface-hover)}
+.rrow.sel{background:var(--surface)}
+.rrow.sel:hover{background:var(--surface)}
+.ring{width:14px;height:14px;flex:none;border-radius:50%;border:1.5px solid var(--hairline-strong);display:grid;place-items:center}
+.ring.main{border-color:var(--type-primary)}
+.ring .core{width:6px;height:6px;border-radius:50%;background:var(--type-primary);opacity:0}
+.ring .core.on{opacity:1}
+.rmain{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.rname{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rsub{font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fbadge{width:16px;height:16px;flex:none;border-radius:50%;background:var(--type-feed);color:#fff;font-size:9px;
+  display:grid;place-items:center;font-weight:700}
+.dark .fbadge{color:#3b2b05}
+/* main + tabs */
+.pane{flex:1;position:relative;display:flex;flex-direction:column;min-width:0}
+.tabs{height:32px;flex:none;display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--hairline);font-size:12.5px;color:var(--text-muted)}
+.tab{padding:8px 2px;position:relative}
+.tab.on{color:var(--text-primary);font-weight:600}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);border-radius:2px}
+/* stage */
+.stage-wrap{flex:1;overflow:auto;display:flex;justify-content:center;align-items:center}
+.stage{position:relative;width:640px;height:470px;flex:none}
+.legend{position:absolute;top:10px;right:14px;font-size:10.5px;color:var(--text-muted);pointer-events:none}
+.wires line{stroke-linecap:round}
+.wires .w{stroke-width:2;opacity:.6}
+.wires .w.pri{stroke:var(--type-primary)}
+.wires .w.mir{stroke:var(--type-mirror)}
+.wires .w.feed{stroke:var(--type-feed);opacity:.85}
+.wires .flow{stroke-dasharray:3 9;animation:dash .55s linear infinite;opacity:1}
+@keyframes dash{to{stroke-dashoffset:-12}}
+.sat{position:absolute;display:grid;place-items:center;border-radius:50%;cursor:pointer;background:var(--surface);
+  border:1px solid var(--hairline-strong);box-shadow:var(--shadow-float);transition:border-color .15s,transform .15s}
+.sat:hover{border-color:var(--accent);transform:scale(1.04)}
+.sat.dev{width:64px;height:64px}
+.sat.proc{width:46px;height:46px}
+.sat.idle{background:transparent;border-color:var(--hairline-strong);box-shadow:none;opacity:.9}
+.sat.feedc{border-color:var(--type-feed)}
+.sring{border-radius:50%;border:1.5px solid var(--type-idle);display:grid;place-items:center}
+.sat.dev .sring{width:20px;height:20px}
+.sat.proc .sring{width:16px;height:16px}
+.sring.main{border-color:var(--type-primary)}
+.sring.mir{border-color:var(--type-mirror)}
+.sring.feed{border-color:var(--type-feed)}
+.sring .core{border-radius:50%;opacity:0}
+.sat.dev .sring .core{width:8px;height:8px}
+.sat.proc .sring .core{width:6px;height:6px}
+.sring .core.on{opacity:1}
+.slab{position:absolute;width:130px;text-align:center;pointer-events:none}
+.sname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srole{font-size:10.5px;margin-top:1px;min-height:14px}
+.srole.pri{color:var(--type-primary)}
+.srole.mir{color:var(--type-mirror)}
+.srole.feed{color:var(--type-feed)}
+.srole.off{color:var(--text-muted)}
+.tuner{margin-top:3px;display:flex;flex-direction:column;gap:3px;align-items:center;pointer-events:auto}
+.trow{display:flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--hairline-strong);
+  border-radius:8px;padding:1px 5px}
+.trow .tv{font-size:10.5px;min-width:46px;text-align:center;color:var(--text-secondary)}
+.tbtn3{width:16px;height:16px;border:0;background:transparent;border-radius:5px;display:grid;place-items:center;
+  font-size:11px;color:var(--text-muted);cursor:pointer;line-height:1}
+.tbtn3:hover{background:var(--accent-muted);color:var(--accent)}
+/* hub */
+.hub{position:absolute;width:104px;height:104px;border-radius:50%;background:var(--surface);border:1px solid var(--hairline-strong);
+  box-shadow:var(--shadow-float);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  text-align:center;padding:0 10px}
+.hub .hring{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--type-idle);display:grid;place-items:center}
+.hub .hring.main{border-color:var(--type-primary)}
+.hub .hring .core{width:6px;height:6px;border-radius:50%;background:var(--type-primary);opacity:0}
+.hub .hring .core.on{opacity:1}
+.hname{font-size:13px;font-weight:700;max-width:88px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hstat{font-size:10.5px;color:var(--text-muted)}
+.hub.able{cursor:pointer}
+.hub.able:hover{border-color:var(--accent);box-shadow:var(--shadow-float),0 0 0 3px var(--accent-muted)}
+.applycap{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--accent-ink);
+  font-size:10.5px;padding:2px 10px;border-radius:999px;white-space:nowrap;pointer-events:none}
+/* briefing & toast */
+.brief-btn{position:absolute;left:16px;bottom:16px;background:var(--surface);border:1px solid var(--hairline-strong);
+  border-radius:999px;padding:6px 15px;font-size:12.5px;box-shadow:var(--shadow-float);cursor:pointer;color:var(--text-primary)}
+.brief-pop{position:absolute;left:16px;bottom:56px;width:430px;background:var(--surface);border:1px solid var(--hairline-strong);
+  border-radius:12px;box-shadow:var(--shadow-float);padding:12px 15px;font-size:12.5px;line-height:1.8;z-index:20}
+.toast{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--hairline-strong);
+  border-radius:999px;box-shadow:var(--shadow-float);padding:7px 8px 7px 16px;font-size:12.5px;display:flex;align-items:center;
+  gap:10px;z-index:30;white-space:nowrap}
+.toast .u{border:0;background:var(--accent-muted);color:var(--accent);font-size:12px;border-radius:999px;padding:4px 12px;cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<div class="mnote">
+  <b>方案 A · 双环舞台</b>
+  <span>延续同心圆：内环＝输出设备（今日的舞台），外环＝其他程序；辐条即路由，<span style="color:var(--type-feed)">琥珀色</span>＝送进程序的输入，流动方向即声流方向。点圆盘改计划，点中心生效。</span>
+  <span class="sp"></span>
+  <a href="index.html">← 全部方案</a>
+  <button class="tbtn2" onclick="document.body.classList.toggle('dark')">◐ 主题</button>
+</div>
+
+<div class="win">
+  <div class="tbar">
+    <div class="brand"><span class="branddot"></span>App Audio Router<span class="ver mono">v2.3.0</span></div>
+    <div class="tcount mono" id="tcount"></div>
+    <div class="tbtn" title="设置">⚙</div>
+    <div class="tbtn">—</div><div class="tbtn">□</div><div class="tbtn close">✕</div>
+  </div>
+  <div class="wbody">
+    <aside class="rail" id="rail"></aside>
+    <main class="pane">
+      <div class="tabs"><span class="tab on">路由</span><span class="tab">活动</span></div>
+      <div class="stage-wrap">
+        <div class="stage">
+          <div class="legend">内环 · 输出设备　外环 · 程序</div>
+          <svg class="wires" id="wires" width="640" height="470" style="position:absolute;inset:0">
+            <defs>
+              <marker id="arrF" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L8 4 L0 8 z" style="fill:var(--type-feed)"></path>
+              </marker>
+            </defs>
+            <g id="wgroup"></g>
+          </svg>
+          <div id="nodes" style="position:absolute;inset:0"></div>
+        </div>
+      </div>
+      <button class="brief-btn" id="briefBtn" onclick="toggleBrief()">直说</button>
+      <div class="brief-pop" id="briefPop" style="display:none"></div>
+      <div class="toast" id="toast" style="display:none"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+const DEVICES=[
+  {id:'spk', name:'扬声器',      sub:'Realtek(R) Audio'},
+  {id:'hp',  name:'WH-1000XM5', sub:'蓝牙耳机'},
+  {id:'hdmi',name:'DELL U2723', sub:'HDMI'},
+];
+const DEF='spk';
+const PROCS=[
+  {id:'spotify',name:'Spotify',        exe:'spotify.exe',       pid:8124, playing:true,  dev:['spk','hp'], feed:['discord']},
+  {id:'edge',   name:'Microsoft Edge', exe:'msedge.exe',        pid:9312, playing:true,  dev:[],           feed:['obs']},
+  {id:'discord',name:'Discord',        exe:'Discord.exe',       pid:7788, playing:true,  dev:[],           feed:[]},
+  {id:'obs',    name:'OBS Studio',     exe:'obs64.exe',         pid:6420, playing:false, dev:[],           feed:[]},
+  {id:'game',   name:'Cyberpunk 2077', exe:'Cyberpunk2077.exe', pid:5120, playing:true,  dev:['hp'],       feed:[]},
+];
+const DELAY={spk:0,hdmi:0,hp:40};          // 每台设备的延迟补偿（全局）
+const SHARE={spk:100,hdmi:100,hp:100};     // 副本份额（全局）
+const FEEDVOL={discord:80,obs:60};         // 送入某程序的音量
+const PVOL={spotify:100,edge:100,discord:100,obs:100,game:100}; // 主输出音量（会话音量，按程序）
+const DELAY_STEP=10, VOL_STEP=5;
+
+let sel='spotify';
+let plan=null;            // {dev:[],feed:[]} —— 选中程序的计划
+let undoState=null, undoTimer=null;
+
+const P=id=>PROCS.find(p=>p.id===id);
+const D=id=>DEVICES.find(d=>d.id===id);
+const fedByNames=id=>PROCS.filter(p=>p.feed.includes(id)).map(p=>p.name);
+const setEq=(a,b)=>a.length===b.length&&a.every(x=>b.includes(x));
+const lst=a=>a.length<=1?a.join(''):a.slice(0,-1).join('、')+' 和 '+a[a.length-1];
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+function snapshot(){return{dev:[...P(sel).dev],feed:[...P(sel).feed]}}
+function select(id){sel=id;plan=snapshot();render()}
+function toggleDev(id){
+  const i=plan.dev.indexOf(id);
+  if(i>=0){if(plan.dev.length===1)return; plan.dev.splice(i,1)} else plan.dev.push(id);
+  render();
+}
+function toggleFeed(id){
+  const i=plan.feed.indexOf(id);
+  if(i>=0)plan.feed.splice(i,1); else plan.feed.push(id);
+  render();
+}
+function applyHub(){
+  const cur=P(sel);
+  if(setEq(plan.dev,cur.dev)&&setEq(plan.feed,cur.feed))return;
+  undoState={id:sel,dev:[...cur.dev],feed:[...cur.feed]};
+  cur.dev=[...plan.dev];cur.feed=[...plan.feed];
+  render();showToast('路由已生效。',true);
+}
+function undo(){
+  if(!undoState)return;
+  const p=P(undoState.id);p.dev=undoState.dev;p.feed=undoState.feed;
+  if(undoState.id===sel)plan=snapshot();
+  undoState=null;render();hideToast();
+}
+function showToast(msg,withUndo){
+  const t=document.getElementById('toast');
+  t.innerHTML=esc(msg)+(withUndo?' <button class="u" onclick="undo()">撤销</button>':'');
+  t.style.display='flex';
+  clearTimeout(undoTimer);undoTimer=setTimeout(hideToast,8000);
+}
+function hideToast(){document.getElementById('toast').style.display='none'}
+function nudgeDelay(id,d){DELAY[id]=Math.max(0,Math.min(200,DELAY[id]+d));render()}
+function nudgeShare(id,d){SHARE[id]=Math.max(0,Math.min(100,SHARE[id]+d));render()}
+function nudgeFeed(id,d){FEEDVOL[id]=Math.max(0,Math.min(100,(FEEDVOL[id]??100)+d));render()}
+function nudgePvol(id,d){PVOL[id]=Math.max(5,Math.min(100,PVOL[id]+d));render()}
+function toggleBrief(){const b=document.getElementById('briefPop');b.style.display=b.style.display==='none'?'block':'none'}
+
+/* ---------- 舞台几何 ---------- */
+const S={W:640,H:470,cx:320,cy:228,hubR:52,devR:114,prR:182,devD:64,prD:46};
+const DEV_A={spk:90,hp:192,hdmi:294};
+const PROC_A={edge:38,discord:140,obs:235,game:344};
+function polar(R,a){const r=a*Math.PI/180;return{x:S.cx+R*Math.sin(r),y:S.cy-R*Math.cos(r)}}
+function spokeEnds(R,discR,a){
+  const t=polar(R,a),dx=t.x-S.cx,dy=t.y-S.cy,L=Math.hypot(dx,dy),ux=dx/L,uy=dy/L;
+  return{x1:S.cx+ux*S.hubR,y1:S.cy+uy*S.hubR,x2:t.x-ux*discR,y2:t.y-uy*discR};
+}
+
+function render(){
+  const cur=P(sel);
+  const applied=setEq(plan.dev,cur.dev)&&setEq(plan.feed,cur.feed);
+  const flowing=applied&&cur.playing;
+
+  /* --- 辐条 --- */
+  let w='';
+  plan.dev.forEach((id,i)=>{
+    const e=spokeEnds(S.devR,S.devD/2,DEV_A[id]);
+    w+=`<line class="w ${i===0?'pri':'mir'}${flowing?' flow':''}" x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}"></line>`;
+  });
+  plan.feed.forEach(id=>{
+    const e=spokeEnds(S.prR,S.prD/2,PROC_A[id]);
+    w+=`<line class="w feed${flowing?' flow':''}" x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" marker-end="url(#arrF)"></line>`;
+  });
+  PROCS.filter(q=>q.feed.includes(sel)&&q.id!==sel).forEach(q=>{
+    const e=spokeEnds(S.prR,S.prD/2,PROC_A[q.id]);
+    w+=`<line class="w feed${q.playing?' flow':''}" x1="${e.x2}" y1="${e.y2}" x2="${e.x1}" y2="${e.y1}" marker-end="url(#arrF)"></line>`;
+  });
+  document.getElementById('wgroup').innerHTML=w;
+
+  /* --- 圆盘 --- */
+  let n='';
+  DEVICES.forEach(d=>{
+    const pos=polar(S.devR,DEV_A[d.id]);
+    const idx=plan.dev.indexOf(d.id);
+    const inPlan=idx>=0;
+    const role=inPlan?(idx===0?'pri':'mir'):'off';
+    const roleWord=inPlan?(idx===0?'主输出':'副本'):'系统默认';
+    const tone=role==='pri'?'main':role==='mir'?'mir':'';
+    const coreOn=cur.playing&&inPlan;
+    let tuner='';
+    if(inPlan&&plan.dev.length>1){
+      if(idx===0){
+        tuner=`<div class="trow" title="主输出音量：程序的会话音量，只影响主输出这一路">
+          <button class="tbtn3" onclick="nudgePvol('${sel}',-5)">−</button>
+          <span class="tv mono">${PVOL[sel]} %</span>
+          <button class="tbtn3" onclick="nudgePvol('${sel}',5)">＋</button></div>`;
+      }else{
+        tuner=`<div class="trow" title="软件侧实测延迟随此值变化；主输出由系统直连，没有可压后的一段">
+          <button class="tbtn3" onclick="nudgeDelay('${d.id}',-10)">−</button>
+          <span class="tv mono">${DELAY[d.id]} ms</span>
+          <button class="tbtn3" onclick="nudgeDelay('${d.id}',10)">＋</button></div>
+        <div class="trow" title="这台设备作为副本时的响度份额">
+          <button class="tbtn3" onclick="nudgeShare('${d.id}',-5)">−</button>
+          <span class="tv mono">${SHARE[d.id]} %</span>
+          <button class="tbtn3" onclick="nudgeShare('${d.id}',5)">＋</button></div>`;
+      }
+    }
+    n+=`<div class="sat dev ${inPlan?'':'idle'}" style="left:${pos.x-S.devD/2}px;top:${pos.y-S.devD/2}px"
+        onclick="toggleDev('${d.id}')" title="${esc(d.name)}（${esc(d.sub)}）">
+      <span class="sring ${tone}"><span class="core ${coreOn?'on':''}" style="background:var(--type-${inPlan?(idx===0?'primary':'mirror'):'idle'})"></span></span></div>
+    <div class="slab" style="left:${pos.x-65}px;top:${pos.y+S.devD/2+5}px">
+      <div class="sname">${esc(d.name)}</div>
+      <div class="srole ${role}">${roleWord}</div>${tuner}</div>`;
+  });
+  PROCS.filter(p=>p.id!==sel).forEach(q=>{
+    const pos=polar(S.prR,PROC_A[q.id]);
+    const out=plan.feed.includes(q.id);
+    const inc=PROCS.some(p=>p.feed.includes(q.id)&&p.id===sel&&false)||q.feed.includes(sel);
+    const isFeed=out, isSrc=inc;
+    const tone=isFeed?'feed':'';
+    const word=isFeed?'送入':(isSrc?'来源':'');
+    const coreOn=q.playing&&(isFeed||isSrc);
+    let tuner='';
+    if(isFeed){
+      tuner=`<div class="trow" title="送进这个程序的音量">
+        <button class="tbtn3" onclick="nudgeFeed('${q.id}',-5)">−</button>
+        <span class="tv mono">${FEEDVOL[q.id]??100} %</span>
+        <button class="tbtn3" onclick="nudgeFeed('${q.id}',5)">＋</button></div>`;
+    }
+    const title=isFeed?`把「${cur.name}」的声音送进「${q.name}」的输入`
+      :isSrc?`「${fedByNames(sel)[0]||q.name}」正把声音送进「${cur.name}」的输入`
+      :`「${q.name}」的输入可以接收别的程序的声音`;
+    n+=`<div class="sat proc ${(isFeed||isSrc)?'':'idle'} ${isFeed?'feedc':''}" style="left:${pos.x-S.prD/2}px;top:${pos.y-S.prD/2}px"
+        onclick="toggleFeed('${q.id}')" title="${esc(title)}">
+      <span class="sring ${tone}"><span class="core ${coreOn?'on':''}" style="background:var(--type-feed)"></span></span></div>
+    <div class="slab" style="left:${pos.x-65}px;top:${pos.y+S.prD/2+4}px">
+      <div class="sname">${esc(q.name)}</div>
+      <div class="srole ${isFeed?'feed':isSrc?'feed':'off'}">${word}</div>${tuner}</div>`;
+  });
+  function inPlanOr(id){return plan.feed.includes(id)||PROCS.some(p=>p.id===sel&&p.feed.includes(id))}
+  document.getElementById('nodes').innerHTML=n;
+
+  /* --- 中心 --- */
+  const hub=document.getElementById('nodes');
+  const hubEl=document.createElement('div');
+  const able=!applied;
+  hubEl.className='hub'+(able?' able':'');
+  hubEl.style.left=(S.cx-S.hubR)+'px';hubEl.style.top=(S.cy-S.hubR)+'px';
+  hubEl.onclick=applyHub;
+  hubEl.title=able?(plan.dev.length===0&&plan.feed.length===0
+      ?'点击生效：让它跟着系统默认设备走':'点击生效：应用这次改动')
+    :'当前画面就是正在生效的事实';
+  hubEl.innerHTML=`
+    ${able?'<div class="applycap">点按生效</div>':''}
+    <span class="hring ${plan.dev.length?'main':''}"><span class="core ${cur.playing?'on':''}"></span></span>
+    <div class="hname">${esc(cur.name)}</div>
+    <div class="hstat">${cur.playing?'正在播放':'未在播放'}${plan.dev.length?'':' · 跟随系统默认'}</div>`;
+  document.getElementById('nodes').appendChild(hubEl);
+
+  /* --- 左栏 --- */
+  document.getElementById('rail').innerHTML=
+    `<div class="railhead"><span>程序</span><span class="sp"></span><span class="clr" title="示意：回到系统默认（需二次确认）">⌂ 全部默认</span></div>`+
+    PROCS.map(p=>{
+      const routed=p.dev.length>0;
+      const fed=fedByNames(p.id);
+      const sub=routed?`${D(p.dev[0]).name}${p.dev.length>1?' +'+(p.dev.length-1):''}`:'系统默认';
+      return`<div class="rrow ${p.id===sel?'sel':''}" onclick="select('${p.id}')">
+        <span class="ring ${routed?'main':''}"><span class="core ${p.playing?'on':''}"></span></span>
+        <span class="rmain"><span class="rname">${esc(p.name)}</span>
+        <span class="rsub mono">PID ${p.pid} · ${esc(sub)}</span></span>
+        ${fed.length?`<span class="fbadge" title="它的输入收到「${esc(fed.join('、'))}」的声音">←</span>`:''}</div>`;
+    }).join('');
+
+  /* --- 计数 --- */
+  const routedN=PROCS.filter(p=>p.dev.length>0).length;
+  const playN=PROCS.filter(p=>p.playing).length;
+  document.getElementById('tcount').textContent=`已路由 ${routedN} · 播放中 ${playN}`;
+
+  /* --- 直说 --- */
+  document.getElementById('briefPop').innerHTML='<b style="font-size:12px;color:var(--text-secondary)">现状</b><br>'+
+    PROCS.map(p=>{
+      const head=`「${esc(p.name)}」`;
+      if(!p.playing&&!p.dev.length&&!p.feed.length){
+        const fed=fedByNames(p.id);
+        return head+'没在出声'+(fed.length?`；它的输入收到的是 ${lst(fed.map(esc))} 的声音。`:'。');
+      }
+      let s=head+(p.dev.length===1?`只从 ${esc(D(p.dev[0]).name)} 出声`
+        :p.dev.length>1?`从 ${lst(p.dev.map(id=>esc(D(id).name)))} 出声`
+        :`跟着系统默认设备（${esc(D(DEF).name)}）出声`);
+      if(p.feed.length)s+=`，并把声音送进了 ${lst(p.feed.map(id=>esc(P(id).name)))} 的输入`;
+      const fed=fedByNames(p.id);
+      if(fed.length)s+=`；它的输入收到的是 ${lst(fed.map(esc))} 的声音`;
+      return s+'。';
+    }).join('<br>');
+}
+
+plan=snapshot();
+render();
+</script>
+</body>
+</html>

@@ -4,11 +4,11 @@
 
 # App Audio Router
 
-**Per-app audio routing for Windows: send one program's sound to several playback devices at once, each with its own delay compensation and its own volume.**
+**Per-app audio routing for Windows: send one program's sound to several playback devices at once — each with its own delay compensation and its own volume — or into another program's input.**
 
 <p align="center">
   <a href="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/Eververdants/AppAudioRouter/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Version 2.1.1" src="https://img.shields.io/badge/version-2.1.1-0891b2">
+  <img alt="Version 2.3.0" src="https://img.shields.io/badge/version-2.3.0-0891b2">
   <img alt="Platform: Windows 10 and Windows 11, 64-bit" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-3da639"></a>
   <img alt="Built with Tauri 2, Rust and React 19" src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20React%2019-24C8DB">
@@ -26,13 +26,13 @@
 
 App Audio Router (**AAR**) is a per-application audio router for Windows. Windows itself only lets an application play to one output at a time; App Audio Router lifts that restriction. Pick a program, pick one or more playback devices, and the program's audio goes to all of them at once — live, without restarting the program.
 
-It is aimed at ordinary users rather than audio engineers. There is no mixer graph, no virtual cable and no driver installation: the whole app is one window — the programmes making sound in a sidebar on the left, and beside it a ring with the programme you picked at its centre and every playback device as a disc around it. A spoke from the centre to a lit disc *is* that part of the route, so "where is this sound going?" is answered by which discs are lit. A change becomes real only when you click the circle in the middle, and a small "Straight talk" pill in the corner will tell you where things stand in plain words. The activity log sits one tab away.
+It is aimed at ordinary users rather than audio engineers. There is no mixer graph and no driver installation: the whole app is one window — the programmes making sound in a sidebar on the left, and beside it a board with the programme you picked on the left-centre and its destinations as a column of numbered cards on the right. A wire from the programme's card to a destination card *is* that part of the route, so "where is this sound going?" is answered by which cards are wired up — and the number on each card is the order they play in, 01 being the device Windows plays itself. A destination can be a playback device **or another program's input**: pick a program's input and its audio is fed there, so Discord can hear Spotify the way a microphone would. A change becomes real only when you click the program's card, and a small "Straight talk" pill in the corner will tell you where things stand in plain words. The activity log sits one tab away.
 
 | | |
 |---|---|
 | **What it is** | Per-app audio routing tool for Windows (one app → many devices) |
 | **Platform** | Windows 10 / Windows 11, 64-bit |
-| **Latest version** | 2.1.1 |
+| **Latest version** | 2.3.0 |
 | **Installer** | MSI or NSIS setup from [Releases](https://github.com/Eververdants/AppAudioRouter/releases) |
 | **Licence** | MIT |
 | **UI languages** | English, Simplified Chinese |
@@ -42,11 +42,11 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 
 ## Screenshots
 
-The same stage in both themes: `chrome.exe` is the programme being looked at, so it sits at the centre and its route — the digital output — is the one lit disc, joined by a spoke and labelled *Main*. `Music.exe` plays to three devices at once (a Bluetooth headset, USB headphones and an HDMI output); picking it redraws the ring around its own route. The sidebar lists the programmes making sound, with each routed one marked by its ring, and the hub at the centre is the button that applies the plan — while a change is waiting, a badge on it says so. The title bar keeps the count: two routed, two playing.
+The same board in both themes: `Music.exe` is the programme being looked at, so its card sits left of centre and its three destinations stand in a numbered column on the right — 01 is the system's own playback (the Bluetooth headset, *Main*), 02 and 03 are copies this app duplicates to, each with its own delay. The sidebar lists the programmes making sound, with each routed one marked by its ring, and the strip along the bottom holds the levers of whichever card was picked — for a copy, its delay and its share. The title bar keeps the count: two routed, two playing.
 
-![App Audio Router with chrome.exe at the centre of the ring playing through the digital output, Music.exe routed to three devices listed in the sidebar, and every playback device as a disc around the centre](docs/images/app-audio-router-light.png)
+![App Audio Router's node board: Music.exe's card wired to three numbered device cards, with the copy's delay and share in the strip below and the app list on the left](docs/images/app-audio-router-light.png)
 
-![The same concentric stage shown in the dark theme](docs/images/app-audio-router-dark.png)
+![The same node board shown in the dark theme](docs/images/app-audio-router-dark.png)
 
 ## Features
 
@@ -66,7 +66,7 @@ The same stage in both themes: `chrome.exe` is the programme being looked at, so
 - **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest copy in the route, so a quiet headset and a loud speaker rig can be brought in line. The device Windows plays directly gets a volume of its own: it moves the program's session volume, and the copies are compensated for it automatically, so it changes the main path alone.
 - **Reported latency** — the software-side latency each device is actually playing at, measured from the running stream. It is a reading and not a setting, so it lives in the tooltip of the delay value rather than beside it: the cell holds the value you asked for, and the tooltip holds what you got.
 - **Stepped, not scraped** — each value moves with the `−` and `+` beside it: delay by the configured step, level by 5 %, both stopped at the ends of their range. They are buttons rather than drag surfaces because these two change what you are hearing, and resting a finger on a scroll wheel should not be able to move them.
-- **Only where they can act** — a copy carries a delay and a volume share under its disc; the main device carries a volume of its own (the program's session volume, compensated so the copies stay put) but no delay, because nothing of this app's sits on its path to hold back. A single-device route starts no engine, so no control is drawn there at all — a greyed-out control that could never work would promise otherwise.
+- **Only where they can act** — click a copy's number badge and the strip below hands you its delay and its volume share; the main device's card offers a volume of its own (the program's session volume, compensated so the copies stay put) but no delay, because nothing of this app's sits on its path to hold back. A single-device route starts no engine, so its number is not a button at all and the strip offers no device panel — a greyed-out control that could never work would promise otherwise.
 
 ### Stays out of the way
 
@@ -78,7 +78,7 @@ The same stage in both themes: `chrome.exe` is the programme being looked at, so
 
 ### Interface and overhead
 
-- **A stage, not a form** — the process list is a sidebar, and the routing screen is a ring: the programme you picked sits at the centre with its name inside, every playback device is a disc around it, and a spoke from the centre to a lit disc *is* that part of the route. The first device of a route is the one Windows plays itself (accent); the devices after it are copies (teal), and a copy is the only place delay and level exist, because it is the only place there is a stream of ours to hold back or attenuate. Nothing takes effect until you click the circle in the middle, and nothing can leave a programme with nowhere to play — a ring always keeps at least one device lit. Devices no route touches get no spoke and no colour, which is most devices most of the time. A programme playing to several devices carries its own level as a ring under the hub, and the title bar keeps a quiet count — *2 routed · 2 playing*. Solid panels and hairlines instead of cards, sentences instead of pills, monospaced figures for every value.
+- **A board, not a form** — the process list is a sidebar, and the routing screen is a node board: the programme you picked is a card left of centre, its destinations stand in a numbered column on the right (playback devices first, the programmes it feeds after), and a wire from the programme's out-pin to a destination's in-pin *is* that part of the route. **The number on a card is the order it plays in**: 01 is the one Windows plays itself (accent), everything after it is a copy (teal), and a copy is the only place delay and a share exist, because it is the only place there is a stream of ours to hold back or attenuate. Nothing takes effect until you click the programme's card, and nothing can leave a programme with nowhere to play — the last device card cannot be removed. Devices no route touches are not on the board at all, which is most devices most of the time. A programme playing to several devices carries its own level as a ring under its card, and the title bar keeps a quiet count — *2 routed · 2 playing*. Solid panels and hairlines, sentences instead of pills, monospaced figures for every value, and generous continuous-curvature corners.
 - **Process list search** — filter the list by name as you type, with the programs that are currently routed kept at the top so the one you are working with does not move under the cursor. `Escape` clears the search.
 - **Light and dark themes**, English and Simplified Chinese, both switchable from the title bar; the preferred theme and language are applied before the first frame paints, so there is no flash on startup.
 - **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. The interface has exactly two things that move on their own: the dash running along the spokes of a programme that is sounding, and the pulse on the ring beside a programme that is — only while the window is visible, focused and free of the system's reduced-motion request; hidden, unfocused or silent, everything stands still and nothing repaints. An active route is idle when its program is, too: a routed program that has produced no sound for a second and a half stops being fed to its mirrored devices, rather than having silence written at them a hundred times a second apiece.
@@ -120,9 +120,10 @@ Prefer building it yourself? See [Build from source](#build-from-source).
 
 1. **Play some sound in the app you want to route.** A program only appears in the process list while it has an active audio session — audio routing is per session, not per shortcut.
 2. **Pick it in the sidebar.** One programme at a time is what the ring shows; the circular button at the end of another row adds that programme to the same change.
-3. **Click the discs it should play through.** The first one is the device Windows itself drives, and every disc after it receives a copy carrying its own delay and level. One always stays lit: a programme with nowhere to play is not a state this app offers.
+3. **Add the devices it should play through.** The first one added is the device Windows itself drives, and every one after it receives a copy carrying its own delay and share. The last one cannot be removed: a programme with nowhere to play is not a state this app offers.
 4. **Click the circle in the middle of the stage.** While a change is waiting, the hub wears a "click to apply" badge, and its accessible name says exactly what the click will do. Once the route is live, the spokes to those discs stay on the stage, and they flow while the programme is sounding.
-5. **Tune a copy if you need to** — its delay and level sit under its own disc.
+5. **Tune a copy if you need to** — its number badge opens its delay and share in the strip along the bottom.
+6. **Or feed another programme's input** — the same "add destination" card lists every programme that can take sound in; picking one connects it there and then (no hub press needed), and the toast offers the way back.
 6. **Turn on Auto-remember** in the settings so the route is restored the next time that program plays.
 
 ## Delay compensation explained
@@ -198,7 +199,7 @@ Routing rules are keyed by **executable name**, not by PID, so a remembered rout
 AppAudioRouter/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── ConcentricStage.tsx   # the ring: the picked programme at the centre, one disc per device, one spoke per lit disc; the hub applies the plan
+│   │   ├── NodeStage.tsx         # the node board: the picked programme's card on the left-centre, a numbered column of destination cards on the right (devices, or another programme's input), a wire per route; the bottom strip tunes the picked card
 │   │   ├── ProgramRail.tsx       # programmes with an audio session, and whether each one joins the change
 │   │   ├── StatusBriefing.tsx    # the "straight talk" pill: where sound is going, in plain words, on demand
 │   │   ├── SourceLevelDial.tsx   # a programme's own level, as a ring under the hub

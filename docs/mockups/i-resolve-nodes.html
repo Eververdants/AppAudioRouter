@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方案 I · 节点台（达芬奇风）— App Audio Router 2.3.0 主界面提案</title>
+<style>
+:root{
+  --bg-primary:#eef0f3;--bg-tertiary:#e8e8ec;
+  --text-primary:#18181b;--text-secondary:#3f3f46;--text-muted:#71717a;
+  --accent:#0891b2;--accent-hover:#0e7490;--accent-muted:rgba(8,145,178,.12);--accent-ink:#ffffff;
+  --surface:#ffffff;--surface-hover:rgba(24,24,27,.035);
+  --hairline:#e6e6ea;--hairline-strong:#d4d4da;
+  --shadow-float:0 1px 2px rgba(24,40,66,.06),0 8px 24px rgba(24,40,66,.1);
+}
+.dark{
+  --bg-primary:#0b0e14;--bg-tertiary:#27272a;
+  --text-primary:#fafafa;--text-secondary:#d4d4d8;--text-muted:#a1a1aa;
+  --accent:#22d3ee;--accent-hover:#06b6d4;--accent-muted:rgba(34,211,238,.14);--accent-ink:#05222b;
+  --surface:#12151a;--surface-hover:rgba(255,255,255,.035);
+  --hairline:#23272e;--hairline-strong:#2e3742;
+  --shadow-float:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.35);
+}
+*{margin:0;box-sizing:border-box}
+body{min-height:100vh;background:#e3e5ea;padding:22px 0 34px;display:flex;flex-direction:column;align-items:center;gap:14px;
+  font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;color:#18181b}
+body.dark{background:#04060a;color:#fafafa}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+.mnote{width:980px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#52525b}
+body.dark .mnote{color:#9494a0}
+.mnote b{font-size:13px;color:#18181b}
+body.dark .mnote b{color:#fafafa}
+.mnote a{color:#0e7490;text-decoration:none;border-bottom:1px dotted currentColor;cursor:pointer;white-space:nowrap}
+body.dark .mnote a{color:#22d3ee}
+.mnote .sp{flex:1}
+.tbtn2{border:1px solid #d4d4da;background:#fff;border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;color:#18181b}
+body.dark .tbtn2{border-color:#2e3742;background:#161c24;color:#fafafa}
+.win{width:980px;height:680px;flex:none;background:var(--bg-primary);border:1px solid var(--hairline-strong);border-radius:14px;
+  box-shadow:0 24px 64px rgba(0,0,0,.30);display:flex;flex-direction:column;overflow:hidden;color:var(--text-primary);position:relative}
+.tbar{height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 6px 0 14px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+.branddot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.ver{font-size:10.5px;color:var(--text-muted);border:1px solid var(--hairline-strong);padding:1px 7px;border-radius:999px}
+.tcount{margin-left:auto;font-size:11.5px;color:var(--text-muted)}
+.tbtn{width:32px;height:26px;display:grid;place-items:center;border-radius:7px;color:var(--text-muted);cursor:pointer;font-size:12px}
+.tbtn:hover{background:var(--surface-hover);color:var(--text-primary)}
+.tbtn.close:hover{background:rgba(239,68,68,.14);color:var(--error)}
+.wbody{flex:1;display:flex;min-height:0}
+.rail{width:236px;flex:none;border-right:1px solid var(--hairline);padding:8px;display:flex;flex-direction:column;gap:2px;overflow:auto}
+.railhead{display:flex;align-items:center;padding:4px 10px 8px;font-size:11.5px;color:var(--text-muted)}
+.railhead .sp{flex:1}
+.rrow{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:10px;cursor:pointer;position:relative}
+.rrow:hover{background:var(--surface-hover)}
+.rrow.sel{background:var(--surface)}
+.ring{width:14px;height:14px;flex:none;border-radius:50%;border:1.5px solid var(--hairline-strong);display:grid;place-items:center}
+.ring.main{border-color:var(--type-primary)}
+.ring .core{width:6px;height:6px;border-radius:50%;background:var(--type-primary);opacity:0}
+.ring .core.on{opacity:1}
+.rmain{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.rname{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rsub{font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fbadge{width:16px;height:16px;flex:none;border-radius:50%;background:var(--type-feed);color:#fff;font-size:9px;display:grid;place-items:center;font-weight:700}
+.dark .fbadge{color:#3b2b05}
+.mainarea{flex:1;position:relative;display:flex;flex-direction:column;min-width:0}
+.tabs{height:32px;flex:none;display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--hairline);font-size:12.5px;color:var(--text-muted)}
+.tab{padding:8px 2px;position:relative}
+.tab.on{color:var(--text-primary);font-weight:600}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);border-radius:2px}
+/* ---- 暗色节点井（无论应用主题，这里永远是编辑器暗面） ---- */
+.well{flex:1;position:relative;overflow:auto;background:#222528}
+body.dark .well{background:#161a20}
+#wires{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.wgrp{pointer-events:stroke;cursor:pointer}
+.wline{fill:none;stroke:#84898f;stroke-width:1.75}
+.wgrp:hover .wline{stroke:#c9ced4;stroke-width:2}
+.wgrp .live{stroke-dasharray:1 0}
+.wgrp.live .live{stroke-dasharray:3 9;animation:dash 1.1s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-12}}
+.wbadge{opacity:0;transition:opacity .12s}
+.wgrp:hover .wbadge{opacity:1}
+/* 节点 */
+.nd{position:absolute;background:#33363a;border:1px solid #4a4e54;border-radius:10px;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s}
+.nd:hover{border-color:#6a707a}
+.nd.sel{border-color:#22d3ee;box-shadow:0 0 0 2px rgba(34,211,238,.25)}
+.nd.hub{background:#2e3236;border-color:#565b62}
+.nd.ghost{background:transparent;border:1.5px dashed #5a5f66;cursor:pointer}
+.nd.ghost:hover{border-color:#8a9096}
+.nd .nhead{display:flex;align-items:center;gap:9px;padding:0 12px}
+.nd .nm{font-size:12.5px;font-weight:600;color:#e8eaed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nd .nsub{font-size:9.5px;color:#9aa0a6;padding:0 12px;margin-top:2px}
+.nd .no{position:absolute;top:-7px;left:-7px;min-width:18px;height:18px;border-radius:5px;background:#43474d;
+  color:#d3d8dd;font-size:9.5px;display:grid;place-items:center;padding:0 4px;border:1px solid #565b62}
+.nd .role{position:absolute;right:9px;bottom:7px;font-size:9.5px}
+.nd .rm{position:absolute;top:-8px;right:-8px;width:16px;height:16px;border-radius:50%;background:#2a2d31;
+  border:1px solid #565b62;display:none;place-items:center;font-size:9px;color:#c9ced4;cursor:pointer;line-height:1}
+.nd:hover .rm{display:grid}
+.nd .rm:hover{color:#f87171;border-color:#f87171}
+.nd.ghost .pl{font-size:12.5px;color:#9aa0a6;display:flex;align-items:center;gap:8px;height:100%;justify-content:center}
+/* 引脚短桩 */
+.pin{position:absolute;top:50%;width:13px;height:13px;border-radius:4px;background:#a6adb4;transform:translateY(-50%)}
+.pin.in{left:-7px}
+.pin.out{right:-7px}
+.pin.amb{background:#e0b25c}
+/* 检查器 */
+.insp{flex:none;border-top:1px solid var(--hairline);min-height:76px;padding:11px 22px;display:flex;align-items:center;gap:22px;overflow-x:auto;background:var(--bg-primary)}
+.insp .hint{font-size:11.5px;color:var(--text-muted)}
+.insp .who{display:flex;align-items:center;gap:9px;flex:none}
+.insp .who .nm{font-weight:700;font-size:13px}
+.item{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--hairline-strong);border-radius:9px;
+  padding:4px 8px;font-size:11px;white-space:nowrap}
+.item .lb{color:var(--text-secondary)}
+.stp{display:flex;align-items:center;gap:4px}
+.stp .tv{font-size:11px;min-width:46px;text-align:center;color:var(--text-secondary)}
+.stp button{width:17px;height:17px;border:0;background:transparent;border-radius:5px;display:grid;place-items:center;
+  font-size:11px;color:var(--text-muted);cursor:pointer;line-height:1}
+.stp button:hover{background:var(--accent-muted);color:var(--accent)}
+/* 弹层 & Toast */
+.pop{position:absolute;background:var(--surface);border:1px solid var(--hairline-strong);border-radius:12px;
+  box-shadow:var(--shadow-float);width:240px;padding:6px;z-index:40}
+.pop .glabel{font-size:10px;color:var(--text-muted);letter-spacing:.06em;padding:6px 10px 3px}
+.pop .prow{padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12.5px;display:flex;gap:8px;align-items:center}
+.pop .prow:hover{background:var(--surface-hover)}
+.pop .prow .ds{font-size:10px;color:var(--text-muted);margin-left:auto}
+.toast{position:absolute;bottom:88px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--hairline-strong);
+  border-radius:999px;box-shadow:var(--shadow-float);padding:7px 8px 7px 16px;font-size:12.5px;display:flex;align-items:center;
+  gap:10px;z-index:50;white-space:nowrap}
+.toast .u{border:0;background:var(--accent-muted);color:var(--accent);font-size:12px;border-radius:999px;padding:4px 12px;cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<div class="mnote">
+  <b>方案 I · 节点台（达芬奇风）</b>
+  <span>照着 Resolve 调色页翻译：<b>一张图只画当前选中的程序</b>——左边迷你源节点（有人送音时）→ 中间程序本体 → 右边一列去向节点（编号＝路由顺序：01 主输出、02 副本、03 送入）。<b>线全是同一根灰线</b>，颜色长在编号牌和角色字上；暗色编辑器井 + 引脚短桩 + 角标，就是调色台的质感。点节点在下方调音，行尾虚线节点 ＋ 添加去向，悬停节点 ✕ 撤线。</span>
+  <span class="sp"></span>
+  <a href="index.html">← 全部方案</a>
+  <button class="tbtn2" onclick="document.body.classList.toggle('dark')">◐ 主题</button>
+</div>
+
+<div class="win">
+  <div class="tbar">
+    <div class="brand"><span class="branddot"></span>App Audio Router<span class="ver mono">v2.3.0</span></div>
+    <div class="tcount mono" id="tcount"></div>
+    <div class="tbtn" title="设置">⚙</div>
+    <div class="tbtn">—</div><div class="tbtn">□</div><div class="tbtn close">✕</div>
+  </div>
+  <div class="wbody">
+    <aside class="rail" id="rail"></aside>
+    <main class="mainarea">
+      <div class="tabs"><span class="tab on">路由</span><span class="tab">活动</span></div>
+      <div class="well" id="well">
+        <svg id="wires" width="704" height="452">
+          <g id="wgrps"></g>
+        </svg>
+        <div id="nodes" style="position:absolute;inset:0"></div>
+      </div>
+      <div class="insp" id="insp"></div>
+    </main>
+  </div>
+  <div class="toast" id="toast" style="display:none"></div>
+</div>
+
+<script>
+const DEVICES=[
+  {id:'spk', name:'扬声器',      sub:'Realtek(R) Audio'},
+  {id:'hp',  name:'WH-1000XM5', sub:'蓝牙耳机'},
+  {id:'hdmi',name:'DELL U2723', sub:'HDMI'},
+];
+const DEF='spk';
+const PROCS=[
+  {id:'spotify',name:'Spotify',        exe:'spotify.exe',       pid:8124, playing:true,  dev:['spk','hp'], feed:['discord']},
+  {id:'edge',   name:'Microsoft Edge', exe:'msedge.exe',        pid:9312, playing:true,  dev:[],           feed:['obs']},
+  {id:'discord',name:'Discord',        exe:'Discord.exe',       pid:7788, playing:true,  dev:[],           feed:[]},
+  {id:'obs',    name:'OBS Studio',     exe:'obs64.exe',         pid:6420, playing:false, dev:[],           feed:[]},
+  {id:'game',   name:'Cyberpunk 2077', exe:'Cyberpunk2077.exe', pid:5120, playing:true,  dev:['hp'],       feed:[]},
+];
+const DELAY={spk:0,hdmi:0,hp:40};
+const SHARE={spk:100,hdmi:100,hp:100};
+const FEEDVOL={discord:80,obs:60};
+const PVOL={spotify:100,edge:100,discord:100,obs:100,game:100};
+
+const W=704,H=452;
+const HUB={x:206,y:220,w:192,h:84};
+const TGT={x:512,w:184,h:60,DY:88};
+const MINI={x:14,w:150,h:52,DY:78};
+let sel='spotify',nodeSel=null,popOpen=false;
+const P=id=>PROCS.find(p=>p.id===id);
+const D=id=>DEVICES.find(d=>d.id===id);
+const fedBy=id=>PROCS.filter(p=>p.feed.includes(id));
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const pad=n=>String(n).padStart(2,'0');
+const ROLE_C={主输出:'#22d3ee',副本:'#2dd4bf',送入:'#fbbf24'};
+
+function snapshot(){return JSON.stringify(PROCS.map(p=>({id:p.id,dev:[...p.dev],feed:[...p.feed]})))}
+function restore(s){JSON.parse(s).forEach(r=>{const p=P(r.id);p.dev=r.dev;p.feed=r.feed})}
+let undoSnap=null,undoTimer=null;
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.innerHTML=esc(msg)+(undoSnap?' <button class="u" onclick="doUndo()">撤销</button>':'');
+  t.style.display='flex';
+  clearTimeout(undoTimer);undoTimer=setTimeout(()=>t.style.display='none',8000);
+}
+function doUndo(){if(undoSnap)restore(undoSnap);undoSnap=null;nodeSel=null;closePop();render();document.getElementById('toast').style.display='none'}
+function nd(id,d){DELAY[id]=Math.max(0,Math.min(200,DELAY[id]+d));render()}
+function ns(id,d){SHARE[id]=Math.max(0,Math.min(100,SHARE[id]+d));render()}
+function nf(id,d){FEEDVOL[id]=Math.max(0,Math.min(100,(FEEDVOL[id]??100)+d));render()}
+function npv(id,d){PVOL[id]=Math.max(5,Math.min(100,PVOL[id]+d));render()}
+function removeNode(kind,id){
+  undoSnap=snapshot();
+  const p=P(sel);
+  if(kind==='dev'){if(p.dev.length>1)p.dev=p.dev.filter(x=>x!==id);else{undoSnap=null;return}}
+  else p.feed=p.feed.filter(x=>x!==id);
+  nodeSel=null;
+  const nm=kind==='dev'?D(id).name:P(id).name;
+  showToast(`已撤下「${p.name}」在 ${nm}${kind==='feed'?' 的输入':''} 的去向。`);
+  render();
+}
+function addDest(kind,id){
+  undoSnap=snapshot();
+  const p=P(sel);
+  if(kind==='dev'&&!p.dev.includes(id))p.dev.push(id);
+  if(kind==='feed'&&!p.feed.includes(id))p.feed.push(id);
+  closePop();
+  const nm=kind==='dev'?D(id).name:P(id).name;
+  showToast(`已接：「${p.name}」→ ${nm}${kind==='feed'?' 的输入':''}。`);
+  render();
+}
+function selectProc(id){sel=id;nodeSel=null;closePop();render()}
+function selectNode(key){nodeSel=key;closePop();render()}
+function closePop(){popOpen=false;const p=document.getElementById('pop');if(p)p.remove()}
+
+function bez(x1,y1,x2,y2){
+  const dx=x2-x1;
+  return`M ${x1} ${y1} C ${x1+dx*0.38} ${y1}, ${x1+dx*0.62} ${y2}, ${x2} ${y2}`;
+}
+function render(){
+  const p=P(sel);
+  const targets=[
+    ...p.dev.map((id,i)=>({kind:'dev',id,no:pad(i+1),role:i===0?'主输出':'副本',live:p.playing})),
+    ...p.feed.map((id,j)=>({kind:'feed',id,no:pad(p.dev.length+j+1),role:'送入',live:p.playing&&P(id)?true:false})),
+  ];
+  const T=targets.length+1; /* + ghost */
+  const cy=H/2-10;
+  const hubIn=HUB.x-7, hubOut=HUB.x+HUB.w+7, hubCY=HUB.y+HUB.h/2;
+
+  /* ---- 线 ---- */
+  let w='';
+  /* 迷你源 → hub 左孔 */
+  const feeders=fedBy(sel);
+  feeders.forEach((q,i)=>{
+    const my=cy+(i-(feeders.length-1)/2)*MINI.DY;
+    const a={x:MINI.x+MINI.w+7,y:my+MINI.h/2};
+    w+=`<g class="wgrp${q.playing?' live':''}"><path class="wline live" d="${bez(a.x,a.y,hubIn,hubCY)}"></path></g>`;
+  });
+  targets.forEach(t=>{
+    const idx=targets.indexOf(t);
+    const ty=cy+(idx-(T-1)/2)*TGT.DY+TGT.h/2;
+    const live=t.live?' live':'';
+    w+=`<g class="wgrp${live}"><path class="wline live" d="${bez(hubOut,hubCY,TGT.x-7,ty)}"></path>
+      <g class="wbadge" transform="translate(${(hubOut+TGT.x-7)/2},${(hubCY+ty)/2})">
+        <circle r="9" fill="#2a2d31" stroke="#565b62"></circle>
+        <text y="3.5" text-anchor="middle" font-size="10" fill="#c9ced4" style="pointer-events:none">✕</text></g></g>`;
+  });
+  document.getElementById('wgrps').innerHTML=w;
+  document.querySelectorAll('#wgrps .wgrp').forEach((g,i)=>{
+    const t=targets[i-feeders.length];
+    if(t)g.dataset.rm=`${t.kind}:${t.id}`;
+  });
+  document.querySelectorAll('#wgrps .wgrp').forEach((g,i)=>{
+    if(i<feeders.length){g.onclick=null;g.style.cursor='default'}
+    else g.onclick=()=>{const [k,id]=g.dataset.rm.split(':');removeNode(k,id)};
+  });
+
+  /* ---- 节点 ---- */
+  let n='';
+  feeders.forEach((q,i)=>{
+    const my=cy+(i-(feeders.length-1)/2)*MINI.DY;
+    n+=`<div class="nd" style="left:${MINI.x}px;top:${my}px;width:${MINI.w}px;height:${MINI.h}px"
+        onclick="selectProc('${q.id}')" title="查看「${esc(q.name)}」的声流">
+      <span class="pin out"></span>
+      <div class="nhead" style="padding-top:8px"><span class="ring ${q.dev.length?'main':''}" style="border-color:#565b62"><span class="core ${q.playing?'on':''}" style="background:#22d3ee"></span></span>
+      <span class="nm" style="font-size:11.5px">${esc(q.name)}</span></div>
+      <div class="nsub">送入「${esc(p.name)}」</div>
+    </div>`;
+  });
+  n+=`<div class="nd hub ${nodeSel==='hub'?'sel':''}" style="left:${HUB.x}px;top:${HUB.y}px;width:${HUB.w}px;height:${HUB.h}px"
+      onclick="selectNode('hub')" title="「${esc(p.name)}」—— 正在查看它的声流">
+    ${feeders.length?'<span class="pin in"></span>':''}
+    <span class="pin out"></span>
+    <div class="nhead" style="padding-top:14px">
+      <span class="ring ${p.dev.length?'main':''}" style="border-color:#565b62"><span class="core ${p.playing?'on':''}" style="background:#22d3ee"></span></span>
+      <span class="nm">${esc(p.name)}</span></div>
+    <div class="nsub">${esc(p.exe)} · PID ${p.pid} · ${p.playing?'正在播放':'未在播放'}</div>
+  </div>`;
+  targets.forEach((t,idx)=>{
+    const ty=cy+(idx-(T-1)/2)*TGT.DY;
+    const isDev=t.kind==='dev';
+    const d=isDev?D(t.id):P(t.id);
+    const name=isDev?d.name:`${d.name} 的输入`;
+    const sub=isDev?d.sub:(fedBy(t.id).length?`收到自 ${fedBy(t.id).map(x=>x.name).join('、')}`:'未在收音');
+    const key=`${t.kind}:${t.id}`;
+    const lastGuard=isDev&&p.dev.length===1;
+    n+=`<div class="nd ${nodeSel===key?'sel':''}" style="left:${TGT.x}px;top:${ty}px;width:${TGT.w}px;height:${TGT.h}px"
+        onclick="selectNode('${key}')" title="${esc(name)}（${esc(sub)}）">
+      <span class="no">${t.no}</span>
+      <span class="pin in"></span>
+      <div class="nhead" style="padding-top:10px"><span class="nm" style="font-size:12px">${esc(name)}</span></div>
+      <div class="nsub">${esc(sub)}</div>
+      <span class="role" style="color:${ROLE_C[t.role]}">${t.role}</span>
+      <span class="rm" title="${lastGuard?'主输出至少保留一台':'撤下这个去向'}"
+        onclick="event.stopPropagation();${lastGuard?'':'removeNode(\''+t.kind+'\',\''+t.id+'\')'}">✕</span>
+    </div>`;
+  });
+  n+=`<div class="nd ghost" style="left:${TGT.x}px;top:${cy+(T-1)/2*TGT.DY}px;width:${TGT.w}px;height:${TGT.h}px"
+      onclick="openPop(event)" title="添加一个去向（设备或程序输入）">
+    <span class="pl">＋　添加去向</span>
+  </div>`;
+  document.getElementById('nodes').innerHTML=n;
+
+  /* ---- 左栏 ---- */
+  document.getElementById('rail').innerHTML=
+    `<div class="railhead"><span>程序</span><span class="sp"></span><span style="font-size:11px">⌂ 全部默认</span></div>`+
+    PROCS.map(q=>{
+      const routed=q.dev.length>0;
+      const fed=fedBy(q.id).length>0;
+      const sub=routed?`${D(q.dev[0]).name}${q.dev.length>1?' +'+(q.dev.length-1):''}`:'系统默认';
+      return`<div class="rrow ${q.id===sel?'sel':''}" onclick="selectProc('${q.id}')">
+        <span class="ring ${routed?'main':''}"><span class="core ${q.playing?'on':''}"></span></span>
+        <span class="rmain"><span class="rname">${esc(q.name)}</span>
+        <span class="rsub mono">PID ${q.pid} · ${esc(sub)}</span></span>
+        ${fed?'<span class="fbadge" title="它的输入收到别的程序的声音">←</span>':''}</div>`;
+    }).join('');
+
+  /* ---- 检查器 ---- */
+  const insp=document.getElementById('insp');
+  if(!nodeSel){
+    insp.innerHTML='<span class="hint">点一个节点在这里调音 · 虚线节点添加去向 · 悬停节点或连线出现 ✕ 撤下。</span>';
+  }else if(nodeSel==='hub'){
+    insp.innerHTML=`<div class="who"><span class="ring ${p.dev.length?'main':''}"><span class="core ${p.playing?'on':''}"></span></span>
+      <span><span class="nm">${esc(p.name)}</span><br><span class="rsub mono">${esc(p.exe)} · ${p.playing?'正在播放':'未在播放'}${p.dev.length?'':` · 跟随系统默认（${D(DEF).name}）`}</span></span></div>
+      <span class="hint">这是程序本体——去右上各去向节点上调音。</span>`;
+  }else{
+    const [kind,id]=nodeSel.split(':');
+    if(kind==='dev'){
+      const k=p.dev.indexOf(id),d=D(id);
+      if(k===0)insp.innerHTML=`<div class="who"><span class="ring main"><span class="core ${p.playing?'on':''}"></span></span>
+        <span><span class="nm">${esc(d.name)}</span><br><span class="rsub mono">主输出 · 系统直连</span></span></div>
+        <div class="item"><span class="lb" style="color:var(--type-primary)">主输出音量</span>
+        <span class="stp"><button onclick="npv('${sel}',-5)">−</button><span class="tv mono">${PVOL[sel]} %</span><button onclick="npv('${sel}',5)">＋</button></span>
+        <span class="lb" style="opacity:.7">只影响「${esc(p.name)}」这一路</span></div>`;
+      else insp.innerHTML=`<div class="who"><span class="ring main"><span class="core ${p.playing?'on':''}"></span></span>
+        <span><span class="nm">${esc(d.name)}</span><br><span class="rsub mono">副本 · 软件侧实测延迟随补偿变化</span></span></div>
+        <div class="item"><span class="lb" style="color:var(--type-mirror)">延迟</span>
+        <span class="stp"><button onclick="nd('${id}',-10)">−</button><span class="tv mono">${DELAY[id]} ms</span><button onclick="nd('${id}',10)">＋</button></span>
+        <span class="lb" style="color:var(--type-mirror)">份额</span>
+        <span class="stp"><button onclick="ns('${id}',-5)">−</button><span class="tv mono">${SHARE[id]} %</span><button onclick="ns('${id}',5)">＋</button></span></div>`;
+    }else{
+      const q=P(id);
+      insp.innerHTML=`<div class="who"><span class="ring"><span class="core" style="background:var(--type-feed);opacity:${p.feed.includes(id)?1:0}"></span></span>
+        <span><span class="nm">${esc(q.name)} 的输入</span><br><span class="rsub mono">${esc(q.exe)}</span></span></div>
+        <div class="item"><span class="lb" style="color:var(--type-feed)">送入音量</span>
+        <span class="stp"><button onclick="nf('${id}',-5)">−</button><span class="tv mono">${FEEDVOL[id]??100} %</span><button onclick="nf('${id}',5)">＋</button></span></div>`;
+    }
+  }
+
+  const routedN=PROCS.filter(q=>q.dev.length>0).length;
+  document.getElementById('tcount').textContent=`已路由 ${routedN} · 播放中 ${PROCS.filter(q=>q.playing).length}`;
+}
+
+function openPop(evt){
+  popOpen=true;render();
+  const p=P(sel);
+  let h='<div class="pop" id="pop" onclick="event.stopPropagation()">';
+  h+='<div class="glabel">输出设备</div>';
+  h+=DEVICES.map(d=>p.dev.includes(d.id)
+    ?`<div class="prow" style="opacity:.4;cursor:default">${esc(d.name)}<span class="ds">已接</span></div>`
+    :`<div class="prow" onclick="addDest('dev','${d.id}')">${esc(d.name)}<span class="ds">${esc(d.sub)}</span></div>`).join('');
+  h+='<div class="glabel">程序输入</div>';
+  h+=PROCS.filter(q=>q.id!==sel).map(q=>p.feed.includes(q.id)
+    ?`<div class="prow" style="opacity:.4;cursor:default">${esc(q.name)} 的输入<span class="ds">已接</span></div>`
+    :`<div class="prow" onclick="addDest('feed','${q.id}')">${esc(q.name)} 的输入</div>`).join('');
+  h+='</div>';
+  document.getElementById('nodes').insertAdjacentHTML('beforeend',h);
+  const pop=document.getElementById('pop');
+  const well=document.getElementById('well');
+  const wr=well.getBoundingClientRect(),tr=evt.currentTarget.getBoundingClientRect();
+  pop.style.left=Math.min(tr.left-wr.left-40,wr.width-256)+'px';
+  pop.style.top=Math.min(tr.bottom-wr.top+6,wr.height-250)+'px';
+}
+document.getElementById('well').addEventListener('pointerdown',e=>{
+  if(popOpen&&!e.target.closest('.pop')&&!e.target.closest('.nd.ghost')){closePop();render()}
+});
+
+render();
+</script>
+</body>
+</html>

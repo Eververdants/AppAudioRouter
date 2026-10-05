@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2.3.0 主界面提案 · 程序 → 程序路由 — 两轮方案</title>
+<style>
+:root{--ink:#18181b;--mut:#71717a;--acc:#0891b2;--line:#e6e6ea;--card:#fff;--bg:#eef0f3}
+body.dark{--ink:#fafafa;--mut:#a1a1aa;--acc:#22d3ee;--line:#23272e;--card:#12151a;--bg:#0b0e14}
+*{margin:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  padding:40px 24px 60px;display:flex;flex-direction:column;align-items:center;transition:background .2s,color .2s}
+.wrap{width:920px;max-width:100%}
+h1{font-size:22px;font-weight:800}
+.sub{color:var(--mut);font-size:13px;margin:8px 0 4px;line-height:1.7}
+.sub b{color:var(--ink)}
+h2.rd{font-size:14px;margin:30px 0 12px;color:var(--mut);font-weight:700;letter-spacing:.05em}
+h2.rd b{color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+a.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;
+  text-decoration:none;color:inherit;transition:transform .15s,border-color .15s}
+a.card:hover{transform:translateY(-2px);border-color:var(--acc)}
+.card .tag{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--acc);border-radius:999px;padding:2px 10px;margin-bottom:8px}
+.card h3{font-size:16px;margin-bottom:6px}
+.card p{font-size:12.5px;color:var(--mut);line-height:1.7}
+.card p b{color:var(--ink)}
+.card .fix{margin-top:8px;font-size:11.5px;color:var(--acc)}
+.card .go{margin-top:8px;font-size:12.5px;color:var(--acc);font-weight:600}
+.r1{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.r1 a{display:inline-block;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 14px;
+  font-size:12.5px;color:var(--ink);text-decoration:none}
+.r1 a:hover{border-color:var(--acc);color:var(--acc)}
+.r1 a span{color:var(--mut);font-size:11.5px;margin-left:6px}
+.diagnosis{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 18px;font-size:12.5px;
+  color:var(--mut);line-height:1.8;margin-top:26px}
+.diagnosis b{color:var(--ink)}
+.note{margin-top:16px;font-size:12px;color:var(--mut);line-height:1.8}
+.tbtn{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;color:var(--ink);float:right}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <button class="tbtn" onclick="document.body.classList.toggle('dark')">◐ 主题</button>
+  <h1>2.3.0 主界面提案 · 程序 → 程序</h1>
+  <p class="sub">2.3.0 新增能力：<b>把一个程序的输出送进另一个程序的输入</b>（Spotify → Discord 的麦克风；Chrome → OBS）。
+  所有稿子共用同一套设计令牌与应用外壳，可以直接点开交互（假数据）。</p>
+
+  <h2 class="rd">第二轮 · <b>针对「都不咋地」重做</b>（第一轮的病灶见页尾诊断）</h2>
+  <div class="grid">
+    <a class="card" href="i-resolve-nodes.html">
+      <span class="tag">方案 I · 最新 · 达芬奇风</span>
+      <h3>节点台 —— 一张图只讲一个程序</h3>
+      <p>照 Resolve 调色页翻译：<b>画布只画当前选中程序</b>——左边迷你源节点（有人送音时）→ 中间程序本体 → 右边一列去向节点，编号即路由顺序（01 主输出、02 副本、03 送入）。<b>线全是同一根灰细线</b>，颜色只长在编号牌和角色字上；暗色编辑器井、引脚短桩、编号角标。点节点调音，虚线节点 ＋ 添加去向，悬停 ✕ 撤线。</p>
+      <div class="fix">回答「图怎么才能不乱」：图小了、线灰了，乱就没有藏身之处。</div>
+      <div class="go">打开 →</div>
+    </a>
+    <a class="card" href="g-single-ring.html">
+      <span class="tag">方案 G · 推荐</span>
+      <h3>关系舞台 —— 一圈只画有关系的人</h3>
+      <p>不再加第二只环。舞台一圈里只有<b>与选中程序有音频关系的端点</b>：设备（青＝主输出 / 绿＝副本）和程序（琥珀）。方向不靠颜色猜——<b>虚线流动的方向就是声音的方向，箭头扎在谁身上谁就是接收方</b>。无关的程序待在左栏，不上舞台。计划/生效、点按生效、调音行全部保留。</p>
+      <div class="fix">修 A 的病：外环拥挤、第四色泛滥、动态程序钉死在轨道上。</div>
+      <div class="go">打开 →</div>
+    </a>
+    <a class="card" href="e-flowfield.html">
+      <span class="tag">方案 E</span>
+      <h3>声流图 —— 一条线就是一份声音</h3>
+      <p>承认 A→B 之后路由是<b>一张图</b>而不是一颗星：左列程序、右列去向，多路复制在分岔点画一个结（分岔＝复制，箭头＝流向），点程序聚焦、点去向改线，调音在底部检查器。一屏看全所有程序的拓扑，这是舞台给不了的全局。</p>
+      <div class="fix">修 A–D 共同的病：谁都没有真正回答「全都去哪儿」。</div>
+      <div class="go">打开 →</div>
+    </a>
+    <a class="card" href="f-rows.html">
+      <span class="tag">方案 F</span>
+      <h3>一行一舞台 —— 同心圆拉直了用</h3>
+      <p>每个程序一行：<b>圆盘＝去向、辐条＝路由、环＝角色、芯＝在响</b>——字母表和 2.2 的舞台一模一样，只是从绕一圈变成排一行。行尾 ＋ 添加、悬停 ✕ 撤下、点行展开调音行、Toast 撤销。规模按行滚，永远不挤。</p>
+      <div class="fix">修 D 的病：胶囊芯片没有身份；也修 A 的病：程序一多舞台装不下。</div>
+      <div class="go">打开 →</div>
+    </a>
+    <a class="card" href="h-blueprint.html">
+      <span class="tag">方案 H · 来自你的灵感</span>
+      <h3>简化蓝图 —— 端口＋拉线</h3>
+      <p>只保留虚幻蓝图里非专业用户也懂的部分：<b>看得见的插孔、从孔拖线到孔、线即连接</b>。砍掉自由画布（固定两列自动布局）、砍掉节点面板（节点由系统自动枚举，画布永远不空）、只留一种音频线。松手即生效＋8 秒撤销；拖不动的用户可以<b>点出孔→点入孔</b>等价完成；悬停线上出现 ✕ 撤线。</p>
+      <div class="fix">回答「怎么让拉线比点列表更直白」：插线这个动作全世界都会。</div>
+      <div class="go">打开 →</div>
+    </a>
+    <a class="card" href="h2-quiet-blueprint.html">
+      <span class="tag">方案 H2</span>
+      <h3>安静的蓝图 —— H 的降噪版</h3>
+      <p>五处降噪：<b>程序合并成一张双孔卡</b>（左孔收音、右孔输出，13 卡变 8 卡）；<b>线默认安静</b>（半透明细线、无动画），悬停某张卡时只有它的线点亮流动——平时看拓扑，注视看电路；送进程序走贴柱回勾线与设备线分道；卡片只留一行名字；去掉点阵与提示条，一屏放下不滚动。拉线 / 点孔连接 / 悬停 ✕ 撤线全部保留。</p>
+      <div class="fix">回答「蓝图怎么不乱」：乱的从来不是图，是响度。</div>
+      <div class="go">打开 →</div>
+    </a>
+  </div>
+
+  <h2 class="rd">第一轮 · 备查</h2>
+  <div class="r1">
+    <a href="a-dual-orbit.html">A 双环舞台<span>外环程序盘，延续性最高但挤</span></a>
+    <a href="b-patchbay.html">B 跳线板<span>patchbay 隐喻，线缆太短</span></a>
+    <a href="c-matrix.html">C 矩阵<span>交叉点网格，像表格</span></a>
+    <a href="d-chain.html">D 链路<span>胶囊信号链，像任务管理器</span></a>
+  </div>
+
+  <div class="diagnosis">
+    <b>第一轮为什么不行（自诊）</b>——
+    A：本质是老舞台挂个外圈，把动态多变的程序钉在装饰性轨道上，还引入了第四种颜色，词汇表变脏；
+    B：620px 里塞 patchbay，线缆只有一拃长，像工装软件；
+    C：一张表格，正是 ③ 版删过的「说得出组成、说不出流向」；
+    D：胶囊排排坐，同心圆的字母表全丢了，读起来像任务管理器。
+  </div>
+
+  <p class="note">说明：均为静态高保真原型（假数据、内联脚本），仅示意布局与交互；正式实现仍须遵守 AGENTS.md 的动效曲线（lib/motion.ts）、useLiveness 闸门与主题令牌。
+  「送进程序」在后端对应一条新的路由形态（源程序输出 → 目标程序输入端点），UI 先按此抽象设计。</p>
+</div>
+</body>
+</html>
