@@ -113,31 +113,56 @@ struct AudioPolicyConfig {
     vtable: usize,
 }
 
+/// Handle to AudioSes.dll, loaded once for the life of the process.
+///
+/// Every route and every release used to raise the module's reference count
+/// through `LoadLibraryW` and never give it back — harmless on an afternoon,
+/// a slow leak across a session of many routes. `FreeLibraryW` is still not
+/// called: the DLL stays mapped from the first route to process exit, which
+/// is exactly what the audio service needs it for anyway.
+fn audio_ses_module() -> Result<isize, AudioError> {
+    use std::sync::OnceLock;
+    static MODULE: OnceLock<isize> = OnceLock::new();
+
+    if let Some(module) = MODULE.get() {
+        return Ok(*module);
+    }
+    use std::os::windows::ffi::OsStrExt;
+    extern "system" {
+        fn LoadLibraryW(name: *const u16) -> isize;
+    }
+    // SAFETY: loading a system DLL.
+    let module = unsafe {
+        let name: Vec<u16> = std::ffi::OsStr::new("AudioSes.dll\0")
+            .encode_wide()
+            .collect();
+        LoadLibraryW(name.as_ptr())
+    };
+    if module == 0 {
+        return Err(AudioError::Api(
+            "LoadLibraryW(AudioSes.dll) failed".to_string(),
+        ));
+    }
+    // Two threads racing the load both hold valid handles to the same DLL;
+    // whichever write lands, the value is good.
+    let _ = MODULE.set(module);
+    Ok(MODULE.get().copied().unwrap_or(module))
+}
+
 impl AudioPolicyConfig {
     /// Activate the factory and QI to the build-specific interface.
     fn activate() -> Result<Self, AudioError> {
-        use std::os::windows::ffi::OsStrExt;
-
         extern "system" {
-            fn LoadLibraryW(name: *const u16) -> isize;
             fn GetProcAddress(module: isize, name: *const u8) -> isize;
         }
 
-        // SAFETY: loading a system DLL and resolving its export.
-        let module = unsafe {
-            let name: Vec<u16> = std::ffi::OsStr::new("AudioSes.dll\0")
-                .encode_wide()
-                .collect();
-            LoadLibraryW(name.as_ptr())
-        };
-        if module == 0 {
-            return Err(AudioError::Api(
-                "LoadLibraryW(AudioSes.dll) failed".to_string(),
-            ));
-        }
         // SAFETY: export name is a valid NUL-terminated literal.
-        let proc_addr =
-            unsafe { GetProcAddress(module, c"DllGetActivationFactory".as_ptr() as *const u8) };
+        let proc_addr = unsafe {
+            GetProcAddress(
+                audio_ses_module()?,
+                c"DllGetActivationFactory".as_ptr() as *const u8,
+            )
+        };
         if proc_addr == 0 {
             return Err(AudioError::Api(
                 "AudioSes.dll does not export DllGetActivationFactory".to_string(),
