@@ -35,6 +35,34 @@ export interface LogEntry {
 /** `(exe_name, device_ids)` — ids in route order, first is the primary. */
 export type RememberedRoute = [exeName: string, deviceIds: string[]];
 
+/** `(source_exe_name, target_exe_name)` — one remembered "send into" rule:
+ * the source program's audio is fed into the target program's input. */
+export type RememberedFeed = [sourceExe: string, targetExe: string];
+
+/**
+ * The pair of endpoints that carries one program's audio into another's input:
+ * the source is pinned to the *render* side (a virtual cable's input) and the
+ * target captures from the *capture* side (its output). The pair comes from a
+ * loopback driver — ours when it ships, or any the user already has — and the
+ * settings page keeps it. Null on either side means "no carrier configured",
+ * which is why a feed can be remembered but not delivered.
+ */
+export interface FeedCarrier {
+  render: string | null;
+  capture: string | null;
+}
+
+/** What setting one feed target actually did.
+ *
+ * `delivered` is false — with a `reason` — when the rule is recorded but no
+ * sound can move yet: no carrier is configured, or the source is routed to a
+ * device (its one per-app render slot is taken by that device, so the feed
+ * rides along suspended until the device route stops). */
+export interface FeedOutcome {
+  delivered: boolean;
+  reason: 'no_carrier' | 'source_routed' | null;
+}
+
 /** What the window should say about this install on launch. */
 export interface StartupNotice {
   /** A fresh install, or an earlier version that may have left assignments. */

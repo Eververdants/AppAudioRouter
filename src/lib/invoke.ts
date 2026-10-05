@@ -7,7 +7,10 @@ import type {
   AudioDevice,
   AudioSession,
   DeviceDelay,
+  FeedCarrier,
+  FeedOutcome,
   ProcessIcon,
+  RememberedFeed,
   RememberedRoute,
   ResetOutcome,
   SourceVolume,
@@ -17,6 +20,12 @@ import type {
 
 export async function listDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>('list_devices');
+}
+
+/** Recording (capture) endpoints — the microphones and virtual cable outputs
+ * a program can take sound *in* through. */
+export async function listCaptureDevices(): Promise<AudioDevice[]> {
+  return invoke<AudioDevice[]>('list_capture_devices');
 }
 
 export async function listSessions(): Promise<AudioSession[]> {
@@ -173,4 +182,45 @@ export async function getStartupNotice(): Promise<StartupNotice | null> {
 /** Record that this version has run, so the notice is not shown again. */
 export async function ackStartupNotice(): Promise<void> {
   await invoke('ack_startup_notice');
+}
+
+/** The endpoints pair that carries one program's audio into another's input. */
+export async function getFeedCarrier(): Promise<FeedCarrier> {
+  return invoke<FeedCarrier>('get_feed_carrier');
+}
+
+export async function setFeedCarrier(render: string | null, capture: string | null): Promise<void> {
+  await invoke('set_feed_carrier', { render, capture });
+}
+
+/** Every remembered feed rule as `(source_exe, target_exe)` pairs. */
+export async function listFeeds(): Promise<RememberedFeed[]> {
+  return invoke<RememberedFeed[]>('list_feeds');
+}
+
+/**
+ * Send one program's audio into another program's input: the source's render
+ * endpoint is pinned to the carrier's input side and the target's capture
+ * endpoint to its output side. `delivered` is false — with a reason — when the
+ * rule could only be recorded (no carrier configured, or the source is routed
+ * to a device and its render slot is taken).
+ */
+export async function setFeedTarget(
+  sourcePid: number,
+  sourceExe: string,
+  targetPid: number,
+  targetExe: string,
+): Promise<FeedOutcome> {
+  return invoke<FeedOutcome>('set_feed_target', {
+    sourcePid,
+    sourceExe,
+    targetPid,
+    targetExe,
+  });
+}
+
+/** Take one feed rule back: the target's capture endpoint is released, and the
+ * source's carrier pin goes with it when nothing else still needs it. */
+export async function removeFeedTarget(sourcePid: number, targetPid: number): Promise<void> {
+  await invoke('remove_feed_target', { sourcePid, targetPid });
 }

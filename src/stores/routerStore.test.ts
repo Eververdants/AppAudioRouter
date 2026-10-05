@@ -38,6 +38,10 @@ interface Backend {
   remembered: [string, string[]][];
   delays: [string, number][];
   volumes: [string, number][];
+  /** The remembered feed rules, as `(source_exe, target_exe)` pairs. */
+  feeds: [string, string][];
+  /** The loopback pair feeds run through; null halves mean "not configured". */
+  carrier: { render: string | null; capture: string | null };
   calls: { cmd: string; args: Record<string, unknown> }[];
   generation: number;
   /** Return true to make a command fail, the way a real backend would. */
@@ -53,6 +57,8 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
     remembered: [],
     delays: [],
     volumes: [],
+    feeds: [],
+    carrier: { render: 'speakers', capture: 'cable-out' },
     calls: [],
     generation: 0,
     fail: () => false,
@@ -94,6 +100,38 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         }));
       case 'get_remembered_routes':
         return backend.remembered;
+      case 'list_capture_devices':
+        return [{ id: 'cable-out', name: 'CABLE Output' }];
+      case 'get_feed_carrier':
+        return backend.carrier;
+      case 'set_feed_carrier':
+        backend.carrier = {
+          render: (args.render as string | null) ?? null,
+          capture: (args.capture as string | null) ?? null,
+        };
+        return null;
+      case 'list_feeds':
+        return backend.feeds;
+      case 'set_feed_target': {
+        const sourceExe = args.sourceExe as string;
+        const targetExe = args.targetExe as string;
+        if (!backend.feeds.some(([s2, t]) => s2 === sourceExe && t === targetExe)) {
+          backend.feeds = [...backend.feeds, [sourceExe, targetExe]];
+        }
+        if (backend.carrier.render === null || backend.carrier.capture === null) {
+          return { delivered: false, reason: 'no_carrier' };
+        }
+        return { delivered: true, reason: null };
+      }
+      case 'remove_feed_target': {
+        const source = backend.sessions.find((s2) => s2.pid === args.sourcePid)?.exe_name ?? '';
+        const target = backend.sessions.find((s2) => s2.pid === args.targetPid)?.exe_name ?? '';
+        backend.feeds = backend.feeds.filter(
+          ([s2, t]) =>
+            !(s2.toLowerCase() === source.toLowerCase() && t.toLowerCase() === target.toLowerCase()),
+        );
+        return null;
+      }
       case 'clear_route':
         backend.remembered = backend.remembered.filter(([name]) => name !== args.exeName);
         return null;
@@ -155,6 +193,11 @@ function reset(overrides: Partial<StoreState> = {}): void {
     sourceVolumes: {},
     soundingPids: {},
     rememberedRoutes: [],
+    rememberedFeeds: [],
+    feeds: {},
+    feedCarrier: { render: null, capture: null },
+    captureDevices: [],
+    feedUndo: null,
     defaultDeviceId: null,
     startupNotice: null,
     undoSnapshot: null,
@@ -739,5 +782,85 @@ describe('settings and log', () => {
     state().toggleAutoRemember();
     expect(state().autoRemember).toBe(true);
     expect(localStorage.getItem('aar-auto-remember')).toBe('1');
+  });
+});
+
+describe('feeds', () => {
+  it('connects a programme into another input and offers the way back', async () => {
+    const backend = installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME], feedCarrier: backend.carrier });
+
+    await state().addFeed(MUSIC.pid, GAME.pid);
+
+    expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+    expect(state().rememberedFeeds).toEqual([
+      { sourceExe: 'music.exe', targetExe: ['game.exe'] },
+    ]);
+    // Connected at once: a feed pins its own endpoints, so no hub press waits
+    // between the pick and the sound.
+    expect(backend.calls.some((call) => call.cmd === 'set_feed_target')).toBe(true);
+    expect(state().feedUndo).toMatchObject({ sourcePid: MUSIC.pid, targetPid: GAME.pid });
+
+    await state().undoFeed();
+
+    expect(state().feeds[MUSIC.pid]).toBeUndefined();
+    expect(state().rememberedFeeds).toEqual([]);
+    // The undo is the end of the chain, not a new offer.
+    expect(state().feedUndo).toBeNull();
+  });
+
+  it('records a feed but says it is silent when no carrier is configured', async () => {
+    installBackend({ carrier: { render: null, capture: null } });
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+
+    await state().addFeed(MUSIC.pid, GAME.pid);
+
+    // The rule is the user's decision and stays; nothing moves until a pair is
+    // picked in the settings, and the log says exactly that.
+    expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+    expect(state().rememberedFeeds).toHaveLength(1);
+    expect(lastLog()?.message).toContain('no carrier');
+    expect(lastLog()?.level).toBe('error');
+  });
+
+  it('rolls the whole rule back when the backend refuses it', async () => {
+    installBackend({ fail: (cmd) => cmd === 'set_feed_target' });
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+
+    await state().addFeed(MUSIC.pid, GAME.pid);
+
+    expect(state().feeds[MUSIC.pid]).toBeUndefined();
+    expect(state().rememberedFeeds).toEqual([]);
+    expect(state().feedUndo).toBeNull();
+    expect(lastLog()?.level).toBe('error');
+  });
+
+  it('keeps a feed only while both of its ends are on the session list', async () => {
+    installBackend({ sessions: [MUSIC, GAME] });
+    reset({
+      devices: [SPEAKERS, TV],
+      rememberedFeeds: [{ sourceExe: 'music.exe', targetExe: ['game.exe'] }],
+      feeds: {},
+    });
+
+    await state().refreshSessions();
+    expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+
+    // The target exits: the wire has nothing to arrive at, and the card goes
+    // with it — the rule itself stays in the memory.
+    installBackend({ sessions: [MUSIC] });
+    await state().refreshSessions();
+    expect(state().feeds[MUSIC.pid]).toBeUndefined();
+    expect(state().rememberedFeeds).toHaveLength(1);
+  });
+
+  it('refuses to feed a programme into itself', async () => {
+    installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+
+    await state().addFeed(MUSIC.pid, MUSIC.pid);
+
+    expect(state().feeds[MUSIC.pid]).toBeUndefined();
+    expect(state().rememberedFeeds).toEqual([]);
   });
 });

@@ -6,6 +6,7 @@ import type {
   AudioSession,
   DuplicationReadyEvent,
   DuplicationStoppedEvent,
+  FeedCarrier,
   LogEntry,
   MirrorFailedEvent,
   RememberedRouteEntry,
@@ -27,6 +28,39 @@ import {
 } from '@/lib/delay';
 import { rgbaToDataUrl } from '@/lib/icons';
 import * as api from '@/lib/invoke';
+
+/** One executable's remembered feed rules: the programs its audio feeds into. */
+export interface RememberedFeedEntry {
+  sourceExe: string;
+  targetExe: string[];
+}
+
+/** The inverse offer a feed change leaves standing. */
+export interface FeedUndoOffer {
+  sourcePid: number;
+  targetPid: number;
+  /** True when the change was an add (undo removes it); false for a removal. */
+  added: boolean;
+}
+
+/** Where a feed rule stands right now.
+ *
+ * `live`: the carrier is configured and the source's render slot is free, so
+ * sound is actually moving into the target. `suspended`: the source is routed
+ * to a device — the per-app render slot belongs to that device, and the feed
+ * comes back the moment the route stops. `no-carrier`: no endpoint pair is
+ * configured, so the rule is recorded but nothing can move. */
+export type FeedLiveness = 'live' | 'suspended' | 'no-carrier';
+
+export function feedLiveness(
+  sourcePid: number,
+  carrier: FeedCarrier,
+  routedPids: Record<number, string[]>,
+): FeedLiveness {
+  if (carrier.render === null || carrier.capture === null) return 'no-carrier';
+  const routed = routedPids[sourcePid];
+  return routed !== undefined && routed.length > 0 ? 'suspended' : 'live';
+}
 
 interface RouterState {
   devices: AudioDevice[];
@@ -115,6 +149,29 @@ interface RouterState {
   autoRemember: boolean;
   /** Routes the backend remembers, one entry per executable name. */
   rememberedRoutes: RememberedRouteEntry[];
+  /**
+   * "Send into" rules the backend remembers, one entry per source executable.
+   * A rule is recorded even when it cannot be delivered yet — the node on the
+   * board stays visible and says what is missing instead of vanishing.
+   */
+  rememberedFeeds: RememberedFeedEntry[];
+  /**
+   * Live feed targets keyed by source PID, in the order they were added.
+   * Rebuilt from the memory and the live session list on every session refresh:
+   * a feed pins endpoints on both ends, so a process leaving the list takes its
+   * half of the wire with it.
+   */
+  feeds: Record<number, number[]>;
+  /**
+   * The endpoint pair that carries feeds (a loopback driver's render + capture
+   * sides, configured in settings). Either half null means feeds are recorded
+   * but nothing can move.
+   */
+  feedCarrier: FeedCarrier;
+  /** Recording endpoints, for the carrier picker in settings. */
+  captureDevices: AudioDevice[];
+  /** The last feed change that can still be undone, while the offer stands. */
+  feedUndo: FeedUndoOffer | null;
   /** Whether the close button hides the window to the tray instead of quitting. */
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
@@ -151,6 +208,27 @@ interface RouterState {
   restoreRememberedRoutes: () => Promise<void>;
   /** Forget one executable's remembered route. */
   forgetRememberedRoute: (exeName: string) => Promise<void>;
+  /** Read the remembered feed rules and rebuild the live feed map from them. */
+  loadFeeds: () => Promise<void>;
+  /** Read the configured carrier pair (both halves may be null). */
+  loadFeedCarrier: () => Promise<void>;
+  /** Point the carrier at a new endpoint pair; pending feeds try to deliver. */
+  setFeedCarrier: (render: string | null, capture: string | null) => Promise<void>;
+  /** Read the recording endpoints for the carrier picker. */
+  loadCaptureDevices: () => Promise<void>;
+  /** Send one program's audio into another's input. Immediate (no hub apply):
+   * the inverse offer rides the feed toast. */
+  addFeed: (sourcePid: number, targetPid: number) => Promise<void>;
+  /** Take one feed rule back. */
+  removeFeed: (sourcePid: number, targetPid: number) => Promise<void>;
+  /** Put every remembered feed whose two ends are live back on. Like the
+   * device-route restore, it waits for the lists and the memory; whichever of
+   * the three lands last calls it. */
+  restoreRememberedFeeds: () => Promise<void>;
+  /** Invert the last feed change without leaving a new offer. */
+  undoFeed: () => Promise<void>;
+  /** Drop the feed offer without acting on it. */
+  dismissFeedUndo: () => void;
   /** Fold one Core Audio change notification into the UI: refresh whatever moved
    * and quietly, since the user did not ask for this. */
   syncFromNotification: (changed: AudioChangedEvent) => Promise<void>;
@@ -354,6 +432,88 @@ const autoRestoreDecided = new Set<number>();
  */
 const iconsInFlight = new Set<string>();
 
+/**
+ * Source PID + target exe pairs this run already decided about, so a feed
+ * restore is attempted at most once per pair: a rule the user removed by hand
+ * must not be put straight back, and one whose delivery failed must not retry —
+ * and log — on every Core Audio move. Never pruned against the live list: a
+ * PID leaving it is exactly the case that must not be retried.
+ */
+const feedRestoreDecided = new Set<string>();
+
+/**
+ * Lowest live PID per executable name — the address a per-app assignment is
+ * written to, since the audio service keeps them per executable and one browser
+ * holds a dozen processes.
+ */
+function lowestPidByExe(sessions: AudioSession[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const session of sessions) {
+    const key = session.exe_name.toLowerCase();
+    const known = map.get(key);
+    if (known === undefined || session.pid < known) map.set(key, session.pid);
+  }
+  return map;
+}
+
+/**
+ * Rebuild the live feed map from the memory and the sessions: a rule exists on
+ * the board only while both of its ends are on the list — a feed pins an
+ * endpoint on each of them, so a process leaving the list takes its half of the
+ * wire with it.
+ */
+function deriveFeeds(
+  memory: RememberedFeedEntry[],
+  sessions: AudioSession[],
+): Record<number, number[]> {
+  const pidByExe = lowestPidByExe(sessions);
+  const feeds: Record<number, number[]> = {};
+  for (const entry of memory) {
+    const sourcePid = pidByExe.get(entry.sourceExe.toLowerCase());
+    if (sourcePid === undefined) continue;
+    for (const targetExe of entry.targetExe) {
+      if (targetExe.toLowerCase() === entry.sourceExe.toLowerCase()) continue;
+      const targetPid = pidByExe.get(targetExe.toLowerCase());
+      if (targetPid === undefined) continue;
+      const existing = feeds[sourcePid] ?? [];
+      if (!existing.includes(targetPid)) existing.push(targetPid);
+      feeds[sourcePid] = existing;
+    }
+  }
+  return feeds;
+}
+
+/**
+ * The feed memory with `sourceExe` pointing at `targetExe` (added) or without
+ * it (removed). Matched case-insensitively, like the route memory; the first
+ * spelling seen is the one kept.
+ */
+function rememberFeedTargets(
+  entries: RememberedFeedEntry[],
+  sourceExe: string,
+  targetExe: string,
+  added: boolean,
+): RememberedFeedEntry[] {
+  const key = sourceExe.toLowerCase();
+  const existing = entries.find((entry) => entry.sourceExe.toLowerCase() === key);
+  const others = entries.filter((entry) => entry.sourceExe.toLowerCase() !== key);
+  if (!added) {
+    const remaining = (existing?.targetExe ?? []).filter(
+      (name) => name.toLowerCase() !== targetExe.toLowerCase(),
+    );
+    if (existing === undefined || remaining.length === 0) return others;
+    return [...others, { sourceExe: existing.sourceExe, targetExe: remaining }];
+  }
+  const already = (existing?.targetExe ?? []).some(
+    (name) => name.toLowerCase() === targetExe.toLowerCase(),
+  );
+  if (already) return entries;
+  return [
+    ...others,
+    { sourceExe: existing?.sourceExe ?? sourceExe, targetExe: [...(existing?.targetExe ?? []), targetExe] },
+  ];
+}
+
 /** A device's name for the log, or its id when it is not in the list. */
 function deviceName(deviceId: string | undefined, devices: AudioDevice[]): string {
   if (deviceId === undefined) return '';
@@ -449,6 +609,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   soundingPids: {},
   autoRemember: readAutoRemember(),
   rememberedRoutes: [],
+  rememberedFeeds: [],
+  feeds: {},
+  feedCarrier: { render: null, capture: null },
+  captureDevices: [],
+  feedUndo: null,
   closeToTray: false,
   autostart: false,
   startupNotice: null,
@@ -541,6 +706,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         for (const session of sessions) {
           if (session.playing === true) soundingPids[session.pid] = true;
         }
+        // Feeds pin an endpoint on each end, so both ends have to be live for
+        // the wire to stay on the board — rebuilt from the memory, same as the
+        // badges above are rebuilt from the engine list.
+        const feeds = deriveFeeds(s.rememberedFeeds, sessions);
         return {
           sessions,
           routedPids,
@@ -548,6 +717,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
           engineGenerations,
           soundingPids,
+          feeds,
         };
       });
       // A routed program can exit on its own, and the fixed output device
@@ -565,8 +735,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         : Promise.resolve();
       // A program that has just started playing is the moment its remembered
       // route is due; the same pass picks up everything that was already running
-      // when the app launched.
+      // when the app launched. Feeds ride the same ordering — both passes can
+      // pin endpoints around one executable.
       void swept.then(() => get().restoreRememberedRoutes());
+      void swept.then(() => get().restoreRememberedFeeds());
       // Icons ride behind the list, never in front of it: the rows are already
       // on screen with their letter tiles by the time the shell answers.
       get().loadMissingIcons();
@@ -791,6 +963,242 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       );
     }
   },
+
+  loadFeeds: async () => {
+    try {
+      const pairs = await api.listFeeds();
+      const grouped = new Map<string, { sourceExe: string; targetExe: string[] }>();
+      for (const [sourceExe, targetExe] of pairs) {
+        const key = sourceExe.toLowerCase();
+        const entry = grouped.get(key);
+        if (entry === undefined) grouped.set(key, { sourceExe, targetExe: [targetExe] });
+        else entry.targetExe.push(targetExe);
+      }
+      const rememberedFeeds = [...grouped.values()];
+      set({ rememberedFeeds, feeds: deriveFeeds(rememberedFeeds, get().sessions) });
+    } catch (e) {
+      get().addLog(i18next.t('log.feedsLoadFailed', { error: String(e) }), 'error');
+      return;
+    }
+    void get().restoreRememberedFeeds();
+  },
+
+  loadFeedCarrier: async () => {
+    try {
+      set({ feedCarrier: await api.getFeedCarrier() });
+    } catch (e) {
+      get().addLog(i18next.t('log.feedCarrierLoadFailed', { error: String(e) }), 'error');
+    }
+    // The carrier arriving is the moment every recorded-but-undeliverable feed
+    // becomes deliverable; whichever of the three inputs landed last calls it.
+    void get().restoreRememberedFeeds();
+  },
+
+  setFeedCarrier: async (render, capture) => {
+    const previous = get().feedCarrier;
+    set({ feedCarrier: { render, capture } });
+    try {
+      await api.setFeedCarrier(render, capture);
+      get().addLog(i18next.t('log.feedCarrierSet'), 'success');
+      // Same as the load path: a carrier moving re-opens every suspended rule.
+      void get().restoreRememberedFeeds();
+    } catch (e) {
+      set({ feedCarrier: previous });
+      get().addLog(i18next.t('log.feedCarrierSetFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  loadCaptureDevices: async () => {
+    try {
+      set({ captureDevices: await api.listCaptureDevices() });
+    } catch (e) {
+      get().addLog(i18next.t('log.captureDevicesFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  addFeed: async (sourcePid, targetPid) => {
+    const { sessions, feeds } = get();
+    if (sourcePid === targetPid) return;
+    if ((feeds[sourcePid] ?? []).includes(targetPid)) return;
+    const source = sessions.find((s) => s.pid === sourcePid);
+    const target = sessions.find((s) => s.pid === targetPid);
+    if (source === undefined || target === undefined) return;
+    // Optimistic, like every other immediate change: the board shows the wire
+    // now, the backend records the rule and pins whatever endpoints it can.
+    set((s) => ({
+      feeds: { ...s.feeds, [sourcePid]: [...(s.feeds[sourcePid] ?? []), targetPid] },
+      rememberedFeeds: rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, true),
+      feedUndo: { sourcePid, targetPid, added: true },
+    }));
+    try {
+      const outcome = await api.setFeedTarget(
+        sourcePid,
+        source.exe_name,
+        targetPid,
+        target.exe_name,
+      );
+      if (outcome.delivered) {
+        get().addLog(
+          i18next.t('log.feedSet', { source: source.exe_name, target: target.exe_name }),
+          'success',
+        );
+      } else if (outcome.reason === 'source_routed') {
+        // Recorded, suspended: the board keeps the node and says why nothing
+        // moves until the source's device route stops.
+        get().addLog(
+          i18next.t('log.feedSuspended', { source: source.exe_name, target: target.exe_name }),
+          'info',
+        );
+      } else {
+        get().addLog(
+          i18next.t('log.feedNoCarrier', { source: source.exe_name, target: target.exe_name }),
+          'error',
+        );
+      }
+    } catch (e) {
+      // The backend refused the rule: roll the whole optimistic write back, so
+      // the UI never shows a wire the audio service does not know about.
+      set((s) => {
+        const nextFeeds = { ...s.feeds };
+        const remaining = (nextFeeds[sourcePid] ?? []).filter((pid) => pid !== targetPid);
+        if (remaining.length === 0) delete nextFeeds[sourcePid];
+        else nextFeeds[sourcePid] = remaining;
+        return {
+          feeds: nextFeeds,
+          rememberedFeeds: rememberFeedTargets(
+            s.rememberedFeeds,
+            source.exe_name,
+            target.exe_name,
+            false,
+          ),
+          feedUndo: null,
+        };
+      });
+      get().addLog(i18next.t('log.feedSetFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  removeFeed: async (sourcePid, targetPid) => {
+    const { sessions, feeds } = get();
+    if (!(feeds[sourcePid] ?? []).includes(targetPid)) return;
+    const source = sessions.find((s) => s.pid === sourcePid);
+    const target = sessions.find((s) => s.pid === targetPid);
+    const previousFeeds = { ...feeds };
+    const previousMemory = get().rememberedFeeds;
+    set((s) => {
+      const nextFeeds = { ...s.feeds };
+      const remaining = (nextFeeds[sourcePid] ?? []).filter((pid) => pid !== targetPid);
+      if (remaining.length === 0) delete nextFeeds[sourcePid];
+      else nextFeeds[sourcePid] = remaining;
+      return {
+        feeds: nextFeeds,
+        rememberedFeeds:
+          source !== undefined && target !== undefined
+            ? rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, false)
+            : s.rememberedFeeds,
+        feedUndo: { sourcePid, targetPid, added: false },
+      };
+    });
+    try {
+      await api.removeFeedTarget(sourcePid, targetPid);
+      if (source !== undefined && target !== undefined) {
+        get().addLog(
+          i18next.t('log.feedRemoved', { source: source.exe_name, target: target.exe_name }),
+          'info',
+        );
+      }
+    } catch (e) {
+      // The backend kept the rule: put the wire and the memory back rather than
+      // showing a board that disagrees with the audio service.
+      set({
+        feeds: previousFeeds,
+        rememberedFeeds: previousMemory,
+        feedUndo: null,
+      });
+      get().addLog(i18next.t('log.feedRemoveFailed', { error: String(e) }), 'error');
+    }
+  },
+
+  restoreRememberedFeeds: async () => {
+    const { rememberedFeeds, sessions, feedCarrier, feeds, routedPids } = get();
+    if (rememberedFeeds.length === 0) return;
+    if (feedCarrier.render === null || feedCarrier.capture === null) return;
+    const pidByExe = lowestPidByExe(sessions);
+    if (pidByExe.size === 0) return;
+    const pairs: {
+      sourcePid: number;
+      sourceExe: string;
+      targetPid: number;
+      targetExe: string;
+    }[] = [];
+    for (const entry of rememberedFeeds) {
+      const sourcePid = pidByExe.get(entry.sourceExe.toLowerCase());
+      if (sourcePid === undefined) continue;
+      // A source routed to a device has its one per-app render slot taken; the
+      // backend would only record the rule as suspended, and the board already
+      // shows that. Stopping the route resumes the feed on the backend side.
+      if ((routedPids[sourcePid]?.length ?? 0) > 0) continue;
+      for (const targetExe of entry.targetExe) {
+        const targetPid = pidByExe.get(targetExe.toLowerCase());
+        if (targetPid === undefined || targetPid === sourcePid) continue;
+        if ((feeds[sourcePid] ?? []).includes(targetPid)) continue;
+        const key = `${sourcePid}|${targetExe.toLowerCase()}`;
+        if (feedRestoreDecided.has(key)) continue;
+        pairs.push({ sourcePid, sourceExe: entry.sourceExe, targetPid, targetExe });
+      }
+    }
+    if (pairs.length === 0) return;
+    // Claimed before the first await, like the device-route restore: a refresh
+    // landing mid-flight must not double-pin the same endpoints.
+    for (const pair of pairs) {
+      feedRestoreDecided.add(`${pair.sourcePid}|${pair.targetExe.toLowerCase()}`);
+    }
+    const results = await Promise.allSettled(
+      pairs.map((pair) =>
+        api.setFeedTarget(pair.sourcePid, pair.sourceExe, pair.targetPid, pair.targetExe),
+      ),
+    );
+    const restored: Record<number, number[]> = {};
+    results.forEach((result, index) => {
+      const pair = pairs[index];
+      if (pair === undefined) return;
+      if (result.status === 'fulfilled' && result.value.delivered) {
+        restored[pair.sourcePid] = [...(restored[pair.sourcePid] ?? []), pair.targetPid];
+        get().addLog(
+          i18next.t('log.feedRestored', { source: pair.sourceExe, target: pair.targetExe }),
+          'info',
+        );
+      }
+      // A suspension or a missing carrier stays silent in a restore pass: the
+      // board shows both states, and a boot sweep has no business scolding the
+      // user for a configuration it can see.
+    });
+    if (Object.keys(restored).length === 0) return;
+    set((s) => {
+      const nextFeeds = { ...s.feeds };
+      for (const [sourcePidKey, targetPids] of Object.entries(restored)) {
+        const sourcePid = Number(sourcePidKey);
+        const existing = nextFeeds[sourcePid] ?? [];
+        nextFeeds[sourcePid] = [...existing, ...targetPids.filter((t) => !existing.includes(t))];
+      }
+      return { feeds: nextFeeds };
+    });
+  },
+
+  undoFeed: async () => {
+    const offer = get().feedUndo;
+    if (offer === null) return;
+    // Consumed first, like the route undo: the inverse action below must not
+    // open its own offer on top of the one being used.
+    set({ feedUndo: null });
+    if (offer.added) await get().removeFeed(offer.sourcePid, offer.targetPid);
+    else await get().addFeed(offer.sourcePid, offer.targetPid);
+    // Either inverse re-opens an offer of its own; this was the undo, so the
+    // chain stops here.
+    set({ feedUndo: null });
+  },
+
+  dismissFeedUndo: () => set({ feedUndo: null }),
 
   loadShellSettings: async () => {
     // Both come from the native side: the close-to-tray preference sits with the
