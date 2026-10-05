@@ -1,4 +1,4 @@
-import type { Transition } from 'framer-motion';
+import type { MotionProps, Transition } from 'framer-motion';
 
 /**
  * Every surface in the app moves on one of these four curves.
@@ -36,6 +36,26 @@ export const SPRING_ARRIVE: Transition = {
 
 /** Opacity-only changes, where a spring would just look slow. */
 export const FADE: Transition = { duration: 0.18, ease: 'easeOut' };
+
+/**
+ * Identity `transformTemplate`: opts a motion element out of Motion's WAAPI
+ * path, and that is the point. When a WAAPI animation finishes, Motion cancels
+ * it on the spot but commits the final value through its batched style write —
+ * which lands a frame later. For that one painted frame the element falls back
+ * to its stale inline base, so anything fading out blinks back at full opacity
+ * exactly as it leaves; an icon swap reads as a stutter, which is how the hub
+ * icon's interrupted cross-fade got reported. Main-thread animation commits
+ * inline styles every frame, leaving nothing stale to fall back to.
+ *
+ * Put it on every element whose exit fade must not blink (the hub icon swap,
+ * the role words, the tuners, the ripple). The cost is per-frame style writes
+ * for a few small layers, and only while a swap is in flight — these surfaces
+ * have no standing loops.
+ */
+export const MAIN_THREAD_TRANSFORM: NonNullable<MotionProps['transformTemplate']> = (
+  _,
+  generated,
+) => generated;
 
 /**
  * A concentric ripple: one ring expanding out of the thing that just changed

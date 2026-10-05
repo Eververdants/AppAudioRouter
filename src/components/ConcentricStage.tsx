@@ -7,7 +7,14 @@ import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { formatStep, orderByDelay } from '@/lib/delay';
-import { FADE, RIPPLE, SPRING_ARRIVE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import {
+  FADE,
+  MAIN_THREAD_TRANSFORM,
+  RIPPLE,
+  SPRING_ARRIVE,
+  SPRING_GLIDE,
+  SPRING_TAP,
+} from '@/lib/motion';
 import {
   DISC_D,
   HUB_D,
@@ -423,6 +430,10 @@ function Hub({
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               exit={{ opacity: 0, scale: 0.6, filter: 'blur(4px)' }}
               transition={SPRING_TAP}
+              // Without this, the WAAPI path blinks the outgoing icon back at
+              // full opacity on the frame its fade ends — the interrupted swap
+              // read as "shrank, then grew again" (see MAIN_THREAD_TRANSFORM).
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               className="absolute inset-0 flex items-center justify-center"
             >
               <ProcessIcon exeName={exeName} name={name ?? exeName} size={24} />
