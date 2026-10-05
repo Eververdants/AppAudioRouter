@@ -77,6 +77,7 @@ pub(crate) fn window_titles(pids: &[u32]) -> HashMap<u32, String> {
     let mut collector = TitleCollector {
         wanted: pids.iter().copied().collect(),
         best: HashMap::new(),
+        stopped_early: false,
     };
     // SAFETY: `collect_title` reads state only through the pointer handed to
     // it in `lparam`, which outlives the call on this same thread.
@@ -87,7 +88,9 @@ pub(crate) fn window_titles(pids: &[u32]) -> HashMap<u32, String> {
         )
     };
     if let Err(e) = enumerated {
-        log::warn!("window title walk failed: {e}");
+        if !collector.stopped_early {
+            log::warn!("window title walk failed: {e}");
+        }
     }
     collector
         .best
@@ -102,6 +105,11 @@ struct TitleCollector {
     wanted: HashSet<u32>,
     /// pid -> (rank, title); a lower rank wins.
     best: HashMap<u32, (u8, String)>,
+    /// Set when the collector itself ended the walk — every wanted process
+    /// already holds its best possible window, and the rest of the Z order
+    /// could not improve anything. `EnumWindows` reports that early stop as a
+    /// failure like any other, and it must not be logged as one.
+    stopped_early: bool,
 }
 
 /// Ranks for a window with a non-empty title; lower is better. Only visible
@@ -120,7 +128,9 @@ unsafe extern "system" fn collect_title(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let collector = &mut *(lparam.0 as *mut TitleCollector);
     if collector.wanted.is_empty() {
         // Every process already has its best possible window; the rest of the
-        // walk could not improve anything.
+        // walk could not improve anything. Marked as the collector's own early
+        // stop, so the caller does not read it as a failure.
+        collector.stopped_early = true;
         return BOOL(0);
     }
 
