@@ -51,10 +51,15 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
 
         for i in 0..count {
             // SAFETY: i is within [0, count).
-            let device: IMMDevice = unsafe {
-                collection
-                    .Item(i)
-                    .map_err(|e| AudioError::Api(format!("Item({i}) failed: {e}")))?
+            let device: IMMDevice = match unsafe { collection.Item(i) } {
+                Ok(device) => device,
+                // A device vanishing between GetCount and its Item call — a
+                // hotplug race — is the same skip-able failure a device that
+                // will not open is below, not a reason the whole list is lost.
+                Err(e) => {
+                    warn!("skipping render device {i}: Item failed: {e}");
+                    continue;
+                }
             };
 
             // One endpoint that will not open — a driver in a bad state, an

@@ -49,10 +49,16 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
 
         for d in 0..device_count {
             // SAFETY: d in [0, device_count).
-            let device: IMMDevice = unsafe {
-                devices
-                    .Item(d)
-                    .map_err(|e| AudioError::Api(format!("Item({d}) failed: {e}")))?
+            let device: IMMDevice = match unsafe { devices.Item(d) } {
+                Ok(device) => device,
+                // An endpoint disappearing between GetCount and its Item call
+                // is a hotplug race; the sessions of the devices that remain
+                // are still worth listing, so skip this one the way a device
+                // whose session manager will not activate is skipped below.
+                Err(e) => {
+                    warn!("skipping the sessions of device {d}: Item failed: {e}");
+                    continue;
+                }
             };
 
             // One endpoint whose session manager will not activate must not
@@ -283,10 +289,16 @@ fn with_session_volumes<T>(
         let mut produced: Vec<T> = Vec::new();
         for d in 0..device_count {
             // SAFETY: d in [0, device_count).
-            let device: IMMDevice = unsafe {
-                devices
-                    .Item(d)
-                    .map_err(|e| AudioError::Api(format!("Item({d}) failed: {e}")))?
+            let device: IMMDevice = match unsafe { devices.Item(d) } {
+                Ok(device) => device,
+                // An endpoint disappearing between GetCount and its Item call
+                // is a hotplug race; the sessions of the devices that remain
+                // are still worth listing, so skip this one the way a device
+                // whose session manager will not activate is skipped below.
+                Err(e) => {
+                    warn!("skipping the sessions of device {d}: Item failed: {e}");
+                    continue;
+                }
             };
             // One endpoint whose session manager will not activate must not
             // lose the program's volume elsewhere: skip it the way the
