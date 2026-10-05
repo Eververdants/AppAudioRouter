@@ -68,8 +68,6 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "language": "Language",
-    "glassLite": "Reduce glass effects",
-    "glassLiteDesc": "Skips the frosted refraction and the pointer-tracked highlight, so panes turn solid and weak GPUs stay cool. Windows with transparency effects turned off starts here automatically.",
     "routing": "Routing",
     "autoRemember": "Auto-remember",
     "autoRememberDesc": "Remember each program's device routing and restore it automatically",

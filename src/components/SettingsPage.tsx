@@ -6,7 +6,6 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
-import { useGlassLite } from '@/hooks/useGlassLite';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
 import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
@@ -191,7 +190,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const { language, setLanguage } = useLanguage();
-  const { glassLite, setGlassLite } = useGlassLite();
   const devices = useRouterStore((s) => s.devices);
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
@@ -309,16 +307,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 { value: 'zh-CN', label: '中文' },
                 { value: 'en', label: 'EN' },
               ]}
-            />
-          </Row>
-          {/* Same shape as every other Switch row; the description is where the
-              automatic half is explained, because the switch only writes the
-              explicit choice that overrides it. */}
-          <Row title={t('settings.glassLite')} desc={t('settings.glassLiteDesc')}>
-            <Switch
-              checked={glassLite}
-              onChange={() => setGlassLite(!glassLite)}
-              label={t('settings.glassLite')}
             />
           </Row>
         </SectionCard>

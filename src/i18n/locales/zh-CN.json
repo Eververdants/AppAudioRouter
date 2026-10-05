@@ -68,8 +68,6 @@
     "themeLight": "浅色",
     "themeDark": "深色",
     "language": "语言",
-    "glassLite": "降低玻璃特效",
-    "glassLiteDesc": "关闭毛玻璃折射与跟随指针的高光，面板改为实底，低配置设备更流畅；Windows 关闭「透明效果」时会自动启用。",
     "routing": "路由",
     "autoRemember": "自动记忆",
     "autoRememberDesc": "记住每个程序的设备路由，下次自动恢复",
