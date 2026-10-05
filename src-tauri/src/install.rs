@@ -1,12 +1,16 @@
 //! What this install has seen before.
 //!
 //! Windows keeps a per-app endpoint assignment after the program that wrote it
-//! is gone. A version that stopped a route without releasing that assignment
-//! (2.1.1 and earlier) can therefore leave a program stuck on one device: the
-//! system default no longer moves it, and neither does a reboot. Nothing in the
-//! app can tell such a leftover from an assignment the user made by hand in the
-//! volume mixer, so the release that fixes it says so once — on the first launch
-//! after the update — and offers the reset.
+//! is gone. 2.1.0 — the release that introduced those assignments — stopped a
+//! route by rewriting the record without releasing it, and could leave a
+//! program stuck on one device: the system default no longer moves it, and
+//! neither does a reboot. Nothing in the app can tell such a leftover from an
+//! assignment the user made by hand in the volume mixer, so the app says so
+//! once — on the first launch after the update — and offers the reset.
+//! **Only for 2.1.0**: every later release returns what it pins on all four
+//! paths (stop, exit, the stale sweep, the reset), so a machine coming from
+//! 2.1.1 or later has nothing to clean and is not asked, on this or on any
+//! future update.
 //!
 //! Whether this is an update is decided **before the window exists**: the
 //! evidence is the two directories this app's own files live in.
@@ -28,6 +32,10 @@ const STATE_FILE: &str = "install-state.json";
 
 /// WebView2's profile directory, inside the local app data directory.
 const PROFILE_DIR: &str = "EBWebView";
+
+/// The only release whose launches could leave a per-app endpoint assignment
+/// behind. The upgrade notice exists for it and for nothing else.
+const LEFTOVER_VERSION: &str = "2.1.0";
 
 /// What the window should tell the user on launch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,16 +108,25 @@ impl InstallProbe {
         match self.recorded_version() {
             // This version already ran here: the notice has been shown.
             Some(seen) if seen == current_version => None,
-            Some(seen) => Some(StartupNotice {
+            // The rule is the version, not the distance to it. The state file
+            // postdates 2.1.0, so in the wild this arm is rarely the evidence —
+            // the arm below is — but the rule stays total rather than inferred.
+            Some(seen) if seen == LEFTOVER_VERSION => Some(StartupNotice {
                 kind: NoticeKind::Upgrade,
                 previous_version: Some(seen),
             }),
-            // Nothing recorded: a version from before the file existed is an
-            // update, and a machine with neither directory is a first run.
+            // Anything else recorded (2.1.1 and on) released its own
+            // allocations on every path. An upgrade from it has nothing to
+            // reset and gets silence, not the same dialog every release.
+            Some(_) => None,
+            // Nothing recorded but the directories are here: a version from
+            // before the file existed ran here — the era that closed with
+            // 2.1.0, the release the reset is for.
             None if self.ran_before() => Some(StartupNotice {
                 kind: NoticeKind::Upgrade,
                 previous_version: None,
             }),
+            // Neither directory exists: an empty machine.
             None => Some(StartupNotice {
                 kind: NoticeKind::FirstRun,
                 previous_version: None,
@@ -187,6 +204,9 @@ mod tests {
         assert_eq!(notice.kind, NoticeKind::FirstRun);
     }
 
+    /// No state file but the webview profile is here: the machine last ran a
+    /// version from before the file existed — the era 2.1.0 closed. This is
+    /// the arm that catches a 2.1.0 machine in the wild.
     #[test]
     fn a_webview_profile_means_an_earlier_version_ran_here() {
         let dir = std::env::temp_dir().join("aar-install-probe-launched");
@@ -205,16 +225,40 @@ mod tests {
         let dir = std::env::temp_dir().join("aar-install-probe-acked");
         let _ = std::fs::remove_dir_all(&dir);
         let probe = probe(Some(dir.clone()), None);
+        probe.record("2.3.0").unwrap();
+        assert_eq!(probe.notice("2.3.0"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 2.1.1 and later return what they pin on every path, so an upgrade from
+    /// them has nothing to reset — and must not see the same dialog again on
+    /// every future release.
+    #[test]
+    fn an_upgrade_from_2_1_1_or_later_is_not_asked() {
+        let dir = std::env::temp_dir().join("aar-install-probe-post-2-1-0");
+        let _ = std::fs::remove_dir_all(&dir);
+        let probe = probe(Some(dir.clone()), None);
         probe.record("2.1.1").unwrap();
-        assert_eq!(probe.notice("2.1.1"), None);
-        // The next version has something to say again.
-        assert_eq!(
-            probe
-                .notice("2.2.0")
-                .expect("an update says something")
-                .kind,
-            NoticeKind::Upgrade
-        );
+        assert_eq!(probe.notice("2.3.0"), None);
+        probe.record("2.2.0").unwrap();
+        assert_eq!(probe.notice("2.3.0"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only 2.1.0 earns the notice. The state file postdates that release, so
+    /// this arm states the rule in full rather than being the evidence the
+    /// wild provides — a real 2.1.0 machine arrives through the probe below.
+    #[test]
+    fn a_recorded_2_1_0_is_offered_the_reset() {
+        let dir = std::env::temp_dir().join("aar-install-probe-2-1-0");
+        let _ = std::fs::remove_dir_all(&dir);
+        let probe = probe(Some(dir.clone()), None);
+        probe.record(LEFTOVER_VERSION).unwrap();
+        let notice = probe
+            .notice("2.3.0")
+            .expect("2.1.0 is the version the reset is for");
+        assert_eq!(notice.kind, NoticeKind::Upgrade);
+        assert_eq!(notice.previous_version.as_deref(), Some("2.1.0"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

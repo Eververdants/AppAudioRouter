@@ -9,11 +9,13 @@ import { useRouterStore } from '@/stores/routerStore';
  * What this install is told about itself, once.
  *
  * Windows keeps a per-app endpoint assignment after the program that wrote it is
- * gone, so a version that stopped a route without releasing it (2.1.1 and
- * earlier) can leave a program stuck on one device — the system default no
- * longer moves it, and a reboot does not help. Nothing in the app can tell such
- * a leftover from an assignment the user made by hand in the volume mixer, so
- * the launch after an update offers the reset instead of running it silently.
+ * gone. 2.1.0 — the release that introduced them — stopped a route without
+ * releasing the assignment, and could leave a program stuck on one device: the
+ * system default no longer moves it, and a reboot does not help. Nothing in the
+ * app can tell such a leftover from an assignment the user made by hand in the
+ * volume mixer, so the launch after an update offers the reset instead of
+ * running it silently. The offer is 2.1.0's alone: later releases return what
+ * they pin on every path, so upgrading from them shows nothing at all.
  *
  * A fresh install gets the two lines it needs to start routing, and one about
  * the reset, which is the answer if a program ever stops following the system
