@@ -130,6 +130,19 @@ const SILENT_LEVEL: f32 = 1e-3;
 /// the device volume is still the control that has to move.
 pub const ALIGN_HEADROOM: f32 = 0.7;
 
+/// How many programs in `playing` measured above silence.
+///
+/// The count a human ear would give — a program making sound is playing,
+/// whether or not there were enough of them to align against each other.
+/// `aligned_gains` answers what can be aligned; this answers what was
+/// actually sounding, which is what an empty result has to be explained with.
+pub fn audible_count(playing: &[(String, SourceLevel)]) -> usize {
+    playing
+        .iter()
+        .filter(|(_, level)| level.rms > SILENT_LEVEL)
+        .count()
+}
+
 /// What each program in a group needs to be as loud as the others, as
 /// `(exe_name, gain)`, where a gain of 1.0 leaves that program's audio alone.
 ///
@@ -245,6 +258,18 @@ mod tests {
             .map(|(name, _)| name)
             .collect();
         assert_eq!(names, vec!["chat.exe", "game.exe", "music.exe"]);
+    }
+
+    #[test]
+    fn the_audible_count_is_what_an_ear_would_give() {
+        // One audible program: nothing to align, but something was playing —
+        // and the report has to say that rather than "nothing was".
+        let playing = vec![
+            ("loud.exe".to_string(), level(0.5, 0.5)),
+            ("muted.exe".to_string(), level(0.0, 0.0)),
+        ];
+        assert_eq!(audible_count(&playing), 1);
+        assert!(aligned_gains(&playing).is_empty());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
-use crate::audio::levels::{aligned_gains, SourceLevel, SourceLevels, LEVEL_MAX_AGE};
+use crate::audio::levels::{aligned_gains, audible_count, SourceLevel, SourceLevels, LEVEL_MAX_AGE};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
 use crate::config::{
     AppSettings, DelayConfig, PrimaryVolumeConfig, RouteConfig, SourceVolumeConfig, VolumeConfig,
@@ -706,7 +706,12 @@ pub fn align_source_levels(
         .collect();
 
     let gains = aligned_gains(&playing);
-    let audible = gains.len();
+    // "Playing" means a program a listener would call playing — a live
+    // reading above silence — not a program that ended up with a gain: the
+    // gains only exist once two audible programs are aligned against each
+    // other, and counting them would tell a user who can hear exactly one
+    // program that nothing was sounding at all.
+    let audible = audible_count(&playing);
     let mut applied = Vec::new();
     for (exe_name, gain) in gains {
         let percent = (gain * 100.0).round().clamp(0.0, SOURCE_VOLUME_MAX as f32) as u32;
