@@ -720,7 +720,7 @@ impl AppSettingsInner {
 /// then that file is renamed over the target. A crash mid-write can therefore
 /// leave the stale `.tmp` behind, but never a half-written config — renaming
 /// within one directory is atomic on all supported filesystems.
-fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
+pub(crate) fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create_dir_all failed: {e}"))?;
     }

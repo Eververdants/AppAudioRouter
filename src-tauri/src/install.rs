@@ -122,13 +122,14 @@ impl InstallProbe {
         let Some(dir) = &self.app_dir else {
             return Err("no roaming app data directory in the environment".to_string());
         };
-        std::fs::create_dir_all(dir).map_err(|e| format!("create_dir_all failed: {e}"))?;
         let state = StateFile {
             last_version: Some(current_version.to_string()),
         };
-        let content =
-            serde_json::to_string_pretty(&state).map_err(|e| format!("serialize failed: {e}"))?;
-        std::fs::write(dir.join(STATE_FILE), content)
+        // Same atomic write every config file gets: a crash mid-write must
+        // leave the previous state standing, not a half-written file the next
+        // launch cannot parse — that would turn one update notice into one
+        // per launch.
+        crate::config::persist_json(&dir.join(STATE_FILE), &state)
             .map_err(|e| format!("write {STATE_FILE} failed: {e}"))
     }
 }
