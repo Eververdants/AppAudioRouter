@@ -594,6 +594,10 @@ AppAudioRouter/
   状态行（正在播放/未在播放）按 `sounding` 自己换场，不搭名字的车。
   hub 的 exe 图标在固定槽位（`h-6 w-6`）里**并行交叉**，且与名字共用同一个动词——旧的缩小入雾、新的从 blur 4px 里聚焦
   （`SPRING_TAP` + blur，默认 sync 模式，不写 `mode="wait"` 让进出场互相等）；键是 `exeName`：换程序才动，窗口改标题只换名字。
+  ⚠️ **舞台上一切带退场淡出的 motion 元素都挂 `MAIN_THREAD_TRANSFORM`**（`lib/motion.ts`，恒等 `transformTemplate`）：
+  Motion 的 WAAPI 路径在动画结束的那一帧先同步拆掉动画、批量样式提交却晚一帧，元素会闪回内联基态（满透明度）——
+  退场的东西眨一下眼，被打断的图标切换读起来就是「先缩小又放大」。主线程动画每帧都提交内联样式，没有旧值可回落；
+  SVG（辐条）本来就走主线程，不必挂。
   副本的延迟/音量数值用 `mode="popLayout"` 纵向滚动。句子被原地改写没人会重读。
 - **hub 外圈虚线环**（`HUB_HALO_R`）：空闲时 hairline，有计划时换 accent 色——两层圆交叉淡入而不是动画颜色（颜色插值会脱离主题令牌）。
 - **空闲圆盘退后**：`animate` 的 opacity 目标是 `lit ? 1 : 0.72`，悬停任何圆盘都补足到 1 并放大 1.05；悬停还有一圈 `border-accent/45` 的外环以 opacity 淡入（不动阴影）。

@@ -326,6 +326,7 @@ function Ripple({ x, y, onDone }: { x: number; y: number; onDone: () => void }) 
       animate={{ scale: 2.2, opacity: 0 }}
       exit={{ opacity: 0 }}
       transition={RIPPLE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       onAnimationComplete={onDone}
     />
   );
@@ -456,6 +457,7 @@ function Hub({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
             transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             className="px-1 text-[11px] leading-tight text-text-muted"
           >
             {t('stage.guide')}
@@ -467,6 +469,7 @@ function Hub({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             className="flex max-w-full flex-col items-center gap-1"
           >
             <CharSwapText
@@ -480,6 +483,7 @@ function Hub({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 className="text-[9.5px] leading-none text-text-muted"
               >
                 {sounding ? t('stage.sounding') : t('stage.quiet')}
@@ -496,6 +500,7 @@ function Hub({
       initial={{ scale: 0.88, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={SPRING_ARRIVE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       className="absolute flex flex-col items-center justify-center gap-1 text-center"
       style={{ left: cx - HUB_D / 2, top: cy - HUB_D / 2, width: HUB_D, height: HUB_D }}
     >
@@ -553,6 +558,7 @@ function Hub({
               animate={{ opacity: 1, x: '-50%', y: 0, scale: 1 }}
               exit={{ opacity: 0, x: '-50%', y: 6, scale: 0.8 }}
               transition={SPRING_TAP}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               className="pointer-events-none absolute left-1/2 z-10"
               style={{ top: HUB_D - 9 }}
             >
@@ -641,6 +647,7 @@ function Satellite({
         animate={{ x: 0, y: 0, scale: 1, opacity: lit ? 1 : 0.72 }}
         whileHover={{ scale: 1.05, opacity: 1 }}
         transition={{ ...SPRING_ARRIVE, delay: Math.min(index * 0.045, 0.24) }}
+        transformTemplate={MAIN_THREAD_TRANSFORM}
         className="group/disc flex flex-col items-center"
       >
         <div className="relative">
@@ -707,6 +714,7 @@ function Satellite({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
               >
                 {role === 'primary' ? (
                   // The word explains itself: the one role whose tuners are
@@ -740,6 +748,7 @@ function Satellite({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
               >
                 {t('stage.defaultLabel')}
               </motion.span>
@@ -761,6 +770,7 @@ function Satellite({
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={SPRING_GLIDE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               className="overflow-hidden"
             >
               <Tuner deviceId={deviceId} primaryVolumeExe={primaryVolumeExe} />
@@ -896,6 +906,7 @@ function Row({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -10, opacity: 0 }}
             transition={SPRING_TAP}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             className="font-mono text-[10px] tabular-nums text-text-secondary"
           >
             {value}
