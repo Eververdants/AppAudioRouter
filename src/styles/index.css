@@ -7,10 +7,9 @@
    the first paint already carries the right colours. Keep both copies in sync
    when adjusting the palette. */
 :root {
-  /* The window's own plane: what everything is floating over, and the colour
-     the rainbow behind the glass is lit by. Cool and a step below every surface
-     that sits on it, which is what lets a translucent panel read as raised. */
-  --bg-primary: #e4eaf1;
+  /* The window's own plane: what everything floats over. Cool and a step below
+     every surface that sits on it, so a solid panel reads as raised. */
+  --bg-primary: #eef0f3;
   --bg-tertiary: #e8e8ec;
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
@@ -30,76 +29,11 @@
   /* Text on top of the accent fill. */
   --accent-ink: #ffffff;
 
-  /* Liquid glass.
-     A pane is a thick lens, not a frosted sheet: it stays see-through, it catches
-     a tight specular highlight where the light source reflects off its top, it
-     focuses that light into a bright caustic along its bottom edge, it traps a
-     pool of light inside near that bottom (the volumetric glow), and its whole
-     rim catches a thin bright line because a curved edge bends light from every
-     direction. Those four — specular, caustic, inner pool, rim — are what separate
-     liquid glass from frosted plastic; a flat alpha fill with one soft shadow has
-     none of them and reads as a sticker. */
-  --glass: rgba(255, 255, 255, 0.3);
-  --glass-strong: rgba(255, 255, 255, 0.42);
-  --glass-border: rgba(255, 255, 255, 0.5);
-  /* The reflection of the light source: a tight bright pool that sits wherever
-     the pointer is (`--gx/--gy`, written by a single delegated listener in App)
-     and falls off fast, plus the caustic the lens focuses along its bottom. With
-     no pointer the pool rests at the top, like light from above. */
-  --glass-specular: radial-gradient(
-      140% 90% at var(--gx, 50%) var(--gy, -18%),
-      rgba(255, 255, 255, 0.6),
-      rgba(255, 255, 255, 0.14) 42%,
-      rgba(255, 255, 255, 0) 64%
-    ),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 34%);
-  --glass-specular-strong: radial-gradient(
-      140% 90% at var(--gx, 50%) var(--gy, -18%),
-      rgba(255, 255, 255, 0.72),
-      rgba(255, 255, 255, 0.18) 42%,
-      rgba(255, 255, 255, 0) 64%
-    ),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 34%);
-  /* The rim and the trapped light, as one token because lit discs restate their
-     whole box-shadow inline (lib/stage.ts bloom) and must not drift: an inner rim
-     line all the way round, a hot top edge, a bright bottom caustic, and the
-     volumetric pool glowing up from inside the bottom. */
-  --glass-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.55), inset 0 -16px 30px -16px rgba(255, 255, 255, 0.5);
-  --glass-rim-strong: inset 0 0 0 1px rgba(255, 255, 255, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(255, 255, 255, 0.65),
-    inset 0 -18px 34px -16px rgba(255, 255, 255, 0.6);
-  /* Depth under the lens: contact, body, ambient. */
-  --glass-shadow: 0 1px 2px rgba(24, 40, 66, 0.12), 0 8px 24px rgba(24, 40, 66, 0.14),
-    0 24px 60px rgba(24, 40, 66, 0.14);
-
-  /* A thinner, clearer piece of the same glass: hardware nothing is wired to and
-     a centre with nothing attached. Less fill, a fainter rim, only a contact
-     shadow — it sits closer to the surface, so the thick glossy lens stays the
-     thing that reads as live. */
-  --glass-thin-bg: rgba(255, 255, 255, 0.16);
-  --glass-thin-border: rgba(255, 255, 255, 0.35);
-  --glass-thin-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  --glass-thin-shadow: 0 1px 2px rgba(24, 40, 66, 0.08);
-
-  /* How hard the lens bends what is behind it: clear enough to stay see-through,
-     saturated and a touch brightened so the refracted light reads as light. */
-  --glass-filter: blur(18px) saturate(190%) brightness(1.05);
-  --glass-filter-thin: blur(10px) saturate(160%);
-
-  /* A breath of noise over the aurora. Gradients this smooth read as vector
-     plastic; a static grain is what makes them read as light on a surface. */
-  --grain-alpha: 0.04;
-
-  /* What the glass has to refract. Three pools of light, tight enough and far
-     enough apart that a pane over one picks up a different tint than a pane over
-     another — that difference across a blurred surface is the refraction. Pushed
-     out of focus so they never read as shapes, but not so far that the whole
-     window becomes one even wash of candy. */
-  --spot-1: rgba(34, 211, 238, 0.48);
-  --spot-2: rgba(45, 212, 191, 0.36);
-  --spot-3: rgba(251, 191, 36, 0.26);
+  /* The one shadow a flat surface may cast: a tight contact layer and one
+     ambient layer, for the things that genuinely float above the page — toast,
+     popover, dialog, the stage's discs. Panels flush with the page get none;
+     separation between those is the hairline's job. */
+  --shadow-float: 0 1px 2px rgba(24, 40, 66, 0.06), 0 8px 24px rgba(24, 40, 66, 0.1);
 
   /* The three roles a device can be in, painted on the stage. One colour paints
      three things: the ring on the device's disc, the spoke that reaches it, and
@@ -132,8 +66,8 @@
 }
 
 .dark {
-  /* The plane again, cold and deep enough that a light ripple reads as light. */
-  --bg-primary: #05080c;
+  /* The plane again, cold and a step below every surface that sits on it. */
+  --bg-primary: #0b0e14;
   --bg-tertiary: #27272a;
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
@@ -152,55 +86,12 @@
   --hairline-strong: #2e3742;
   --accent-ink: #05222b;
 
-  /* The same lens in the dark. The fill stays near nothing — the glass is read
-     entirely by the light it catches: a cooler, tighter specular at the top, a
-     caustic and an inner pool at the bottom, and a rim line all the way round.
-     Without those a dark pane is just a slightly lighter rectangle. */
-  --glass: rgba(255, 255, 255, 0.07);
-  --glass-strong: rgba(255, 255, 255, 0.12);
-  --glass-border: rgba(255, 255, 255, 0.16);
-  --glass-specular: radial-gradient(
-      140% 90% at var(--gx, 50%) var(--gy, -18%),
-      rgba(255, 255, 255, 0.22),
-      rgba(255, 255, 255, 0.06) 42%,
-      rgba(255, 255, 255, 0) 64%
-    ),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 34%);
-  --glass-specular-strong: radial-gradient(
-      140% 90% at var(--gx, 50%) var(--gy, -18%),
-      rgba(255, 255, 255, 0.3),
-      rgba(255, 255, 255, 0.08) 42%,
-      rgba(255, 255, 255, 0) 64%
-    ),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 34%);
-  --glass-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.16), inset 0 -16px 30px -16px rgba(255, 255, 255, 0.14);
-  --glass-rim-strong: inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 rgba(255, 255, 255, 0.2),
-    inset 0 -18px 34px -16px rgba(255, 255, 255, 0.18);
-  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.45),
-    0 28px 64px rgba(0, 0, 0, 0.5);
+  /* The same shadow, deepened: on a near-black plane the ambient layer carries
+     the lift, since a darker panel cannot. */
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
 
-  /* The thinner, clearer piece of the same glass, in the dark. */
-  --glass-thin-bg: rgba(255, 255, 255, 0.04);
-  --glass-thin-border: rgba(255, 255, 255, 0.1);
-  --glass-thin-rim: inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --glass-thin-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-
-  --glass-filter: blur(18px) saturate(180%);
-  --glass-filter-thin: blur(10px) saturate(150%);
-
-  --grain-alpha: 0.06;
-
-  /* The same pools, cooled and separated: amber is kept low because on a near-
-     black plane it is what turns a teal wash olive. */
-  --spot-1: rgba(34, 211, 238, 0.4);
-  --spot-2: rgba(45, 212, 191, 0.26);
-  --spot-3: rgba(251, 191, 36, 0.13);
-
-  /* The same three roles, lifted for a dark stage. Teal has to clear the glass
-     by enough to be read as a spoke colour, which is why it sits at the
+  /* The same three roles, lifted for a dark stage. Teal has to stay light
+     enough to read against a dark disc, which is why it sits at the
      400-level step rather than the 600/700-level ones used on paper — and why
      mirror sits beside primary rather than two steps below it: they are the two
      halves of one fact, and two tints of one hue say that a copy is the same
@@ -218,37 +109,6 @@
   --type-primary-rgb: 34 211 238;
   --type-mirror-rgb: 20 184 166;
   --type-idle-rgb: 100 116 139;
-}
-
-/* Low-spec glass. The same material without the refraction: `backdrop-filter`
-   re-samples everything behind a pane on every frame anything above it moves,
-   and that is the one cost a weak GPU cannot carry — so `--glass-filter`
-   drops to none, the ambient shadow layer goes, and the fill takes over the
-   blur's job of keeping text readable by going nearly opaque. The panes read
-   as solid acrylic; the specular and rim stay, since a gradient and inset
-   shadows are paint, not sampling. Resolved and applied on <html> by
-   lib/glassLite.ts (and the boot script in index.html); the two themes keep
-   recognisably the same panes. */
-.glass-lite {
-  --glass: rgba(255, 255, 255, 0.68);
-  --glass-strong: rgba(255, 255, 255, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.62);
-  --glass-thin-bg: rgba(255, 255, 255, 0.45);
-  --glass-thin-border: rgba(255, 255, 255, 0.5);
-  --glass-shadow: 0 1px 2px rgba(24, 40, 66, 0.12), 0 10px 28px rgba(24, 40, 66, 0.1);
-  --glass-filter: none;
-  --glass-filter-thin: none;
-}
-
-.dark.glass-lite {
-  --glass: rgba(19, 24, 31, 0.74);
-  --glass-strong: rgba(23, 29, 37, 0.84);
-  --glass-border: rgba(255, 255, 255, 0.14);
-  --glass-thin-bg: rgba(19, 24, 31, 0.55);
-  --glass-thin-border: rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.42);
-  --glass-filter: none;
-  --glass-filter-thin: none;
 }
 
 * {
@@ -315,81 +175,6 @@ input[type='number']::-webkit-outer-spin-button,
 input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
-}
-
-@layer utilities {
-  /* A pane of liquid glass: see-through, blurred-and-saturated refraction of
-     whatever sits behind it, a tight specular highlight at the top, a caustic and
-     a trapped pool of light at the bottom, a bright rim all the way round, and a
-     real shadow stack beneath. Static: no transition, no animation, because a
-     lens is not something that happens. */
-  .glass {
-    background-color: var(--glass);
-    background-image: var(--glass-specular);
-    backdrop-filter: var(--glass-filter);
-    -webkit-backdrop-filter: var(--glass-filter);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      var(--glass-shadow),
-      var(--glass-rim);
-  }
-
-  /* The same lens one step thicker and glossier — for the thing the user has
-     picked, or the thing floating closest to them. */
-  .glass-strong {
-    background-color: var(--glass-strong);
-    background-image: var(--glass-specular-strong);
-    backdrop-filter: var(--glass-filter);
-    -webkit-backdrop-filter: var(--glass-filter);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      var(--glass-shadow),
-      var(--glass-rim-strong);
-  }
-
-  /* A thinner, clearer piece of the same glass: less fill, a fainter rim, only a
-     contact shadow, so it sits closer to the surface and the thick glossy lens
-     stays the thing that reads as live. */
-  .glass-thin {
-    background-color: var(--glass-thin-bg);
-    backdrop-filter: var(--glass-filter-thin);
-    -webkit-backdrop-filter: var(--glass-filter-thin);
-    border: 1px solid var(--glass-thin-border);
-    box-shadow:
-      var(--glass-thin-shadow),
-      var(--glass-thin-rim);
-  }
-
-  /* Light for the glass to bend. Three pools blurred past legibility but kept
-     apart, so a pane picks up a different tint depending on where it sits — that
-     difference across a blurred surface is the whole reason a panel looks like
-     glass instead of like frosted plastic. Nothing here may ever animate. */
-  .aurora {
-    background:
-      radial-gradient(30% 34% at 14% 10%, var(--spot-1), transparent 70%),
-      radial-gradient(32% 36% at 86% 18%, var(--spot-2), transparent 72%),
-      radial-gradient(36% 32% at 60% 94%, var(--spot-3), transparent 74%);
-    filter: blur(40px);
-  }
-
-  /* A breath of static noise over the aurora. A gradient this smooth is a vector
-     gradient, and vector gradients read as plastic; grain is what makes the same
-     colours read as light falling on a surface. Painted once, never animated,
-     blended so it only ever modulates what is beneath it. */
-  .grain {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
-    opacity: var(--grain-alpha);
-    mix-blend-mode: overlay;
-  }
-
-  /* Continuous curvature. A squircle is a superellipse corner: the curve leaves
-     the straight edge gradually instead of meeting it at a fixed radius, so a
-     small card nested in a large one looks like the same material rather than
-     like a rectangle wearing round trousers. Ignored where unsupported — the
-     radius itself already carries the shape. */
-  .squircle {
-    corner-shape: squircle;
-  }
 }
 
 @layer components {

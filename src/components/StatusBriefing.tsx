@@ -168,7 +168,7 @@ export function StatusBriefing() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.98 }}
               transition={SPRING_GLIDE}
-              className="glass squircle absolute bottom-full left-0 mb-2 w-[300px] rounded-[26px] p-3.5"
+              className="bg-surface border border-line shadow-float absolute bottom-full left-0 mb-2 w-[300px] rounded-card p-3.5"
             >
               <ul className="flex flex-col gap-2">
                 {lines.map((line) => (
@@ -195,10 +195,10 @@ export function StatusBriefing() {
             whileTap={{ scale: 0.94 }}
             whileHover={{ scale: 1.05 }}
             transition={SPRING_TAP}
-            className={`squircle flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11.5px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+            className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11.5px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
               open
                 ? 'border-accent/60 bg-accent-muted text-accent'
-                : 'border-glass-border bg-glass text-text-secondary hover:text-text-primary'
+                : 'border-line bg-surface text-text-secondary hover:text-text-primary'
             }`}
           >
             <svg

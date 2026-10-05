@@ -39,15 +39,6 @@ const config: Config = {
           DEFAULT: 'rgb(var(--hairline-rgb) / <alpha-value>)',
           strong: 'var(--hairline-strong)',
         },
-        /* The glass every floating surface is made of (see `.glass` in
-           styles/index.css for what composes a pane). Named as tokens rather
-           than written as utilities at the call site so the fill, its border
-           and its shadow stay one decision. */
-        glass: {
-          DEFAULT: 'var(--glass)',
-          strong: 'var(--glass-strong)',
-          border: 'var(--glass-border)',
-        },
         /* The three roles a device can be in, as spoke colours. One colour
            paints three things on the stage; nothing else may use these. */
         type: {
@@ -57,21 +48,19 @@ const config: Config = {
         },
       },
       /* Corner radii, in steps of "how far from the window edge is this".
-         Nested surfaces take the next step down, and the step between them is
-         the padding between them — that difference is what makes the curvature
-         read as continuous instead of as four independently rounded boxes.
-         The ladder runs generous on purpose: this is a liquid-glass surface,
-         and anything that floats is a capsule (`rounded-full`) or a true circle,
-         so the rectangular steps below are only for planes that sit still. */
+         Nested surfaces take the next step down. The ladder runs tight — flat
+         panels read as planes, not as bubbles — while anything that floats is
+         a capsule (`rounded-full`) or a true circle, so the rectangular steps
+         below are only for planes that sit still. */
       borderRadius: {
-        window: '40px',
-        panel: '32px',
-        card: '26px',
-        ctl: '20px',
-        seg: '17px',
+        window: '16px',
+        panel: '14px',
+        card: '12px',
+        ctl: '10px',
+        seg: '8px',
       },
       boxShadow: {
-        glass: 'var(--glass-shadow)',
+        float: 'var(--shadow-float)',
       },
       fontFamily: {
         sans: [

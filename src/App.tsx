@@ -11,7 +11,6 @@ import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
 import { UnderlineTabs } from '@/components/ui/UnderlineTabs';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
-import { useGlassSpecular } from '@/hooks/useGlassSpecular';
 import { useRouterStore } from '@/stores/routerStore';
 import type {
   AudioChangedEvent,
@@ -21,7 +20,6 @@ import type {
   SessionActivityEvent,
 } from '@/lib/types';
 import { FADE, SPRING_GLIDE } from '@/lib/motion';
-import { applyGlassLite, readStoredGlassLite, resolveGlassLite } from '@/lib/glassLite';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
 
@@ -60,24 +58,6 @@ export default function App() {
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
   const [tab, setTab] = useState<WorkTab>('router');
-
-  // The glass catches the pointer: one delegated listener writes the hovered
-  // pane's highlight position, so every lens in the window tracks the light.
-  useGlassSpecular();
-
-  useEffect(() => {
-    // The boot script in index.html already applied low-spec glass before the
-    // first paint. This keeps following the machine's verdict while the user
-    // has made none of their own — flipping Windows' transparency effects
-    // takes effect without a relaunch. A stored choice always wins, so the
-    // check lives in the handler, not in the effect body.
-    const media = window.matchMedia('(prefers-reduced-transparency: reduce)');
-    const onChange = () => {
-      if (readStoredGlassLite() === null) applyGlassLite(resolveGlassLite());
-    };
-    media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
-  }, []);
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
@@ -212,17 +192,12 @@ export default function App() {
   );
 
   return (
-    // One wash of light behind everything, blurred past legibility. It exists so
-    // the glass panels have something to refract — a blur over a flat colour is
-    // grey plastic, and this app is made of glass. Painted once, never animated,
-    // and behind every other layer including the title bar, because the frame is
-    // part of the same window rather than a thing stuck onto it.
+    // One flat plane of colour behind everything. Every surface that sits on it
+    // is solid and separated by hairlines, so the plane carries no detail of its
+    // own — painted once, never repainted, behind every other layer including
+    // the title bar, because the frame is part of the same window rather than a
+    // thing stuck onto it.
     <div className="relative isolate flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
-      <div aria-hidden="true" className="aurora pointer-events-none absolute inset-0 -z-10" />
-      {/* A breath of grain over that wash, so the light reads as falling on a
-          surface rather than as a flat vector gradient. Static and blended. */}
-      <div aria-hidden="true" className="grain pointer-events-none absolute inset-0 -z-10" />
-
       <TitleBar
         settingsOpen={view === 'settings'}
         onToggleSettings={() => setView((v) => (v === 'settings' ? 'router' : 'settings'))}

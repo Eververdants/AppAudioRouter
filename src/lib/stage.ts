@@ -1,5 +1,3 @@
-import type { CSSProperties } from 'react';
-
 /**
  * The concentric stage — the one place a route is drawn.
  *
@@ -169,9 +167,8 @@ export type RoleTone = {
   ring: string;
   /** The role word under the device's name. */
   label: string;
-  /** The disc's own outline, and its wash. */
+  /** The lit disc's own outline. */
   outline: string;
-  wash: string;
   /** The spoke carrying sound to it. */
   wire: string;
 };
@@ -183,7 +180,6 @@ export const TONE: Record<StageRole, RoleTone> = {
     ring: 'con-ring-main',
     label: 'text-type-primary',
     outline: 'border-type-primary',
-    wash: 'bg-type-primary/[0.07] dark:bg-type-primary/[0.09]',
     wire: 'stroke-type-primary',
   },
   /* A copy. The accent's neighbour hue rather than a second accent: both mean
@@ -193,7 +189,6 @@ export const TONE: Record<StageRole, RoleTone> = {
     ring: 'con-ring-copy',
     label: 'text-type-mirror',
     outline: 'border-type-mirror',
-    wash: 'bg-type-mirror/[0.07] dark:bg-type-mirror/[0.09]',
     wire: 'stroke-type-mirror',
   },
   /* Hardware no route touches. Stays on the shared border: most devices are
@@ -204,37 +199,10 @@ export const TONE: Record<StageRole, RoleTone> = {
   idle: {
     ring: 'con-ring-idle',
     label: 'text-text-muted',
-    // No outline of its own: an idle disc is a thinner, clearer piece of glass
-    // (`.glass-thin`), and a border colour here would fight that pane's rim.
+    // No outline of its own: an idle disc is an unfilled hairline circle on the
+    // stage's plane, and a second border colour inside it would say "wired"
+    // without a wire to back the claim.
     outline: '',
-    wash: '',
     wire: 'stroke-type-idle',
   },
 };
-
-/**
- * The bloom around a lit disc.
- *
- * Inline rather than a utility class because the colour has to come from the
- * theme's channels, so it can differ between the light and dark palettes, and
- * because this is one property rather than a shape worth naming.
- *
- * Two rings, not one: a halo outside and a hairline inset inside the rim, so a
- * lit disc is a disc *with a second circle drawn in it* rather than a disc with
- * a coloured outline. The lens's own rim light and shadow stack are pulled in as
- * tokens rather than restated, because an inline `box-shadow` replaces the whole
- * `.glass` one — and a disc that loses its specular rim or its contact shadow
- * stops looking like glass and starts looking like a sticker.
- */
-export function bloom(role: StageRole): CSSProperties {
-  if (role === 'idle') return {};
-  const channel = role === 'primary' ? '--type-primary-rgb' : '--type-mirror-rgb';
-  return {
-    boxShadow: [
-      `0 0 0 4px rgb(var(${channel}) / 0.16)`,
-      `inset 0 0 0 1px rgb(var(${channel}) / 0.22)`,
-      'var(--glass-rim)',
-      'var(--glass-shadow)',
-    ].join(', '),
-  };
-}

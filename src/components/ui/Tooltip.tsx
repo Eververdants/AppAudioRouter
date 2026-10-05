@@ -9,8 +9,8 @@ import type { ReactNode } from 'react';
  * behaviour of its own — the anchor keeps its own accessible name, so screen
  * readers never depend on this being visible.
  *
- * Solid, not glass: a blur behind a two-line hint is a backdrop-filter the
- * glass-lite budget exists to prevent, and a hint is not a lens.
+ * Solid, and unapologetically so: a hint is not a panel, and the quickest way
+ * to cheapen a flat surface is to give it a shadow and a blur it did not earn.
  */
 export function Tooltip({ label, children }: { label: string; children: ReactNode }) {
   return (

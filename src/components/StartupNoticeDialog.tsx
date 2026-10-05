@@ -62,7 +62,7 @@ export function StartupNoticeDialog() {
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={SPRING_GLIDE}
-        className="glass-strong squircle w-full max-w-md rounded-panel p-5"
+        className="bg-surface border border-line shadow-float w-full max-w-md rounded-panel p-5"
       >
         <h2 id="startup-notice-title" className="text-[15px] font-semibold tracking-tight text-text-primary">
           {upgrade

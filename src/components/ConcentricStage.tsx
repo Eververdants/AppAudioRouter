@@ -25,7 +25,6 @@ import {
   TONE,
   alreadyApplied,
   approach,
-  bloom,
   roleOf,
   satellite,
   spoke,
@@ -148,15 +147,6 @@ export function ConcentricStage() {
     <section className="relative min-h-0 flex-1 overflow-auto">
       <div className="relative mx-auto my-auto flex min-h-full items-center justify-center">
         <div className="relative" style={{ width: STAGE_W, height: STAGE_H }}>
-          {/* Something for the glass to bend. Nothing here ever moves. */}
-          <div
-            aria-hidden="true"
-            className="aurora pointer-events-none absolute inset-0 opacity-90"
-          />
-          {/* Grain over those pools so they read as light on a surface rather
-              than as a vector gradient. Static, blended, beneath the discs. */}
-          <div aria-hidden="true" className="grain pointer-events-none absolute inset-0" />
-
           <svg
             width={STAGE_W}
             height={STAGE_H}
@@ -403,13 +393,12 @@ function Hub({
   // The hub leans in by a hair once there is a plan: it is the thing the
   // spokes come from, and a centre that acknowledges that reads as the
   // cause of the ring rather than as a label floating in it. With nothing
-  // attached it is a thinner, clearer piece of the same glass; the thick
-  // glossy lens is reserved for a centre that is actually wired.
-  // A true circle, not a squircle: the hub is the innermost member of a
-  // concentric family (halo, orbit, discs, rings), and a superellipse here
-  // would make the whole ring read as squares standing on a circle.
+  // attached it is just an outline on the plane; the filled panel is
+  // reserved for a centre that is actually wired.
+  // A true circle: the hub is the innermost member of a concentric family
+  // (halo, orbit, discs, rings), and anything else would break the ring.
   const discClass = `group/hub relative flex flex-col items-center justify-center gap-1 rounded-full px-2 outline-none ${
-    hasPlan ? 'glass-strong' : 'glass-thin'
+    hasPlan ? 'bg-surface border border-line-strong shadow-float' : 'border border-line'
   }`;
   const content = (
     <>
@@ -562,7 +551,7 @@ function Hub({
               className="pointer-events-none absolute left-1/2 z-10"
               style={{ top: HUB_D - 9 }}
             >
-              <span className="squircle block rounded-full bg-accent px-2 py-[3px] text-[10px] font-medium leading-none text-accent-ink shadow-md shadow-accent/25">
+              <span className="block rounded-full bg-accent px-2 py-[3px] text-[10px] font-medium leading-none text-accent-ink shadow-md shadow-accent/25">
                 {t('stage.applyHint')}
               </span>
             </motion.span>
@@ -580,7 +569,7 @@ function Hub({
 }
 
 /**
- * One output device, drawn as a glass disc orbiting the hub.
+ * One output device, drawn as a disc orbiting the hub.
  *
  * The name rides under the disc rather than inside it, and the tuners under
  * that: a control inside the control you press is a control nobody reaches,
@@ -653,7 +642,7 @@ function Satellite({
         <div className="relative">
           {/* Approaching a disc draws a second circle around it, one the disc
               does not have to re-paint to show: opacity, not shadow, so the
-              hover costs nothing and cannot fight the bloom beneath it. */}
+              hover costs nothing and sits outside the disc's own paint. */}
           <span
             aria-hidden="true"
             className="pointer-events-none absolute -inset-2 rounded-full border border-accent/45 opacity-0 transition-opacity duration-200 group-focus-within/disc:opacity-100 group-hover/disc:opacity-100"
@@ -669,10 +658,10 @@ function Satellite({
             // springs back round. Uniform scale would read as a sticker peeling.
             whileTap={{ scaleX: 1.08, scaleY: 0.88 }}
             transition={SPRING_TAP}
-            className={`relative flex items-center justify-center rounded-full ${tone.outline} ${tone.wash} ${
-              lit ? 'glass-strong' : 'glass-thin'
-            } outline-none transition-colors hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent/60`}
-            style={{ width: DISC_D, height: DISC_D, ...bloom(role) }}
+            className={`relative flex items-center justify-center rounded-full border outline-none transition-colors hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent/60 ${
+              lit ? `bg-surface shadow-float ${tone.outline}` : 'border-line'
+            }`}
+            style={{ width: DISC_D, height: DISC_D }}
           >
             {/* The core of the ring is what lights up, and it arrives rather
                 than appearing: a disc that is suddenly on is a disc you want to
@@ -947,7 +936,7 @@ function MiniStep({
       whileHover={disabled ? undefined : { scale: 1.18 }}
       whileTap={disabled ? undefined : { scale: 0.82 }}
       transition={SPRING_TAP}
-      className="squircle flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border border-glass-border bg-glass text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-40"
+      className="flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border border-line bg-surface text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-40"
     >
       <svg
         width="8"

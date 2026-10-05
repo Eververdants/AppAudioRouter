@@ -98,7 +98,7 @@ export function Toast() {
                 setHeld(false);
               }
             }}
-            className="glass squircle pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-2"
+            className="bg-surface border border-line shadow-float pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-2"
           >
             <span className="text-[12px] text-text-secondary">
               {/* The offer names where the sound went, not just that it moved:

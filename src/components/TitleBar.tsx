@@ -119,8 +119,8 @@ export function TitleBar({
       // handle — interactive children must not carry it or they stop clicking.
       //
       // Flat and transparent: the caption is chrome, and the window behind it is
-      // one continuous pane — the aurora and the stage run under it, which is
-      // what makes the frame and the content read as one piece of glass.
+      // one continuous plane — the stage runs under it, which is what makes the
+      // frame and the content read as one surface.
       role="toolbar"
       aria-label={t('productName')}
       data-tauri-drag-region

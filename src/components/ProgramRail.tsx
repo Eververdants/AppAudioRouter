@@ -137,7 +137,7 @@ export function ProgramRail() {
             onClick={() => void refreshSessions()}
             whileTap={{ scale: 0.96 }}
             transition={SPRING_TAP}
-            className="squircle rounded-seg px-2 py-1 text-[11px] text-text-muted outline-none transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="rounded-seg px-2 py-1 text-[11px] text-text-muted outline-none transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             {t('rail.refresh')}
           </motion.button>
@@ -174,7 +174,7 @@ export function ProgramRail() {
             }}
             placeholder={t('rail.search')}
             aria-label={t('rail.search')}
-            className="squircle w-full rounded-full border border-transparent bg-transparent py-2 pl-8 pr-3 text-[12px] text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-glass-border focus:bg-glass"
+            className="w-full rounded-full border border-transparent bg-transparent py-2 pl-8 pr-3 text-[12px] text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-line focus:bg-surface"
           />
         </div>
       )}
@@ -258,13 +258,13 @@ export function ProgramRail() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={FADE}
-                className={`group/row squircle relative ${
+                className={`group/row relative ${
                   // The row carrying the selection pane sits below every other
                   // row. Rows paint in document order, so a pane travelling
                   // downwards would otherwise start out *over* the row being
                   // left — its icon and name spend the first frames of the
-                  // slide frosted under the glass, which reads as the icon
-                  // flickering. Under them the pane slips beneath instead.
+                  // slide buried under the moving pane, which reads as the
+                  // icon flickering. Under them the pane slips beneath instead.
                   isSubject ? 'z-0' : 'z-10'
                 } mb-1 flex items-center rounded-full px-2 py-1.5 transition-colors ${
                   isSelected ? '' : 'hover:bg-surface-hover'
@@ -276,20 +276,19 @@ export function ProgramRail() {
                     "the stage switched to this one" without words. The rows
                     added to the batch get a quieter wash — several programmes
                     are going to be changed at once, and only one of them is the
-                    one being shown. Both are capsules: a row of a liquid-glass
-                    list is a pill, and the glass that marks it is the same pill
-                    sliding between them. */}
+                    one being shown. Both are capsules, and the mark that
+                    travels between rows is the same capsule. */}
                 {isSubject ? (
                   <motion.span
                     layoutId="rail-selection"
                     transition={SPRING_GLIDE}
                     aria-hidden="true"
-                    className="glass-strong squircle pointer-events-none absolute inset-0 rounded-full"
+                    className="bg-surface pointer-events-none absolute inset-0 rounded-full"
                   />
                 ) : joined ? (
                   <span
                     aria-hidden="true"
-                    className="squircle pointer-events-none absolute inset-0 rounded-full bg-accent/[0.07]"
+                    className="pointer-events-none absolute inset-0 rounded-full bg-accent/[0.07]"
                   />
                 ) : null}
 
@@ -418,10 +417,10 @@ function MiniToggle({
       whileTap={{ scale: 0.82 }}
       whileHover={{ scale: 1.12 }}
       transition={SPRING_TAP}
-      className={`squircle flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+      className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
         pressed
           ? 'border-accent bg-accent text-accent-ink'
-          : 'border-glass-border bg-glass text-text-muted opacity-0 hover:text-accent group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-visible:opacity-100'
+          : 'border-line bg-surface text-text-muted opacity-0 hover:text-accent group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-visible:opacity-100'
       }`}
     >
       {/* The plus does not turn into a tick, it is replaced by one: the mark
