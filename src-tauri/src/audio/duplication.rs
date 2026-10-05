@@ -750,13 +750,18 @@ impl DuplicationManager {
     /// A program with no live session is left as it is: the value is stored,
     /// and the next engine this program gets applies it at start.
     pub fn update_primary_volume(&self, exe_name: &str, percent: u32) {
-        for engine in self
+        // The engines are collected under the lock and written to outside of
+        // it: `set_session_volume` is a full device and session enumeration,
+        // and no start, stop or route read should queue behind one per engine.
+        let targets: Vec<Arc<EngineShared>> = self
             .engines
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|engine| engine.exe_name == exe_name)
-        {
+            .cloned()
+            .collect();
+        for engine in targets {
             engine
                 .session_volume_percent
                 .store(percent, Ordering::Relaxed);
@@ -777,12 +782,16 @@ impl DuplicationManager {
     /// volume left behind would keep the program quietly playing everywhere —
     /// the volume mixer remembers the value for its next launch.
     pub fn restore_all_session_volumes(&self) {
-        for engine in self
+        // Same shape as `update_primary_volume`: snapshot under the lock, do
+        // the session writes outside of it.
+        let engines: Vec<Arc<EngineShared>> = self
             .engines
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .values()
-        {
+            .cloned()
+            .collect();
+        for engine in engines {
             engine.restore_session_volume();
         }
     }
