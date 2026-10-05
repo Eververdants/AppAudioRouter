@@ -504,6 +504,32 @@ impl PinnedRoutes {
         inner.remove(&pid);
     }
 
+    /// The executable name recorded for `pid`, if this run pinned it.
+    pub fn exe_name_of(&self, pid: u32) -> Option<String> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.get(&pid).map(|route| route.exe_name.clone())
+    }
+
+    /// The endpoint recorded for `pid`, if this run pinned it.
+    pub fn device_of(&self, pid: u32) -> Option<String> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.get(&pid).map(|route| route.device_id.clone())
+    }
+
+    /// Whether a live route of ours other than `pid`'s serves `exe_name`.
+    ///
+    /// The assignment Windows keeps is stored per executable, so while one
+    /// live route holds it, no other process of the same program may release
+    /// it — the release would reach the route's primary endpoint all the same.
+    pub fn exe_routed_elsewhere(&self, pid: u32, exe_name: &str) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.iter().any(|(other, route)| {
+            *other != pid
+                && route.kind == PinKind::Route
+                && route.exe_name.eq_ignore_ascii_case(exe_name)
+        })
+    }
+
     /// The PIDs a live route of ours owns, whose assignments must be left alone.
     pub fn routed_pids(&self) -> Vec<u32> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());

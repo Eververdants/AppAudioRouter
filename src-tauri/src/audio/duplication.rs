@@ -821,6 +821,31 @@ impl DuplicationManager {
         names
     }
 
+    /// The executable name of the engine running for `pid`, if one is.
+    pub fn exe_name_of(&self, pid: u32) -> Option<String> {
+        self.engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&pid)
+            .map(|e| e.exe_name.clone())
+    }
+
+    /// Whether an engine other than `pid`'s is duplicating the same
+    /// executable right now.
+    ///
+    /// The per-app endpoint assignment Windows persists is stored per
+    /// executable (see the module docs of `routing.rs`), so anything that
+    /// releases it through one PID takes it away from every other PID of the
+    /// same program — including one whose route is still live.
+    pub fn exe_duplicated_elsewhere(&self, pid: u32) -> bool {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(engine) = engines.get(&pid) else {
+            return false;
+        };
+        let exe = engine.exe_name.as_str();
+        engines.values().any(|e| e.pid != pid && e.exe_name.eq(exe))
+    }
+
     /// Re-read every device's persisted delay. Needed after the configured
     /// range changed, which may have clamped values that live engines are still
     /// applying.

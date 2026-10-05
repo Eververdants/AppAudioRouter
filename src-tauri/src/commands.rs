@@ -263,6 +263,23 @@ pub async fn stop_route(
     // and anything that reconciles against the live engines in that window would
     // read the engine this stop is removing and put the badge back — and the
     // `stopped` event that follows is ignored on purpose as redundant.
+    //
+    // But the release below is decided *before* the engine goes: it is what
+    // knows the executable, and the question it answers — does a sibling
+    // process of this program still hold a live route? — is a question about
+    // the moment before the teardown.
+    let sibling_routed = {
+        let exe = duplications
+            .exe_name_of(pid)
+            .or_else(|| pins.exe_name_of(pid));
+        match exe {
+            Some(exe) => {
+                duplications.exe_duplicated_elsewhere(pid)
+                    || pins.exe_routed_elsewhere(pid, &exe)
+            }
+            None => false,
+        }
+    };
     duplications.stop(pid);
     // Resolve the fallback endpoint before releasing the assignment: if the
     // assignment cannot be released, the program is pointed here so it keeps
@@ -271,6 +288,23 @@ pub async fn stop_route(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+
+    if sibling_routed {
+        // The assignment Windows persists is stored per executable, and a
+        // sibling process of this program is still routed: releasing it here
+        // would take that route's primary endpoint away while its mirrors kept
+        // playing — the same trap `release_stale_routes` guards against. The
+        // assignment stays, owned by the sibling's route, and this PID keeps
+        // following it like every other session of the program.
+        let pinned = pins.device_of(pid);
+        info!(
+            "stopped PID {pid}; its assignment stays because the same executable is still routed"
+        );
+        return Ok(StopOutcome {
+            released: false,
+            pinned_device: pinned,
+        });
+    }
 
     match audio::routing::release_process_default_devices(vec![pid], audio::Role::All).await {
         Ok(outcomes) if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) => {
