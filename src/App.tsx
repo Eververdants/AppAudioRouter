@@ -54,6 +54,9 @@ export default function App() {
   const loadSourceVolumes = useRouterStore((s) => s.loadSourceVolumes);
   const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
   const loadRememberedRoutes = useRouterStore((s) => s.loadRememberedRoutes);
+  const loadFeeds = useRouterStore((s) => s.loadFeeds);
+  const loadFeedCarrier = useRouterStore((s) => s.loadFeedCarrier);
+  const loadCaptureDevices = useRouterStore((s) => s.loadCaptureDevices);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
@@ -117,6 +120,14 @@ export default function App() {
       // the app starts is on its remembered device without the user doing
       // anything — which is the whole point of launching into the tray.
       void loadRememberedRoutes();
+      // Feed rules and the carrier pair are the other remembered half of the
+      // graph; the restore waits for the lists the same way routes do, and
+      // whichever of the three inputs lands last calls it.
+      void loadFeeds();
+      void loadFeedCarrier();
+      // Recording endpoints back the carrier picker in settings; they never
+      // block anything on the board.
+      void loadCaptureDevices();
       // The tray preference and the startup registry entry are only read by the
       // settings page, so they wait for the first paint like the rest.
       void loadShellSettings();
@@ -130,6 +141,9 @@ export default function App() {
     refreshSessions,
     reconcileActiveDuplications,
     loadRememberedRoutes,
+    loadFeeds,
+    loadFeedCarrier,
+    loadCaptureDevices,
     loadShellSettings,
     loadStartupNotice,
   ]);

@@ -209,6 +209,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const toggleCloseToTray = useRouterStore((s) => s.toggleCloseToTray);
   const autostart = useRouterStore((s) => s.autostart);
   const toggleAutostart = useRouterStore((s) => s.toggleAutostart);
+  const feedCarrier = useRouterStore((s) => s.feedCarrier);
+  const setFeedCarrier = useRouterStore((s) => s.setFeedCarrier);
+  const captureDevices = useRouterStore((s) => s.captureDevices);
   // Only ever disables one button, but it walks the whole session list, and
   // this page re-renders for every store field it reads — several of which
   // move whenever audio comes or goes.
@@ -364,6 +367,67 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               disabled={routedCount === 0}
             />
           </Row>
+          {/* Sending one program's audio into another's input runs through a
+              loopback pair: the source plays to the pair's playback side, the
+              target records from its recording side. The app ships no driver,
+              so the pair is picked here; without one, feeds are remembered and
+              shown on the board, but silent. */}
+          <div className="border-b border-line py-3">
+            <div className="text-[13px] text-text-primary">{t('settings.feedCarrier')}</div>
+            <div className="mt-0.5 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+              {t('settings.feedCarrierDesc')}
+            </div>
+            <div className="mt-2.5 flex flex-col gap-2">
+              <label className="flex items-center gap-3">
+                <span className="w-[130px] flex-none text-[11px] text-text-muted">
+                  {t('settings.feedCarrierRender')}
+                </span>
+                <select
+                  aria-label={t('settings.feedCarrierRender')}
+                  title={t('settings.feedCarrierRenderHint')}
+                  value={feedCarrier.render ?? ''}
+                  onChange={(event) =>
+                    void setFeedCarrier(
+                      event.target.value === '' ? null : event.target.value,
+                      feedCarrier.capture,
+                    )
+                  }
+                  className="min-w-0 flex-1 rounded-ctl border border-line-strong bg-surface px-2.5 py-1.5 text-[12px] text-text-secondary outline-none focus-visible:border-accent"
+                >
+                  <option value="">{t('settings.feedCarrierNone')}</option>
+                  {devices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-3">
+                <span className="w-[130px] flex-none text-[11px] text-text-muted">
+                  {t('settings.feedCarrierCapture')}
+                </span>
+                <select
+                  aria-label={t('settings.feedCarrierCapture')}
+                  title={t('settings.feedCarrierCaptureHint')}
+                  value={feedCarrier.capture ?? ''}
+                  onChange={(event) =>
+                    void setFeedCarrier(
+                      feedCarrier.render,
+                      event.target.value === '' ? null : event.target.value,
+                    )
+                  }
+                  className="min-w-0 flex-1 rounded-ctl border border-line-strong bg-surface px-2.5 py-1.5 text-[12px] text-text-secondary outline-none focus-visible:border-accent"
+                >
+                  <option value="">{t('settings.feedCarrierNone')}</option>
+                  {captureDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
         </SectionCard>
 
         <SectionCard

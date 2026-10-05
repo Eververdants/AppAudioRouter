@@ -26,13 +26,17 @@ export function Toast() {
   const snapshot = useRouterStore((s) => s.undoSnapshot);
   const undoLastRoute = useRouterStore((s) => s.undoLastRoute);
   const dismissUndo = useRouterStore((s) => s.dismissUndo);
+  const feedUndo = useRouterStore((s) => s.feedUndo);
+  const undoFeed = useRouterStore((s) => s.undoFeed);
+  const dismissFeedUndo = useRouterStore((s) => s.dismissFeedUndo);
   // Held while the pointer or the keyboard is on the offer, so a user reaching
   // for the button does not have it taken away mid-reach.
   const [held, setHeld] = useState(false);
 
   // Keyed on the snapshot itself, not on it being non-null: a route applied
   // while the offer is still standing replaces it, and the countdown starts over
-  // rather than expiring under a question that has just changed.
+  // rather than expiring under a question that has just changed. The feed offer
+  // runs its own timer on the same rule.
   useEffect(() => {
     if (snapshot === null || held) return;
     const timer = window.setTimeout(() => dismissUndo(), TOAST_DISMISS_MS);
@@ -40,14 +44,20 @@ export function Toast() {
   }, [snapshot, held, dismissUndo]);
 
   useEffect(() => {
+    if (feedUndo === null || held) return;
+    const timer = window.setTimeout(() => dismissFeedUndo(), TOAST_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [feedUndo, held, dismissFeedUndo]);
+
+  useEffect(() => {
     // A card that is gone cannot report the pointer leaving it: an offer that
     // ended while the pointer was on it — the button was clicked, Escape was
     // pressed — must not leave the next one held forever.
-    if (snapshot === null) setHeld(false);
-  }, [snapshot]);
+    if (snapshot === null && feedUndo === null) setHeld(false);
+  }, [snapshot, feedUndo]);
 
   useEffect(() => {
-    if (snapshot === null) return;
+    if (snapshot === null && feedUndo === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       // Escape belongs to the field that has the focus first. Clearing the
@@ -56,18 +66,64 @@ export function Toast() {
       // the one offer that could still undo the route.
       if (isEditableTarget(event.target)) return;
       dismissUndo();
+      dismissFeedUndo();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [snapshot, dismissUndo]);
+  }, [snapshot, feedUndo, dismissUndo, dismissFeedUndo]);
 
   const entries = snapshot?.entries ?? [];
   const only = entries[0];
+  const sessions = useRouterStore((s) => s.sessions);
+  const feedSource = feedUndo !== null
+    ? sessions.find((s) => s.pid === feedUndo.sourcePid)?.display_name ??
+      sessions.find((s) => s.pid === feedUndo.sourcePid)?.exe_name
+    : undefined;
+  const feedTarget = feedUndo !== null
+    ? sessions.find((s) => s.pid === feedUndo.targetPid)?.display_name ??
+      sessions.find((s) => s.pid === feedUndo.targetPid)?.exe_name
+    : undefined;
 
   return (
     // The layer spans the bottom of the window but takes no pointer events: only
-    // the card itself is clickable, so whatever is behind it stays usable.
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center p-4">
+    // the cards themselves are clickable, so whatever is behind it stays usable.
+    // Two offers can stand at once (a route and a feed); they stack.
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col items-center justify-center gap-2 p-4">
+      <AnimatePresence>
+        {feedUndo !== null && feedSource !== undefined && feedTarget !== undefined && (
+          <motion.div
+            key={`feed-toast-${feedUndo.added ? 'add' : 'remove'}-${feedUndo.sourcePid}-${feedUndo.targetPid}`}
+            role="status"
+            aria-live="polite"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0, pointerEvents: 'auto' }}
+            exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
+            transition={{ opacity: FADE, y: SPRING_GLIDE }}
+            onPointerEnter={() => setHeld(true)}
+            onPointerLeave={() => setHeld(false)}
+            onFocus={() => setHeld(true)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setHeld(false);
+              }
+            }}
+            className="bg-surface border-line shadow-float pointer-events-auto flex items-center gap-3 rounded-full border py-2 pl-4 pr-2"
+          >
+            <span className="text-[12px] text-text-secondary">
+              {feedUndo.added
+                ? t('toast.feedAdded', { source: feedSource, target: feedTarget })
+                : t('toast.feedRemoved', { source: feedSource, target: feedTarget })}
+            </span>
+            <button
+              type="button"
+              onClick={() => void undoFeed()}
+              className="shrink-0 rounded px-2.5 py-1 text-[12px] font-semibold text-accent outline-none transition-colors hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              {t('toast.undo')}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {snapshot !== null && (
           <motion.div
