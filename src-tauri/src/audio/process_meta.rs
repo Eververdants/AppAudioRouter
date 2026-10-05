@@ -569,7 +569,7 @@ fn base64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{base64, extract_icon, file_description};
+    use super::{base64, file_description};
 
     #[test]
     fn base64_matches_the_standard_vectors() {
