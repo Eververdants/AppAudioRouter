@@ -946,10 +946,55 @@ impl DuplicationManager {
             warn!("no live session for PID {pid} — primary volume applies when it next sounds");
         }
 
-        self.engines
+        // Registering the engine is the moment two concurrent starts for the
+        // same PID are reconciled. `stop()` ran at the top of this method, but
+        // the COM work between there and here is slow enough that another
+        // `start` can have slipped its own engine in: without this check the
+        // loser is never told to shut down, its capture thread keeps writing
+        // the program's audio to its mirrors, and the user hears the route
+        // twice while its threads run until the process exits.
+        if self
+            .engines
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(pid, shared.clone());
+            .get(&pid)
+            .map(|e| e.generation)
+            .unwrap_or(0)
+            > shared.generation
+        {
+            // A newer engine took the seat while this start did its COM work.
+            // This one never spawned a thread, so withdrawing it is clean —
+            // and the caller is handed the generation of the engine that is
+            // actually serving the program.
+            return Ok(self
+                .engines
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&pid)
+                .map(|e| e.generation)
+                .unwrap_or(0));
+        }
+        // `insert` hands back whatever sat in the seat, so the eviction and the
+        // registration are one atomic step; the loser is shut down afterwards,
+        // outside the lock, exactly the way `stop` does it.
+        if let Some(losing) = self
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pid, Arc::clone(&shared))
+        {
+            losing.shutdown.store(true, Ordering::Relaxed);
+            // A mirror parked on a quiet source waits on its own thread rather
+            // than on the device; wake it or the capture thread cannot join it
+            // until the park's backstop expires.
+            for mirror in &losing.mirrors {
+                mirror.wake();
+            }
+            // Losing the seat is a stop like any other: the program's session
+            // volume goes back to what the loser read before it claimed it, or
+            // the restore would hand back a value this run wrote itself.
+            losing.restore_session_volume();
+        }
 
         let generation = shared.generation;
         let app = app.clone();
