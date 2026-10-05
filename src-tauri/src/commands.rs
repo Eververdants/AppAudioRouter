@@ -386,10 +386,38 @@ pub async fn reset_pinned_endpoints(
     // time — is exactly the case the user is asking about, and nothing else can
     // reach it.
     let live_routes: HashSet<u32> = pins.routed_pids().into_iter().collect();
+    // The assignment is stored per executable, so releasing through *any*
+    // process of a routed program would reach the live route's primary
+    // endpoint — including through a sibling PID that was never routed
+    // itself. Whole executables with a live route are therefore out of
+    // bounds, whatever state their individual processes are in.
+    let routed_exes: HashSet<String> = {
+        let mut exes: HashSet<String> = duplications
+            .routed_exe_names()
+            .into_iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        // Only live routes speak for their executable here. A program this run
+        // handed back to the default — recorded with a pin but no live route —
+        // is exactly what the user is asking the reset to clear.
+        for (pid, exe_name, _device) in pins.snapshot() {
+            if live_routes.contains(&pid) {
+                exes.insert(exe_name.to_ascii_lowercase());
+            }
+        }
+        exes
+    };
     let pids: Vec<u32> = sessions
         .iter()
         .map(|session| session.pid)
         .filter(|pid| !routed.contains(pid) && !live_routes.contains(pid))
+        .filter(|pid| {
+            audio::sessions::get_process_exe_name(*pid)
+                .map(|name| !routed_exes.contains(&name.to_ascii_lowercase()))
+                // A process whose name cannot be read has nothing in common
+                // with a routed executable that is known of.
+                .unwrap_or(true)
+        })
         .collect();
 
     let names: HashMap<u32, String> = sessions
