@@ -32,6 +32,8 @@
     "stepDown": "降低 {{step}}"
   },
   "primaryVolume": {
+    "stepUp": "提高 {{step}}",
+    "stepDown": "降低 {{step}}",
     "hint": "主输出音量：走的是该程序自己的会话音量，只有主输出这一路变小；本应用会把副本等比补回，副本不受影响。下限 5%——要让主输出没声而副本继续，把另一台设备「设为主输出」后再把这台当作副本调到 0"
   },
   "stage": {
@@ -47,7 +49,39 @@
     "defaultLabel": "系统默认",
     "applyHint": "点按生效",
     "applyAriaOne": "将「{{process}}」的声音改为通过 {{device}} 播放",
-    "applyAriaMany": "将 {{n}} 个程序的声音改为通过 {{device}} 播放"
+    "applyAriaMany": "将 {{n}} 个程序的声音改为通过 {{device}} 播放",
+    "removeTarget": "把 {{name}} 移出方案",
+    "inspectAria": "调音 {{name}}",
+    "inspectTitle": "打开 {{name}} 的调音条",
+    "inspectClear": "收起调音条",
+    "addTarget": "添加去向",
+    "addTargetTitle": "输出到另一台设备，或把声音送进另一个程序的输入",
+    "pickDevice": "输出设备",
+    "pickFeed": "程序输入",
+    "pickFeedItem": "{{process}} 的输入",
+    "pickNone": "没有可添加的了",
+    "feedRole": "送入",
+    "feedHeld": "挂起",
+    "feedNoCarrier": "未接通",
+    "feedInputSuffix": "的输入",
+    "feedCount": "送入 {{n}} 个",
+    "feedTitleLive": "正在通过已配置的载体，把本程序的声音送进 {{name}} 的输入",
+    "feedTitleSuspended": "已记录但暂未生效：{{source}} 正输出到设备，每应用输出槽被它占用；停掉该路由后送入会自动恢复",
+    "feedTitleNoCarrier": "已记录但暂未生效：尚未配置载体——请到「设置 → 送入载体」选择回环端点对",
+    "removeFeed": "停止把本程序的声音送进 {{name}} 的输入",
+    "feederTitle": "点击打开它自己的路由看板",
+    "feederAria": "{{process}} 正把声音送进 {{target}}",
+    "feederSub": "送入「{{target}}」",
+    "stripPrimaryVolume": "主输出音量",
+    "stripPrimaryNote": "这是程序的会话音量——只有主输出这一路变化；副本会被等比补回。",
+    "stripPrimaryLatency": "主输出由系统直接播放，这里没有可实测的延迟读数。",
+    "stripDelay": "延迟",
+    "stripShare": "份额",
+    "inspectorHint": "点击卡片上的编号即可调音——程序本体、设备的延迟与音量都在这里；虚线卡片用于添加去向。",
+    "inspectorHubNoRoute": "尚未路由——点选去向卡片搭好方案，再点程序卡生效。",
+    "inspectorHubOne": "正在通过 {{device}} 播放。",
+    "inspectorHubMulti": "正在通过 {{device}} 播放（+{{m}} 台复制）。",
+    "inspectorHubFeeds": "送入 {{n}} 个输入"
   },
   "briefing": {
     "button": "直说",
@@ -58,7 +92,9 @@
     "routeOne": "「{{process}}」现在只从 {{device}} 出声。",
     "routeMulti": "「{{process}}」现在同时从 {{devices}} 出声。",
     "quiet": "（此刻没在出声）",
-    "staged": "舞台上还有没生效的改动——点中间的圆，立刻生效。"
+    "staged": "看板上还有没生效的改动——点程序卡，立刻生效。",
+    "feedLine": "「{{process}}」正把声音送进「{{targets}}」的输入。",
+    "feedHeldLine": "「{{process}}」有一条送往「{{targets}}」的送入，暂因它正输出到设备而搁置。"
   },
   "settings": {
     "title": "设置",
@@ -86,7 +122,7 @@
     "autostart": "开机自动启动",
     "autostartDesc": "登录后静默启动至托盘，记忆的路由提前生效",
     "delays": "延迟补偿",
-    "delayNote": "延迟按设备设置，可在此处、下方各行或舞台上副本下方的 − / + 中调整；仅当一个程序同时输出到多台设备时生效——仅输出到一台时由系统直接播放。",
+    "delayNote": "延迟按设备设置，可在此处、下方各行，或选中路由看板上的副本卡片后在调音条中调整；仅当一个程序同时输出到多台设备时生效——仅输出到一台时由系统直接播放。",
     "calibrationNote": "实测延迟仅包含软件侧；蓝牙等链路自身引入的部分无法测得，需以听感对齐。",
     "delayRange": "延迟范围",
     "delayRangeDesc": "每台设备的延迟可在该正负范围内设置",
@@ -96,8 +132,15 @@
     "sourceLevelsAlign": "对齐电平",
     "sourceLevelsAlignDesc": "将正在播放的程序统一调整至最响一台的电平",
     "sourceLevelsAlignAction": "对齐",
-    "sourceLevelsNote": "同时输出到多台设备的程序，其电平显示在舞台中心旁的电平环上。电平仅作用于本应用复制出去的那份声音，不改动程序自身音量与 Windows 保存的设置；100 为原样，仅对副本生效。",
+    "sourceLevelsNote": "同时输出到多台设备的程序，其电平显示在路由看板程序卡下方的电平环上。电平仅作用于本应用复制出去的那份声音，不改动程序自身音量与 Windows 保存的设置；100 为原样，仅对副本生效。",
     "noDevices": "暂无音频设备",
+    "feedCarrier": "送入载体",
+    "feedCarrierDesc": "把一个程序的声音送进另一个程序的输入，要经过一对回环端点：源程序播放到回环的播放侧，目标程序从回环的录音侧收音。请选择回环驱动提供的端点对（例如 VB-Cable）；未配置时，送入会记住但保持静默。",
+    "feedCarrierRender": "播放侧",
+    "feedCarrierRenderHint": "回环对的播放端点——通常名为「… Input」",
+    "feedCarrierCapture": "录音侧",
+    "feedCarrierCaptureHint": "回环对的录音端点——通常名为「… Output」",
+    "feedCarrierNone": "未配置",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
   },
@@ -112,7 +155,7 @@
     "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。",
     "dismiss": "知道了",
     "firstRunTitle": "欢迎使用 {{product}}",
-    "firstRunBody": "在左侧选择一个程序，点选输出设备，再点中间的圆——点它之前不会有任何更改。可多选设备，声音将同时从各台设备播放。若某个程序不再跟随你在 Windows 中切换的播放设备，可使用设置中的「重置每应用音频输出」解除。",
+    "firstRunBody": "在左侧选择一个程序，点选或添加去向卡片，再点程序卡——点它之前不会有任何更改。可多选设备，声音将同时从各台设备播放。若某个程序不再跟随你在 Windows 中切换的播放设备，可使用设置中的「重置每应用音频输出」解除。",
     "startAction": "开始使用"
   },
   "titleBar": {
@@ -139,7 +182,9 @@
     "routedOneMore": "{{process}} → {{device}} +{{m}}",
     "routedMany": "{{n}} 个程序 → {{device}}",
     "routedManyMore": "{{n}} 个程序 → {{device}} +{{m}}",
-    "undo": "撤销"
+    "undo": "撤销",
+    "feedAdded": "{{source}} → {{target}}（输入）",
+    "feedRemoved": "已撤下送往 {{target}} 的送入"
   },
   "log": {
     "deviceRefreshed": "设备列表已刷新（{{n}} 项）",
@@ -210,6 +255,18 @@
     "autostartFailed": "修改开机启动项失败：{{error}}",
     "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}",
     "startupNoticeFailed": "读取启动提示失败：{{error}}",
-    "startupNoticeAckFailed": "记录启动提示状态失败：{{error}}"
+    "startupNoticeAckFailed": "记录启动提示状态失败：{{error}}",
+    "feedsLoadFailed": "加载送入规则失败：{{error}}",
+    "feedCarrierLoadFailed": "读取送入载体失败：{{error}}",
+    "feedCarrierSet": "送入载体已更新",
+    "feedCarrierSetFailed": "保存送入载体失败：{{error}}",
+    "captureDevicesFailed": "枚举录音设备失败：{{error}}",
+    "feedSet": "正在把「{{source}}」的声音送进「{{target}}」的输入",
+    "feedSuspended": "送入规则「{{source}} → {{target}}」已记录；{{source}} 正输出到设备，恢复会在其停止后自动进行",
+    "feedNoCarrier": "送入规则「{{source}} → {{target}}」已记录，但尚未配置载体——在设置中选择前送入保持静默",
+    "feedSetFailed": "记录送入规则失败：{{error}}",
+    "feedRemoved": "已停止把「{{source}}」送进「{{target}}」的输入",
+    "feedRemoveFailed": "撤下送入规则失败：{{error}}",
+    "feedRestored": "已按记忆恢复送入：「{{source}}」→「{{target}}」的输入"
   }
 }

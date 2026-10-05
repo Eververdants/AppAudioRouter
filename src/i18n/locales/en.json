@@ -32,6 +32,8 @@
     "stepDown": "{{step}} quieter"
   },
   "primaryVolume": {
+    "stepUp": "{{step}} louder",
+    "stepDown": "{{step}} quieter",
     "hint": "Primary volume: this is the program's own session volume, so only the main path gets quieter — the engine compensates the copies, and they are unaffected. It stops at 5%; to silence the main device while the copies keep playing, make another device the main output and turn this one down as a copy"
   },
   "stage": {
@@ -47,7 +49,39 @@
     "defaultLabel": "System default",
     "applyHint": "Click to apply",
     "applyAriaOne": "Play {{process}} through {{device}} instead",
-    "applyAriaMany": "Play {{n}} apps through {{device}} instead"
+    "applyAriaMany": "Play {{n}} apps through {{device}} instead",
+    "removeTarget": "Remove {{name}} from the plan",
+    "inspectAria": "Tune {{name}}",
+    "inspectTitle": "Open the tuning strip for {{name}}",
+    "inspectClear": "Close the tuning strip",
+    "addTarget": "Add destination",
+    "addTargetTitle": "Play through another device, or send the sound into another program's input",
+    "pickDevice": "Output devices",
+    "pickFeed": "Program inputs",
+    "pickFeedItem": "{{process}}'s input",
+    "pickNone": "Nothing left to add",
+    "feedRole": "Send in",
+    "feedHeld": "Held",
+    "feedNoCarrier": "No carrier",
+    "feedInputSuffix": "input",
+    "feedCount": "feeding {{n}}",
+    "feedTitleLive": "{{name}}'s input receives this program's audio through the configured carrier",
+    "feedTitleSuspended": "Recorded but not moving: {{source}} is routed to a device, and the per-app output slot belongs to it. Stop that route and the feed resumes on its own",
+    "feedTitleNoCarrier": "Recorded but not moving: no carrier is configured — pick a loopback pair in Settings → Feed carrier",
+    "removeFeed": "Stop sending this program's audio into {{name}}'s input",
+    "feederTitle": "Click to open this program's own board",
+    "feederAria": "{{process}} feeds into {{target}}",
+    "feederSub": "feeds into {{target}}",
+    "stripPrimaryVolume": "Primary volume",
+    "stripPrimaryNote": "This is the program's session volume — only the main path changes; the copies are compensated.",
+    "stripPrimaryLatency": "The primary is played by Windows directly, so there is no measured latency to show here.",
+    "stripDelay": "Delay",
+    "stripShare": "Share",
+    "inspectorHint": "Click a card's number to tune it — the program itself, a device's delay and volume. The dashed card adds a destination.",
+    "inspectorHubNoRoute": "Not routed — pick destination cards to build a plan, then click the program card to apply it.",
+    "inspectorHubOne": "Plays through {{device}}.",
+    "inspectorHubMulti": "Plays through {{device}} (+{{m}} copies).",
+    "inspectorHubFeeds": "feeds {{n}} input(s)"
   },
   "briefing": {
     "button": "Straight talk",
@@ -58,7 +92,9 @@
     "routeOne": "{{process}} plays from {{device}} now, and follows nothing else.",
     "routeMulti": "{{process}} plays from {{devices}} at once.",
     "quiet": "(silent right now)",
-    "staged": "The stage still has changes waiting — click the circle in the middle to make them real."
+    "staged": "The board still has changes waiting — click the program card to make them real.",
+    "feedLine": "{{process}} is sending its audio into {{targets}}' input.",
+    "feedHeldLine": "{{process}} has a feed into {{targets}}, held while it plays through a device."
   },
   "settings": {
     "title": "Settings",
@@ -86,7 +122,7 @@
     "autostart": "Start with Windows",
     "autostartDesc": "Launches silently into the tray at sign-in; remembered routes are ready before you open anything",
     "delays": "Delay compensation",
-    "delayNote": "Delay is set per device: here, on the settings rows, or with the − / + under a copy on the stage. It applies only when one program goes to several devices — a single-device route is played by the system directly.",
+    "delayNote": "Delay is set per device: here, on the settings rows, or in the tuning strip of a copy selected on the routing board. It applies only when one program goes to several devices — a single-device route is played by the system directly.",
     "calibrationNote": "The measured latency covers the software side only; what a Bluetooth link itself adds cannot be measured here, so align by ear.",
     "delayRange": "Delay range",
     "delayRangeDesc": "Delays can be set within this ± range",
@@ -96,8 +132,15 @@
     "sourceLevelsAlign": "Align levels",
     "sourceLevelsAlignDesc": "Brings every duplicating program that is playing up to the loudest one's level",
     "sourceLevelsAlignAction": "Align",
-    "sourceLevelsNote": "A program playing through several devices wears its level as the dial beside the hub at the centre of the stage. The level is the gain this app applies to its own copy of that sound — the program's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the copies only.",
+    "sourceLevelsNote": "A program playing through several devices wears its level as the dial under its card on the routing board. The level is the gain this app applies to its own copy of that sound — the program's own volume and anything Windows stores are untouched. 100 leaves it as produced, and it acts on the copies only.",
     "noDevices": "No audio devices",
+    "feedCarrier": "Feed carrier",
+    "feedCarrierDesc": "Sending one program's audio into another's input runs it through a loopback pair: the source plays into the pair's playback side, and the target records from its recording side. Pick the pair a loopback driver provides (such as VB-Cable); without one, feeds are remembered but stay silent.",
+    "feedCarrierRender": "Playback side",
+    "feedCarrierRenderHint": "The pair's playback endpoint — often named “… Input”",
+    "feedCarrierCapture": "Recording side",
+    "feedCarrierCaptureHint": "The pair's recording endpoint — often named “… Output”",
+    "feedCarrierNone": "Not configured",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."
   },
@@ -112,7 +155,7 @@
     "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again.",
     "dismiss": "Got it",
     "firstRunTitle": "Welcome to {{product}}",
-    "firstRunBody": "Select an app on the left, choose an output device, then click the circle in the middle — nothing changes until you do. Select further devices to play through all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
+    "firstRunBody": "Select an app on the left, pick or add destination cards, then click the program card — nothing changes until you do. Select further devices to play through all of them at once. If a program ever stops following the device you switch to in Windows, the per-app output reset in Settings releases it.",
     "startAction": "Start routing"
   },
   "titleBar": {
@@ -139,7 +182,9 @@
     "routedOneMore": "{{process}} → {{device}} +{{m}}",
     "routedMany": "{{n}} apps → {{device}}",
     "routedManyMore": "{{n}} apps → {{device}} +{{m}}",
-    "undo": "Undo"
+    "undo": "Undo",
+    "feedAdded": "{{source}} → {{target}} (input)",
+    "feedRemoved": "Feed to {{target}} removed"
   },
   "log": {
     "deviceRefreshed": "Device list refreshed ({{n}})",
@@ -210,6 +255,18 @@
     "autostartFailed": "Failed to change the startup entry: {{error}}",
     "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}",
     "startupNoticeFailed": "Could not read the startup notice: {{error}}",
-    "startupNoticeAckFailed": "Could not record the startup notice: {{error}}"
+    "startupNoticeAckFailed": "Could not record the startup notice: {{error}}",
+    "feedsLoadFailed": "Failed to load the feed rules: {{error}}",
+    "feedCarrierLoadFailed": "Failed to load the feed carrier: {{error}}",
+    "feedCarrierSet": "Feed carrier updated",
+    "feedCarrierSetFailed": "Failed to save the feed carrier: {{error}}",
+    "captureDevicesFailed": "Failed to list recording devices: {{error}}",
+    "feedSet": "Feeding {{source}} into {{target}}'s input",
+    "feedSuspended": "Feed rule {{source}} → {{target}} recorded, held while {{source}} is routed to a device",
+    "feedNoCarrier": "Feed rule {{source}} → {{target}} recorded, but no carrier is configured — feeds stay silent until one is picked in settings",
+    "feedSetFailed": "Failed to record the feed: {{error}}",
+    "feedRemoved": "Stopped feeding {{source}} into {{target}}'s input",
+    "feedRemoveFailed": "Failed to remove the feed: {{error}}",
+    "feedRestored": "Restored the remembered feed: {{source}} → {{target}}'s input"
   }
 }

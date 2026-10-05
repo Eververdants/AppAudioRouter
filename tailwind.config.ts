@@ -39,23 +39,27 @@ const config: Config = {
           DEFAULT: 'rgb(var(--hairline-rgb) / <alpha-value>)',
           strong: 'var(--hairline-strong)',
         },
-        /* The three roles a device can be in, as spoke colours. One colour
-           paints three things on the stage; nothing else may use these. */
+        /* The four roles a route target can be in, as node accents. One colour
+           paints three things on the stage: the node's role word, its number
+           badge and the reading that belongs to it; nothing else may use these.
+           `feed` marks a program's *input* rather than an output device — amber
+           so it reads at a glance as a different kind of wire. */
         type: {
           primary: 'rgb(var(--type-primary-rgb) / <alpha-value>)',
           mirror: 'rgb(var(--type-mirror-rgb) / <alpha-value>)',
           idle: 'rgb(var(--type-idle-rgb) / <alpha-value>)',
+          feed: 'rgb(var(--type-feed-rgb) / <alpha-value>)',
         },
       },
       /* Corner radii, in steps of "how far from the window edge is this".
-         Nested surfaces take the next step down. The ladder runs tight — flat
-         panels read as planes, not as bubbles — while anything that floats is
-         a capsule (`rounded-full`) or a true circle, so the rectangular steps
-         below are only for planes that sit still. */
+         Nested surfaces take the next step down. The ladder is generous — the
+         interface is built on large, continuous-curvature corners — while
+         anything that floats is a capsule (`rounded-full`) or a true circle,
+         so the rectangular steps below are only for planes that sit still. */
       borderRadius: {
-        window: '16px',
-        panel: '14px',
-        card: '12px',
+        window: '20px',
+        panel: '18px',
+        card: '14px',
         ctl: '10px',
         seg: '8px',
       },

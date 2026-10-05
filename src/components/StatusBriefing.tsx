@@ -80,6 +80,7 @@ export function StatusBriefing() {
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
+  const feeds = useRouterStore((s) => s.feeds);
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -114,23 +115,44 @@ export function StatusBriefing() {
     const result: BriefingLine[] = [];
     for (const session of sessions) {
       const ids = routedPids[session.pid];
-      if (ids === undefined || ids.length === 0) continue;
       const name = session.display_name ?? session.exe_name;
       const quiet = soundingPids[session.pid] !== true;
-      if (ids.length === 1) {
+      if (ids !== undefined && ids.length > 0) {
+        if (ids.length === 1) {
+          result.push({
+            key: `${session.pid}`,
+            text: t('briefing.routeOne', { process: name, device: deviceNameOf(ids[0], devices) }),
+            quiet,
+          });
+        } else {
+          const joined = joinNames(
+            ids.map((id) => deviceNameOf(id, devices)),
+            i18n.language,
+          );
+          result.push({
+            key: `${session.pid}`,
+            text: t('briefing.routeMulti', { process: name, devices: joined }),
+            quiet,
+          });
+        }
+      }
+      // Feeds are their own line: "plays from" and "is fed into" are two facts
+      // about one program, and cramming them into one sentence reads worse than
+      // two short ones. A feed held by a device route says so — silence with no
+      // reason reads as a bug.
+      const feedPids = feeds[session.pid] ?? [];
+      if (feedPids.length > 0) {
+        const targets = feedPids
+          .map((targetPid) => sessions.find((s) => s.pid === targetPid))
+          .filter((s) => s !== undefined)
+          .map((s) => s.display_name ?? s.exe_name);
+        const joined = joinNames(targets, i18n.language);
         result.push({
-          key: `${session.pid}`,
-          text: t('briefing.routeOne', { process: name, device: deviceNameOf(ids[0], devices) }),
-          quiet,
-        });
-      } else {
-        const joined = joinNames(
-          ids.map((id) => deviceNameOf(id, devices)),
-          i18n.language,
-        );
-        result.push({
-          key: `${session.pid}`,
-          text: t('briefing.routeMulti', { process: name, devices: joined }),
+          key: `${session.pid}-feed`,
+          text:
+            ids !== undefined && ids.length > 0
+              ? t('briefing.feedHeldLine', { process: name, targets: joined })
+              : t('briefing.feedLine', { process: name, targets: joined }),
           quiet,
         });
       }
@@ -147,7 +169,7 @@ export function StatusBriefing() {
       });
     }
     return result;
-  }, [sessions, routedPids, soundingPids, devices, defaultDeviceId, t, i18n.language]);
+  }, [sessions, routedPids, soundingPids, devices, defaultDeviceId, feeds, t, i18n.language]);
 
   // Changes staged on the stage that the hub has not landed yet — worth a
   // line, because "the picture and the sound disagree" is the one thing this
@@ -156,7 +178,10 @@ export function StatusBriefing() {
   const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routedPids);
 
   return (
-    <div ref={rootRef} className="pointer-events-none absolute bottom-4 left-4 z-30">
+    // Anchored above the board's tuning strip, not at the very bottom of the
+    // work area: the strip occupies the bottom band, and a floating button that
+    // covered its left-hand controls would swallow their clicks.
+    <div ref={rootRef} className="pointer-events-none absolute bottom-[56px] left-4 z-30">
       <div className="pointer-events-auto relative">
         <AnimatePresence>
           {open && (

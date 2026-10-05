@@ -8,7 +8,7 @@ import { useDelayValue } from '@/hooks/useDelayValue';
  * in between so an exact figure can be entered too.
  *
  * The settings page is the only place this control appears; the same delay is
- * also stepped from the disc it belongs to on the stage (`ConcentricStage`),
+ * also stepped from the mirror's row in the board's tuning dock (`NodeStage`),
  * and both share the editing logic in `useDelayValue`.
  */
 export function DelayStepper({

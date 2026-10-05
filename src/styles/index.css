@@ -48,6 +48,9 @@
   --type-primary: #0891b2;
   --type-mirror: #0f766e;
   --type-idle: #94a3b8;
+  /* A program's input as a route target: amber, so "sound flowing into another
+     program" reads as its own kind of wire at a glance. */
+  --type-feed: #b45309;
 
   /* RGB channel mirrors for the colours Tailwind combines with opacity
      modifiers (`bg-accent/15`, `hover:bg-error/10`, …). Tailwind can't apply
@@ -63,6 +66,7 @@
   --type-primary-rgb: 8 145 178;
   --type-mirror-rgb: 15 118 110;
   --type-idle-rgb: 148 163 184;
+  --type-feed-rgb: 180 83 9;
 }
 
 .dark {
@@ -99,6 +103,8 @@
   --type-primary: #22d3ee;
   --type-mirror: #14b8a6;
   --type-idle: #64748b;
+  /* The same amber, lifted for a dark well. */
+  --type-feed: #fbbf24;
 
   --accent-rgb: 34 211 238;
   --error-rgb: 248 113 113;
@@ -109,10 +115,22 @@
   --type-primary-rgb: 34 211 238;
   --type-mirror-rgb: 20 184 166;
   --type-idle-rgb: 100 116 139;
+  --type-feed-rgb: 251 191 36;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Continuous-curvature corners. The interface is built on large radii; where
+   the renderer knows what a squircle is, every rectangular surface takes the
+   continuous-curvature form so highlights do not kink at the corner. Pure
+   progressive enhancement — where `corner-shape` is unknown the large radii
+   stand on their own. */
+@supports (corner-shape: supercircle(2)) {
+  .cc {
+    corner-shape: supercircle(2);
+  }
 }
 
 html,
@@ -178,6 +196,73 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 @layer components {
+  /* The board's card furniture: pin stubs, the number badge, and the wire.
+     Sizes and positions come from lib/stage.ts; only the paint lives here. */
+
+  /* A pin: the stub a wire plugs into. Half outside the card's edge, so the
+     wire that meets it ends at the card's boundary rather than in its middle. */
+  .pin {
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    border-radius: 4px;
+    background: rgb(var(--text-muted-rgb) / 0.85);
+    border: 1px solid var(--bg-primary);
+  }
+  .pin-in {
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .pin-out {
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  /* The feed's pin wears the feed colour: on a card with both kinds of
+     destination, the amber stub says which side takes another program's input. */
+  .pin-amber {
+    background: var(--type-feed);
+  }
+
+  /* The route-order badge (01, 02, …). 01 is always the endpoint Windows plays
+     itself; the numbering runs straight down the destination column. */
+  .no {
+    position: absolute;
+    top: -7px;
+    left: -7px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--hairline-strong);
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 9.5px;
+    display: grid;
+    place-items: center;
+  }
+
+  /* The wire. One grey line per route — the role colour lives on the cards
+     (badge, role word), never on the wire, so a fan of routes reads as
+     plumbing. Lit (hovered) it darkens and thickens; flowing it takes the
+     same dash the spokes wore, gated by `useLiveness` upstream. */
+  .nwire {
+    fill: none;
+    stroke: var(--text-muted);
+    stroke-width: 1.75;
+    opacity: 0.55;
+    transition:
+      opacity 0.15s ease,
+      stroke-width 0.15s ease;
+  }
+  .nwire.lit {
+    opacity: 1;
+    stroke-width: 2.25;
+  }
+
   /* The concentric indicator — the mark this interface is made of.
      Two circles sharing a centre and nothing in the space between them: an
      outer ring that says what the thing *is*, and a core that says whether it

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { ConcentricStage } from '@/components/ConcentricStage';
+import { NodeStage } from '@/components/NodeStage';
 import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
 import { SettingsPage } from '@/components/SettingsPage';
@@ -234,7 +234,7 @@ export default function App() {
               />
               {tab === 'router' ? (
                 <>
-                  <ConcentricStage />
+                  <NodeStage />
                   {/* The plain-language answer to "where is sound going", in
                       the corner the action dock used to float over. */}
                   <StatusBriefing />
