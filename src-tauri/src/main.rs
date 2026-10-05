@@ -71,6 +71,13 @@ fn main() {
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             let primary_volumes = std::sync::Arc::new(primary_volumes);
             app.manage(primary_volumes.clone());
+            // The "send into" rules and the loopback pair that carries them.
+            let feeds = config::FeedConfig::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            app.manage(feeds);
+            let feed_carrier = config::FeedCarrierConfig::load(app.handle())
+                .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
+            app.manage(feed_carrier);
             let settings = config::AppSettings::load(app.handle())
                 .map_err(|e| Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error>)?;
             app.manage(settings);
@@ -155,6 +162,12 @@ fn main() {
             commands::set_tray_labels,
             commands::get_startup_notice,
             commands::ack_startup_notice,
+            commands::list_capture_devices,
+            commands::get_feed_carrier,
+            commands::set_feed_carrier,
+            commands::list_feeds,
+            commands::set_feed_target,
+            commands::remove_feed_target,
         ])
         .build(context)
         .expect("error while building tauri application")

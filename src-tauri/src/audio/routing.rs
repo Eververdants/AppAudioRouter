@@ -60,6 +60,9 @@ const MMDEVAPI_TOKEN: &str = "\\\\?\\SWD#MMDEVAPI#";
 
 // EDataFlow
 const E_RENDER: i32 = 0;
+// The capture half of the same policy API: a program's default *recording*
+// endpoint is pinned through the identical slot, addressed by data flow.
+const E_CAPTURE: i32 = 1;
 
 // ERole values used by the policy API.
 const ROLE_CONSOLE: i32 = 0;
@@ -266,10 +269,16 @@ impl AudioPolicyConfig {
         Ok(Self { obj, vtable })
     }
 
-    /// Set the persisted default render endpoint of a process for one role.
+    /// Set the persisted default endpoint of a process for one role.
+    ///
+    /// `data_flow` picks which half of the policy is addressed: `E_RENDER` is
+    /// where the program plays, `E_CAPTURE` is where it records — a feed into
+    /// another program is delivered by pointing the *target* at the carrier's
+    /// capture side through this same slot.
     fn set_persisted_default(
         &self,
         process_id: u32,
+        data_flow: i32,
         role: i32,
         device_hstring: &HSTRING,
     ) -> windows::core::HRESULT {
@@ -283,33 +292,39 @@ impl AudioPolicyConfig {
             f(
                 self.obj,
                 process_id,
-                E_RENDER,
+                data_flow,
                 role,
                 hstring_handle(device_hstring),
             )
         }
     }
 
-    /// Drop a process's persisted render endpoint for one role.
+    /// Drop a process's persisted endpoint for one role and data flow.
     ///
     /// A null HSTRING is the service's "no assignment" value: after this call
-    /// the process plays to whatever the system default is, now and later.
-    fn clear_persisted_default(&self, process_id: u32, role: i32) -> windows::core::HRESULT {
+    /// the process follows whatever the system default is, now and later.
+    fn clear_persisted_default(
+        &self,
+        process_id: u32,
+        data_flow: i32,
+        role: i32,
+    ) -> windows::core::HRESULT {
         let f: SetPersistedDefaultAudioEndpointFn = unsafe {
             core::mem::transmute(*((self.vtable + SLOT_SET_PERSISTED_DEFAULT * 8) as *const usize))
         };
         // SAFETY: COM call on a live object; a null HSTRING is a documented
         // input for this parameter and outlives nothing.
-        unsafe { f(self.obj, process_id, E_RENDER, role, 0) }
+        unsafe { f(self.obj, process_id, data_flow, role, 0) }
     }
 
-    /// Read a process's persisted render endpoint for one role.
+    /// Read a process's persisted endpoint for one role and data flow.
     ///
     /// `Ok(None)` means the process carries no assignment and follows the
     /// system default; `Ok(Some(id))` is the endpoint id it is pinned to.
     fn get_persisted_default(
         &self,
         process_id: u32,
+        data_flow: i32,
         role: i32,
     ) -> Result<Option<String>, AudioError> {
         type GetPersistedDefaultAudioEndpointFn =
@@ -329,7 +344,7 @@ impl AudioPolicyConfig {
         // the returned string back.
         let mut device_id = HSTRING::new();
         // SAFETY: COM call on a live object; the out HSTRING is owned here.
-        let hr = unsafe { f(self.obj, process_id, E_RENDER, role, &mut device_id) };
+        let hr = unsafe { f(self.obj, process_id, data_flow, role, &mut device_id) };
         if hr.0 == HR_ERROR_NOT_FOUND {
             return Ok(None);
         }
@@ -479,7 +494,17 @@ pub struct PinnedRoute {
     pub kind: PinKind,
 }
 
-/// The processes this run has pointed at an explicit endpoint.
+/// One feed endpoint this run pinned.
+#[derive(Debug, Clone)]
+pub struct FeedPin {
+    pub exe_name: String,
+    pub device_id: String,
+    /// True when this is the capture half (a feed target), false for the
+    /// render half (a feed source).
+    pub capture: bool,
+}
+
+/// The endpoint assignments this run wrote.
 ///
 /// Windows keeps a per-app endpoint assignment after the program that wrote it
 /// is gone, and that assignment outranks any later change of the system default
@@ -493,6 +518,11 @@ pub struct PinnedRoute {
 #[derive(Default)]
 pub struct PinnedRoutes {
     inner: std::sync::Mutex<std::collections::HashMap<u32, PinnedRoute>>,
+    /// Feed endpoints, tracked apart from the route assignments because they
+    /// own the *other* data flow: a program can be routed to a device and feed
+    /// another program at the same time, and releasing one must not touch the
+    /// other.
+    feeds: std::sync::Mutex<std::collections::HashMap<u32, FeedPin>>,
 }
 
 impl PinnedRoutes {
@@ -586,11 +616,121 @@ impl PinnedRoutes {
     /// where nothing will retry afterwards.
     pub fn take_all(&self) -> Vec<u32> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let pids = inner.keys().copied().collect();
+        let pids: Vec<u32> = inner.keys().copied().collect();
         inner.clear();
-        pids
+        // Feed pins are ours to hand back too — on shutdown the release walks
+        // both data flows anyway, so their PIDs ride the same list.
+        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        let feed_pids: Vec<u32> = feeds.keys().copied().collect();
+        feeds.clear();
+        drop(feeds);
+        let mut all = pids;
+        for pid in feed_pids {
+            if !all.contains(&pid) {
+                all.push(pid);
+            }
+        }
+        all
+    }
+
+    // ------------------------------------------------------------- feed pins
+
+    /// Record that this app pointed `pid`'s *render* endpoint at the carrier,
+    /// which is how a feed source is wired.
+    pub fn mark_feed(&self, pid: u32, exe_name: &str, device_id: &str) {
+        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        feeds.insert(
+            pid,
+            FeedPin {
+                exe_name: exe_name.to_string(),
+                device_id: device_id.to_string(),
+                capture: false,
+            },
+        );
+    }
+
+    /// Record that this app pointed `pid`'s *capture* endpoint at the carrier —
+    /// the receiving half of a feed.
+    pub fn mark_feed_capture(&self, pid: u32, exe_name: &str, device_id: &str) {
+        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        feeds.insert(
+            pid,
+            FeedPin {
+                exe_name: exe_name.to_string(),
+                device_id: device_id.to_string(),
+                capture: true,
+            },
+        );
+    }
+
+    /// The executable name a feed source pin was recorded under, if any.
+    pub fn feed_source_exe_of(&self, pid: u32) -> Option<String> {
+        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        feeds
+            .get(&pid)
+            .filter(|pin| !pin.capture)
+            .map(|pin| pin.exe_name.clone())
+    }
+
+    /// The executable name a feed capture pin was recorded under, if any.
+    pub fn feed_capture_exe_of(&self, pid: u32) -> Option<String> {
+        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        feeds
+            .get(&pid)
+            .filter(|pin| pin.capture)
+            .map(|pin| pin.exe_name.clone())
+    }
+
+    /// The render endpoint a feed source pin was recorded against.
+    pub fn feed_source_device_of(&self, pid: u32) -> Option<String> {
+        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        feeds
+            .get(&pid)
+            .filter(|pin| !pin.capture)
+            .map(|pin| pin.device_id.clone())
+    }
+
+    /// Whether a feed source (render half) pin exists for `pid`.
+    pub fn feed_source_of(&self, pid: u32) -> Option<String> {
+        self.feed_source_exe_of(pid)
+    }
+
+    /// Whether a feed capture pin exists for `pid`.
+    pub fn feed_capture_of(&self, pid: u32) -> Option<String> {
+        self.feed_capture_exe_of(pid)
+    }
+
+    /// Forget a feed source pin.
+    pub fn forget_feed_source(&self, pid: u32) {
+        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        if feeds.get(&pid).is_some_and(|pin| !pin.capture) {
+            feeds.remove(&pid);
+        }
+    }
+
+    /// Forget a feed capture pin.
+    pub fn forget_feed_capture(&self, pid: u32) {
+        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        if feeds.get(&pid).is_some_and(|pin| pin.capture) {
+            feeds.remove(&pid);
+        }
+    }
+
+    /// Every feed endpoint this run pinned, as `(pid, exe_name, capture)`.
+    pub fn feed_pins(&self) -> Vec<(u32, String, bool)> {
+        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
+        feeds
+            .iter()
+            .map(|(pid, pin)| (*pid, pin.exe_name.clone(), pin.capture))
+            .collect()
     }
 }
+
+/// The two data flows a per-app assignment can be written under. A route pins
+/// the render half; a feed into this program pins the capture half. Releasing a
+/// program means clearing both — one left behind keeps it fixed to an endpoint,
+/// which is the whole failure the release exists to prevent.
+const ALL_FLOWS: [i32; 2] = [E_RENDER, E_CAPTURE];
 
 /// Release several processes from their per-app endpoint assignment.
 ///
@@ -610,9 +750,11 @@ pub fn release_default_endpoints(
                 continue;
             }
             let mut cleared = false;
-            for &r in role_values(role) {
-                if policy.clear_persisted_default(pid, r).is_ok() {
-                    cleared = true;
+            for flow in ALL_FLOWS {
+                for &r in role_values(role) {
+                    if policy.clear_persisted_default(pid, flow, r).is_ok() {
+                        cleared = true;
+                    }
                 }
             }
             if !cleared {
@@ -623,16 +765,21 @@ pub fn release_default_endpoints(
             // this outcome is what the user is told, and "the program follows
             // the system default again" is a promise that has to hold.
             let mut still = ReleaseOutcome::Released;
-            for &r in role_values(role) {
-                match policy.get_persisted_default(pid, r) {
-                    Ok(Some(device_id)) => {
-                        still = ReleaseOutcome::StillPinned(device_id);
-                        break;
+            for flow in ALL_FLOWS {
+                for &r in role_values(role) {
+                    match policy.get_persisted_default(pid, flow, r) {
+                        Ok(Some(device_id)) => {
+                            still = ReleaseOutcome::StillPinned(device_id);
+                            break;
+                        }
+                        Ok(None) => {}
+                        // The service had no answer for this role; a clear that
+                        // was accepted stays accepted, so this is not a failure.
+                        Err(e) => log::debug!("reading the assignment of PID {pid} failed: {e}"),
                     }
-                    Ok(None) => {}
-                    // The service had no answer for this role; a clear that was
-                    // accepted stays accepted, so this is not a failure.
-                    Err(e) => log::debug!("reading the assignment of PID {pid} failed: {e}"),
+                }
+                if still != ReleaseOutcome::Released {
+                    break;
                 }
             }
             outcomes.push((pid, still));
@@ -684,6 +831,70 @@ pub async fn release_process_default_devices(
         .map_err(|_| AudioError::Api("release task failed".to_string()))?
 }
 
+/// Release one data flow only: the render half a route owns, or the capture
+/// half a feed owns.
+///
+/// The two halves are separate slots in the audio service, and a program can
+/// hold both at once — routed to a device *and* recorded from by another
+/// program. A release that cleared both would take the other relationship away
+/// with it, so the paths that own one half say which half they mean.
+pub async fn release_process_default_devices_flow(
+    pids: Vec<u32>,
+    role: Role,
+    capture: bool,
+) -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
+    tokio::task::spawn_blocking(move || release_endpoints_of_flow(&pids, role, capture))
+        .await
+        .map_err(|_| AudioError::Api("release task failed".to_string()))?
+}
+
+/// The blocking body of [`release_process_default_devices_flow`].
+fn release_endpoints_of_flow(
+    pids: &[u32],
+    role: Role,
+    capture: bool,
+) -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
+    let com_owned = crate::audio::init_com()?;
+    let flow = if capture { E_CAPTURE } else { E_RENDER };
+
+    let result = (|| -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
+        let policy = AudioPolicyConfig::activate()?;
+        let mut outcomes = Vec::with_capacity(pids.len());
+        for &pid in pids {
+            if pid == 0 {
+                continue;
+            }
+            let mut cleared = false;
+            for &r in role_values(role) {
+                if policy.clear_persisted_default(pid, flow, r).is_ok() {
+                    cleared = true;
+                }
+            }
+            if !cleared {
+                outcomes.push((pid, ReleaseOutcome::Unknown));
+                continue;
+            }
+            let mut still = ReleaseOutcome::Released;
+            for &r in role_values(role) {
+                match policy.get_persisted_default(pid, flow, r) {
+                    Ok(Some(device_id)) => {
+                        still = ReleaseOutcome::StillPinned(device_id);
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(e) => log::debug!("reading the assignment of PID {pid} failed: {e}"),
+                }
+            }
+            outcomes.push((pid, still));
+        }
+        Ok(outcomes)
+    })();
+
+    crate::audio::uninit_com(com_owned);
+
+    result
+}
+
 /// Set the default audio device for a single process (by PID).
 ///
 /// The assignment is persisted by the audio service per executable and applies
@@ -693,6 +904,27 @@ pub async fn set_process_default_device(
     device_id: &str,
     pid: u32,
     role: Role,
+) -> Result<(), AudioError> {
+    set_process_default_endpoint_flow(device_id, pid, role, E_RENDER).await
+}
+
+/// Pin a process's default *recording* endpoint — the capture half of the same
+/// per-app assignment, and the receiving half of a feed: the target program
+/// records the carrier's output through it.
+pub async fn set_process_default_capture_device(
+    device_id: &str,
+    pid: u32,
+    role: Role,
+) -> Result<(), AudioError> {
+    set_process_default_endpoint_flow(device_id, pid, role, E_CAPTURE).await
+}
+
+/// The pin itself, shared by both halves of the policy.
+async fn set_process_default_endpoint_flow(
+    device_id: &str,
+    pid: u32,
+    role: Role,
+    data_flow: i32,
 ) -> Result<(), AudioError> {
     if pid == 0 {
         return Err(AudioError::Api("invalid pid".to_string()));
@@ -716,7 +948,7 @@ pub async fn set_process_default_device(
             let mut ok = 0;
             let mut last_err: Option<windows::core::HRESULT> = None;
             for &r in role_values(role) {
-                let hr = policy.set_persisted_default(pid, r, &wrapped);
+                let hr = policy.set_persisted_default(pid, data_flow, r, &wrapped);
                 if hr.is_ok() {
                     ok += 1;
                 } else {
@@ -730,7 +962,12 @@ pub async fn set_process_default_device(
                     hr.0
                 )));
             }
-            info!("routed PID {pid} to device {device_id} (roles ok: {ok})");
+            let what = if data_flow == E_CAPTURE {
+                "capture"
+            } else {
+                "render"
+            };
+            info!("pinned PID {pid} {what} endpoint to device {device_id} (roles ok: {ok})");
             Ok(())
         })();
 

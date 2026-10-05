@@ -398,6 +398,182 @@ impl VolumeConfigInner {
     }
 }
 
+/// Feed memory: source exe name -> the exe names its audio is sent into.
+///
+/// "Send this program's sound into that program's input" is delivered by
+/// pointing the source's render endpoint at a loopback pair's playback side
+/// and the target's capture endpoint at the pair's recording side, so the rule
+/// is stored per executable on both ends — the same ownership rule the device
+/// routing uses, and the same reason: one browser holds a dozen processes and
+/// only one of them needs the assignment.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct FeedMap {
+    #[serde(default)]
+    feeds: HashMap<String, Vec<String>>,
+}
+
+/// Manages the feed memory file (interior mutability for Tauri State).
+pub struct FeedConfig {
+    inner: Mutex<FeedConfigInner>,
+}
+
+struct FeedConfigInner {
+    path: PathBuf,
+    map: FeedMap,
+}
+
+impl FeedConfig {
+    /// Load config from the app data directory.
+    pub fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let path = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir failed: {e}"))?
+            .join("feed-memory.json");
+
+        let map = if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
+            parse_or_default(&path, &content)
+        } else {
+            FeedMap::default()
+        };
+
+        Ok(Self {
+            inner: Mutex::new(FeedConfigInner { path, map }),
+        })
+    }
+
+    /// Record that `source_exe`'s audio is sent into `target_exe`'s input.
+    pub fn add(&self, source_exe: &str, target_exe: &str) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let entry = inner.map.feeds.entry(source_exe.to_string()).or_default();
+        if !entry
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(target_exe))
+        {
+            entry.push(target_exe.to_string());
+        }
+        inner.persist()
+    }
+
+    /// Drop one target from a source's rule; an empty rule removes the entry.
+    pub fn remove(&self, source_exe: &str, target_exe: &str) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        // The map is keyed by whatever spelling the rule was recorded under,
+        // and an image name carries whatever case the launch used — match the
+        // same way the reader does, or a removal silently does nothing.
+        let key = inner
+            .map
+            .feeds
+            .keys()
+            .find(|name| name.eq_ignore_ascii_case(source_exe))
+            .cloned();
+        if let Some(key) = key {
+            if let Some(entry) = inner.map.feeds.get_mut(&key) {
+                entry.retain(|name| !name.eq_ignore_ascii_case(target_exe));
+                if entry.is_empty() {
+                    inner.map.feeds.remove(&key);
+                }
+            }
+        }
+        inner.persist()
+    }
+
+    /// Every rule as `(source_exe, target_exe)` pairs.
+    pub fn all(&self) -> Vec<(String, String)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .map
+            .feeds
+            .iter()
+            .flat_map(|(source, targets)| {
+                targets
+                    .iter()
+                    .map(move |target| (source.clone(), target.clone()))
+            })
+            .collect()
+    }
+}
+
+impl FeedConfigInner {
+    /// Persist to disk.
+    fn persist(&self) -> Result<(), String> {
+        persist_json(&self.path, &self.map)
+    }
+}
+
+/// The loopback endpoint pair feeds are carried through.
+///
+/// Sending one program's audio into another's input needs a wire both ends can
+/// address: the source is pointed at the pair's playback side and the target at
+/// its recording side. Any loopback driver provides such a pair (a virtual
+/// cable's input and output); this app does not ship one, so the pair is the
+/// user's to pick. Either half missing means feeds are remembered but silent.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct FeedCarrier {
+    #[serde(default)]
+    pub render: Option<String>,
+    #[serde(default)]
+    pub capture: Option<String>,
+}
+
+/// Manages the feed carrier config file (interior mutability for Tauri State).
+pub struct FeedCarrierConfig {
+    inner: Mutex<FeedCarrierInner>,
+}
+
+struct FeedCarrierInner {
+    path: PathBuf,
+    carrier: FeedCarrier,
+}
+
+impl FeedCarrierConfig {
+    /// Load config from the app data directory.
+    pub fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let path = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir failed: {e}"))?
+            .join("feed-carrier.json");
+
+        let carrier = if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
+            parse_or_default(&path, &content)
+        } else {
+            FeedCarrier::default()
+        };
+
+        Ok(Self {
+            inner: Mutex::new(FeedCarrierInner { path, carrier }),
+        })
+    }
+
+    /// The configured pair, both halves possibly `None`.
+    pub fn get(&self) -> FeedCarrier {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .carrier
+            .clone()
+    }
+
+    /// Replace the pair and persist it.
+    pub fn set(&self, render: Option<String>, capture: Option<String>) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.carrier = FeedCarrier { render, capture };
+        inner.persist()
+    }
+}
+
+impl FeedCarrierInner {
+    /// Persist to disk.
+    fn persist(&self) -> Result<(), String> {
+        persist_json(&self.path, &self.carrier)
+    }
+}
+
 /// Ceiling for a program's own level, as a percentage of what that program
 /// produced.
 ///

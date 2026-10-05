@@ -9,11 +9,13 @@ use tauri::{AppHandle, State};
 
 use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
-use crate::audio::levels::{aligned_gains, audible_count, SourceLevel, SourceLevels, LEVEL_MAX_AGE};
+use crate::audio::levels::{
+    aligned_gains, audible_count, SourceLevel, SourceLevels, LEVEL_MAX_AGE,
+};
 use crate::audio::routing::{PinnedRoutes, ReleaseOutcome};
 use crate::config::{
-    AppSettings, DelayConfig, PrimaryVolumeConfig, RouteConfig, SourceVolumeConfig, VolumeConfig,
-    SOURCE_VOLUME_MAX,
+    AppSettings, DelayConfig, FeedCarrier, FeedCarrierConfig, FeedConfig, PrimaryVolumeConfig,
+    RouteConfig, SourceVolumeConfig, VolumeConfig, SOURCE_VOLUME_MAX,
 };
 use crate::install::{StartupNotice, StartupNoticeState};
 
@@ -274,8 +276,7 @@ pub async fn stop_route(
             .or_else(|| pins.exe_name_of(pid));
         match exe {
             Some(exe) => {
-                duplications.exe_duplicated_elsewhere(pid)
-                    || pins.exe_routed_elsewhere(pid, &exe)
+                duplications.exe_duplicated_elsewhere(pid) || pins.exe_routed_elsewhere(pid, &exe)
             }
             None => false,
         }
@@ -306,10 +307,26 @@ pub async fn stop_route(
         });
     }
 
-    match audio::routing::release_process_default_devices(vec![pid], audio::Role::All).await {
+    // Release the *render* half only: the capture half is a feed's, not a
+    // route's, and a program that receives another program's sound must keep
+    // receiving it when its own device route stops.
+    match audio::routing::release_process_default_devices_flow(vec![pid], audio::Role::All, false)
+        .await
+    {
         Ok(outcomes) if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) => {
             pins.forget(pid);
             info!("stopped PID {pid} and released its endpoint assignment");
+            // A feed this program was the source of was suspended while the
+            // route held the render slot; with the slot free again it resumes
+            // on its own, exactly as the board says it will.
+            if let Some(render) = pins.feed_source_device_of(pid) {
+                match audio::routing::set_process_default_device(&render, pid, audio::Role::All)
+                    .await
+                {
+                    Ok(()) => info!("feed of PID {pid} resumed on its carrier"),
+                    Err(e) => warn!("could not resume the feed of PID {pid}: {e}"),
+                }
+            }
             Ok(StopOutcome {
                 released: true,
                 pinned_device: None,
@@ -436,8 +453,11 @@ pub async fn reset_pinned_endpoints(
             ReleaseOutcome::Released => {
                 // Nothing pins this program any more, so its bookkeeping goes
                 // too — including the entry of a route that was handed back at
-                // stop time and is only now really released.
+                // stop time and is only now really released, and any feed pin
+                // whose endpoints the sweep just cleared.
                 pins.forget(pid);
+                pins.forget_feed_source(pid);
+                pins.forget_feed_capture(pid);
                 released += 1;
             }
             _ => still_pinned.push(
@@ -538,6 +558,16 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
             if !released.contains(&exe_name) {
                 released.push(exe_name);
             }
+        }
+    }
+    // Feed pins whose program is gone are bookkeeping with nothing to hold:
+    // the endpoints they name died with the process. The rule itself stays in
+    // the feed memory — it is the user's, not the process's — so the sweep
+    // drops only the pin.
+    for (pid, _exe, _capture) in pins.feed_pins() {
+        if !live_pids.contains(&pid) {
+            pins.forget_feed_source(pid);
+            pins.forget_feed_capture(pid);
         }
     }
     Ok(released)
@@ -817,4 +847,178 @@ pub fn get_startup_notice(state: State<'_, StartupNoticeState>) -> Option<Startu
 pub fn ack_startup_notice(state: State<'_, StartupNoticeState>) -> Result<(), String> {
     info!("cmd: ack_startup_notice");
     state.ack()
+}
+
+// ------------------------------------------------------------------- feeds
+
+/// What one feed change actually did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedOutcome {
+    /// True when the endpoints were pinned and sound can move.
+    pub delivered: bool,
+    /// Why it could not be delivered, when it could not: `no_carrier` — no
+    /// loopback pair is configured; `source_routed` — the source's per-app
+    /// render slot belongs to a device route, so the rule is recorded and the
+    /// feed resumes when that route stops.
+    pub reason: Option<FeedBlockReason>,
+}
+
+/// Why a recorded feed is not moving sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedBlockReason {
+    NoCarrier,
+    SourceRouted,
+}
+
+/// Recording endpoints, for the carrier picker in settings.
+#[tauri::command]
+pub async fn list_capture_devices() -> Result<Vec<audio::AudioDevice>, String> {
+    info!("cmd: list_capture_devices");
+    tokio::task::spawn_blocking(audio::devices::enumerate_capture_devices)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// The loopback endpoint pair that carries feeds.
+#[tauri::command]
+pub fn get_feed_carrier(carrier: State<'_, FeedCarrierConfig>) -> FeedCarrier {
+    carrier.get()
+}
+
+/// Replace the carrier pair. Both halves may be null ("not configured").
+#[tauri::command]
+pub fn set_feed_carrier(
+    render: Option<String>,
+    capture: Option<String>,
+    carrier: State<'_, FeedCarrierConfig>,
+) -> Result<(), String> {
+    info!("cmd: set_feed_carrier render={render:?} capture={capture:?}");
+    if let Some(id) = render.as_deref() {
+        audio::routing::validate_device_id(id).map_err(|e| e.to_string())?;
+    }
+    if let Some(id) = capture.as_deref() {
+        audio::routing::validate_device_id(id).map_err(|e| e.to_string())?;
+    }
+    carrier.set(render, capture)
+}
+
+/// Every remembered feed rule as `(source_exe, target_exe)` pairs.
+#[tauri::command]
+pub fn list_feeds(feeds: State<'_, FeedConfig>) -> Vec<(String, String)> {
+    feeds.all()
+}
+
+/// Send one program's audio into another program's input.
+///
+/// Delivered by pinning the source's render endpoint to the carrier's playback
+/// side and the target's capture endpoint to its recording side; both pins are
+/// written down so they can be handed back, and the rule itself is written to
+/// the feed memory so it survives a restart.
+///
+/// The per-app endpoint the audio service keeps is a single slot per data flow:
+/// while the source is routed to an output device, that slot belongs to the
+/// device route, and overwriting it would silently take the route's primary
+/// endpoint away. In that case the rule is recorded and reported as
+/// `source_routed` — the engine's render path resumes the feed when the route
+/// stops.
+#[tauri::command]
+pub async fn set_feed_target(
+    source_pid: u32,
+    source_exe: String,
+    target_pid: u32,
+    target_exe: String,
+    feeds: State<'_, FeedConfig>,
+    carrier: State<'_, FeedCarrierConfig>,
+    pins: State<'_, PinnedRoutes>,
+) -> Result<FeedOutcome, String> {
+    info!("cmd: set_feed_target {source_exe} ({source_pid}) -> {target_exe} ({target_pid})");
+    if source_pid == 0 || target_pid == 0 || source_pid == target_pid {
+        return Err("a feed needs two distinct processes".to_string());
+    }
+    if source_exe.eq_ignore_ascii_case(&target_exe) {
+        return Err("a program cannot be fed into itself".to_string());
+    }
+    // The rule is recorded first: an undeliverable feed is still the user's
+    // decision, and the board shows it with the reason it is quiet. Recording
+    // is cheap and idempotent.
+    feeds.add(&source_exe, &target_exe)?;
+
+    let pair = carrier.get();
+    let (Some(render), Some(capture)) = (pair.render.clone(), pair.capture.clone()) else {
+        return Ok(FeedOutcome {
+            delivered: false,
+            reason: Some(FeedBlockReason::NoCarrier),
+        });
+    };
+
+    // Is the source's render slot already owned by a device route of ours?
+    let source_has_route = pins.holds(source_pid) && pins.device_of(source_pid).is_some();
+    if source_has_route {
+        return Ok(FeedOutcome {
+            delivered: false,
+            reason: Some(FeedBlockReason::SourceRouted),
+        });
+    }
+
+    audio::routing::set_process_default_device(&render, source_pid, audio::Role::All)
+        .await
+        .map_err(|e| e.to_string())?;
+    pins.mark_feed(source_pid, &source_exe, &render);
+    audio::routing::set_process_default_capture_device(&capture, target_pid, audio::Role::All)
+        .await
+        .map_err(|e| e.to_string())?;
+    pins.mark_feed_capture(target_pid, &target_exe, &capture);
+    Ok(FeedOutcome {
+        delivered: true,
+        reason: None,
+    })
+}
+
+/// Take one feed rule back: drop it from the memory and release the endpoints
+/// the two ends were pinned to.
+///
+/// The release is per flow, so a source that is also routed to a device keeps
+/// its render assignment — that one belongs to the route, not to the feed.
+#[tauri::command]
+pub async fn remove_feed_target(
+    source_pid: u32,
+    target_pid: u32,
+    feeds: State<'_, FeedConfig>,
+    pins: State<'_, PinnedRoutes>,
+) -> Result<(), String> {
+    info!("cmd: remove_feed_target {source_pid} -> {target_pid}");
+    let source_exe = pins
+        .feed_source_exe_of(source_pid)
+        .or_else(|| pins.exe_name_of(source_pid))
+        .unwrap_or_default();
+    let target_exe = pins.feed_capture_exe_of(target_pid).unwrap_or_default();
+    if !source_exe.is_empty() && !target_exe.is_empty() {
+        feeds.remove(&source_exe, &target_exe)?;
+    }
+    // Hand both ends back, but only the flow the feed owns: a routed source
+    // keeps its render assignment (that one belongs to the route, and the
+    // feed was recorded as suspended), and a target with no capture pin of
+    // ours is left alone.
+    if pins.feed_source_of(source_pid).is_some() && !pins.holds(source_pid) {
+        let _ = audio::routing::release_process_default_devices_flow(
+            vec![source_pid],
+            audio::Role::All,
+            false,
+        )
+        .await;
+        pins.forget_feed_source(source_pid);
+    }
+    if pins.feed_capture_of(target_pid).is_some() {
+        let _ = audio::routing::release_process_default_devices_flow(
+            vec![target_pid],
+            audio::Role::All,
+            true,
+        )
+        .await;
+        pins.forget_feed_capture(target_pid);
+    }
+    Ok(())
 }

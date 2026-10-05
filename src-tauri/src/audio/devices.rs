@@ -2,8 +2,8 @@
 
 use log::{info, warn};
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator, MMDeviceEnumerator,
-    DEVICE_STATE_ACTIVE,
+    eCapture, eConsole, eRender, IMMDevice, IMMDeviceCollection, IMMDeviceEnumerator,
+    MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
@@ -24,6 +24,23 @@ const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
 
 /// Enumerate all active render (playback) devices.
 pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
+    enumerate_devices_of_flow(eRender, "render")
+}
+
+/// Enumerate all active capture (recording) devices.
+///
+/// The other half of a feed: the carrier pair's capture side is where the
+/// target program records from, so the settings picker has to be able to list
+/// these alongside the playback endpoints.
+pub fn enumerate_capture_devices() -> Result<Vec<AudioDevice>, AudioError> {
+    enumerate_devices_of_flow(eCapture, "capture")
+}
+
+/// The shared walk, told which half of the audio graph to enumerate.
+fn enumerate_devices_of_flow(
+    flow: windows::Win32::Media::Audio::EDataFlow,
+    label: &str,
+) -> Result<Vec<AudioDevice>, AudioError> {
     let com_owned = crate::audio::init_com()?;
 
     let result = (|| -> Result<Vec<AudioDevice>, AudioError> {
@@ -34,11 +51,11 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
             })?
         };
 
-        // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
+        // SAFETY: flow + DEVICE_STATE_ACTIVE are valid params.
         let collection: IMMDeviceCollection = unsafe {
             enumerator
-                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-                .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints failed: {e}")))?
+                .EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)
+                .map_err(|e| AudioError::Api(format!("EnumAudioEndpoints({label}) failed: {e}")))?
         };
 
         let count = unsafe {
@@ -57,7 +74,7 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
                 // hotplug race — is the same skip-able failure a device that
                 // will not open is below, not a reason the whole list is lost.
                 Err(e) => {
-                    warn!("skipping render device {i}: Item failed: {e}");
+                    warn!("skipping {label} device {i}: Item failed: {e}");
                     continue;
                 }
             };
@@ -68,10 +85,10 @@ pub fn enumerate_render_devices() -> Result<Vec<AudioDevice>, AudioError> {
             // devices at all" leaves the user with nothing to route to.
             match device_info(&device) {
                 Ok(device) => {
-                    info!("render device: {} [{}]", device.name, device.id);
+                    info!("{label} device: {} [{}]", device.name, device.id);
                     devices.push(device);
                 }
-                Err(e) => warn!("skipping render device {i}: {e}"),
+                Err(e) => warn!("skipping {label} device {i}: {e}"),
             }
         }
 
