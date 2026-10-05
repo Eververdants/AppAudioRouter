@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  addDevice,
   appRow,
   callsFor,
   deviceRow,
@@ -10,6 +11,8 @@ import {
   setFailing,
   setSessions,
   stopAllRail,
+  tuneButton,
+  tunerStrip,
 } from './fixtures';
 
 /**
@@ -20,16 +23,25 @@ import {
  * including CI.
  */
 
-test('shows the apps and the devices the backend reports', async ({ page }) => {
+test('shows the apps the backend reports, and the devices a plan reaches', async ({ page }) => {
   await openApp(page);
 
   await expect(appRow(page, 'music.exe')).toBeVisible();
   await expect(appRow(page, 'game.exe')).toBeVisible();
-  await expect(deviceRow(page, 'Speakers')).toBeVisible();
-  await expect(deviceRow(page, 'TV')).toBeVisible();
-  // Nothing is picked, so there is no hub yet — the stage is a guide, not a
-  // button waiting to be pressed.
+  // Nothing is picked, so there is no hub yet — the board is a guide, not a
+  // button waiting to be pressed, and it draws a plan rather than an inventory.
   await expect(hub(page)).toHaveCount(0);
+  await expect(deviceRow(page, 'Speakers')).toHaveCount(0);
+
+  // Picking a programme stages the device it already plays through, and *that*
+  // is what puts a device card on the board.
+  await appRow(page, 'music.exe').click();
+  await expect(deviceRow(page, 'Speakers')).toBeVisible();
+
+  // The device the plan does not reach is not a card yet; the dashed card is
+  // how it joins.
+  await expect(deviceRow(page, 'TV')).toHaveCount(0);
+  await expect(page.locator('main').getByRole('button', { name: 'Add destination' })).toBeVisible();
 });
 
 test('selecting an app stages the device it plays through, without routing it', async ({
@@ -87,30 +99,31 @@ test('pressing the hub routes it, and a re-selected app is not asked again', asy
   await expect(appRow(page, 'music.exe')).toContainText('Speakers');
 });
 
-test('the disc that carries the route is the one that lights up', async ({ page }) => {
+test('the card that carries the route is the one that lights up', async ({ page }) => {
   await openApp(page);
 
   await appRow(page, 'music.exe').click();
-  await deviceRow(page, 'TV').click();
+  await addDevice(page, 'TV');
   await hub(page).click();
 
-  // The route's first device is the one Windows plays itself, and the ring
-  // names it. The device the route does not use is not a copy of anything.
+  // The route's first device is the one Windows plays itself, and the card
+  // names it. The device the route does not reach is not on the board at all —
+  // the board draws the plan, not an inventory of hardware.
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
   await expect(deviceRow(page, 'TV')).toHaveAttribute('aria-pressed', 'true');
-  await expect(deviceRow(page, 'Speakers')).toHaveAttribute('aria-pressed', 'false');
+  await expect(deviceRow(page, 'Speakers')).toHaveCount(0);
 });
 
 test('the first click on another device replaces the staged guess', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The stage staged "Speakers" on its own — that is the app's guess about
+  // The board staged "Speakers" on its own — that is the app's guess about
   // where the programme plays, not something the user asked for. Choosing the
   // TV must mean "play through the TV instead", never "play through both": a
   // second copy of the audio appearing on a device nobody picked is the one
   // mistake this screen exists to prevent.
-  await deviceRow(page, 'TV').click();
+  await addDevice(page, 'TV');
   await expect(hub(page)).toHaveAttribute('aria-label', /TV/);
   await expect(hub(page)).not.toHaveAttribute('aria-label', /Speakers/);
 
@@ -120,18 +133,18 @@ test('the first click on another device replaces the staged guess', async ({ pag
   expect(applied[0]?.args.deviceIds).toEqual(['tv']);
 });
 
-test('a second device makes a copy, and the copy carries its own delay and level', async ({
+test('a second device makes a copy, and the copy is the one with its own delay', async ({
   page,
 }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The first click replaced the guess; from here on a click adds. Two devices
-  // means one of them is a copy this app duplicates to — and a copy is the only
-  // thing here a delay can hold back or a gain can attenuate, which is why the
-  // controls appear with it and nowhere else.
-  await deviceRow(page, 'TV').click();
-  await deviceRow(page, 'Speakers').click();
+  // The first pick replaced the guess; from here on adding another device piles
+  // on. Two devices means one of them is a copy this app duplicates to — and a
+  // copy is the only thing here a delay can hold back or a gain can attenuate,
+  // which is why the controls appear with it and nowhere else.
+  await addDevice(page, 'TV');
+  await addDevice(page, 'Speakers');
 
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
@@ -139,8 +152,15 @@ test('a second device makes a copy, and the copy carries its own delay and level
   await hub(page).click();
   expect((await callsFor(page, 'apply_route'))[0]?.args.deviceIds).toEqual(['tv', 'speakers']);
 
-  // Stepping the copy's delay talks to the backend for that device alone.
-  await page.locator('main').getByRole('button', { name: /later/ }).first().click();
+  // The copy's levers live in the strip, behind its number badge; the primary
+  // has none of them to offer. Stepping the copy's delay talks to the backend
+  // for that device alone.
+  await tuneButton(page, 'TV').click();
+  await expect(tunerStrip(page).getByText('Primary volume')).toBeVisible();
+  await expect(tunerStrip(page).getByText('Delay')).toHaveCount(0);
+
+  await tuneButton(page, 'Speakers').click();
+  await tunerStrip(page).getByRole('button', { name: /later/ }).click();
   const delayed = await callsFor(page, 'set_device_delay');
   expect(delayed).toHaveLength(1);
   expect(delayed[0]?.args.deviceId).toBe('speakers');
@@ -153,33 +173,37 @@ test('the primary tunes the volume of the programme; the copy keeps its own two'
   await appRow(page, 'music.exe').click();
 
   // One staged device and no engine: neither control has anything it could act
-  // on, so no tuner is drawn at all.
-  await expect(deviceRowShell(page, 'Speakers').getByText('%')).toHaveCount(0);
+  // on, so the strip's device panel is not reachable at all.
+  await expect(tuneButton(page, 'Speakers')).toHaveCount(0);
 
   // A second device starts an engine: the primary (the TV) carries the
   // programme's session volume, the copy carries its delay and its share —
   // and only the copy has a delay, because nothing of ours sits on the
   // primary's path to hold back.
-  await deviceRow(page, 'TV').click();
-  await deviceRow(page, 'Speakers').click();
-  await expect(deviceRowShell(page, 'TV').getByText('100%')).toBeVisible();
-  await expect(deviceRowShell(page, 'Speakers').getByText('100%')).toBeVisible();
-  await expect(deviceRowShell(page, 'TV').getByText('ms')).toHaveCount(0);
-  await expect(deviceRowShell(page, 'Speakers').getByText('ms')).toBeVisible();
+  await addDevice(page, 'TV');
+  await addDevice(page, 'Speakers');
+
+  await tuneButton(page, 'TV').click();
+  await expect(tunerStrip(page).getByText('100%')).toBeVisible();
+  await expect(tunerStrip(page).getByText('Delay')).toHaveCount(0);
+
+  await tuneButton(page, 'Speakers').click();
+  await expect(tunerStrip(page).getByText('100%')).toBeVisible();
+  await expect(tunerStrip(page).getByText('Delay')).toBeVisible();
+  await expect(tunerStrip(page).getByText('ms')).toBeVisible();
 
   // Stepping the primary's volume talks to the backend per *programme* —
   // music.exe, not per device — because it is the session volume that moves.
-  await deviceRowShell(page, 'TV')
-    .getByRole('button', { name: /quieter/ })
-    .click();
+  await tuneButton(page, 'TV').click();
+  await tunerStrip(page).getByRole('button', { name: /quieter/ }).click();
   const applied = await callsFor(page, 'set_primary_volume');
   expect(applied).toHaveLength(1);
   expect(applied[0]?.args).toMatchObject({ exeName: 'music.exe', percent: 95 });
-  await expect(deviceRowShell(page, 'TV').getByText('95%')).toBeVisible();
+  await expect(tunerStrip(page).getByText('95%')).toBeVisible();
 
   // The floor: 5, because a session volume of 0 is true silence and no gain
   // could give the copies their loudness back.
-  const quieter = deviceRowShell(page, 'TV').getByRole('button', { name: /quieter/ });
+  const quieter = tunerStrip(page).getByRole('button', { name: /quieter/ });
   for (let step = 0; step < 18; step += 1) {
     await quieter.click();
   }
@@ -194,11 +218,11 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The first click replaced the guess with the TV; the second added Speakers
+  // The first pick replaced the guess with the TV; the second added Speakers
   // as the copy. With no delays set every device ties, so the plan's own order
   // decides who plays directly — the TV, for being there first.
-  await deviceRow(page, 'TV').click();
-  await deviceRow(page, 'Speakers').click();
+  await addDevice(page, 'TV');
+  await addDevice(page, 'Speakers');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
 
@@ -215,19 +239,20 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
   expect((await callsFor(page, 'apply_route'))[0]?.args.deviceIds).toEqual(['speakers', 'tv']);
 });
 
-test('the stage draws the primary the delay order will produce', async ({ page }) => {
+test('the board draws the primary the delay order will produce', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
-  await deviceRow(page, 'TV').click();
-  await deviceRow(page, 'Speakers').click();
+  await addDevice(page, 'TV');
+  await addDevice(page, 'Speakers');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
 
   // Stepping the copy earlier than the primary takes the primary's seat on the
   // spot, before the hub is pressed: the route goes out in delay order, so the
-  // stage would be lying if it kept the word on whoever was picked first. The
-  // tuner moves with the role — the device the system plays directly has no
+  // board would be lying if it kept the word on whoever was picked first. The
+  // strip moves with the role — the device the system plays directly has no
   // copy's controls to offer.
-  await page.locator('main').getByRole('button', { name: '10 ms earlier' }).click();
+  await tuneButton(page, 'Speakers').click();
+  await tunerStrip(page).getByRole('button', { name: '10 ms earlier' }).click();
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
   await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
 });
@@ -236,7 +261,7 @@ test('picking the same app again throws the picks away and sends nothing', async
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  await deviceRow(page, 'TV').click();
+  await addDevice(page, 'TV');
   await expect(hub(page)).toHaveAttribute('aria-label', /TV/);
 
   // Re-reading the programme's own route back into the stage is the whole of
@@ -383,7 +408,7 @@ test('a plan that is not the route has nothing flowing through it', async ({ pag
   );
 
   await emit(page, 'session-activity', { pid: 1001, active: false });
-  await deviceRow(page, 'TV').click();
+  await addDevice(page, 'TV');
   // Counted rather than checked for visibility: with two devices the spoke to
   // the lower one is exactly vertical, and a vertical line has no width to be
   // seen by.
@@ -399,7 +424,7 @@ test('the rail says where every routed programme plays; the stage draws the one 
   await appRow(page, 'music.exe').click();
   await hub(page).click();
   await appRow(page, 'game.exe').click();
-  await deviceRow(page, 'TV').click();
+  await addDevice(page, 'TV');
   await hub(page).click();
 
   // Both programmes are named where they play in the list — that is the answer
@@ -444,7 +469,7 @@ test('the briefing button says where things stand, in so many words', async ({ p
   await expect(page.getByText(/plays from Speakers now/)).toBeVisible();
 
   // A press somewhere else closes it too — and the route behind it still lands.
-  await deviceRow(page, 'TV').click();
+  await deviceRow(page, 'Speakers').click();
   await expect(page.getByText(/plays from Speakers now/)).toBeHidden();
 
   // The Escape that closed the bubble was unregistered with it, so the search

@@ -41,6 +41,12 @@ export interface BridgeState {
   sourceVolumes: [string, number][];
   /** `(exe_name, percent)` — the per-program primary (session) volumes. */
   primaryVolumes: [string, number][];
+  /** Recording endpoints, for the settings page's carrier picker. */
+  captureDevices: BridgeDevice[];
+  /** The loopback pair feeds are carried through; null halves mean "none set". */
+  feedCarrier: { render: string | null; capture: string | null };
+  /** `(source_exe, target_exe)` — the remembered feed rules. */
+  feeds: [string, string][];
 }
 
 /** Commands the fake backend should reject, by name. */
@@ -133,6 +139,50 @@ function tauriBridge(initial: BridgeState): void {
         }));
       case 'get_remembered_routes':
         return state.remembered;
+      case 'list_capture_devices':
+        return state.captureDevices;
+      case 'get_feed_carrier':
+        return state.feedCarrier;
+      case 'set_feed_carrier':
+        state.feedCarrier = {
+          render: (payload.render as string | null) ?? null,
+          capture: (payload.capture as string | null) ?? null,
+        };
+        return null;
+      case 'list_feeds':
+        return state.feeds;
+      case 'set_feed_target': {
+        const sourceExe = payload.sourceExe as string;
+        const targetExe = payload.targetExe as string;
+        if (!state.feeds.some(([s, t]: [string, string]) => s === sourceExe && t === targetExe)) {
+          state.feeds = [...state.feeds, [sourceExe, targetExe]];
+        }
+        // The fake delivers every rule once a pair is configured; the blocked
+        // cases (no carrier, a routed source) are driven by the state itself.
+        const configured =
+          state.feedCarrier.render !== null && state.feedCarrier.capture !== null;
+        if (!configured) return { delivered: false, reason: 'no_carrier' };
+        return { delivered: true, reason: null };
+      }
+      case 'remove_feed_target': {
+        // The real command addresses the two ends by PID (the toggle already
+        // knows the sessions); the fake maps back to the exe names its memory
+        // is keyed by.
+        const sourceExe = state.sessions.find(
+          (s: BridgeSession) => s.pid === payload.sourcePid,
+        )?.exe_name;
+        const targetExe = state.sessions.find(
+          (s: BridgeSession) => s.pid === payload.targetPid,
+        )?.exe_name;
+        state.feeds = state.feeds.filter(
+          ([s, t]: [string, string]) =>
+            !(
+              s.toLowerCase() === (sourceExe ?? '').toLowerCase() &&
+              t.toLowerCase() === (targetExe ?? '').toLowerCase()
+            ),
+        );
+        return null;
+      }
       case 'clear_route':
         state.remembered = state.remembered.filter(([name]: [string, string[]]) => name !== payload.exeName);
         return null;
@@ -288,4 +338,9 @@ export const DEFAULT_STATE: BridgeState = {
   volumes: [],
   primaryVolumes: [],
   sourceVolumes: [],
+  captureDevices: [{ id: 'cable-out', name: 'CABLE Output' }],
+  // Pre-configured so the specs that concern the board's feed behaviour do not
+  // have to walk through settings first; the carrier's own specs override it.
+  feedCarrier: { render: 'speakers', capture: 'cable-out' },
+  feeds: [],
 };

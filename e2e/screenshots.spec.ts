@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { appRow, deviceRow, hub } from './fixtures';
+import { addDevice, appRow, hub, tuneButton } from './fixtures';
 import { installBridge } from './tauri/bridge';
 
 /**
@@ -28,12 +28,12 @@ test.skip(
 
 /** One programme routed to three devices at once — the case the stage is for,
  *  and the only one in which a delay or a level has anything to act on: the
- *  copies carry theirs under their discs. Chrome goes to the digital output as
- *  well, so the rail shows two programmes with somewhere to be. The rest of the
- *  hardware is there and deliberately not part of any route, so the shot also
- *  shows where the lit part of the ring ends. Both routed programmes are marked
- *  as playing, because that is the resting truth when music is on: the spokes
- *  carry their moving dash. The list is filled out to a plausible desktop rather
+ *  copies carry the numbered badges that open the tuning strip. Chrome goes to
+ *  the digital output as well, so the rail shows two programmes with somewhere
+ *  to be. The rest of the hardware is deliberately not part of any route, so
+ *  the shot also shows where the plan stops and the dashed "add destination"
+ *  card begins. Both routed programmes are marked as playing, because that is
+ *  the resting truth when music is on: the wires carry their moving dash. The list is filled out to a plausible desktop rather
  *  than trimmed to two rows: a screenshot that is nine tenths empty reads as a
  *  broken layout, not as a quiet one. */
 const STATE = {
@@ -68,6 +68,9 @@ const STATE = {
   sourceVolumes: [
     ['Music.exe', 80],
   ],
+  captureDevices: [{ id: 'cable-out', name: 'CABLE Output (VB-Audio)' }],
+  feedCarrier: { render: 'spdif', capture: 'cable-out' },
+  feeds: [] as [string, string][],
 };
 
 for (const theme of ['light', 'dark'] as const) {
@@ -84,16 +87,21 @@ for (const theme of ['light', 'dark'] as const) {
     // adding to it, and every click after that adds. Two wired outputs and the
     // headset, which is what puts a delay and a level under the two copies.
     await appRow(page, 'Music.exe').click();
-    await deviceRow(page, 'HDMI output').click();
-    await deviceRow(page, 'WH-1000XM5').click();
-    await deviceRow(page, 'USB headphones').click();
+    await addDevice(page, 'HDMI output');
+    await addDevice(page, 'WH-1000XM5');
+    await addDevice(page, 'USB headphones');
     await hub(page).click();
 
     // A second programme to a second output, so the rail shows two of them with
     // somewhere to be rather than one.
     await appRow(page, 'chrome.exe').click();
-    await deviceRow(page, 'Digital Audio (S/PDIF)').click();
+    await addDevice(page, 'Digital Audio (S/PDIF)');
     await hub(page).click();
+
+    // Back to the three-device programme with one copy's strip open: the shot
+    // shows the board and the levers a copy actually has.
+    await appRow(page, 'Music.exe').click();
+    await tuneButton(page, 'HDMI output').click();
 
     // Let the undo offer expire: the shot is of the resting state, not of the
     // moment after the click.

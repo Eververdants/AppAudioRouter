@@ -95,3 +95,36 @@ export function stopAllRail(page: Page) {
     name: /^All back to system default$|^Click again to return everything to the system default$/,
   });
 }
+
+/**
+ * One destination card's number badge — the door to the tuning strip.
+ *
+ * The levers live in the strip at the bottom of the board rather than inside
+ * the card, so reading or changing a device's delay/volume starts here.
+ */
+export function tuneButton(page: Page, name: string) {
+  return page.locator('main').getByRole('button', { name: `Tune ${name}`, exact: true });
+}
+
+/** The tuning strip at the bottom of the routing board. */
+export function tunerStrip(page: Page) {
+  return page.locator('main [data-tuner-strip]');
+}
+
+/** One feed card on the board: the programme this one's sound goes into. */
+export function feedRow(page: Page, pid: number) {
+  return page.locator(`main [data-feed-row="${pid}"]`);
+}
+
+/**
+ * Add one destination through the board's ghost card.
+ *
+ * The board draws the plan, not the inventory: a device becomes a card when it
+ * joins the plan, which is what the dashed "add destination" card is for. Any
+ * second device therefore arrives through this picker rather than by clicking a
+ * disc that was always on screen.
+ */
+export async function addDevice(page: Page, name: string): Promise<void> {
+  await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
+  await page.getByRole('menuitem', { name, exact: true }).click();
+}
