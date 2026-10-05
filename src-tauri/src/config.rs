@@ -217,13 +217,20 @@ impl DelayConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("device-delays.json");
 
-        let map = if path.exists() {
+        let mut map = if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
             parse_or_default(&path, &content)
         } else {
             DelayMap::default()
         };
+        // The file is user-editable and was written by older versions, and
+        // neither is bound by what this build supports: a range past the
+        // engine's ring capacity, or delays past the range it was sized for,
+        // would load here as-is and leave the mirrors truncating audio. The
+        // same clamp a range change applies pulls the whole file back into
+        // what the engine was designed to hold.
+        map.clamp_to_range(map.delay_range_ms);
 
         Ok(Self {
             inner: Mutex::new(DelayConfigInner { path, map }),
