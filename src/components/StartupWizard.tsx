@@ -108,16 +108,16 @@ export function StartupWizard() {
   const last = step === STEPS - 1;
 
   return (
-    // The tour is one big soft shape, not a card: the surface carries the
-    // largest step of the radius ladder and no border at all — the rounding
-    // is the statement, a hairline frame would just box the content again.
-    // `.cc` is the progressive continuous-curvature cut for renderers that
-    // know supercircles; where they don't, the large radii stand alone.
-    <div className="flex h-full min-h-0 flex-col items-center justify-center px-10 py-6">
-      <div className="cc flex w-full max-w-xl flex-col overflow-hidden rounded-window bg-surface">
-        {/* Fixed body height so the panel does not breathe between steps; the
+    // The tour has no container at all: content sits straight on the work
+    // area, the way the settings page does. A surface box around the step —
+    // bordered or not, rounded or not — reads as a card, and cards are what
+    // the owner refuses here. Rounding lives on the real shapes: the carrier
+    // rows and the sketch cards, at the ladder's card step.
+    <div className="flex h-full min-h-0 flex-col items-center justify-center px-10">
+      <div className="flex w-full max-w-xl flex-col">
+        {/* Fixed body height so the footer does not jump between steps; the
             shorter steps centre themselves inside it. */}
-        <div className="flex min-h-[364px] flex-col justify-center px-9 py-8">
+        <div className="flex min-h-[364px] flex-col justify-center">
           <motion.div
             key={step}
             initial={{ opacity: 0 }}
@@ -152,7 +152,7 @@ export function StartupWizard() {
         {/* Step marks are the app's own concentric rings, at indicator size:
             the outer ring is the stop, the lit core is where the tour stands.
             The tone switch is already animated inside `.con-ring`. */}
-        <div className="flex items-center justify-between border-t border-line px-6 py-3.5">
+        <div className="mt-8 flex items-center justify-between">
           <div className="flex items-center gap-2" role="group" aria-label={t('wizard.stepsLabel')}>
             {Array.from({ length: STEPS }, (_, i) => (
               <Ring key={i} size={12} tone={i === step ? 'main' : 'idle'} />
@@ -336,7 +336,7 @@ function CarrierStep({
       <StepProse text={t('wizard.carrierBody')} />
       <StepBlock>
         {carrierMatch && !paired && (
-          <div className="mt-5 flex items-center justify-between gap-3 rounded-ctl border border-line-strong px-3.5 py-2.5">
+          <div className="mt-5 flex items-center justify-between gap-3 rounded-card border border-line px-3.5 py-2.5">
             <span className="text-[11.5px] text-text-secondary">
               {t('settings.feedCarrierDetected', { driver: carrierMatch.driver.display })}
             </span>
@@ -350,12 +350,12 @@ function CarrierStep({
           </div>
         )}
         {paired && (
-          <div className="mt-5 rounded-ctl border border-line-strong px-3.5 py-2.5 text-[11.5px] text-accent">
+          <div className="mt-5 rounded-card border border-line px-3.5 py-2.5 text-[11.5px] text-accent">
             {t('settings.feedCarrierPaired', { driver: carrierMatch!.driver.display })}
           </div>
         )}
         {!carrierMatch && (
-          <div className="mt-5 flex items-center justify-between gap-3 rounded-ctl border border-line-strong px-3.5 py-2.5">
+          <div className="mt-5 flex items-center justify-between gap-3 rounded-card border border-line px-3.5 py-2.5">
             <span className="text-[11.5px] leading-relaxed text-text-secondary">
               {t('wizard.carrierMissing')}
             </span>
