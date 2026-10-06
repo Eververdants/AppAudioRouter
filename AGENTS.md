@@ -303,7 +303,7 @@ AppAudioRouter/
   - 前端 `soundingPids` 是**纯显示状态**（线上流动、脉冲环、标题栏计数），路由逻辑一个字都不读它；每次 `refreshSessions` 按会话列表的 `playing` 标志**重建**（列表是权威），事件在两次刷新之间补瞬时的转换。`AudioSession.playing`（枚举时是否有任一会话 Active，按 pid 跨设备取 OR）是它的种子。
 - 线程启动时必须先 `sync()` 一次：两种回调都只报「变化」，不给已存在的设备/会话预先挂钩子，启动前就在放音的程序永远不会被通知到。
 - 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
-- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面两处才不至于永远停在旧值。
+- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。`devices` 分支还会跟一次 `loadCaptureDevices()`：载体选择器列的是捕获侧，回环驱动装上后必须不重启就出现在列表里。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面两处才不至于永远停在旧值。
 - **第四个引擎事件 `duplication-ready`**（pid / generation）：最后一个镜像初始化完成时由 `mirror_ready` 发一次，因为镜像的 `GetStreamLatency` 是在**渲染线程**里、在一次异步设备激活**之后**才拿到的，而 `apply_route` 早就返回了——前端若只在收到路由回执时读一次，读到的必然是空值，而且**再也不会重读**。`reconcileActiveDuplications()` 因此有四处调用：开机、路由落地后、撤销后、以及这个事件；外加改延迟之后与 `syncFromNotification`。**每一条新起引擎的路径都要跟一次**，否则那台设备的读数要么不出现、要么停在改动之前。
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
 
@@ -542,6 +542,14 @@ hub 的**出脚**到去向的**入脚**之间那根线**就是**路由的这一�
   那个程序还可能在收别人的声音。只有"重置每应用音频输出"与退出这两条路会两个流一起清。
 - ⚠️ **别把送入并进设备路由的记忆**：`feed-memory.json` 与 `route-memory.json` 是两份，
   一条规则的存在不依赖另一条；恢复也各自独立（`restoreRememberedFeeds` vs `restoreRememberedRoutes`，都由列表/记忆/载体的到达触发）。
+- **设置页会点名探测常见回环驱动**（`lib/carrierDetect.ts`：VB-Cable、VoiceMeeter；按友好名的子串匹配、
+  不区分大小写，VoiceMeeter 的标记故意不命中 Aux 对——「… Aux Input」截断了子串，Banana/Potato 系统配的是 VAIO 对）。
+  检测到就给「一键配对」（走现成的 `setFeedCarrier`）；没检测到**且载体未配置**时给 VB-Cable 下载指引——
+  `open_carrier_download` 的 URL 映射固定在 Rust 侧（`commands.rs` 的 `CARRIER_PAGES`），前端只传驱动 key、永不传 URL，
+  页面经 `ShellExecuteW` 的 open 动词交给浏览器关联。探测只是认名字，**不是携带**：应用仍然不自带、不安装任何驱动；
+  已配置载体但不是已知驱动时保持安静（用户自己配的，别念叨）。
+- 两份设备列表都随 `audio-changed` 刷新（`syncFromNotification` 的 devices 分支也拉捕获列表），
+  所以「装完回环驱动 → 不重启 → 一键配对」这条链是闭环的，别把捕获列表从那条路里摘出去。
 
 ### 布局与其余规矩
 
@@ -664,6 +672,7 @@ cd src-tauri && cargo clippy -- -D warnings
 - [ ] 进程列表搜索：输入即时过滤，已路由的排在最前且组内顺序稳定；`Escape` 清空并失焦；无匹配时的提示与「没有进程在放音」不是同一句
 - [ ] 节点看板：选中一个程序后它是 hub 卡（名字写在卡里），右侧一列是它的去向（输出设备在前、送入的程序在后）；每张卡有编号角标（01 起，**编号即路由顺序**），hub 出脚到去向入脚之间一根灰线——**没参与的设备不在板上、也没有线**；「＋ 添加去向」的虚线卡是加入的入口（选择器里设备与程序输入分两组）
 - [ ] 送入程序：选中 A，经虚线卡把 B 的输入加进来——卡上写「送入」并立刻生效（`set_feed_target`，没有 hub 那一步），Toast 给撤销；把 A 路由到设备后这张卡改口写「挂起」（渲染槽被占），停掉设备路由后自动恢复；设置页没配载体时写「未接通」且日志点名原因；设置页选好回环端点对后挂起/未接通的送入自己接通
+- [ ] 送入载体的检测与引导：装了 VB-Cable/VoiceMeeter 的机器，设置页点名检测且「一键配对」把端点对写进载体（看板上的送入卡随之从「未接通」变「送入」）；没装且载体未配置时给出 VB-Cable 下载指引，点击打开官方页（`ShellExecuteW`）；**已配置载体时不出指引**；装完驱动不重启应用，设备列表自动跟上、即可配对
 - [ ] 先替换、后追加：选中一个已路由的程序后**第一次**加入另一台设备是替换（只输出到那一台），同一状态下再加别的才是追加成副本；路由里只剩一台时点它被忽略、它的 ✕ 也不出现——**路由不可能被点成空的**
 - [ ] 换主输出：多设备计划中副本的角色词带点状下划线，悬停/聚焦由「副本」变「设为主输出」，点击后两张卡的角色词当场对调、按下 hub 后后端收到以它为首的设备顺序；延迟补偿更大的副本悬停不出现动作且 `title` 说明原因；给副本调一个比主输出更小的延迟（可为负），主位当场换人——卡片角色词、hub `aria-label`、落地顺序三处一致
 - [ ] hub 卡即应用：有改动待生效时它是一枚按钮（卡上挂「点按生效」胶囊与 accent 描边，`aria-label` 是完整句子、列出全部去向），按下即落地并给 Toast 撤销；画面已经是事实时它不可按（胶囊消失、`disabled`），程序摘要改由底部调音条承担；未选中程序时板上是一句引导；丢弃已选改动 = 重新选中那个程序（计划被事实读回，不发任何 apply_route）
