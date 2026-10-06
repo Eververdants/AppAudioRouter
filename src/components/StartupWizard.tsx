@@ -5,7 +5,7 @@ import { Ring } from '@/components/ui/Ring';
 import { Switch } from '@/components/ui/Switch';
 import { detectCarrierPair, matchesCarrier, type CarrierMatch } from '@/lib/carrierDetect';
 import { openCarrierDownload } from '@/lib/invoke';
-import { FADE } from '@/lib/motion';
+import { FADE, MAIN_THREAD_TRANSFORM } from '@/lib/motion';
 import type { FeedCarrier } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -19,6 +19,15 @@ const STEPS = 4;
  * label on the wrapper, so a screen reader hears the sentence, not a spelling
  * bee. Delays are the documented per-item pattern: one base per block, one
  * small step per character.
+ *
+ * Every char carries the identity `transformTemplate` on purpose: Motion runs
+ * opacity/filter on the WAAPI path otherwise, and a WAAPI finish cancels the
+ * animation one frame before the final value is committed — for that frame the
+ * char falls back to its inline base (invisible, blurred) and blinks exactly
+ * as it lands. Main-thread animation commits inline styles every frame, so a
+ * char sharpens once and stays sharp. Plain inline chars, not inline-block:
+ * an English word must never wrap mid-word just because each letter is its
+ * own box.
  */
 function BlurText({
   text,
@@ -40,7 +49,8 @@ function BlurText({
           initial={{ opacity: 0, filter: 'blur(6px)' }}
           animate={{ opacity: 1, filter: 'blur(0px)' }}
           transition={{ ...FADE, delay: base + i * step }}
-          className="inline-block whitespace-pre"
+          transformTemplate={MAIN_THREAD_TRANSFORM}
+          className="inline whitespace-pre"
         >
           {ch}
         </motion.span>
@@ -111,6 +121,7 @@ export function StartupWizard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
           >
             {step === 0 && <WelcomeStep />}
             {step === 1 && <BoardStep />}
@@ -212,13 +223,16 @@ function StepBullet({ text, base }: { text: string; base: number }) {
 }
 
 /** Anything that is chrome rather than prose — rows, switches, buttons —
- * arrives as one piece, after the words it belongs to. */
+ * arrives as one piece, after the words it belongs to. Same main-thread rule
+ * as the chars: a block that blinks dark for a frame as it lands reads as a
+ * glitch, not an arrival. */
 function StepBlock({ children, base = 0.85 }: { children: ReactNode; base?: number }) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ ...FADE, delay: base }}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
     >
       {children}
     </motion.div>
@@ -235,6 +249,7 @@ function WelcomeStep() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ ...FADE, delay: 0.02 }}
+        transformTemplate={MAIN_THREAD_TRANSFORM}
         className="mb-5"
       >
         <Ring size={40} tone="main" />
