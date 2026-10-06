@@ -282,6 +282,7 @@ export default function App() {
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             transition={SPRING_GLIDE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             className="min-h-0 flex-1"
           >
             <SettingsPage onBack={() => setView('router')} />

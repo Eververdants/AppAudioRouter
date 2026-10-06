@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { FADE, SPRING_GLIDE } from '@/lib/motion';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import { isEditableTarget } from '@/lib/productionGuards';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -99,6 +99,7 @@ export function Toast() {
             animate={{ opacity: 1, y: 0, pointerEvents: 'auto' }}
             exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
             transition={{ opacity: FADE, y: SPRING_GLIDE }}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             onPointerEnter={() => setHeld(true)}
             onPointerLeave={() => setHeld(false)}
             onFocus={() => setHeld(true)}
@@ -144,6 +145,7 @@ export function Toast() {
             // point of view.
             exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
             transition={{ opacity: FADE, y: SPRING_GLIDE }}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             onPointerEnter={() => setHeld(true)}
             onPointerLeave={() => setHeld(false)}
             onFocus={() => setHeld(true)}

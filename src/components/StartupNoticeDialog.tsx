@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { SPRING_GLIDE } from '@/lib/motion';
+import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import type { ResetOutcome } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -62,6 +62,7 @@ export function StartupNoticeDialog() {
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={SPRING_GLIDE}
+        transformTemplate={MAIN_THREAD_TRANSFORM}
         className="bg-surface border border-line shadow-float w-full max-w-md rounded-panel p-5"
       >
         <h2 id="startup-notice-title" className="text-[15px] font-semibold tracking-tight text-text-primary">

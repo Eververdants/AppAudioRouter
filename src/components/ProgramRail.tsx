@@ -101,6 +101,7 @@ export function ProgramRail() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.7 }}
                 transition={SPRING_TAP}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 className="flex"
               >
                 {/* Stops every routed programme at once, so it asks first: one
@@ -436,6 +437,7 @@ function MiniToggle({
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.5, opacity: 0 }}
           transition={SPRING_TAP}
+          transformTemplate={MAIN_THREAD_TRANSFORM}
           className="flex"
         >
           {pressed ? (

@@ -666,6 +666,7 @@ export function NodeStage() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 4 }}
                 transition={SPRING_GLIDE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 className="bg-surface border-line-strong shadow-float cc absolute z-30 w-[230px] rounded-card border p-1.5"
                 style={{
                   left: Math.min(TARGET_X - 20, BOARD_W - 250),

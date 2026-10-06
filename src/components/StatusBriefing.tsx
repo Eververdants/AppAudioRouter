@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { orderByDelay } from '@/lib/delay';
-import { SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { alreadyApplied } from '@/lib/stage';
 import type { AudioDevice } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
@@ -193,6 +193,7 @@ export function StatusBriefing() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.98 }}
               transition={SPRING_GLIDE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               className="bg-surface border border-line shadow-float absolute bottom-full left-0 mb-2 w-[300px] rounded-card p-3.5"
             >
               <ul className="flex flex-col gap-2">
