@@ -6,7 +6,9 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
+import { detectCarrierPair, matchesCarrier } from '@/lib/carrierDetect';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
+import { openCarrierDownload } from '@/lib/invoke';
 import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -219,6 +221,13 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     () => duplicatedExecutables(sessions, routedPids),
     [sessions, routedPids],
   );
+  // Which known loopback driver, if any, is on the two lists right now. Both
+  // lists follow the audio-changed event, so a driver installed while the app
+  // is open pairs without a restart.
+  const carrierMatch = useMemo(
+    () => detectCarrierPair(devices, captureDevices),
+    [devices, captureDevices],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -427,6 +436,45 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </select>
               </label>
             </div>
+            {/* The known loopback drivers announce themselves: pairing is one
+                click when one is here, and the free one is one click away when
+                none is. The button below hands a driver key to the backend —
+                the URL itself never crosses from the frontend. */}
+            {carrierMatch && !matchesCarrier(carrierMatch, feedCarrier) && (
+              <div className="mt-2.5 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-text-secondary">
+                  {t('settings.feedCarrierDetected', { driver: carrierMatch.driver.display })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)
+                  }
+                  className="shrink-0 rounded bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+                >
+                  {t('settings.feedCarrierApply')}
+                </button>
+              </div>
+            )}
+            {carrierMatch && matchesCarrier(carrierMatch, feedCarrier) && (
+              <div className="mt-2.5 text-[11px] text-text-muted">
+                {t('settings.feedCarrierPaired', { driver: carrierMatch.driver.display })}
+              </div>
+            )}
+            {!carrierMatch && !feedCarrier.render && !feedCarrier.capture && (
+              <div className="mt-2.5 flex items-center justify-between gap-3">
+                <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                  {t('settings.feedCarrierMissing')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void openCarrierDownload('vb-cable')}
+                  className={ROW_BUTTON_CLASS}
+                >
+                  {t('settings.feedCarrierDownload')}
+                </button>
+              </div>
+            )}
           </div>
         </SectionCard>
 

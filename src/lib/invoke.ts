@@ -224,3 +224,9 @@ export async function setFeedTarget(
 export async function removeFeedTarget(sourcePid: number, targetPid: number): Promise<void> {
   await invoke('remove_feed_target', { sourcePid, targetPid });
 }
+
+/** Open a known loopback driver's download page. The key names a driver, never
+ * a URL — the page mapping is an allowlist on the Rust side. */
+export async function openCarrierDownload(key: 'vb-cable' | 'voicemeeter'): Promise<void> {
+  await invoke('open_carrier_download', { key });
+}

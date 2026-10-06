@@ -764,6 +764,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // The system default is what an unrouted process falls back to, and it is
       // exactly what unplugging the current output tends to move.
       await get().refreshDevices(true);
+      // The carrier picker lists the capture flow too: a loopback driver
+      // installed a minute ago must show up here without an app restart, or
+      // the settings page cannot pair it right after the install.
+      await get().loadCaptureDevices();
       await get().loadDefaultDevice();
     }
     if (sessions) await get().refreshSessions(true);

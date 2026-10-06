@@ -141,6 +141,11 @@
     "feedCarrierCapture": "Recording side",
     "feedCarrierCaptureHint": "The pair's recording endpoint — often named “… Output”",
     "feedCarrierNone": "Not configured",
+    "feedCarrierDetected": "Found {{driver}} — both sides are on the lists",
+    "feedCarrierApply": "Pair it",
+    "feedCarrierPaired": "{{driver}} is the carrier",
+    "feedCarrierMissing": "No loopback driver found. A free one is enough — install VB-Cable and the lists here refresh on their own, no restart needed.",
+    "feedCarrierDownload": "Get VB-Cable (free)",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust talking to Windows Core Audio directly, no third-party executables."
   },

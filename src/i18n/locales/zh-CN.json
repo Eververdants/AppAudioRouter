@@ -141,6 +141,11 @@
     "feedCarrierCapture": "录音侧",
     "feedCarrierCaptureHint": "回环对的录音端点——通常名为「… Output」",
     "feedCarrierNone": "未配置",
+    "feedCarrierDetected": "检测到 {{driver}}，两侧端点都在列表里",
+    "feedCarrierApply": "一键配对",
+    "feedCarrierPaired": "正在使用 {{driver}} 作为载体",
+    "feedCarrierMissing": "未检测到回环驱动。免费的就够用——装一个 VB-Cable，装好后这里的列表会自己刷新，无需重启。",
+    "feedCarrierDownload": "下载 VB-Cable（免费）",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由，Rust 直连 Windows Core Audio，无第三方 exe 依赖。"
   },
