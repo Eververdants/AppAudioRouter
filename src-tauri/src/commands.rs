@@ -1022,3 +1022,53 @@ pub async fn remove_feed_target(
     }
     Ok(())
 }
+
+// ------------------------------------------------- carrier download pages
+
+/// The download pages the carrier hint may point at. The mapping lives on this
+/// side on purpose: the frontend names a driver key, never a URL, so nothing
+/// user-controlled ever reaches the shell.
+const CARRIER_PAGES: &[(&str, &str)] = &[
+    ("vb-cable", "https://vb-audio.com/Cable/"),
+    ("voicemeeter", "https://vb-audio.com/Voicemeeter/"),
+];
+
+/// Open a known loopback driver's download page in the user's browser.
+#[tauri::command]
+pub fn open_carrier_download(key: &str) -> Result<(), String> {
+    info!("cmd: open_carrier_download {key}");
+    let Some((_, url)) = CARRIER_PAGES.iter().find(|(name, _)| *name == key) else {
+        return Err(format!("unknown carrier page key: {key}"));
+    };
+    open_in_browser(url)
+}
+
+/// Hand a URL to the shell's "open" verb; the browser association decides
+/// where it lands, and this process never sees the browser.
+fn open_in_browser(url: &str) -> Result<(), String> {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    // SAFETY: the strings outlive the call, the verb is the literal "open" and
+    // the file is an allowlisted https URL, and no window handle is involved.
+    let verb = HSTRING::from("open");
+    let file = HSTRING::from(url);
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // The shell's contract: the return value, read as an integer, is above 32
+    // when the launch started; the handle type only dresses it up.
+    let code = result.0 as usize;
+    if code <= 32 {
+        return Err(format!("ShellExecuteW failed with code {code} for {url}"));
+    }
+    Ok(())
+}
