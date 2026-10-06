@@ -17,9 +17,8 @@ import { useRouterStore } from '@/stores/routerStore';
  * running it silently. The offer is 2.1.0's alone: later releases return what
  * they pin on every path, so upgrading from them shows nothing at all.
  *
- * A fresh install gets the two lines it needs to start routing, and one about
- * the reset, which is the answer if a program ever stops following the system
- * default.
+ * A fresh install never reaches this dialog — the full-screen wizard owns the
+ * first run (see `StartupWizard`); this is the upgrade warning only.
  */
 export function StartupNoticeDialog() {
   const { t } = useTranslation();
@@ -38,8 +37,7 @@ export function StartupNoticeDialog() {
     return () => window.removeEventListener('keydown', onKey);
   }, [notice, dismiss]);
 
-  if (notice === null) return null;
-  const upgrade = notice.kind === 'upgrade';
+  if (notice === null || notice.kind !== 'upgrade') return null;
 
   const runReset = async () => {
     setBusy(true);
@@ -67,23 +65,15 @@ export function StartupNoticeDialog() {
         className="bg-surface border border-line shadow-float w-full max-w-md rounded-panel p-5"
       >
         <h2 id="startup-notice-title" className="text-[15px] font-semibold tracking-tight text-text-primary">
-          {upgrade
-            ? t('startup.upgradeTitle')
-            : t('startup.firstRunTitle', { product: t('productName') })}
+          {t('startup.upgradeTitle')}
         </h2>
         <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
-          {upgrade
-            ? notice.previous_version === null
-              ? t('startup.upgradeBody')
-              : t('startup.upgradeBodyVersion', { version: notice.previous_version })
-            : t('startup.firstRunBody')}
+          {notice.previous_version === null
+            ? t('startup.upgradeBody')
+            : t('startup.upgradeBodyVersion', { version: notice.previous_version })}
         </p>
 
-        {upgrade && (
-          <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
-            {t('startup.resetHint')}
-          </p>
-        )}
+        <p className="mt-2 text-[11px] leading-relaxed text-text-muted">{t('startup.resetHint')}</p>
 
         {result !== null && (
           <p
@@ -98,23 +88,21 @@ export function StartupNoticeDialog() {
         )}
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          {upgrade && (
-            <button
-              type="button"
-              onClick={() => void runReset()}
-              disabled={busy}
-              className="rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
-            >
-              {busy ? t('startup.resetting') : t('startup.resetAction')}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => void runReset()}
+            disabled={busy}
+            className="rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+          >
+            {busy ? t('startup.resetting') : t('startup.resetAction')}
+          </button>
           <button
             type="button"
             autoFocus
             onClick={() => void dismiss()}
             className="rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
           >
-            {upgrade ? t('startup.dismiss') : t('startup.startAction')}
+            {t('startup.dismiss')}
           </button>
         </div>
       </motion.div>

@@ -6,6 +6,7 @@ import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
+import { StartupWizard } from '@/components/StartupWizard';
 import { StatusBriefing } from '@/components/StatusBriefing';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
@@ -59,8 +60,12 @@ export default function App() {
   const loadCaptureDevices = useRouterStore((s) => s.loadCaptureDevices);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
+  const startupNotice = useRouterStore((s) => s.startupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
   const [tab, setTab] = useState<WorkTab>('router');
+  // The first run owns the work area until it is acknowledged; upgrades stay a
+  // dialog, because a warning is one sentence, not a tour.
+  const wizardActive = startupNotice?.kind === 'first-run';
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
@@ -215,6 +220,7 @@ export default function App() {
       <TitleBar
         settingsOpen={view === 'settings'}
         onToggleSettings={() => setView((v) => (v === 'settings' ? 'router' : 'settings'))}
+        hideSettings={wizardActive}
       />
 
       {/* Two planes, one hairline between them: the app list is a sidebar, and
@@ -222,7 +228,17 @@ export default function App() {
           AnimatePresence): the outgoing view unmounts immediately, which keeps
           the swap stuck-free. */}
       <div className="flex min-h-0 flex-1">
-        {view === 'router' ? (
+        {wizardActive ? (
+          <motion.div
+            key="wizard"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            className="min-h-0 flex-1"
+          >
+            <StartupWizard />
+          </motion.div>
+        ) : view === 'router' ? (
           <motion.div
             key="router"
             initial={{ opacity: 0 }}
@@ -271,9 +287,10 @@ export default function App() {
         )}
       </div>
 
-      {/* Last children, so they cover both views: what this install is told
-          about itself once (a welcome, or the leftovers of an earlier version),
-          and the standing offer to undo the route that was just applied. */}
+      {/* Last children, so they cover both views: the warning an install that
+          once ran 2.1.0 is owed, and the standing offer to undo the route that
+          was just applied. The first run itself is the wizard in the work
+          area, not a layer here. */}
       <StartupNoticeDialog />
       <Toast />
     </div>
