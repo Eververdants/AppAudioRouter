@@ -67,7 +67,9 @@ pub struct AlignOutcome {
 /// so the shell's extraction is paid once and every later ask — another
 /// session of the same program, the next refresh — reads the cache. Returns
 /// `None` when the process is gone or its file carries no icon: the frontend
-/// keeps its letter tile and does not retry this process.
+/// keeps its letter tile and asks again — first on its own bounded retries,
+/// then on the next refresh, since a miss can be the ask losing a race to a
+/// dying pid rather than a file that truly has no icon.
 #[tauri::command]
 pub async fn get_process_icon(pid: u32) -> Result<Option<audio::process_meta::IconImage>, String> {
     debug!("cmd: get_process_icon pid={pid}");

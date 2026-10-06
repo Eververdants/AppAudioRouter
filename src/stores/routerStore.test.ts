@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import type { AudioDevice, AudioSession } from '@/lib/types';
 import { useRouterStore } from './routerStore';
@@ -862,5 +862,56 @@ describe('feeds', () => {
 
     expect(state().feeds[MUSIC.pid]).toBeUndefined();
     expect(state().rememberedFeeds).toEqual([]);
+  });
+});
+
+describe('missing icons', () => {
+  // Fresh executable names: the retry budget lives at module level on
+  // purpose, so a name another test missed already carries spent tries.
+  const ICONLESS: AudioSession = { pid: 5001, exe_name: 'iconless.exe' };
+  const DEPARTED: AudioSession = { pid: 5002, exe_name: 'departed.exe' };
+
+  it('asks again on its own when a miss settles — a quiet system has no refresh to lean on', async () => {
+    vi.useFakeTimers();
+    try {
+      const backend = installBackend({ sessions: [ICONLESS] });
+      reset({ sessions: [ICONLESS] });
+
+      await state().refreshSessions();
+      const asks = () => backend.calls.filter((c) => c.cmd === 'get_process_icon').length;
+      expect(asks()).toBe(1);
+
+      // 2s, 4s, 8s — three self-retries, then the executable waits for a real
+      // refresh like it always did.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(asks()).toBe(2);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(asks()).toBe(3);
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(asks()).toBe(4);
+      await vi.advanceTimersByTimeAsync(16000);
+      expect(asks()).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops the retry when the executable leaves the list', async () => {
+    vi.useFakeTimers();
+    try {
+      const backend = installBackend({ sessions: [DEPARTED] });
+      reset({ sessions: [DEPARTED] });
+
+      await state().refreshSessions();
+      const asks = () => backend.calls.filter((c) => c.cmd === 'get_process_icon').length;
+      expect(asks()).toBe(1);
+
+      installBackend({ sessions: [] });
+      await state().refreshSessions();
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(asks()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

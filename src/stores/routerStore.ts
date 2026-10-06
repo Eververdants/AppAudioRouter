@@ -291,9 +291,10 @@ interface RouterState {
   /** Ask the backend for the icons the current process list is missing, one
    * command per executable, without waiting for them: the rows render their
    * letter tiles immediately and the icon lands whenever the shell is done.
-   * A settled miss does not stick — the next refresh asks again, because the
-   * likeliest failure (the process died mid-ask) is one a later ask gets
-   * past; a success is final and never asked for again. */
+   * A settled miss does not stick — it re-arms its own bounded timer (three
+   * tries, doubling), because the likeliest failure (the process died
+   * mid-ask) is one a later ask gets past and a quiet system never raises a
+   * refresh to lean on; a success is final and never asked for again. */
   loadMissingIcons: () => void;
   /** Set one program's own level (percent, 0–400, 100 = unchanged). */
   setSourceVolume: (exeName: string, percent: number) => Promise<void>;
@@ -431,6 +432,57 @@ const autoRestoreDecided = new Set<number>();
  * extraction from being asked twice across refreshes.
  */
 const iconsInFlight = new Set<string>();
+
+/**
+ * Bounded second chances for a missed icon.
+ *
+ * The ask cadence is event-driven — a refresh, a hotplug — but a quiet system
+ * never raises one, so the ask that lost its race (the pid died mid-question,
+ * the shell lost an extraction once) would hold its letter tile for the whole
+ * run: entering the app with nothing changing in the audio graph, some icons
+ * simply never arrived. One timer per unresolved executable — 2s, 4s, 8s,
+ * three tries — and the bookkeeping is gone the moment a data URL lands or
+ * the executable leaves the list. Not a poll: once every miss is resolved or
+ * spent there is nothing left to fire.
+ */
+const iconRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const iconRetries = new Map<string, number>();
+const ICON_RETRY_BASE_MS = 2000;
+const ICON_RETRY_LIMIT = 3;
+
+/** Rearm one executable's retry, unless a timer is pending or its tries are
+ * spent. A later refresh that misses again arms from the remaining budget. */
+function scheduleIconRetry(exeName: string): void {
+  if (iconRetryTimers.has(exeName)) return;
+  const used = iconRetries.get(exeName) ?? 0;
+  if (used >= ICON_RETRY_LIMIT) return;
+  iconRetries.set(exeName, used + 1);
+  iconRetryTimers.set(
+    exeName,
+    setTimeout(() => {
+      iconRetryTimers.delete(exeName);
+      useRouterStore.getState().loadMissingIcons();
+    }, ICON_RETRY_BASE_MS * 2 ** used),
+  );
+}
+
+/** A pending retry is moot: this pass is what it was waiting for. The spent
+ * count survives — the timer firing into this pass is a retry, not a fresh
+ * start, or a quiet system would loop at the base interval forever. */
+function clearIconTimer(exeName: string): void {
+  const timer = iconRetryTimers.get(exeName);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    iconRetryTimers.delete(exeName);
+  }
+}
+
+/** A data URL is final, or the executable is gone: all of the bookkeeping
+ * goes with it, so a returning process starts with a full retry budget. */
+function clearIconRetry(exeName: string): void {
+  clearIconTimer(exeName);
+  iconRetries.delete(exeName);
+}
 
 /**
  * Source PID + target exe pairs this run already decided about, so a feed
@@ -1839,29 +1891,50 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   loadMissingIcons: () => {
+    // Exes no longer on the list are not our business: a retry timer aimed at
+    // a departed process would only fire into an empty pass, and its spent
+    // budget would follow the process around if it ever came back.
+    const live = new Set<string>();
+    for (const session of get().sessions) live.add(session.exe_name);
+    for (const exeName of [...iconRetryTimers.keys()]) {
+      if (!live.has(exeName)) clearIconRetry(exeName);
+    }
+    for (const exeName of [...iconRetries.keys()]) {
+      if (!live.has(exeName)) iconRetries.delete(exeName);
+    }
+
     // One ask per executable per pass: the icon belongs to the file, and the
     // first session's pid is as good an address as any of its siblings'.
-    const seen = new Set<string>();
+    const asked = new Set<string>();
     for (const session of get().sessions) {
       const exeName = session.exe_name;
-      if (seen.has(exeName)) continue;
-      seen.add(exeName);
+      if (asked.has(exeName)) continue;
+      asked.add(exeName);
       // A data URL is final. `null` and "not asked yet" both fall through:
-      // a miss is retried on the next refresh, not held against the exe.
-      if (typeof get().iconByExe[exeName] === 'string') continue;
+      // a miss is retried — first on its own, then on the next refresh —
+      // never held against the exe.
+      if (typeof get().iconByExe[exeName] === 'string') {
+        clearIconRetry(exeName);
+        continue;
+      }
       if (iconsInFlight.has(exeName)) continue;
+      // A pending retry is moot: this pass is what it was waiting for.
+      clearIconTimer(exeName);
       iconsInFlight.add(exeName);
       api
         .getProcessIcon(session.pid)
         .then((icon) => {
           const url = icon === null ? null : rgbaToDataUrl(icon);
           set((s) => ({ iconByExe: { ...s.iconByExe, [exeName]: url } }));
+          if (typeof url === 'string') clearIconRetry(exeName);
+          else scheduleIconRetry(exeName);
         })
         .catch(() => {
           // Same settlement as "the file has no icon": the letter tile stays
-          // for now, the next refresh asks again, and nothing anywhere logs
-          // an icon.
+          // for now, the retry asks again on its own, and nothing anywhere
+          // logs an icon.
           set((s) => ({ iconByExe: { ...s.iconByExe, [exeName]: null } }));
+          scheduleIconRetry(exeName);
         })
         .finally(() => {
           iconsInFlight.delete(exeName);
