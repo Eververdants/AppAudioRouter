@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { Ring } from '@/components/ui/Ring';
 import { Switch } from '@/components/ui/Switch';
 import { detectCarrierPair, matchesCarrier, type CarrierMatch } from '@/lib/carrierDetect';
 import { openCarrierDownload } from '@/lib/invoke';
@@ -10,6 +11,43 @@ import { useRouterStore } from '@/stores/routerStore';
 
 /** The four stops of the tour, in the order a new user needs them. */
 const STEPS = 4;
+
+/**
+ * Text that arrives one character at a time, each sharpening out of a blur. A
+ * one-shot entrance — nothing loops and nothing lingers: the filter is a blur
+ * only while the character is still landing. Chars are aria-hidden behind a
+ * label on the wrapper, so a screen reader hears the sentence, not a spelling
+ * bee. Delays are the documented per-item pattern: one base per block, one
+ * small step per character.
+ */
+function BlurText({
+  text,
+  base = 0,
+  step = 0.006,
+  className,
+}: {
+  text: string;
+  base?: number;
+  step?: number;
+  className?: string;
+}) {
+  return (
+    <span aria-label={text} className={className}>
+      {Array.from(text).map((ch, i) => (
+        <motion.span
+          key={i}
+          aria-hidden="true"
+          initial={{ opacity: 0, filter: 'blur(6px)' }}
+          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          transition={{ ...FADE, delay: base + i * step }}
+          className="inline-block whitespace-pre"
+        >
+          {ch}
+        </motion.span>
+      ))}
+    </span>
+  );
+}
 
 /**
  * The first run, full-screen. Every earlier version's welcome was two lines in
@@ -60,49 +98,51 @@ export function StartupWizard() {
   const last = step === STEPS - 1;
 
   return (
-    <div className="flex h-full min-h-0 flex-col items-center justify-center px-8">
-      <div className="flex w-full max-w-xl flex-col">
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={FADE}
-        >
-          {step === 0 && <WelcomeStep />}
-          {step === 1 && <BoardStep />}
-          {step === 2 && (
-            <CarrierStep
-              carrierMatch={carrierMatch}
-              feedCarrier={feedCarrier}
-              onPair={() => {
-                if (carrierMatch) {
-                  void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId);
-                }
-              }}
-            />
-          )}
-          {step === 3 && (
-            <BackgroundStep
-              autostart={autostart}
-              onAutostart={() => void toggleAutostart()}
-              closeToTray={closeToTray}
-              onCloseToTray={() => void toggleCloseToTray()}
-            />
-          )}
-        </motion.div>
-
-        {/* Step dots are the only progress furniture the tour carries: four
-            stops fit in a glance, so no bar, no counter. */}
-        <div className="mt-12 flex items-center justify-between">
-          <div className="flex items-center gap-1.5" role="group" aria-label={t('wizard.stepsLabel')}>
-            {Array.from({ length: STEPS }, (_, i) => (
-              <span
-                key={i}
-                aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full transition-colors ${
-                  i === step ? 'bg-accent' : 'bg-hairline-strong'
-                }`}
+    // One surface with the largest corners the ladder has: the tour is the one
+    // panel a brand-new user is asked to read end to end, so it wears the
+    // window step. Flat — hairline, no shadow; it is the page, not a float.
+    <div className="flex h-full min-h-0 flex-col items-center justify-center px-10 py-6">
+      <div className="flex w-full max-w-xl flex-col overflow-hidden rounded-window border border-line-strong bg-surface">
+        {/* Fixed body height so the panel does not breathe between steps; the
+            shorter steps centre themselves inside it. */}
+        <div className="flex min-h-[364px] flex-col justify-center px-9 py-8">
+          <motion.div
+            key={step}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+          >
+            {step === 0 && <WelcomeStep />}
+            {step === 1 && <BoardStep />}
+            {step === 2 && (
+              <CarrierStep
+                carrierMatch={carrierMatch}
+                feedCarrier={feedCarrier}
+                onPair={() => {
+                  if (carrierMatch) {
+                    void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId);
+                  }
+                }}
               />
+            )}
+            {step === 3 && (
+              <BackgroundStep
+                autostart={autostart}
+                onAutostart={() => void toggleAutostart()}
+                closeToTray={closeToTray}
+                onCloseToTray={() => void toggleCloseToTray()}
+              />
+            )}
+          </motion.div>
+        </div>
+
+        {/* Step marks are the app's own concentric rings, at indicator size:
+            the outer ring is the stop, the lit core is where the tour stands.
+            The tone switch is already animated inside `.con-ring`. */}
+        <div className="flex items-center justify-between border-t border-line px-6 py-3.5">
+          <div className="flex items-center gap-2" role="group" aria-label={t('wizard.stepsLabel')}>
+            {Array.from({ length: STEPS }, (_, i) => (
+              <Ring key={i} size={12} tone={i === step ? 'main' : 'idle'} />
             ))}
           </div>
           <div className="flex items-center gap-2">
@@ -137,32 +177,80 @@ export function StartupWizard() {
   );
 }
 
-/** The heading + prose every step shares: one claim, then the sentences that
- * carry it. The list bullets are plain hairline-dotted rows — the settings
- * page's vocabulary, not a new one. */
+/** The heading + prose every step shares. The title arrives first, one letter
+ * at a time; the prose follows as a faster stream. */
 function StepText({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <h1 className="text-[19px] font-semibold tracking-tight text-text-primary">{title}</h1>
+      <h1 className="text-[19px] font-semibold tracking-tight text-text-primary">
+        <BlurText text={title} base={0.05} step={0.022} />
+      </h1>
       <div className="mt-3 text-[12.5px] leading-relaxed text-text-secondary">{children}</div>
     </div>
+  );
+}
+
+/** Prose that joins the per-character arrival a beat after its title. */
+function StepProse({ text, base = 0.35 }: { text: string; base?: number }) {
+  return (
+    <p>
+      <BlurText text={text} base={base} />
+    </p>
+  );
+}
+
+/** A bullet row whose text streams in; the dot leads it. */
+function StepBullet({ text, base }: { text: string; base: number }) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <span aria-hidden="true" className="mt-[7px] h-1 w-1 flex-none rounded-full bg-accent" />
+      <span>
+        <BlurText text={text} base={base} />
+      </span>
+    </li>
+  );
+}
+
+/** Anything that is chrome rather than prose — rows, switches, buttons —
+ * arrives as one piece, after the words it belongs to. */
+function StepBlock({ children, base = 0.85 }: { children: ReactNode; base?: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ ...FADE, delay: base }}
+    >
+      {children}
+    </motion.div>
   );
 }
 
 function WelcomeStep() {
   const { t } = useTranslation();
   return (
-    <StepText title={t('wizard.welcomeTitle', { product: t('productName') })}>
-      <p>{t('wizard.welcomeBody')}</p>
-      <ul className="mt-5 flex flex-col gap-2.5">
-        {(['welcomePoint1', 'welcomePoint2', 'welcomePoint3'] as const).map((key) => (
-          <li key={key} className="flex items-start gap-2.5">
-            <span aria-hidden="true" className="mt-[7px] h-1 w-1 flex-none rounded-full bg-accent" />
-            <span>{t(`wizard.${key}`)}</span>
-          </li>
-        ))}
-      </ul>
-    </StepText>
+    <div>
+      {/* The mark the whole interface is made of, at brand size: the outer
+          ring says what the app is, the core says sound is its business. */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ ...FADE, delay: 0.02 }}
+        className="mb-5"
+      >
+        <Ring size={40} tone="main" />
+      </motion.div>
+      <h1 className="text-[19px] font-semibold tracking-tight text-text-primary">
+        <BlurText text={t('wizard.welcomeTitle', { product: t('productName') })} base={0.05} step={0.022} />
+      </h1>
+      <div className="mt-3 text-[12.5px] leading-relaxed text-text-secondary">
+        <StepProse text={t('wizard.welcomeBody')} />
+        <ul className="mt-5 flex flex-col gap-2.5">
+          <StepBullet text={t('wizard.welcomePoint1')} base={0.6} />
+          <StepBullet text={t('wizard.welcomePoint2')} base={0.7} />
+          <StepBullet text={t('wizard.welcomePoint3')} base={0.8} />
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -202,15 +290,14 @@ function BoardStep() {
   const { t } = useTranslation();
   return (
     <StepText title={t('wizard.boardTitle')}>
-      <p>{t('wizard.boardBody')}</p>
-      <BoardSketch />
+      <StepProse text={t('wizard.boardBody')} />
+      <StepBlock base={0.7}>
+        <BoardSketch />
+      </StepBlock>
       <ul className="mt-5 flex flex-col gap-2.5">
-        {(['boardPoint1', 'boardPoint2', 'boardPoint3'] as const).map((key) => (
-          <li key={key} className="flex items-start gap-2.5">
-            <span aria-hidden="true" className="mt-[7px] h-1 w-1 flex-none rounded-full bg-accent" />
-            <span>{t(`wizard.${key}`)}</span>
-          </li>
-        ))}
+        <StepBullet text={t('wizard.boardPoint1')} base={0.85} />
+        <StepBullet text={t('wizard.boardPoint2')} base={0.95} />
+        <StepBullet text={t('wizard.boardPoint3')} base={1.05} />
       </ul>
     </StepText>
   );
@@ -229,40 +316,42 @@ function CarrierStep({
   const paired = carrierMatch !== null && matchesCarrier(carrierMatch, feedCarrier);
   return (
     <StepText title={t('wizard.carrierTitle')}>
-      <p>{t('wizard.carrierBody')}</p>
-      {carrierMatch && !paired && (
-        <div className="mt-5 flex items-center justify-between gap-3 border border-line-strong rounded-ctl px-3.5 py-2.5">
-          <span className="text-[11.5px] text-text-secondary">
-            {t('settings.feedCarrierDetected', { driver: carrierMatch.driver.display })}
-          </span>
-          <button
-            type="button"
-            onClick={onPair}
-            className="shrink-0 rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
-          >
-            {t('settings.feedCarrierApply')}
-          </button>
-        </div>
-      )}
-      {paired && (
-        <div className="mt-5 border border-line-strong rounded-ctl px-3.5 py-2.5 text-[11.5px] text-accent">
-          {t('settings.feedCarrierPaired', { driver: carrierMatch!.driver.display })}
-        </div>
-      )}
-      {!carrierMatch && (
-        <div className="mt-5 flex items-center justify-between gap-3 border border-line-strong rounded-ctl px-3.5 py-2.5">
-          <span className="text-[11.5px] leading-relaxed text-text-secondary">
-            {t('wizard.carrierMissing')}
-          </span>
-          <button
-            type="button"
-            onClick={() => void openCarrierDownload('vb-cable')}
-            className="shrink-0 rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
-          >
-            {t('settings.feedCarrierDownload')}
-          </button>
-        </div>
-      )}
+      <StepProse text={t('wizard.carrierBody')} />
+      <StepBlock>
+        {carrierMatch && !paired && (
+          <div className="mt-5 flex items-center justify-between gap-3 rounded-ctl border border-line-strong px-3.5 py-2.5">
+            <span className="text-[11.5px] text-text-secondary">
+              {t('settings.feedCarrierDetected', { driver: carrierMatch.driver.display })}
+            </span>
+            <button
+              type="button"
+              onClick={onPair}
+              className="shrink-0 rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              {t('settings.feedCarrierApply')}
+            </button>
+          </div>
+        )}
+        {paired && (
+          <div className="mt-5 rounded-ctl border border-line-strong px-3.5 py-2.5 text-[11.5px] text-accent">
+            {t('settings.feedCarrierPaired', { driver: carrierMatch!.driver.display })}
+          </div>
+        )}
+        {!carrierMatch && (
+          <div className="mt-5 flex items-center justify-between gap-3 rounded-ctl border border-line-strong px-3.5 py-2.5">
+            <span className="text-[11.5px] leading-relaxed text-text-secondary">
+              {t('wizard.carrierMissing')}
+            </span>
+            <button
+              type="button"
+              onClick={() => void openCarrierDownload('vb-cable')}
+              className="shrink-0 rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              {t('settings.feedCarrierDownload')}
+            </button>
+          </div>
+        )}
+      </StepBlock>
     </StepText>
   );
 }
@@ -281,33 +370,41 @@ function BackgroundStep({
   const { t } = useTranslation();
   return (
     <StepText title={t('wizard.backgroundTitle')}>
-      <p>{t('wizard.backgroundBody')}</p>
-      <div className="mt-5 flex flex-col">
-        <div className="flex items-center justify-between gap-4 py-2.5">
-          <div className="max-w-[46ch]">
-            <div className="text-[12.5px] text-text-primary">{t('wizard.backgroundAutostart')}</div>
-            <div className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
-              {t('wizard.backgroundAutostartHint')}
+      <StepProse text={t('wizard.backgroundBody')} />
+      <StepBlock>
+        <div className="mt-4 flex flex-col">
+          <div className="flex items-center justify-between gap-4 py-2.5">
+            <div className="max-w-[46ch]">
+              <div className="text-[12.5px] text-text-primary">
+                {t('wizard.backgroundAutostart')}
+              </div>
+              <div className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+                {t('wizard.backgroundAutostartHint')}
+              </div>
             </div>
+            <Switch
+              checked={autostart}
+              onChange={onAutostart}
+              label={t('wizard.backgroundAutostart')}
+            />
           </div>
-          <Switch checked={autostart} onChange={onAutostart} label={t('wizard.backgroundAutostart')} />
-        </div>
-        <div className="flex items-center justify-between gap-4 border-t border-line py-2.5">
-          <div className="max-w-[46ch]">
-            <div className="text-[12.5px] text-text-primary">
-              {t('wizard.backgroundCloseToTray')}
+          <div className="flex items-center justify-between gap-4 border-t border-line py-2.5">
+            <div className="max-w-[46ch]">
+              <div className="text-[12.5px] text-text-primary">
+                {t('wizard.backgroundCloseToTray')}
+              </div>
+              <div className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+                {t('wizard.backgroundCloseToTrayHint')}
+              </div>
             </div>
-            <div className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
-              {t('wizard.backgroundCloseToTrayHint')}
-            </div>
+            <Switch
+              checked={closeToTray}
+              onChange={onCloseToTray}
+              label={t('wizard.backgroundCloseToTray')}
+            />
           </div>
-          <Switch
-            checked={closeToTray}
-            onChange={onCloseToTray}
-            label={t('wizard.backgroundCloseToTray')}
-          />
         </div>
-      </div>
+      </StepBlock>
     </StepText>
   );
 }
