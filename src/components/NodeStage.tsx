@@ -6,7 +6,7 @@ import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
-import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import {
   BOARD_W,
   FEEDER_X,
@@ -314,6 +314,7 @@ export function NodeStage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 onMouseEnter={() => setHoverKey(`feeder:${feeder.pid}`)}
                 onMouseLeave={() => setHoverKey(null)}
                 onClick={() => selectProcess(feeder.pid)}
@@ -402,6 +403,7 @@ export function NodeStage() {
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={FADE}
+                    transformTemplate={MAIN_THREAD_TRANSFORM}
                     className="max-w-[110px] truncate text-[12.5px] font-bold text-text-primary"
                   >
                     {name}
@@ -457,6 +459,7 @@ export function NodeStage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 onMouseEnter={() => setHoverKey(wireKey)}
                 onMouseLeave={() => setHoverKey(null)}
                 className={`${CARD_CLASS} group group/copy ${inspectorKey === `dev:${deviceId}` ? 'border-accent' : ''}`}
@@ -578,6 +581,7 @@ export function NodeStage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 onMouseEnter={() => setHoverKey(`feed:${targetSession.pid}`)}
                 onMouseLeave={() => setHoverKey(null)}
                 title={title}
@@ -632,6 +636,7 @@ export function NodeStage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             aria-label={t('stage.addTarget')}
             title={t('stage.addTargetTitle')}
             onClick={() => setPickerOpen((value) => !value)}

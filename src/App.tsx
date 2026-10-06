@@ -20,7 +20,7 @@ import type {
   MirrorFailedEvent,
   SessionActivityEvent,
 } from '@/lib/types';
-import { FADE, SPRING_GLIDE } from '@/lib/motion';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
 import { revealMainWindow } from '@/lib/window';
 
@@ -234,6 +234,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             className="min-h-0 flex-1"
           >
             <StartupWizard />
@@ -244,6 +245,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             className="flex min-h-0 flex-1"
           >
             <aside className="w-[236px] flex-none border-r border-line">

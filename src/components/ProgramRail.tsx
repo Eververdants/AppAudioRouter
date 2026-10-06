@@ -6,7 +6,7 @@ import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
-import { FADE, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -183,6 +183,7 @@ export function ProgramRail() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={FADE}
+        transformTemplate={MAIN_THREAD_TRANSFORM}
         className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-2"
       >
         {/* The "no programmes" placeholder is out of the flow on purpose. It
@@ -199,6 +200,7 @@ export function ProgramRail() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={FADE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 py-10 text-center"
             >
               {!searching && (
@@ -258,6 +260,7 @@ export function ProgramRail() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={FADE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
                 className={`group/row relative ${
                   // The row carrying the selection pane sits below every other
                   // row. Rows paint in document order, so a pane travelling

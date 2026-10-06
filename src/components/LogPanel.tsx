@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { FADE } from '@/lib/motion';
+import { FADE, MAIN_THREAD_TRANSFORM } from '@/lib/motion';
 import type { LogEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -20,6 +20,7 @@ const LogRow = memo(function LogRow({ log }: { log: LogEntry }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={FADE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       className={`flex gap-3 py-0.5 [overflow-wrap:anywhere] ${
         log.level === 'success'
           ? 'text-success'
