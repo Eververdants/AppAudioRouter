@@ -37,6 +37,13 @@ const PROFILE_DIR: &str = "EBWebView";
 /// behind. The upgrade notice exists for it and for nothing else.
 const LEFTOVER_VERSION: &str = "2.1.0";
 
+/// Debug-only override for what this launch says: `first-run` or `upgrade`
+/// bypasses the probe, so a machine that has already acknowledged once — which
+/// is to say, every developer's machine — can still see the tour or the
+/// warning. Release builds never read the variable.
+#[cfg(debug_assertions)]
+const FORCE_ENV: &str = "AAR_STARTUP_NOTICE";
+
 /// What the window should tell the user on launch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StartupNotice {
@@ -169,6 +176,37 @@ impl StartupNoticeState {
             notice,
             shown: std::sync::Mutex::new(false),
         }
+    }
+
+    /// The notice this launch should show. Identical to `new` except that
+    /// debug builds honour `AAR_STARTUP_NOTICE` (`first-run` / `upgrade`):
+    /// a machine that has already acknowledged once can otherwise never see
+    /// the wizard again — the state file is doing its job — which would make
+    /// the tour effectively untestable. Acknowledging a forced notice still
+    /// records the state file like any other.
+    pub fn for_launch(identifier: &str, current_version: &str) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            if let Ok(forced) = std::env::var(FORCE_ENV) {
+                let kind = match forced.as_str() {
+                    "first-run" => Some(NoticeKind::FirstRun),
+                    "upgrade" => Some(NoticeKind::Upgrade),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    return Self {
+                        probe: InstallProbe::new(identifier),
+                        current_version: current_version.to_string(),
+                        notice: Some(StartupNotice {
+                            kind,
+                            previous_version: None,
+                        }),
+                        shown: std::sync::Mutex::new(false),
+                    };
+                }
+            }
+        }
+        Self::new(identifier, current_version)
     }
 
     /// The notice to show, until the window has acknowledged it.

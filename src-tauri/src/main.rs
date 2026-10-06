@@ -36,8 +36,10 @@ fn main() {
     // would otherwise look like proof that a version has run here before.
     let context = tauri::generate_context!();
     let version = context.package_info().version.to_string();
-    let startup_notice =
-        install::StartupNoticeState::new(context.config().identifier.as_str(), version.as_str());
+    let startup_notice = install::StartupNoticeState::for_launch(
+        context.config().identifier.as_str(),
+        version.as_str(),
+    );
 
     tauri::Builder::default()
         .setup(move |app| {

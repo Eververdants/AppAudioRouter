@@ -339,6 +339,7 @@ AppAudioRouter/
 - 「上次运行的版本」记在 `app_data_dir/install-state.json`，**在用户点掉提示时写**（`ack_startup_notice`），所以同一版本只提示一次；升级是否再提示**只看上次的版本是不是 2.1.0**，从 2.1.1 及以后升上来一律沉默。install-state.json 比 2.1.0 晚出现，所以现实中「装过 2.1.0」的证据就是**目录在、记录不在**（`ran_before()` 且读不到版本）。写失败只记日志，不能让提示卡在那里。
 - `StartupNotice { kind, previous_version }` 的 `kind`（kebab-case）是前后端契约，`src/lib/types.ts` 的联合类型按字面量认它，`install.rs` 里有测试钉住；新增第三种之前先想清楚前端怎么显示。
 - 弹窗里那个重置按钮复用 `resetPinnedEndpoints`，不要再写一条清理路径；文案必须写明「会清掉当前正在运行的程序」，否则用户会以为它只清旧版本留下的东西。
+- **开发期测试入口**：debug 构建读环境变量 `AAR_STARTUP_NOTICE`（取值 `first-run` / `upgrade`），强制本次启动提示的种类——ack 过一次的机器否则永远见不到向导（状态文件正在尽职）。release 构建不读这个变量；强制提示被点掉时照常写 `install-state.json`。
 
 ---
 
