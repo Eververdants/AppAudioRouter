@@ -108,11 +108,13 @@ export function StartupWizard() {
   const last = step === STEPS - 1;
 
   return (
-    // One surface with the largest corners the ladder has: the tour is the one
-    // panel a brand-new user is asked to read end to end, so it wears the
-    // window step. Flat — hairline, no shadow; it is the page, not a float.
+    // The tour is one big soft shape, not a card: the surface carries the
+    // largest step of the radius ladder and no border at all — the rounding
+    // is the statement, a hairline frame would just box the content again.
+    // `.cc` is the progressive continuous-curvature cut for renderers that
+    // know supercircles; where they don't, the large radii stand alone.
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-10 py-6">
-      <div className="flex w-full max-w-xl flex-col overflow-hidden rounded-window border border-line-strong bg-surface">
+      <div className="cc flex w-full max-w-xl flex-col overflow-hidden rounded-window bg-surface">
         {/* Fixed body height so the panel does not breathe between steps; the
             shorter steps centre themselves inside it. */}
         <div className="flex min-h-[364px] flex-col justify-center px-9 py-8">

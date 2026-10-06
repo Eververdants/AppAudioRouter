@@ -55,13 +55,16 @@ const config: Config = {
          Nested surfaces take the next step down. The ladder is generous — the
          interface is built on large, continuous-curvature corners — while
          anything that floats is a capsule (`rounded-full`) or a true circle,
-         so the rectangular steps below are only for planes that sit still. */
+         so the rectangular steps below are only for planes that sit still.
+         Bumped a step on 2026-10-06 (28/24/20/12/10): the owner wants the
+         rounding itself to lead — big soft corners on the shapes, not a
+         boxed card around the content. */
       borderRadius: {
-        window: '20px',
-        panel: '18px',
-        card: '14px',
-        ctl: '10px',
-        seg: '8px',
+        window: '28px',
+        panel: '24px',
+        card: '20px',
+        ctl: '12px',
+        seg: '10px',
       },
       boxShadow: {
         float: 'var(--shadow-float)',
