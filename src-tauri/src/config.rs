@@ -63,6 +63,31 @@ where
     }
 }
 
+/// Read one config file into its map, never failing.
+///
+/// A file that cannot be *read* goes the same way as a file that cannot be
+/// parsed: one `warn!` and the defaults. That is not a hypothetical — an
+/// antivirus scan or a cloud-sync placeholder can hold the file open at the
+/// moment the app starts, and refusing to launch over it would leave the user
+/// with no window to explain anything and no settings page to open. A file that
+/// simply isn't there is a first run and says nothing.
+fn read_or_default<T>(path: &std::path::Path) -> T
+where
+    T: Default + for<'de> Deserialize<'de>,
+{
+    match fs::read_to_string(path) {
+        Ok(content) => parse_or_default(path, &content),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => T::default(),
+        Err(e) => {
+            warn!(
+                "config {} could not be read ({e}); falling back to defaults",
+                path.display()
+            );
+            T::default()
+        }
+    }
+}
+
 /// Persistent route memory: exe_name -> ordered target device ids.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RouteMap {
@@ -89,13 +114,7 @@ impl RouteConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("route-memory.json");
 
-        let map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            RouteMap::default()
-        };
+        let map = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(RouteConfigInner { path, map }),
@@ -217,13 +236,7 @@ impl DelayConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("device-delays.json");
 
-        let mut map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            DelayMap::default()
-        };
+        let mut map: DelayMap = read_or_default(&path);
         // The file is user-editable and was written by older versions, and
         // neither is bound by what this build supports: a range past the
         // engine's ring capacity, or delays past the range it was sized for,
@@ -339,13 +352,7 @@ impl VolumeConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("device-volumes.json");
 
-        let map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            VolumeMap::default()
-        };
+        let map = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(VolumeConfigInner { path, map }),
@@ -431,13 +438,7 @@ impl FeedConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("feed-memory.json");
 
-        let map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            FeedMap::default()
-        };
+        let map = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(FeedConfigInner { path, map }),
@@ -537,13 +538,7 @@ impl FeedCarrierConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("feed-carrier.json");
 
-        let carrier = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            FeedCarrier::default()
-        };
+        let carrier = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(FeedCarrierInner { path, carrier }),
@@ -649,13 +644,7 @@ impl SourceVolumeConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("source-volumes.json");
 
-        let map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            SourceVolumeMap::default()
-        };
+        let map = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(SourceVolumeConfigInner { path, map }),
@@ -768,13 +757,7 @@ impl PrimaryVolumeConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("primary-volumes.json");
 
-        let map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            PrimaryVolumeMap::default()
-        };
+        let map = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(PrimaryVolumeConfigInner { path, map }),
@@ -852,13 +835,7 @@ impl AppSettings {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("app-settings.json");
 
-        let map = if path.exists() {
-            let content =
-                fs::read_to_string(&path).map_err(|e| format!("read config failed: {e}"))?;
-            parse_or_default(&path, &content)
-        } else {
-            SettingsMap::default()
-        };
+        let map = read_or_default(&path);
 
         Ok(Self {
             inner: Mutex::new(AppSettingsInner { path, map }),
