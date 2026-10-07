@@ -676,6 +676,22 @@ function rememberedFor(entries: RememberedRouteEntry[], exeName: string): string
   return entries.find((entry) => entry.exeName.toLowerCase() === wanted)?.deviceIds;
 }
 
+/**
+ * Whether an executable name can carry a memory at all.
+ *
+ * A process this app cannot open — running more elevated than the app, or
+ * protected — has no readable image name, and the session list labels it
+ * `PID 1234` so the row still says something rather than nothing. That label is
+ * the key every memory is hung on, and a PID is not a program: it is gone next
+ * launch and the number is handed to whatever runs then. So such a route is
+ * applied — the sound moves now, which is what was asked for — but not
+ * remembered, and the log says why instead of leaving the 自动记忆 switch to
+ * look broken and the settings list to show a row that can never be found again.
+ */
+function isRememberableName(exeName: string): boolean {
+  return !/^PID \d+$/i.test(exeName);
+}
+
 /** The remembered list with every one of `exeNames` pointing at `deviceIds`. */
 function rememberTargets(
   entries: RememberedRouteEntry[],
@@ -1487,7 +1503,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // routes each PID on its own, so awaiting them in a loop simply added
       // their latencies up — a ten-process selection cost ten times one.
       const results = await Promise.allSettled(
-        targets.map((target) => get().routeOne(target.pid, target.exeName, ordered, autoRemember)),
+        targets.map((target) =>
+          get().routeOne(
+            target.pid,
+            target.exeName,
+            ordered,
+            autoRemember && isRememberableName(target.exeName),
+          ),
+        ),
       );
       const applied: { pid: number; exeName: string; generation: number }[] = [];
       const errors: string[] = [];
@@ -1528,7 +1551,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         rememberedRoutes: autoRemember
           ? rememberTargets(
               s.rememberedRoutes,
-              applied.map((t) => t.exeName),
+              applied.map((t) => t.exeName).filter(isRememberableName),
               ordered,
             )
           : s.rememberedRoutes,
@@ -1576,6 +1599,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         get().addLog(
           i18next.t('log.routePartiallyFailed', { ok: count, n: targets.length, error: errors[0] }),
           'error',
+        );
+      }
+      // The route is in effect and the 自动记忆 switch is on, so one of them did
+      // not happen — say which and why, or the next launch looks like the switch
+      // was ignored. Only reached for a process this app cannot open a file name
+      // for, which is rare enough that a line in the log is the right cost.
+      const skipped = applied.map((t) => t.exeName).filter((name) => !isRememberableName(name));
+      if (autoRemember && skipped.length > 0) {
+        get().addLog(
+          i18next.t('log.notRememberable', { process: skipped.join(', ') }),
+          'info',
         );
       }
       // The engines are up now, and this is the only pass that asks each of them

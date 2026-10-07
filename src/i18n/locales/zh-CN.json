@@ -263,6 +263,7 @@
     "sourceLevelsAlignFailed": "对齐程序电平失败：{{error}}",
     "routeFailed": "路由失败：{{error}}",
     "routePartiallyFailed": "已路由 {{n}} 个进程中的 {{ok}} 个，其余失败：{{error}}",
+    "notRememberable": "{{process}} 的这次路由当场生效，但不会写入记忆：本应用读不到该进程的文件名，下次启动无法凭一个号码找回它",
     "routeStopped": "已停止 {{process}} 的路由，恢复系统默认",
     "deviceSwitched": "输出已改为 {{device}}",
     "deviceSwitchedProcess": "{{process}} 的输出已改为 {{device}}",

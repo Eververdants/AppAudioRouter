@@ -263,6 +263,7 @@
     "sourceLevelsAlignFailed": "Failed to align the program levels: {{error}}",
     "routeFailed": "Routing failed: {{error}}",
     "routePartiallyFailed": "Routed {{ok}} of {{n}} processes, the rest failed: {{error}}",
+    "notRememberable": "Routing {{process}} works now, but it is not remembered: this app cannot read that process's file name, and a number cannot be found again next launch",
     "routeStopped": "Stopped routing {{process}}, back to system default",
     "deviceSwitched": "Output changed to {{device}}",
     "deviceSwitchedProcess": "Output of {{process}} changed to {{device}}",
