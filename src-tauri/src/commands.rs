@@ -209,15 +209,49 @@ pub async fn apply_route(
     // each device's configured delay and volume itself.
     duplications.stop(pid);
     let generation = if device_ids.len() > 1 {
-        duplications
-            .start(
-                pid,
-                &exe_name,
-                &device_ids[0],
-                device_ids[1..].to_vec(),
-                &app,
-            )
-            .map_err(|e| e.to_string())?
+        match duplications.start(
+            pid,
+            &exe_name,
+            &device_ids[0],
+            device_ids[1..].to_vec(),
+            &app,
+        ) {
+            Ok(generation) => generation,
+            Err(e) => {
+                // The mirrors are what failed, but the primary write above has
+                // already landed and its pin is booked. Left standing, the
+                // program keeps playing on the chosen device while the board
+                // shows no route to stop — the dead end `mark_abandoned` exists
+                // to close. Undo this command's own steps before reporting.
+                warn!("starting the duplication engine for PID {pid} failed: {e}");
+                match audio::routing::release_process_default_devices_flow(
+                    vec![pid],
+                    audio::Role::All,
+                    false,
+                )
+                .await
+                {
+                    Ok(outcomes)
+                        if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
+                    {
+                        pins.forget(pid);
+                        // The render slot is free again, so the feeds this
+                        // program was holding back go back on, exactly as a
+                        // stop would hand them over.
+                        resume_suspended_feeds(&exe_name, &pins).await;
+                    }
+                    _ => {
+                        // The release did not take, so the assignment is still
+                        // ours — but no live route answers for it any more.
+                        // Do what a stop does in this spot: fall back to the
+                        // default device, or admit the pin is beyond this
+                        // run's reach so the settings reset can still find it.
+                        pin_to_default_or_abandon(pid, &pins).await;
+                    }
+                }
+                return Err(e.to_string());
+            }
+        }
     } else {
         0
     };
@@ -318,33 +352,9 @@ pub async fn stop_route(
             // The feeds this executable was holding back now get their moment:
             // the route owned the one per-app render slot, and every recorded
             // feed source of the executable — this PID's own feed as much as a
-            // sibling session's — was waiting for it. Re-point each one's
-            // render half at the carrier its pin recorded; the capture halves
-            // were pinned when the rules were made. A source that has picked up
-            // a new route in the meantime keeps its slot.
+            // sibling session's — was waiting for it.
             if let Some(exe) = &released_exe {
-                let routed_now: std::collections::HashSet<u32> =
-                    pins.routed_pids().into_iter().collect();
-                for (feed_pid, feed_exe) in pins.feed_source_pins() {
-                    if !feed_exe.eq_ignore_ascii_case(exe) {
-                        continue;
-                    }
-                    if routed_now.contains(&feed_pid) {
-                        continue;
-                    }
-                    if let Some(render) = pins.feed_source_device_of(feed_pid) {
-                        match audio::routing::set_process_default_device(
-                            &render,
-                            feed_pid,
-                            audio::Role::All,
-                        )
-                        .await
-                        {
-                            Ok(()) => info!("feed of PID {feed_pid} resumed on its carrier"),
-                            Err(e) => warn!("could not resume the feed of PID {feed_pid}: {e}"),
-                        }
-                    }
-                }
+                resume_suspended_feeds(exe, &pins).await;
             }
             Ok(StopOutcome {
                 released: true,
@@ -418,6 +428,36 @@ async fn pin_to_default_or_abandon(pid: u32, pins: &PinnedRoutes) -> StopOutcome
             StopOutcome {
                 released: false,
                 pinned_device: None,
+            }
+        }
+    }
+}
+
+/// Re-point every feed source of `exe` that was waiting for its render slot at
+/// the carrier its pin recorded.
+///
+/// The per-app render assignment is one per executable: while a route owns it,
+/// every feed the program sends is suspended, and the moment the slot frees —
+/// a stop, or the rollback of a route whose engine never started — is the
+/// moment each waiting source goes back on. The capture halves were pinned
+/// when the rules were made and need no attention. A source that has picked up
+/// a route of its own in the meantime keeps its slot: the route outranks the
+/// feed until it stops.
+async fn resume_suspended_feeds(exe: &str, pins: &PinnedRoutes) {
+    let routed_now: HashSet<u32> = pins.routed_pids().into_iter().collect();
+    for (feed_pid, feed_exe) in pins.feed_source_pins() {
+        if !feed_exe.eq_ignore_ascii_case(exe) {
+            continue;
+        }
+        if routed_now.contains(&feed_pid) {
+            continue;
+        }
+        if let Some(render) = pins.feed_source_device_of(feed_pid) {
+            match audio::routing::set_process_default_device(&render, feed_pid, audio::Role::All)
+                .await
+            {
+                Ok(()) => info!("feed of PID {feed_pid} resumed on its carrier"),
+                Err(e) => warn!("could not resume the feed of PID {feed_pid}: {e}"),
             }
         }
     }
