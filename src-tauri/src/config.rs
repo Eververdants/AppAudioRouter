@@ -619,6 +619,22 @@ pub struct SourceVolumeMap {
 }
 
 impl SourceVolumeMap {
+    /// Pull every stored level into the range this build allows.
+    ///
+    /// Same reason the delays are clamped on the way in: the file is user-editable
+    /// and was written by older versions, and neither is bound by what the engine
+    /// here can do with the number. A level of a million is a gain of ten thousand
+    /// on the way to every routed device — the program's noise floor and its peaks
+    /// amplified together into a wall of clipping — and one the frontend has never
+    /// offered would sit there quietly destroying the audio until someone looked.
+    fn clamp_to_range(&mut self) {
+        for level in self.volumes.values_mut() {
+            *level = (*level).min(SOURCE_VOLUME_MAX);
+        }
+        self.volumes
+            .retain(|_, level| *level != SOURCE_VOLUME_NEUTRAL);
+    }
+
     /// The level for `exe_name`, neutral when nothing is stored.
     pub fn level(&self, exe_name: &str) -> u32 {
         self.volumes
@@ -670,7 +686,8 @@ impl SourceVolumeConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("source-volumes.json");
 
-        let map = read_or_default(&path);
+        let mut map: SourceVolumeMap = read_or_default(&path);
+        map.clamp_to_range();
 
         Ok(Self {
             inner: Mutex::new(SourceVolumeConfigInner { path, map }),
@@ -732,6 +749,23 @@ pub struct PrimaryVolumeMap {
 }
 
 impl PrimaryVolumeMap {
+    /// Pull every stored volume into the range this build allows.
+    ///
+    /// The floor is the one that matters: the session volume is what the capture
+    /// stream is made of, so a stored 0 makes that stream true silence, and no
+    /// gain on the copy side can give it back — the exact failure
+    /// `PRIMARY_VOLUME_MIN_PERCENT` exists to prevent, arriving by way of a hand
+    /// edit or an older build rather than the slider. Values above 100 are
+    /// clamped down, because this axis can only ever take the program's own
+    /// loudness away.
+    fn clamp_to_range(&mut self) {
+        for volume in self.volumes.values_mut() {
+            *volume = (*volume).clamp(PRIMARY_VOLUME_MIN_PERCENT, SOURCE_VOLUME_NEUTRAL);
+        }
+        self.volumes
+            .retain(|_, volume| *volume != SOURCE_VOLUME_NEUTRAL);
+    }
+
     /// The volume for `exe_name`, neutral when nothing is stored.
     pub fn volume(&self, exe_name: &str) -> u32 {
         self.volumes
@@ -783,7 +817,8 @@ impl PrimaryVolumeConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("primary-volumes.json");
 
-        let map = read_or_default(&path);
+        let mut map: PrimaryVolumeMap = read_or_default(&path);
+        map.clamp_to_range();
 
         Ok(Self {
             inner: Mutex::new(PrimaryVolumeConfigInner { path, map }),
