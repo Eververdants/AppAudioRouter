@@ -305,6 +305,7 @@
     "feedSetFailed": "记录送入规则失败：{{error}}",
     "feedRemoved": "已停止把「{{source}}」送进「{{target}}」的输入",
     "feedRemoveFailed": "撤下送入规则失败：{{error}}",
+    "feedRemovedStuck": "送入已撤下，但 Windows 仍把 {{processes}} 固定在载体上——需在设置里重置每应用音频输出才能还回来",
     "feedRestored": "已按记忆恢复送入：「{{source}}」→「{{target}}」的输入"
   }
 }

@@ -181,7 +181,8 @@ function tauriBridge(initial: BridgeState): void {
               t.toLowerCase() === (targetExe ?? '').toLowerCase()
             ),
         );
-        return null;
+        // Nothing stays pinned in the fake: it has no endpoint books.
+        return [];
       }
       case 'clear_route':
         state.remembered = state.remembered.filter(([name]: [string, string[]]) => name !== payload.exeName);

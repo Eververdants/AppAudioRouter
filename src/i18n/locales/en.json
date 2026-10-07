@@ -305,6 +305,7 @@
     "feedSetFailed": "Failed to record the feed: {{error}}",
     "feedRemoved": "Stopped feeding {{source}} into {{target}}'s input",
     "feedRemoveFailed": "Failed to remove the feed: {{error}}",
+    "feedRemovedStuck": "Removed the feed, but Windows still has {{processes}} fixed to the carrier — reset per-app audio output in the settings to hand it back",
     "feedRestored": "Restored the remembered feed: {{source}} → {{target}}'s input"
   }
 }

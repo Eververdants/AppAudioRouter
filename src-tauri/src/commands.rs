@@ -1079,13 +1079,18 @@ pub async fn set_feed_target(
 ///
 /// The release is per flow, so a source that is also routed to a device keeps
 /// its render assignment — that one belongs to the route, not to the feed.
+///
+/// Returns the programs that stay fixed to the carrier because Windows refused
+/// to hand their endpoint back. The rule and the wire are gone either way — the
+/// user asked for that, and the memory must not resurrect a feed they removed —
+/// but a removal that quietly half-worked is invisible unless it is said.
 #[tauri::command]
 pub async fn remove_feed_target(
     source_pid: u32,
     target_pid: u32,
     feeds: State<'_, FeedConfig>,
     pins: State<'_, PinnedRoutes>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     info!("cmd: remove_feed_target {source_pid} -> {target_pid}");
     // The executable names decide which memory rule this is. The pins record
     // them for delivered feeds; a feed that was never delivered — recorded
@@ -1120,27 +1125,79 @@ pub async fn remove_feed_target(
     // keeps its render assignment (that one belongs to the route, and the
     // feed was recorded as suspended), and a target with no capture pin of
     // ours is left alone.
+    //
+    // A pin comes off the book only when Windows accepted the clear. Forgetting
+    // it on a refusal leaves that assignment with nothing on our side pointing
+    // at it — the board has already dropped the wire, so no later command comes
+    // back for it, and the program is left on the carrier with nothing but the
+    // settings reset to explain why. So the pin stays, and the name goes into
+    // the log line the frontend writes.
     let slot_held_by_a_route =
         pins.is_routed(source_pid) || pins.exe_routed_elsewhere(source_pid, &source_exe);
+    let mut stuck = Vec::new();
     if pins.feed_source_of(source_pid).is_some() && !slot_held_by_a_route && !source_still_needed {
-        let _ = audio::routing::release_process_default_devices_flow(
-            vec![source_pid],
-            audio::Role::All,
-            false,
-        )
-        .await;
-        pins.forget_feed_source(source_pid);
+        if released_cleanly(
+            audio::routing::release_process_default_devices_flow(
+                vec![source_pid],
+                audio::Role::All,
+                false,
+            )
+            .await,
+            "feed source",
+        ) {
+            pins.forget_feed_source(source_pid);
+        } else if !source_exe.is_empty() {
+            stuck.push(source_exe);
+        }
     }
     if pins.feed_capture_of(target_pid).is_some() && !target_still_needed {
-        let _ = audio::routing::release_process_default_devices_flow(
-            vec![target_pid],
-            audio::Role::All,
-            true,
-        )
-        .await;
-        pins.forget_feed_capture(target_pid);
+        if released_cleanly(
+            audio::routing::release_process_default_devices_flow(
+                vec![target_pid],
+                audio::Role::All,
+                true,
+            )
+            .await,
+            "feed target",
+        ) {
+            pins.forget_feed_capture(target_pid);
+        } else if !target_exe.is_empty() {
+            stuck.push(target_exe);
+        }
     }
-    Ok(())
+    Ok(stuck)
+}
+
+/// Whether a release attempt came back clean for every endpoint it was asked
+/// about, naming in the log the half that failed.
+fn released_cleanly(
+    release: Result<Vec<(u32, ReleaseOutcome)>, audio::AudioError>,
+    which: &str,
+) -> bool {
+    match release {
+        Ok(outcomes) => {
+            let stuck: Vec<String> = outcomes
+                .iter()
+                .filter(|(_, outcome)| *outcome != ReleaseOutcome::Released)
+                .map(|(_, outcome)| match outcome {
+                    ReleaseOutcome::StillPinned(device) => format!("still fixed to {device}"),
+                    _ => "not confirmed clear".to_string(),
+                })
+                .collect();
+            if stuck.is_empty() {
+                return true;
+            }
+            warn!(
+                "the {which} endpoint was not handed back: {}",
+                stuck.join(", ")
+            );
+            false
+        }
+        Err(e) => {
+            warn!("could not ask for the {which} endpoint to be released: {e}");
+            false
+        }
+    }
 }
 
 // ------------------------------------------------- carrier download pages

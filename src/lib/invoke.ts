@@ -220,9 +220,14 @@ export async function setFeedTarget(
 }
 
 /** Take one feed rule back: the target's capture endpoint is released, and the
- * source's carrier pin goes with it when nothing else still needs it. */
-export async function removeFeedTarget(sourcePid: number, targetPid: number): Promise<void> {
-  await invoke('remove_feed_target', { sourcePid, targetPid });
+ * source's carrier pin goes with it when nothing else still needs it. Resolves
+ * to the programs that stay fixed to the carrier because Windows refused to
+ * hand their endpoint back — empty when everything came free. */
+export async function removeFeedTarget(
+  sourcePid: number,
+  targetPid: number,
+): Promise<string[]> {
+  return invoke<string[]>('remove_feed_target', { sourcePid, targetPid });
 }
 
 /** Open a known loopback driver's download page. The key names a driver, never

@@ -130,7 +130,7 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
           ([s2, t]) =>
             !(s2.toLowerCase() === source.toLowerCase() && t.toLowerCase() === target.toLowerCase()),
         );
-        return null;
+        return [];
       }
       case 'clear_route':
         backend.remembered = backend.remembered.filter(([name]) => name !== args.exeName);

@@ -1173,11 +1173,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       };
     });
     try {
-      await api.removeFeedTarget(sourcePid, targetPid);
+      const stuck = await api.removeFeedTarget(sourcePid, targetPid);
       if (source !== undefined && target !== undefined) {
         get().addLog(
           i18next.t('log.feedRemoved', { source: source.exe_name, target: target.exe_name }),
           'info',
+        );
+      }
+      // The rule is gone and the wire came down, but the endpoint did not: the
+      // program stays fixed to the carrier, and nothing on screen says so.
+      // Say it here, and name the way out — this is the one case where the
+      // settings page's reset is the only thing left that can reach it.
+      if (stuck.length > 0) {
+        get().addLog(
+          i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }),
+          'error',
         );
       }
     } catch (e) {
