@@ -1057,7 +1057,10 @@ impl DuplicationManager {
         // and the pre-route value gone for good. Under the lock, a stop either
         // finds the promise and restores it, or this claim finds the shutdown
         // flag and never writes.
-        let claim = shared.volume_claim.lock().unwrap_or_else(|e| e.into_inner());
+        let claim = shared
+            .volume_claim
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if !shared.shutdown.load(Ordering::Relaxed) {
             if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
                 shared.restore_volume_percent.store(
@@ -1221,9 +1224,7 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
     // (and with it the session) is gone. A clean `Stopped` exit was already
     // restored synchronously by `stop`, and restoring again here could clobber
     // a successor engine's freshly claimed volume.
-    if matches!(outcome, UnregisterOutcome::Current)
-        && matches!(reason, ExitReason::Error(_))
-    {
+    if matches!(outcome, UnregisterOutcome::Current) && matches!(reason, ExitReason::Error(_)) {
         shared.restore_session_volume();
     }
     // The level table holds one entry per engine, and this engine will publish

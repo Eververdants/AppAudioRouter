@@ -120,8 +120,8 @@ pub(crate) fn process_is_running(pid: u32, recorded: u64) -> bool {
     // SAFETY: h is a valid handle, exit_code is a live out parameter.
     let exited = unsafe { GetExitCodeProcess(handle, &mut exit_code) }.is_ok()
         && exit_code != STILL_ACTIVE.0 as u32;
-    let same_process = creation_time_of(handle)
-        .is_none_or(|current| recorded == 0 || current == recorded);
+    let same_process =
+        creation_time_of(handle).is_none_or(|current| recorded == 0 || current == recorded);
     // SAFETY: balances OpenProcess.
     unsafe {
         let _ = CloseHandle(handle);
