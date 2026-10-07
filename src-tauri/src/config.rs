@@ -359,6 +359,25 @@ pub struct VolumeMap {
     volumes: HashMap<String, u32>,
 }
 
+impl VolumeMap {
+    /// Pull every stored share into the range this build allows.
+    ///
+    /// Same reason the delays, the source levels and the primary volumes are
+    /// clamped on the way in: the file is user-editable and was written by
+    /// older versions, and neither is bound by what the app here assumes. A
+    /// share of 250 would become the group's reference — every other device
+    /// scaled against a number no UI ever produced, and the one device it came
+    /// from the copy that can never be attenuated. 100 is the unset neutral
+    /// (`set` never stores it), so a clamped-to-neutral entry is dropped; 0 is
+    /// a legitimate stored value — mute — and stays.
+    fn clamp_to_range(&mut self) {
+        for share in self.volumes.values_mut() {
+            *share = (*share).min(100);
+        }
+        self.volumes.retain(|_, share| *share != 100);
+    }
+}
+
 /// Manages the per-device volume config file (interior mutability for Tauri State).
 pub struct VolumeConfig {
     inner: Mutex<VolumeConfigInner>,
@@ -378,7 +397,8 @@ impl VolumeConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("device-volumes.json");
 
-        let map = read_or_default(&path);
+        let mut map: VolumeMap = read_or_default(&path);
+        map.clamp_to_range();
 
         Ok(Self {
             inner: Mutex::new(VolumeConfigInner { path, map }),
@@ -1096,6 +1116,19 @@ mod tests {
         map.add_rule("game.exe", "OBS64.exe");
         map.add_rule("game.exe", "obs64.exe");
         assert_eq!(map.feeds["game.exe"].len(), 1);
+    }
+
+    #[test]
+    fn a_device_volume_past_the_ceiling_does_not_reach_the_engine() {
+        let mut map: VolumeMap =
+            serde_json::from_str(r#"{"volumes": {"loud": 250, "muted": 0, "fine": 40}}"#).unwrap();
+        map.clamp_to_range();
+        // 250 clamps to the unset neutral, which is never stored: left alone it
+        // would be the group's reference that no UI ever produced.
+        assert!(map.volumes.get("loud").is_none());
+        // 0 is mute — a legitimate stored value.
+        assert_eq!(map.volumes.get("muted"), Some(&0));
+        assert_eq!(map.volumes.get("fine"), Some(&40));
     }
 
     #[test]
