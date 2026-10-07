@@ -945,11 +945,13 @@ pub fn list_feeds(feeds: State<'_, FeedConfig>) -> Vec<(String, String)> {
 /// the feed memory so it survives a restart.
 ///
 /// The per-app endpoint the audio service keeps is a single slot per data flow:
-/// while the source is routed to an output device, that slot belongs to the
-/// device route, and overwriting it would silently take the route's primary
-/// endpoint away. In that case the rule is recorded and reported as
-/// `source_routed` — the engine's render path resumes the feed when the route
-/// stops.
+/// while the source's executable is routed to an output device — by this very
+/// process or by a sibling session — that slot belongs to the device route, and
+/// overwriting it would silently take the route's primary endpoint away. In
+/// that case the target's capture half is pinned now and the render half is
+/// recorded as an intent, and the rule is reported as `source_routed`:
+/// `stop_route` re-pins the render half from that record when the route frees
+/// the slot.
 // Tauri commands carry their State params in the signature, so the argument
 // count is fixed by the framework.
 #[allow(clippy::too_many_arguments)]
