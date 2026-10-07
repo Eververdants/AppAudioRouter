@@ -29,12 +29,6 @@
   /* Text on top of the accent fill. */
   --accent-ink: #ffffff;
 
-  /* The one shadow a flat surface may cast: a tight contact layer and one
-     ambient layer, for the things that genuinely float above the page — toast,
-     popover, dialog, the stage's discs. Panels flush with the page get none;
-     separation between those is the hairline's job. */
-  --shadow-float: 0 1px 2px rgba(24, 40, 66, 0.06), 0 8px 24px rgba(24, 40, 66, 0.1);
-
   /* The three roles a device can be in, painted on the stage. One colour paints
      three things: the ring on the device's disc, the spoke that reaches it, and
      the role word under its name — nothing else in the interface is allowed to
@@ -90,10 +84,6 @@
   --hairline-strong: #2e3742;
   --accent-ink: #05222b;
 
-  /* The same shadow, deepened: on a near-black plane the ambient layer carries
-     the lift, since a darker panel cannot. */
-  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
-
   /* The same three roles, lifted for a dark stage. Teal has to stay light
      enough to read against a dark disc, which is why it sits at the
      400-level step rather than the 600/700-level ones used on paper — and why
@@ -130,6 +120,32 @@
 @supports (corner-shape: supercircle(2)) {
   .cc {
     corner-shape: supercircle(2);
+  }
+}
+
+@layer components {
+  /* The one press micro-interaction every plain (non-Motion) button shares:
+     the whole control shrinks a breath under the pointer and eases back on
+     release. Colour changes stay the hover's job; this is the touch, and one
+     curve everywhere is what makes it read as the interface pressing rather
+     than as each button doing its own thing. Motion buttons get the same
+     treatment from `whileTap` instead — the two must never sit on one element,
+     or the springs and the CSS transform fight over it. */
+  .pressable {
+    transition:
+      transform 0.15s ease,
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pressable:active:not(:disabled) {
+      transform: none;
+    }
   }
 }
 
