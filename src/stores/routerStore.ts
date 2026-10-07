@@ -1758,11 +1758,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         );
       }
     } catch (e) {
-      // Backend didn't actually stop: roll the route and its event identity back.
-      set((s) => ({
-        routedPids: { ...s.routedPids, [pid]: previous },
-        engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
-      }));
+      // Backend didn't actually stop: roll the route and its event identity
+      // back — unless something took the seat while the stop was in flight, so
+      // the entries the optimistic clear deleted have been written again by a
+      // newer route. Restoring the snapshot over that would leave the new
+      // route wearing the old engine's generation, and every later event for
+      // the new engine would be dropped as stale.
+      set((s) => {
+        if (s.routedPids[pid] !== undefined || s.engineGenerations[pid] !== undefined) {
+          return {};
+        }
+        return {
+          routedPids: { ...s.routedPids, [pid]: previous },
+          engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
+        };
+      });
       get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
     }
   },
@@ -1798,11 +1808,19 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       }
     });
     set((s) => {
-      const routedPids: Record<number, string[]> = {};
-      const engineGenerations: Record<number, number> = {};
+      const routedPids = { ...s.routedPids };
+      const engineGenerations = { ...s.engineGenerations };
       for (const pid of failed) {
-        routedPids[pid] = snapshot[pid] ?? [];
-        engineGenerations[pid] = generationSnapshot[pid] ?? 0;
+        // Merge into what is here now rather than rebuilding from the
+        // snapshot: a route applied while the batch was in flight has written
+        // newer entries, and overwriting those with the pre-stop snapshot
+        // would leave the new route wearing the old engine's generation —
+        // every later event for it dropped as stale.
+        if (routedPids[pid] !== undefined || engineGenerations[pid] !== undefined) continue;
+        const restored = snapshot[pid];
+        if (restored !== undefined) routedPids[pid] = restored;
+        const generation = generationSnapshot[pid];
+        if (generation !== undefined) engineGenerations[pid] = generation;
       }
       const selectedPids = s.selectedPids.filter((p) => !pids.includes(p) || failed.includes(p));
       return {
