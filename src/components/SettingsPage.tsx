@@ -231,16 +231,25 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   );
 
   useEffect(() => {
+    // Capture phase, and the key is consumed: this page is a full surface, and
+    // the Escape that closes it must not also land in whatever sits underneath
+    // — a route's undo offer lives one bubble-phase listener away, and spending
+    // it silently as a side effect of leaving the page is the exact loss the
+    // toast's own comment describes. The picker, the briefing bubble and the
+    // routed capsule coordinate the same key the same way.
     const onKey = (e: KeyboardEvent) => {
       // Escape belongs to the control that has the focus first: the delay
       // stepper's field, and the carrier pickers — a <select> that closes itself
       // on Escape. Only HTMLInputElement was exempted, so pressing Escape while
       // choosing a carrier fell through and took the whole page with it.
       if (isEditableTarget(e.target)) return;
-      if (e.key === 'Escape') onBack();
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onBack();
+      }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onBack]);
 
   return (
