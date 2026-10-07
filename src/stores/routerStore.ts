@@ -386,7 +386,15 @@ function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>)
  * only one worth a log line.
  */
 function deviceSignature(devices: AudioDevice[]): string {
-  return devices.map((d) => `${d.id}|${d.name}`).join('\n');
+  // Sorted by id, because the enumeration order is the audio service's own and
+  // the same unchanged machine can hand the list back permuted after a hotplug.
+  // Signed as sent, that reads as a change and buys a log line about a device
+  // list that is the same list. The process list is sorted for this exact
+  // reason before it is signed.
+  return [...devices]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((d) => `${d.id}|${d.name}`)
+    .join('\n');
 }
 
 /** Same idea for the process list. `display_name` is deliberately left out:
@@ -506,6 +514,48 @@ function clearIconRetry(exeName: string): void {
 const feedRestoreDecided = new Set<string>();
 
 /**
+ * The newest `reconcileActiveDuplications` ask, so only the last answer lands.
+ *
+ * Six places ask the backend which engines are running — the boot, a route
+ * landing, an undo, a delay change, a Core Audio notification, and one
+ * `duplication-ready` per engine — and several of them can be in flight at once.
+ * Each reply is a picture of a moment that has already gone, so an older reply
+ * that lands last writes the older device lists *and the older generation
+ * numbers* over the current ones; every event the live engine then sends is
+ * dropped by the generation guards, which is how a badge sticks on a route that
+ * stopped and a mirror failure goes unnoticed.
+ */
+let reconcileFlight = 0;
+
+/**
+ * Everything that writes or clears an executable's endpoint assignment, one at
+ * a time.
+ *
+ * The stale sweep and the two restore passes all touch the *same* record, and
+ * the audio service keeps one assignment per executable — run them together and
+ * the sweep can win, wiping a route the restore had just pinned, with nothing on
+ * screen to explain the silence. They cannot be ordered at the call sites
+ * either: each is triggered by whichever of the device list, the session list,
+ * the memory or the carrier arrives last, and that order is not knowable. So
+ * they queue here instead, and one queue gives the sweep-before-restore order
+ * for free at every entry point, not only the one that remembered to ask.
+ */
+let assignmentQueue: Promise<void> = Promise.resolve();
+
+/** Run `task` after whatever is already queued. Fire and forget: the caller has
+ *  no answer to wait for, and a task that fails has already logged it. */
+function queueAssignmentWork(task: () => Promise<unknown>): void {
+  const run = assignmentQueue.then(task);
+  // Attaching the rejection handler here is also what keeps `run` itself from
+  // surfacing as an unhandled rejection, and it is what stops one failing task
+  // from closing the queue for the rest of the session.
+  assignmentQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/**
  * Lowest live PID per executable name — the address a per-app assignment is
  * written to, since the audio service keeps them per executable and one browser
  * holds a dozen processes.
@@ -518,6 +568,36 @@ function lowestPidByExe(sessions: AudioSession[]): Map<string, number> {
     if (known === undefined || session.pid < known) map.set(key, session.pid);
   }
   return map;
+}
+
+/**
+ * The selected processes, folded to one per executable — the lowest PID, which
+ * is the address the audio service keeps a per-app assignment at.
+ *
+ * Routing is keyed by executable everywhere else in this store, and the reason
+ * is audible: a process-loopback capture takes in the whole process *tree*, so
+ * two engines for one browser both capture that browser's sound and both mirror
+ * it to the same devices. Two copies of one audio, offset by each copy's own
+ * pipeline depth, is a comb filter — and the memory would gain the same
+ * executable twice, so the settings list shows one program on two rows and one
+ * ✕ forgets both. A batch picked with the row toggle can easily hold two of a
+ * program's processes, which is how this gets reached.
+ */
+function oneProcessPerExe(
+  sessions: AudioSession[],
+  pids: number[],
+): { pid: number; exeName: string }[] {
+  const byExe = new Map<string, { pid: number; exeName: string }>();
+  for (const pid of pids) {
+    const session = sessions.find((s) => s.pid === pid);
+    if (session === undefined) continue;
+    const key = session.exe_name.toLowerCase();
+    const known = byExe.get(key);
+    if (known === undefined || session.pid < known.pid) {
+      byExe.set(key, { pid: session.pid, exeName: session.exe_name });
+    }
+  }
+  return [...byExe.values()];
 }
 
 /**
@@ -718,7 +798,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       });
       // The device list is one of the three inputs a restore needs, and at boot
       // it is just as likely to be the last of them to arrive.
-      void get().restoreRememberedRoutes();
+      queueAssignmentWork(() => get().restoreRememberedRoutes());
       // Nothing on screen moved, so a notification gets no line at all.
       if (viaNotification && unchanged) return;
       get().addLog(
@@ -790,19 +870,20 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // it. Ask the backend to hand that assignment to the program's next
       // process instead of leaving it behind.
       //
-      // The sweep and the restore below are ordered rather than concurrent: both
-      // can touch the same executable's assignment — the sweep through the
-      // program's new process, the restore by writing one — and run together the
-      // sweep can win and undo a route that was just applied.
-      const swept = routedBefore.some((pid) => !livePids.has(pid))
-        ? get().releaseStaleRoutes()
-        : Promise.resolve();
+      // The sweep and the two restores below are ordered rather than concurrent:
+      // all three can touch the same executable's assignment — the sweep through
+      // the program's new process, the restores by writing one — and run together
+      // the sweep can win and undo a route that was just applied. Queuing them
+      // together makes that ordering hold at every entry point, not just this one.
+      if (routedBefore.some((pid) => !livePids.has(pid))) {
+        queueAssignmentWork(() => get().releaseStaleRoutes());
+      }
       // A program that has just started playing is the moment its remembered
       // route is due; the same pass picks up everything that was already running
       // when the app launched. Feeds ride the same ordering — both passes can
       // pin endpoints around one executable.
-      void swept.then(() => get().restoreRememberedRoutes());
-      void swept.then(() => get().restoreRememberedFeeds());
+      queueAssignmentWork(() => get().restoreRememberedRoutes());
+      queueAssignmentWork(() => get().restoreRememberedFeeds());
       // Icons ride behind the list, never in front of it: the rows are already
       // on screen with their letter tiles by the time the shell answers.
       get().loadMissingIcons();
@@ -923,7 +1004,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
     // Turning it on asks for the routes that are already remembered, not for a
     // promise about the next time something happens to move in the audio graph.
-    if (next) void get().restoreRememberedRoutes();
+    if (next) queueAssignmentWork(() => get().restoreRememberedRoutes());
   },
 
   loadRememberedRoutes: async () => {
@@ -939,7 +1020,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // The device list, the process list and the memory arrive in no particular
     // order, and a restore needs all three — so whichever lands last is the one
     // that can actually do something, and each of them asks.
-    void get().restoreRememberedRoutes();
+    queueAssignmentWork(() => get().restoreRememberedRoutes());
   },
 
   restoreRememberedRoutes: async () => {
@@ -1048,7 +1129,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.feedsLoadFailed', { error: String(e) }), 'error');
       return;
     }
-    void get().restoreRememberedFeeds();
+    queueAssignmentWork(() => get().restoreRememberedFeeds());
   },
 
   loadFeedCarrier: async () => {
@@ -1059,7 +1140,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
     // The carrier arriving is the moment every recorded-but-undeliverable feed
     // becomes deliverable; whichever of the three inputs landed last calls it.
-    void get().restoreRememberedFeeds();
+    queueAssignmentWork(() => get().restoreRememberedFeeds());
   },
 
   setFeedCarrier: async (render, capture) => {
@@ -1069,7 +1150,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       await api.setFeedCarrier(render, capture);
       get().addLog(i18next.t('log.feedCarrierSet'), 'success');
       // Same as the load path: a carrier moving re-opens every suspended rule.
-      void get().restoreRememberedFeeds();
+      queueAssignmentWork(() => get().restoreRememberedFeeds());
     } catch (e) {
       set({ feedCarrier: previous });
       get().addLog(i18next.t('log.feedCarrierSetFailed', { error: String(e) }), 'error');
@@ -1370,18 +1451,18 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.selectProcessAndDevice'), 'error');
       return;
     }
-    const targets = selectedPids.flatMap((pid) => {
-      const session = sessions.find((s) => s.pid === pid);
-      return session ? [{ pid, exeName: session.exe_name }] : [];
-    });
+    const targets = oneProcessPerExe(sessions, selectedPids);
     if (targets.length === 0) {
       set({ applying: false });
       get().addLog(i18next.t('log.processGone'), 'error');
       return;
     }
-    const skipped = selectedPids.length - targets.length;
-    if (skipped > 0) {
-      get().addLog(i18next.t('log.someProcessesGone', { n: skipped }), 'info');
+    // Counted against the list, not against the fold: a selection of four that
+    // came down to two executables lost nothing, it merged — and "some processes
+    // are gone" would report four deaths that did not happen.
+    const gone = selectedPids.filter((pid) => !sessions.some((s) => s.pid === pid)).length;
+    if (gone > 0) {
+      get().addLog(i18next.t('log.someProcessesGone', { n: gone }), 'info');
     }
 
     // Apply in delay order so the earliest device is the one the OS plays
@@ -1600,12 +1681,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       set((s) => {
         const routedPids = { ...s.routedPids };
         delete routedPids[pid];
+        // Gone rather than zeroed: `0` is what an entry that never had an engine
+        // reads as, so leaving a zero behind is only a key that outlives its
+        // route — and the event guards below compare against it either way.
+        const engineGenerations = { ...s.engineGenerations };
+        delete engineGenerations[pid];
         const wasOnlySelection = s.selectedPids.length === 1 && s.selectedPids[0] === pid;
         return {
           routedPids,
+          engineGenerations,
           selectedPids: s.selectedPids.filter((p) => p !== pid),
           selectedDeviceIds: wasOnlySelection ? [] : s.selectedDeviceIds,
-          engineGenerations: { ...s.engineGenerations, [pid]: 0 },
         };
       });
       const outcome = await api.stopRoute(pid);
@@ -2022,6 +2108,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     try {
       await api.setDelayRange(rangeMs);
       get().addLog(i18next.t('log.delayRangeSet', { n: rangeSeconds(rangeMs) }), 'info');
+      // Every delay in the group just moved, and with it the order a live route
+      // would land in and the pipeline each mirror is holding. Same rule as a
+      // single device's delay: the reading is only ever rebuilt at an event, and
+      // this is one of those events.
+      await get().reconcileActiveDuplications();
     } catch (e) {
       set({ delayRangeMs: previousRange, deviceDelays: previousDelays });
       get().addLog(i18next.t('log.delayRangeSetFailed', { error: String(e) }), 'error');
@@ -2056,6 +2147,18 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // Reject stale events before logging too: an old engine must not produce a
     // misleading failure line for a route that has already been replaced.
     if (generation !== (get().engineGenerations[pid] ?? 0)) return;
+    if (reason === 'error') {
+      get().addLog(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }), 'error');
+      // End it the way a stop ends it, and it has to be the stop. The engine
+      // took its mirrors down with itself but not the endpoint Windows was told
+      // to play this program on. Cleared locally only, that assignment stays
+      // marked as a live route: the settings reset skips every executable with
+      // one, the stale sweep skips every live pid, and the board has no route
+      // left for the user to stop — so the only way back would be quitting the
+      // app, which is the dead end 2.1.1 exists to close.
+      void get().stopRoute(pid);
+      return;
+    }
     set((s) => {
       const routedPids = { ...s.routedPids };
       delete routedPids[pid];
@@ -2070,11 +2173,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         selectedDeviceIds: wasSelected && selectedPids.length === 0 ? [] : s.selectedDeviceIds,
       };
     });
-    if (reason === 'error') {
-      get().addLog(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }), 'error');
-    } else {
-      get().addLog(i18next.t('log.duplicationProcessExited', { pid }), 'info');
-    }
+    get().addLog(i18next.t('log.duplicationProcessExited', { pid }), 'info');
+    // The program left with its session, so its assignment can only be released
+    // through whichever process comes next — which is what the stale sweep
+    // borrows. It is asked here rather than left to a session refresh, because
+    // the refresh's own trigger reads the route list this just cleared: waiting
+    // for it to notice the death can mean it never is.
+    queueAssignmentWork(() => get().releaseStaleRoutes());
   },
 
   handleSessionActivity: ({ pid, active }) => {
@@ -2102,14 +2207,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // plays directly. The honest answer is to end the route instead of
     // reassigning its roles.
     if (routed[0] === deviceId) {
-      set((s) => {
-        const routedPids = { ...s.routedPids };
-        const engineGenerations = { ...s.engineGenerations };
-        delete routedPids[pid];
-        delete engineGenerations[pid];
-        return { routedPids, engineGenerations };
-      });
       get().addLog(i18next.t('log.duplicationFailed', { pid, error }), 'error');
+      // Same reasoning as an engine that stops by itself: this ends the route,
+      // so it ends it through the stop, which is the path that hands the
+      // program's endpoint back. The clear below would leave the badge gone and
+      // the assignment pinned as a live route — unreachable from the board, and
+      // skipped by both the reset and the sweep.
+      void get().stopRoute(pid);
       return;
     }
     // The device is not playing anything, so it must not keep the live badge and
@@ -2128,8 +2232,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // The webview can reload while the native process keeps duplication engines
     // alive, so ask the backend for their exact ordered device lists and restore
     // the badges with the data the UI needs.
+    const flight = ++reconcileFlight;
     try {
       const active = await api.getActiveDuplications();
+      if (flight !== reconcileFlight) return;
       if (active.length === 0) {
         // Nothing is being duplicated, so nothing is being measured: a reading
         // that outlived its route would sit under a device describing a stream

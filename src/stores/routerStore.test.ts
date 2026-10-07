@@ -489,8 +489,8 @@ describe('stopRoute', () => {
 });
 
 describe('engine events', () => {
-  it('clears the route when the engine reports an error for the live generation', () => {
-    installBackend();
+  it('clears the route when the engine reports an error for the live generation', async () => {
+    const backend = installBackend();
     reset({
       devices: [SPEAKERS],
       sessions: [MUSIC],
@@ -508,6 +508,12 @@ describe('engine events', () => {
     expect(state().routedPids[1001]).toBeUndefined();
     expect(state().engineGenerations[1001]).toBeUndefined();
     expect(lastLog()?.level).toBe('error');
+    // And it ends through the stop, not just locally: the engine took its
+    // mirrors down with itself but not the endpoint Windows was told to play
+    // this program on, and an assignment left behind with no route on the board
+    // is one the user has no way to release.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(backend.calls.some((c) => c.cmd === 'stop_route')).toBe(true);
   });
 
   it('ignores a stop that belongs to a route that has already been replaced', () => {
@@ -560,12 +566,12 @@ describe('engine events', () => {
     expect(lastLog()?.level).toBe('error');
   });
 
-  it('ends the route when the device that failed is the one the OS plays', () => {
+  it('ends the route when the device that failed is the one the OS plays', async () => {
     // The backend reports a mirror and never the primary, so this is the store
     // and the engine disagreeing about the route. Dropping the primary would
     // promote the copy into its place: drawn as the device Windows plays,
     // driven as a duplicate of a stream that is no longer being produced.
-    installBackend();
+    const backend = installBackend();
     reset({
       devices: [SPEAKERS, TV],
       sessions: [MUSIC],
@@ -578,6 +584,9 @@ describe('engine events', () => {
     expect(state().routedPids[1001]).toBeUndefined();
     expect(state().engineGenerations[1001]).toBeUndefined();
     expect(lastLog()?.level).toBe('error');
+    // Ended the way a stop ends: the program's fixed endpoint goes back with it.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(backend.calls.some((c) => c.cmd === 'stop_route')).toBe(true);
   });
 
   it('ignores a mirror failure from a superseded engine', () => {

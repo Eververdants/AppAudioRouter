@@ -17,8 +17,11 @@
     所以 `refreshDevices` / `refreshSessions` / `loadRememberedRoutes` **三处都调它**，谁最后到谁生效。
   - `autoRestoreDecided`（模块级 Set）保证一个 pid 只尝试一次：用户手动停掉的路由不能被下一次刷新装回去，
     失败的恢复也不该在每次 Core Audio 通知时重试并刷日志。**这个 Set 故意不按存活进程清理**——pid 从列表消失恰恰是不该重试的情形。
-  - 恢复必须排在 `releaseStaleRoutes` **之后**（`refreshSessions` 里用 `swept.then(...)` 串起来）：
-    两者都会碰同一个 exe 的分配记录，并发时清扫可能赢，把刚写好的路由又清掉。
+  - 恢复必须排在 `releaseStaleRoutes` **之后**：两者都会碰同一个 exe 的分配记录，并发时清扫可能赢，把刚写好的路由又清掉。
+    这件事由模块级队列 `queueAssignmentWork` 负责——**清扫与两处恢复（路由、送入）都排进这一条队**，
+    入队的先后就是执行的先后。别在调用点上自己串 `then`：触发恢复的入口有五个
+    （`refreshDevices` / `refreshSessions` / `loadRememberedRoutes` / `toggleAutoRemember` / 载体与送入记忆的到达），
+    只有一处记得排队，其它四处就又开始并发了。
   - 设置页「已记忆的路由」列出这些 exe，✕ 调 `clear_route` 忘记。程序替用户做了决定，就得能在同一个地方撤回。
 - **记忆的送入同样会自动恢复**（`restoreRememberedFeeds`），规矩与路由恢复同款：等列表与记忆都到位（`refreshSessions` 之后、
   `loadFeeds` 与 `loadFeedCarrier` 之后各调一次，谁最后到谁生效），一个 (源 pid, 目标 exe) 只试一次（`feedRestoreDecided`，同样故意不清理），
