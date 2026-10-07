@@ -1653,6 +1653,28 @@ fn fail_mirror(shared: &EngineShared, mirror: &MirrorChannel, app: &AppHandle, e
     );
 }
 
+/// A kernel event handle that closes itself unless somebody takes ownership.
+///
+/// It exists for the window between `CreateEventW` and the session that is
+/// supposed to own the handle: `Initialize`, `SetEventHandle`, `GetService` and
+/// `GetBufferSize` all sit in that window and all can fail, and each failure
+/// used to leave the handle open for the life of the app — one per mirror, per
+/// retry, on a tray-resident process whose devices come and go. On the success
+/// path `std::mem::forget` disarms it, and `RenderSession`'s own `Drop` closes
+/// the handle exactly once, as it always has.
+struct EventGuard(HANDLE);
+
+impl Drop for EventGuard {
+    fn drop(&mut self) {
+        // SAFETY: this guard is the only owner, and the handle it holds came
+        // from CreateEventW. A session that took the handle forgot this guard,
+        // so no path closes the same handle twice.
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
 /// A fully initialized render client, not yet started.
 struct RenderSession {
     client: IAudioClient,
@@ -1700,6 +1722,7 @@ fn open_render_session(
         // SAFETY: unnamed auto-reset event; owned by RenderSession.
         CreateEventW(None, false, false, None).map_err(|e| com_err("CreateEventW", e))?
     };
+    let guard = EventGuard(event);
     // SAFETY: format is a complete WAVEFORMATEX(EXTENSIBLE) copied from the
     // default device's mix format; auto-convert adapts it to this device.
     let format = unsafe { &*(shared.format.as_ptr() as *const WAVEFORMATEX) };
@@ -1759,6 +1782,9 @@ fn open_render_session(
         ),
         Err(e) => warn!("GetStreamLatency failed for {}: {e}", mirror.device_id),
     }
+    // The session takes the handle with it; disarming the guard here is what
+    // keeps the close to exactly once.
+    std::mem::forget(guard);
     Ok(RenderSession {
         client,
         render,
