@@ -55,7 +55,7 @@ use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::{implement, IUnknown, Interface, HRESULT, PCWSTR, PROPVARIANT};
-use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, STILL_ACTIVE, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     eConsole, eRender, ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation,
     IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
@@ -69,7 +69,7 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemAlloc, CoTaskMemFree, CLSCTX_ALL};
 use windows::Win32::System::Threading::{
-    CreateEventW, GetProcessTimes, OpenProcess, WaitForSingleObject,
+    CreateEventW, GetExitCodeProcess, GetProcessTimes, OpenProcess, WaitForSingleObject,
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
@@ -2167,8 +2167,17 @@ fn process_alive(pid: u32, recorded_time: u64) -> bool {
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
     match handle {
         Ok(h) => {
-            // SAFETY: h is a valid handle; WAIT_OBJECT_0 means terminated.
-            let exited = unsafe { WaitForSingleObject(h, 0) } == WAIT_OBJECT_0;
+            // A terminated-but-still-referenced process opens fine with the
+            // query right, so the exit has to be read from the exit code:
+            // `WaitForSingleObject` would need `SYNCHRONIZE` on top of
+            // `PROCESS_QUERY_LIMITED_INFORMATION`, and the wait it refuses
+            // (`WAIT_FAILED`) is indistinguishable from "still running" — which
+            // is how an engine outlived its program whenever a launcher, a
+            // parent shell or a service kept the last handle open.
+            let mut exit_code = 0u32;
+            // SAFETY: h is a valid handle, exit_code is a live out parameter.
+            let exited = unsafe { GetExitCodeProcess(h, &mut exit_code) }.is_ok()
+                && exit_code != STILL_ACTIVE.0 as u32;
             let alive = if exited {
                 false
             } else if recorded_time == 0 {
