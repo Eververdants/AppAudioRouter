@@ -11,9 +11,15 @@
 - 持久化用户偏好到 `localStorage` + 跟随系统初始值
 - 色板为青色（cyan）信号色，不用靛紫/紫罗兰；改色时 `:root` / `.dark` 两份定义与 `--*-rgb` 镜像通道必须一起改（`--bg-primary` / `--text-primary` 还在 `index.html` 里各有一份首帧内联副本，也要同步）
 - **这套界面是平的**（2026-10-05 起）：所有面板都是**实底 + 1px 细线**，没有 blur、没有渐变、没有辉光。
-  分层全靠三样东西：`--hairline`（贴着底色的分隔）、`--hairline-strong`（浮起面板的描边）、`--shadow-float`
-  （全项目唯一允许的阴影：一层接触影 + 一层环境影，只给真正浮在页面之上的东西——Toast、现状气泡、弹窗、看板上的卡片）。
-  与页面齐平的面板（左栏的行、设置页的纸）**没有阴影**——分隔是细线的职责。
+  分层全靠两样东西，**都是线，没有影**：`--hairline`（贴着底色的分隔，Tailwind 的 `border-line`）与
+  `--hairline-strong`（面板与浮层的描边，`border-line-strong`）。
+  - ⚠️ `--hairline` 在 Tailwind 里走的是 `rgb(var(--hairline-rgb) / <alpha-value>)`，**不是**那条 hex：
+    透明度的 `<alpha-value>` 需要分解过的通道，所以它的值只有 `--hairline-rgb` 一份是活的。`:root` / `.dark`
+    里那两条 hex 副本已于 2026-10-07 删除（它们与 `-rgb` 通道各写一遍同一个颜色，改一处不动声色）。改色时
+    `--hairline-rgb` 与 `--hairline-strong` 两份一起改。
+  - ⚠️ 曾经文档里写的 `--shadow-float`（"全项目唯一允许的阴影"）**不存在**，也没有任何浮层带阴影——
+    Toast、现状气泡、弹窗、看板卡片一律是实底 + 细线（见 board-ui.md「卡片坐井、不投射任何东西」）。
+    别照这句话去补一个令牌把阴影请回来。
   实底面板这个语义只留给正在生效的东西。曾经的那套液态玻璃（`--glass*` 令牌、`.glass*` 类、`.aurora`、`.grain`、
   `useGlassSpecular` 指针高光、glass-lite 低配档）已于今天整体退役，**别再搬回来**：
   它最吃执行，差一点就从「透镜」滑向「塑料贴纸」，而 `backdrop-filter` 的重采样成本还永远挂在 GPU 上。

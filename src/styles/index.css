@@ -24,7 +24,6 @@
   --surface-sunken: #f2f3f5;
   --surface-raised: #ffffff;
   --surface-hover: rgba(24, 24, 27, 0.035);
-  --hairline: #e6e6ea;
   --hairline-strong: #d4d4da;
   /* Text on top of the accent fill. */
   --accent-ink: #ffffff;
@@ -80,7 +79,6 @@
   --surface-sunken: #0e1114;
   --surface-raised: #161c24;
   --surface-hover: rgba(255, 255, 255, 0.035);
-  --hairline: #23272e;
   --hairline-strong: #2e3742;
   --accent-ink: #05222b;
 
