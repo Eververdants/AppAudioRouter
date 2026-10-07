@@ -1528,6 +1528,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }),
           'error',
         );
+        // Every apply tears the selection's old engines down before it starts
+        // new ones, so a rejected re-route has left the backend with no engine
+        // for these pids while the badges above may still carry the old route.
+        // Rebuilding from the live engines retires them — the same pass a
+        // partial failure gets below.
+        await get().reconcileActiveDuplications();
         return;
       }
 
@@ -2270,22 +2276,54 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     try {
       const active = await api.getActiveDuplications();
       if (flight !== reconcileFlight) return;
-      if (active.length === 0) {
-        // Nothing is being duplicated, so nothing is being measured: a reading
-        // that outlived its route would sit under a device describing a stream
-        // that does not exist.
-        set({ deviceLatencyMs: {} });
-        return;
-      }
+      const activePids = new Set(active.map((route) => route.pid));
+      // An empty list means the device list has not arrived yet (boot), not
+      // that every device is gone — the same guard the restore pass uses.
+      const devices = get().devices;
+      const liveDeviceIds = new Set(devices.map((device) => device.id));
+      const routesEnded: number[] = [];
       set((s) => {
         const routedPids = { ...s.routedPids };
         const engineGenerations = { ...s.engineGenerations };
+        // A multi-device route has an engine, and this list is the authority on
+        // which of those engines are alive. A badge whose engine is gone — a
+        // re-route whose new engine never started (every apply tears the old
+        // one down first), an event lost while the webview was busy — describes
+        // a route that no longer exists, so it goes with the generation it
+        // stood on. A single-device route has no engine at all (generation 0,
+        // never in this list) and is the session list's to retire, not this
+        // one's.
+        for (const pid of Object.keys(routedPids)) {
+          const numericPid = Number(pid);
+          if ((engineGenerations[numericPid] ?? 0) > 0 && !activePids.has(numericPid)) {
+            delete routedPids[numericPid];
+            delete engineGenerations[numericPid];
+          }
+        }
         // Rebuilt rather than merged, like the badges above: only the devices an
-        // engine is driving right now keep a reading.
+        // engine is driving right now keep a reading. Each badge is also
+        // intersected with the live device list — refreshDevices drops dead
+        // devices from these same badges, and writing them back here would undo
+        // that filter on every notification pass. A route left with no live
+        // device is over: its engine keeps running (process loopback capture
+        // does not end when a device does) and its endpoint assignment stays
+        // booked, so it is stopped here — directly, not through the stop
+        // action, whose promise to a manual stop is to forget the memory, and
+        // an unplug must not erase the user's rule.
         const deviceLatencyMs: Record<string, number> = {};
         for (const route of active) {
           if (route.deviceIds.length === 0) continue;
-          routedPids[route.pid] = [...route.deviceIds];
+          const liveIds =
+            devices.length > 0 ? route.deviceIds.filter((id) => liveDeviceIds.has(id)) : route.deviceIds;
+          if (liveIds.length === 0) {
+            if ((engineGenerations[route.pid] ?? 0) === route.generation) {
+              delete routedPids[route.pid];
+              delete engineGenerations[route.pid];
+              routesEnded.push(route.pid);
+            }
+            continue;
+          }
+          routedPids[route.pid] = liveIds;
           engineGenerations[route.pid] = route.generation;
           // Index 0 is the primary, which Windows plays natively and which
           // reports `null` because there is no stream of ours to ask. Every
@@ -2294,11 +2332,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
             const deviceId = route.deviceIds[index];
             const latencyMs = route.latencyMs[index];
             if (deviceId === undefined || latencyMs === undefined || latencyMs === null) continue;
+            if (devices.length > 0 && !liveDeviceIds.has(deviceId)) continue;
             deviceLatencyMs[deviceId] = latencyMs;
           }
         }
         return { routedPids, engineGenerations, deviceLatencyMs };
       });
+      for (const pid of routesEnded) {
+        api.stopRoute(pid).catch(() => {
+          /* best effort — the next reconcile pass finds the engine again */
+        });
+      }
     } catch {
       /* enumerating active engines is best-effort; the user can re-route */
     }
