@@ -1655,7 +1655,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           // time the program starts. Putting the old memory back is not possible
           // without a command to write one, so it is cleared instead: losing a
           // route that was not in effect is the smaller loss.
-          if (snapshot.remembered) {
+          if (snapshot.remembered && isRememberableName(entry.exeName)) {
             await api.clearRoute(entry.exeName);
             memoryDiffers = true;
           }
@@ -1667,14 +1667,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         const ordered = orderByDelay(previous, get().deviceDelays);
         // `remember` mirrors what the apply did, because that is what puts the
         // memory back: with it false the old device list would never be written
-        // and the memory would keep naming the route being undone.
-        const generation = await get().routeOne(
-          entry.pid,
-          entry.exeName,
-          ordered,
-          snapshot.remembered,
-        );
-        if (snapshot.remembered) memoryDiffers = true;
+        // and the memory would keep naming the route being undone. The apply
+        // only remembers programs it can name — a "PID 4321" matches no future
+        // launch — and the undo holds itself to the same rule, or the settings
+        // list grows a row that can never be found again.
+        const remember = snapshot.remembered && isRememberableName(entry.exeName);
+        const generation = await get().routeOne(entry.pid, entry.exeName, ordered, remember);
+        if (remember) memoryDiffers = true;
         // Written here, one program at a time: an undo is a single user action
         // rather than a fan-out, and the generation is what a later
         // duplication-stopped event for this engine is measured against.
