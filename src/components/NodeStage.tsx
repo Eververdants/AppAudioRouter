@@ -244,7 +244,15 @@ export function NodeStage() {
     wires.push({
       key: `feeder:${feeder.pid}`,
       d: nodePath(from.x, from.y, to.x, to.y),
-      live: (soundingPids[feeder.pid] === true) && liveness,
+      // The same rule the feed-target wires follow on the feeder's own board:
+      // this wire reports sound actually arriving here, and a feed whose
+      // source is itself routed (its render slot is taken) or whose carrier is
+      // not configured delivers nothing — the card reads 挂起 / 未接通, and a
+      // moving wire would say the opposite of the card it hangs from.
+      live:
+        soundingPids[feeder.pid] === true &&
+        liveness &&
+        feedLiveness(feeder.pid, feedCarrier, routedPids, sessions) === 'live',
     });
   });
 
