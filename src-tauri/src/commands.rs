@@ -660,8 +660,9 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
     // Feed pins whose program is gone are bookkeeping with nothing to hold: the
     // endpoints they name died with the process. The rule itself stays in the
     // feed memory — it is the user's, not the process's — so the sweep drops
-    // only the pin.
-    pins.forget_dead_feed_pins(&live_pids);
+    // only the pin. Alive-but-sessionless programs keep theirs: the process
+    // table decides, not the render-session walk above.
+    pins.forget_dead_feed_pins();
     Ok(released)
 }
 

@@ -530,6 +530,21 @@ pub struct PinnedRoute {
 pub struct FeedPin {
     pub exe_name: String,
     pub device_id: String,
+    /// The process's creation time when this pin was written. The pid is the
+    /// only handle the release paths get, and the kernel hands pids to new
+    /// processes — this is what tells the sweep that a pin's pid still names
+    /// the process the pin speaks for.
+    pub creation_time: u64,
+}
+
+impl FeedPin {
+    fn new(pid: u32, exe_name: &str, device_id: &str) -> Self {
+        Self {
+            exe_name: exe_name.to_string(),
+            device_id: device_id.to_string(),
+            creation_time: super::process_creation_time(pid).unwrap_or(0),
+        }
+    }
 }
 
 /// The endpoint assignments this run wrote.
@@ -709,26 +724,14 @@ impl PinnedRoutes {
     /// which is how a feed source is wired.
     pub fn mark_feed(&self, pid: u32, exe_name: &str, device_id: &str) {
         let mut book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
-        book.insert(
-            pid,
-            FeedPin {
-                exe_name: exe_name.to_string(),
-                device_id: device_id.to_string(),
-            },
-        );
+        book.insert(pid, FeedPin::new(pid, exe_name, device_id));
     }
 
     /// Record that this app pointed `pid`'s *capture* endpoint at the carrier —
     /// the receiving half of a feed.
     pub fn mark_feed_capture(&self, pid: u32, exe_name: &str, device_id: &str) {
         let mut book = self.feed_targets.lock().unwrap_or_else(|e| e.into_inner());
-        book.insert(
-            pid,
-            FeedPin {
-                exe_name: exe_name.to_string(),
-                device_id: device_id.to_string(),
-            },
-        );
+        book.insert(pid, FeedPin::new(pid, exe_name, device_id));
     }
 
     /// The executable name a feed source pin was recorded under, if any.
@@ -783,10 +786,18 @@ impl PinnedRoutes {
     /// named died with the process, and the rule stays in the feed memory —
     /// that one is the user's, not the process's — so the sweep drops only the
     /// pin.
-    pub fn forget_dead_feed_pins(&self, live_pids: &std::collections::HashSet<u32>) {
+    ///
+    /// "Gone" is the process, not the session list. A program in a long
+    /// silence owns no render session at all — a recorder receiving a feed may
+    /// never own one — so the session enumeration the sweep already walked is
+    /// the wrong witness: dropping on it would strand the assignments the pin
+    /// is the only handle to, since `remove_feed_target` refuses to release
+    /// without a pin and so would app exit. The process table decides instead,
+    /// with the creation time the pin recorded guarding against a recycled pid.
+    pub fn forget_dead_feed_pins(&self) {
         for book in [&self.feed_sources, &self.feed_targets] {
             let mut book = book.lock().unwrap_or_else(|e| e.into_inner());
-            book.retain(|pid, _| live_pids.contains(pid));
+            book.retain(|pid, pin| super::process_is_running(*pid, pin.creation_time));
         }
     }
 }

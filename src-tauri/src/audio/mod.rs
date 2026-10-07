@@ -16,8 +16,11 @@ pub mod sessions;
 use serde::Serialize;
 use thiserror::Error;
 use windows::core::PWSTR;
-use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, RPC_E_CHANGED_MODE, STILL_ACTIVE};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+use windows::Win32::System::Threading::{
+    GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 /// Errors that can originate from the audio module.
 #[derive(Debug, Error)]
@@ -61,6 +64,69 @@ pub fn uninit_com(owned: bool) {
         // SAFETY: Balances a successful CoInitializeEx from init_com.
         unsafe { CoUninitialize() };
     }
+}
+
+/// The creation time of `pid`'s process, as a FILETIME, or `None` when the
+/// process cannot be opened or queried. A process that has already died also
+/// answers `None` here eventually, so a caller that records this as a witness
+/// must pair it with [`process_is_running`] rather than compare it later.
+pub(crate) fn process_creation_time(pid: u32) -> Option<u64> {
+    // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION; the handle is closed
+    // on both exits below, so a failed query does not leak it.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()? };
+    let creation = creation_time_of(handle);
+    // SAFETY: balances OpenProcess.
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    creation
+}
+
+/// The creation time read from an already-open process handle, or `None` when
+/// the query fails. The caller owns the handle.
+fn creation_time_of(handle: HANDLE) -> Option<u64> {
+    let mut creation = FILETIME::default();
+    let mut _exit = FILETIME::default();
+    let mut _kernel = FILETIME::default();
+    let mut _user = FILETIME::default();
+    // SAFETY: valid handle and out params.
+    let read =
+        unsafe { GetProcessTimes(handle, &mut creation, &mut _exit, &mut _kernel, &mut _user) }
+            .is_ok();
+    if !read {
+        return None;
+    }
+    Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
+}
+
+/// Whether `pid` still names a live process — and, when `recorded` carries a
+/// creation time, the very same one that was running when the record was
+/// written.
+///
+/// A process that has exited still opens while any handle to it survives, so
+/// the exit has to be read from the exit code rather than assumed from the
+/// open failing; a pid the kernel has since handed to a different process is
+/// caught by the creation time. `recorded` of zero means no witness was
+/// captured, and only the exit code is judged.
+pub(crate) fn process_is_running(pid: u32, recorded: u64) -> bool {
+    // SAFETY: OpenProcess with QUERY_LIMITED_INFORMATION; handle closed below.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
+    let Ok(handle) = handle else {
+        // The process was openable when the record was written, so a failed
+        // open now means it is gone.
+        return false;
+    };
+    let mut exit_code = 0u32;
+    // SAFETY: h is a valid handle, exit_code is a live out parameter.
+    let exited = unsafe { GetExitCodeProcess(handle, &mut exit_code) }.is_ok()
+        && exit_code != STILL_ACTIVE.0 as u32;
+    let same_process = creation_time_of(handle)
+        .is_none_or(|current| recorded == 0 || current == recorded);
+    // SAFETY: balances OpenProcess.
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    !exited && same_process
 }
 
 /// Copy a COM-allocated `PWSTR` into an owned `String`.
