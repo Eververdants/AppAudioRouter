@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { NodeStage } from '@/components/NodeStage';
 import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
+import { RoutedCapsule } from '@/components/RoutedCapsule';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { StartupWizard } from '@/components/StartupWizard';
@@ -270,6 +271,9 @@ export default function App() {
                   {/* The plain-language answer to "where is sound going", in
                       the corner the action dock used to float over. */}
                   <StatusBriefing />
+                  {/* Every live route at once, each with its own way out —
+                      stop only; starting belongs to the hub. */}
+                  <RoutedCapsule />
                 </>
               ) : (
                 <LogPanel />

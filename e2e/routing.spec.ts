@@ -8,6 +8,9 @@ import {
   emit,
   hub,
   openApp,
+  routedCapsule,
+  routedPanel,
+  routedRow,
   setFailing,
   setSessions,
   stopAllRail,
@@ -294,6 +297,57 @@ test('a routed app can be sent back to the system default from the toast', async
 
   await expect(page.getByRole('button', { name: 'Undo' })).toBeHidden();
   expect(await callsFor(page, 'stop_route')).toHaveLength(1);
+});
+
+test('the routed capsule expands to every routed programme and opens its board', async ({
+  page,
+}) => {
+  await openApp(page);
+
+  // Nothing is routed, so there is nothing to manage and no capsule at all.
+  await expect(routedCapsule(page)).toHaveCount(0);
+
+  await appRow(page, 'music.exe').click();
+  await hub(page).click();
+  await appRow(page, 'game.exe').click();
+  await addDevice(page, 'TV');
+  await hub(page).click();
+
+  // The capsule counts what is live right now, and expands to one row per
+  // routed programme, naming where its sound comes out.
+  await expect(routedCapsule(page)).toContainText('2 routed');
+  await routedCapsule(page).click();
+  await expect(routedPanel(page)).toBeVisible();
+  await expect(routedRow(page, 1001)).toContainText('Speakers');
+  await expect(routedRow(page, 1002)).toContainText('TV');
+
+  // A row's name is the door to that programme's own board, where its levers
+  // live — the capsule stops routes, it does not tune them.
+  await routedRow(page, 1001).getByRole('button', { name: /music.exe/ }).click();
+  await expect(hub(page)).toContainText('music.exe');
+  await expect(routedPanel(page)).toHaveCount(0);
+});
+
+test('the routed capsule stops one programme, and asks before it does', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+  await hub(page).click();
+  await appRow(page, 'game.exe').click();
+  await addDevice(page, 'TV');
+  await hub(page).click();
+
+  await routedCapsule(page).click();
+  const stop = routedRow(page, 1001).getByRole('button', {
+    name: /^Stop output and return to the system default$|^Click again to confirm$/,
+  });
+  await stop.click();
+  expect(await callsFor(page, 'stop_route')).toHaveLength(0);
+  await stop.click();
+  expect(await callsFor(page, 'stop_route')).toHaveLength(1);
+
+  // The row leaves with its route, and the capsule counts what is left.
+  await expect(routedRow(page, 1001)).toHaveCount(0);
+  await expect(routedCapsule(page)).toContainText('1 routed');
 });
 
 test('a route the backend rejects leaves the app where it was', async ({ page }) => {

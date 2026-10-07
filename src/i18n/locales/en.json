@@ -96,6 +96,12 @@
     "feedLine": "{{process}} is sending its audio into {{targets}}' input.",
     "feedHeldLine": "{{process}} has a feed into {{targets}}, held while it plays through a device."
   },
+  "routed": {
+    "capsule": "{{n}} routed",
+    "title": "Routed programs",
+    "tooltip": "See where every program is routed, or return one to the system default",
+    "tune": "Open {{name}}'s board and tune it on its own"
+  },
   "settings": {
     "title": "Settings",
     "back": "Back",

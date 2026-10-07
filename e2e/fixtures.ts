@@ -111,6 +111,25 @@ export function tunerStrip(page: Page) {
   return page.locator('main [data-tuner-strip]');
 }
 
+/**
+ * The floating capsule that counts the routed programmes and opens their list:
+ * the one place to see every live route and stop one, wherever it sits on the
+ * board. Matched by its own hook.
+ */
+export function routedCapsule(page: Page) {
+  return page.locator('main [data-routed-capsule]');
+}
+
+/** The expanded list of routed programmes, floating above the capsule. */
+export function routedPanel(page: Page) {
+  return page.locator('main [data-routed-panel]');
+}
+
+/** One programme's row in the expanded list. */
+export function routedRow(page: Page, pid: number) {
+  return page.locator(`main [data-routed-row="${pid}"]`);
+}
+
 /** One feed card on the board: the programme this one's sound goes into. */
 export function feedRow(page: Page, pid: number) {
   return page.locator(`main [data-feed-row="${pid}"]`);

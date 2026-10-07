@@ -96,6 +96,12 @@
     "feedLine": "「{{process}}」正把声音送进「{{targets}}」的输入。",
     "feedHeldLine": "「{{process}}」有一条送往「{{targets}}」的送入，暂因它正输出到设备而搁置。"
   },
+  "routed": {
+    "capsule": "已路由 {{n}}",
+    "title": "正在路由的程序",
+    "tooltip": "看看每个程序都路由到了哪儿，或让其中一个回到系统默认",
+    "tune": "打开「{{name}}」的看板，单独调整"
+  },
   "settings": {
     "title": "设置",
     "back": "返回",
