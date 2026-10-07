@@ -341,20 +341,34 @@ fn with_device_session_volumes<T>(
     };
 
     for i in 0..session_count {
+        // One session that will not open is skipped rather than fatal, exactly
+        // as the enumeration path (`read_session`) skips it: a session expiring
+        // between GetCount and its GetSession call is an everyday race, and
+        // aborting the whole device on it would leave the program's own live
+        // session — sitting on the very same endpoint — unanswerable. A walk
+        // that answers for nothing reads as "no live session" to the callers,
+        // which is how a stopped route would skip handing the program's
+        // pre-route loudness back.
+        //
         // SAFETY: i in [0, session_count).
-        let control: IAudioSessionControl = unsafe {
-            session_enum
-                .GetSession(i)
-                .map_err(|e| AudioError::Api(format!("GetSession({i}) failed: {e}")))?
+        let control: IAudioSessionControl = match unsafe { session_enum.GetSession(i) } {
+            Ok(control) => control,
+            Err(e) => {
+                warn!("skipping session {i}: {e}");
+                continue;
+            }
         };
-        // SAFETY: cast to IAudioSessionControl2.
-        let control2: IAudioSessionControl2 = control
-            .cast()
-            .map_err(|e| AudioError::Api(format!("cast(IAudioSessionControl2) failed: {e}")))?;
-        let session_pid = unsafe {
-            control2
-                .GetProcessId()
-                .map_err(|e| AudioError::Api(format!("GetProcessId({i}) failed: {e}")))?
+        // SAFETY: cast to IAudioSessionControl2 on a live session control.
+        let Ok(control2) = control.cast::<IAudioSessionControl2>() else {
+            continue;
+        };
+        // SAFETY: GetProcessId on a live session.
+        let session_pid = match unsafe { control2.GetProcessId() } {
+            Ok(pid) => pid,
+            Err(e) => {
+                warn!("skipping session {i}: {e}");
+                continue;
+            }
         };
         if session_pid != pid {
             continue;
