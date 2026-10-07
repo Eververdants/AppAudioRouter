@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { AudioSession } from '@/lib/types';
@@ -59,6 +59,14 @@ export function ProgramRail() {
    */
   const filter = useDeferredValue(query);
   const searching = filter.trim() !== '';
+
+  // The search box only exists while there are programmes to search; a query
+  // that outlived it would keep filtering a list whose field is gone — rows
+  // missing with nothing on screen naming the reason. When there is nothing
+  // left to search, there is nothing left to search for.
+  useEffect(() => {
+    if (sessions.length === 0) setQuery('');
+  }, [sessions.length]);
 
   /** The rows on screen: filtered by what was typed, routed programmes first.
    *  A stable sort keeps the enumeration order within each group, so rows do
