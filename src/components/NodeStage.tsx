@@ -168,7 +168,7 @@ export function NodeStage() {
   const hubY = Math.round(boardCentre(height) - HUB_H / 2);
   const feedTargetStates = feedTargets.map((targetSession) => ({
     session: targetSession,
-    state: feedLiveness(pid ?? -1, feedCarrier, routedPids),
+    state: feedLiveness(pid ?? -1, feedCarrier, routedPids, sessions),
   }));
 
   // Escape closes the picker; registered only while it is open, so a standing

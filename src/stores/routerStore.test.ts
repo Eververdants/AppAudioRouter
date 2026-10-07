@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import type { AudioDevice, AudioSession } from '@/lib/types';
-import { useRouterStore } from './routerStore';
+import { feedLiveness, useRouterStore } from './routerStore';
 
 /**
  * The store is where every UI decision about audio is made, so this is the
@@ -913,6 +913,39 @@ describe('feeds', () => {
 
     expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(asksAfterAdd);
     expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+  });
+
+  it('reads a sibling session’s route as holding the render slot', () => {
+    // The per-app endpoint the audio service keeps is one per executable: a
+    // route held by one process of the program occupies the slot for every
+    // session of it, so a feed from a sibling is suspended, not live.
+    const BROWSER_TAB: AudioSession = { pid: 6201, exe_name: 'browser.exe' };
+    const BROWSER_HELPER: AudioSession = { pid: 6202, exe_name: 'browser.exe' };
+    const OTHER: AudioSession = { pid: 6203, exe_name: 'other.exe' };
+    const carrier = { render: 'cable-in', capture: 'cable-out' };
+
+    expect(
+      feedLiveness(BROWSER_HELPER.pid, carrier, { [BROWSER_TAB.pid]: ['speakers'] }, [
+        BROWSER_TAB,
+        BROWSER_HELPER,
+        OTHER,
+      ]),
+    ).toBe('suspended');
+    // A route of a different program holds nobody else's slot.
+    expect(
+      feedLiveness(BROWSER_HELPER.pid, carrier, { [OTHER.pid]: ['speakers'] }, [
+        BROWSER_TAB,
+        BROWSER_HELPER,
+        OTHER,
+      ]),
+    ).toBe('live');
+    // The program's own route still reads as suspended, as always.
+    expect(
+      feedLiveness(BROWSER_TAB.pid, carrier, { [BROWSER_TAB.pid]: ['speakers'] }, [
+        BROWSER_TAB,
+        BROWSER_HELPER,
+      ]),
+    ).toBe('suspended');
   });
 });
 

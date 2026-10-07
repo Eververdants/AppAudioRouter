@@ -6,7 +6,7 @@ import { orderByDelay } from '@/lib/delay';
 import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { alreadyApplied } from '@/lib/stage';
 import type { AudioDevice } from '@/lib/types';
-import { useRouterStore } from '@/stores/routerStore';
+import { feedLiveness, useRouterStore } from '@/stores/routerStore';
 
 /** One line of the briefing: one programme, said plainly. */
 interface BriefingLine {
@@ -81,6 +81,7 @@ export function StatusBriefing() {
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const feeds = useRouterStore((s) => s.feeds);
+  const feedCarrier = useRouterStore((s) => s.feedCarrier);
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -147,12 +148,17 @@ export function StatusBriefing() {
           .filter((s) => s !== undefined)
           .map((s) => s.display_name ?? s.exe_name);
         const joined = joinNames(targets, i18n.language);
+        // Held means the render slot is taken — this program's own route, or
+        // a sibling session's, since the slot is one per executable. The same
+        // reading the board's feed cards use.
+        const held =
+          (ids !== undefined && ids.length > 0) ||
+          feedLiveness(session.pid, feedCarrier, routedPids, sessions) === 'suspended';
         result.push({
           key: `${session.pid}-feed`,
-          text:
-            ids !== undefined && ids.length > 0
-              ? t('briefing.feedHeldLine', { process: name, targets: joined })
-              : t('briefing.feedLine', { process: name, targets: joined }),
+          text: held
+            ? t('briefing.feedHeldLine', { process: name, targets: joined })
+            : t('briefing.feedLine', { process: name, targets: joined }),
           quiet,
         });
       }
@@ -169,7 +175,7 @@ export function StatusBriefing() {
       });
     }
     return result;
-  }, [sessions, routedPids, soundingPids, devices, defaultDeviceId, feeds, t, i18n.language]);
+  }, [sessions, routedPids, soundingPids, devices, defaultDeviceId, feeds, feedCarrier, t, i18n.language]);
 
   // Changes staged on the stage that the hub has not landed yet — worth a
   // line, because "the picture and the sound disagree" is the one thing this

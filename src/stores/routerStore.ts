@@ -46,20 +46,32 @@ export interface FeedUndoOffer {
 /** Where a feed rule stands right now.
  *
  * `live`: the carrier is configured and the source's render slot is free, so
- * sound is actually moving into the target. `suspended`: the source is routed
- * to a device — the per-app render slot belongs to that device, and the feed
- * comes back the moment the route stops. `no-carrier`: no endpoint pair is
- * configured, so the rule is recorded but nothing can move. */
+ * sound is actually moving into the target. `suspended`: the source's render
+ * slot is taken — the per-app endpoint the audio service keeps is one per
+ * *executable*, so a device route held by a sibling process of the same
+ * program occupies it all the same — and the feed comes back the moment that
+ * route stops. `no-carrier`: no endpoint pair is configured, so the rule is
+ * recorded but nothing can move. */
 export type FeedLiveness = 'live' | 'suspended' | 'no-carrier';
 
 export function feedLiveness(
   sourcePid: number,
   carrier: FeedCarrier,
   routedPids: Record<number, string[]>,
+  sessions: AudioSession[],
 ): FeedLiveness {
   if (carrier.render === null || carrier.capture === null) return 'no-carrier';
   const routed = routedPids[sourcePid];
-  return routed !== undefined && routed.length > 0 ? 'suspended' : 'live';
+  if (routed !== undefined && routed.length > 0) return 'suspended';
+  const exe = sessions.find((s) => s.pid === sourcePid)?.exe_name?.toLowerCase();
+  if (exe !== undefined) {
+    for (const [pid, ids] of Object.entries(routedPids)) {
+      if (ids.length === 0 || Number(pid) === sourcePid) continue;
+      const routedExe = sessions.find((s) => s.pid === Number(pid))?.exe_name;
+      if (routedExe !== undefined && routedExe.toLowerCase() === exe) return 'suspended';
+    }
+  }
+  return 'live';
 }
 
 interface RouterState {
