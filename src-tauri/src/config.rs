@@ -139,9 +139,9 @@ impl RouteConfig {
     pub fn remove_route(&self, exe_name: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         if !inner.retain_routes_except(exe_name) {
-            // Nothing was stored under this name in any case. Still persist: the
-            // answer the caller gets is the same either way, and a file that
-            // already says what it should is not worth a write.
+            // Nothing was stored under this name in any case, so there is
+            // nothing to write: the file already says what it should, and the
+            // answer the caller gets is the same either way.
             return Ok(());
         }
         inner.persist()
