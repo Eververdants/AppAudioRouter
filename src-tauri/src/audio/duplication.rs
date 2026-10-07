@@ -1347,12 +1347,34 @@ fn capture_session(
 
     let mut render_threads = Vec::with_capacity(shared.mirrors.len());
     for mirror in &shared.mirrors {
-        let mirror = mirror.clone();
-        let shared = shared.clone();
-        let app = app.clone();
+        let thread_shared = shared.clone();
+        let thread_app = app.clone();
+        let thread_mirror = mirror.clone();
         // Render threads report their own errors via `enabled`, so the join
         // result is ignored on purpose.
-        render_threads.push(std::thread::spawn(move || render_main(shared, mirror, app)));
+        let spawned = std::thread::Builder::new()
+            .name(format!("aar-render-{}", shared.pid))
+            .spawn(move || render_main(thread_shared, thread_mirror, thread_app));
+        match spawned {
+            Ok(handle) => render_threads.push(handle),
+            Err(e) => {
+                // The OS refused the thread. Spawning with `thread::spawn`
+                // would panic here, and the unwind would tear this capture
+                // thread down past every teardown step that follows the
+                // capture loop: the engine would stay registered, its mirrors
+                // keep their devices open and no stopped event would fire.
+                // Take the mirror out of service the way a render thread that
+                // lost its device would be, and count it ready, or the start
+                // gate waits out its backstop on a report that never comes.
+                fail_mirror(
+                    shared,
+                    mirror,
+                    app,
+                    AudioError::Api(format!("spawn render thread failed: {e}")),
+                );
+                mirror_ready(shared, app);
+            }
+        }
     }
 
     let mut gate = StartGate {
