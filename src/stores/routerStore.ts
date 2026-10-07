@@ -1094,6 +1094,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         target.exe_name,
       );
       if (outcome.delivered) {
+        // The backend pinned both ends, so a later restore pass has nothing
+        // to deliver here: claimed like the restore's own attempts, or the
+        // next session refresh would pin the same endpoints again and log it
+        // as a restoration of a feed the user added minutes ago.
+        feedRestoreDecided.add(`${sourcePid}|${target.exe_name.toLowerCase()}`);
         get().addLog(
           i18next.t('log.feedSet', { source: source.exe_name, target: target.exe_name }),
           'success',
@@ -1176,7 +1181,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   restoreRememberedFeeds: async () => {
-    const { rememberedFeeds, sessions, feedCarrier, feeds, routedPids } = get();
+    const { rememberedFeeds, sessions, feedCarrier, routedPids } = get();
     if (rememberedFeeds.length === 0) return;
     if (feedCarrier.render === null || feedCarrier.capture === null) return;
     const pidByExe = lowestPidByExe(sessions);
@@ -1197,7 +1202,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       for (const targetExe of entry.targetExe) {
         const targetPid = pidByExe.get(targetExe.toLowerCase());
         if (targetPid === undefined || targetPid === sourcePid) continue;
-        if ((feeds[sourcePid] ?? []).includes(targetPid)) continue;
+        // Membership in the live feed map is not delivery: the map is derived
+        // from this very memory, so every live pair is in it, and skipping on
+        // it would skip everything. What bounds the attempts is the decided
+        // set below — once per (pid, target) per run — and the delivered ones
+        // were claimed by `addFeed` at the moment the backend pinned them.
         const key = `${sourcePid}|${targetExe.toLowerCase()}`;
         if (feedRestoreDecided.has(key)) continue;
         pairs.push({ sourcePid, sourceExe: entry.sourceExe, targetPid, targetExe });

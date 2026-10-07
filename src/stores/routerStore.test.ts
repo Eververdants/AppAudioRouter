@@ -863,6 +863,57 @@ describe('feeds', () => {
     expect(state().feeds[MUSIC.pid]).toBeUndefined();
     expect(state().rememberedFeeds).toEqual([]);
   });
+
+  it('delivers remembered feeds again after a restart — the board is not delivery', async () => {
+    // Fresh names: the restore-decided set lives at module level, and a pair
+    // an earlier test added was claimed by that add.
+    const RESTORED_MUSIC: AudioSession = { pid: 6101, exe_name: 'restore-music.exe' };
+    const RESTORED_GAME: AudioSession = { pid: 6102, exe_name: 'restore-game.exe' };
+    const backend = installBackend({
+      sessions: [RESTORED_MUSIC, RESTORED_GAME],
+      feeds: [['restore-music.exe', 'restore-game.exe']],
+      carrier: { render: 'speakers', capture: 'cable-out' },
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [RESTORED_MUSIC, RESTORED_GAME],
+      feedCarrier: { render: 'speakers', capture: 'cable-out' },
+    });
+
+    // The boot sequence: the memory arrives with the lists already in place.
+    // The feed map the board reads is derived from this very memory, so its
+    // membership must not be read as "already delivered" — the endpoints have
+    // to be pinned again or the card says 送入 while nothing moves.
+    // `loadFeeds` fires the restore without waiting on it; give it a tick.
+    await state().loadFeeds();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      backend.calls.some(
+        (call) =>
+          call.cmd === 'set_feed_target' &&
+          call.args.sourcePid === RESTORED_MUSIC.pid &&
+          call.args.targetPid === RESTORED_GAME.pid,
+      ),
+    ).toBe(true);
+    expect(state().feeds[RESTORED_MUSIC.pid]).toEqual([RESTORED_GAME.pid]);
+    expect(lastLog()?.message).toContain('restore-music.exe');
+  });
+
+  it('does not re-pin a feed the user added this run when a refresh comes by', async () => {
+    const backend = installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME], feedCarrier: backend.carrier });
+
+    await state().addFeed(MUSIC.pid, GAME.pid);
+    const asksAfterAdd = backend.calls.filter((c) => c.cmd === 'set_feed_target').length;
+
+    // A Core Audio change arrives; the restore pass runs with it. The feed
+    // was delivered when it was added, so the pass has nothing to do here.
+    await state().refreshSessions();
+
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(asksAfterAdd);
+    expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+  });
 });
 
 describe('missing icons', () => {
