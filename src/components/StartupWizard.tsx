@@ -162,7 +162,7 @@ export function StartupWizard() {
             <button
               type="button"
               onClick={() => void dismiss()}
-              className="rounded px-2.5 py-1 text-[11px] font-medium text-text-muted outline-none transition-colors hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable rounded-ctl px-2.5 py-1 text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('wizard.skip')}
             </button>
@@ -170,7 +170,7 @@ export function StartupWizard() {
               <button
                 type="button"
                 onClick={() => setStep(step - 1)}
-                className="rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+                className="pressable rounded-ctl border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
               >
                 {t('wizard.back')}
               </button>
@@ -179,7 +179,7 @@ export function StartupWizard() {
               type="button"
               autoFocus
               onClick={() => (last ? void dismiss() : setStep(step + 1))}
-              className="rounded bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable rounded-ctl bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {last ? t('wizard.start') : t('wizard.next')}
             </button>
@@ -343,7 +343,7 @@ function CarrierStep({
             <button
               type="button"
               onClick={onPair}
-              className="shrink-0 rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable shrink-0 rounded-ctl bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('settings.feedCarrierApply')}
             </button>
@@ -362,7 +362,7 @@ function CarrierStep({
             <button
               type="button"
               onClick={() => void openCarrierDownload('vb-cable')}
-              className="shrink-0 rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable shrink-0 rounded-ctl border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('settings.feedCarrierDownload')}
             </button>

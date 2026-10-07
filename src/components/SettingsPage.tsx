@@ -18,7 +18,7 @@ import { useRouterStore } from '@/stores/routerStore';
  * looking like different kinds of control.
  */
 const ROW_BUTTON_CLASS =
-  'shrink-0 rounded border border-line px-2.5 py-1 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-secondary';
+  'pressable shrink-0 rounded-ctl border border-line px-2.5 py-1 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-secondary';
 
 /**
  * A titled group of rows.
@@ -132,7 +132,7 @@ function RememberedChip({
   return (
     <span
       title={`${entry.exeName} → ${target}`}
-      className="flex max-w-full items-center gap-1 rounded border border-line bg-surface-raised py-0.5 pl-1.5 pr-0.5 font-mono text-[10px] text-text-secondary"
+      className="flex max-w-full items-center gap-1 rounded-seg border border-line bg-surface-raised py-0.5 pl-1.5 pr-0.5 font-mono text-[10px] text-text-secondary"
     >
       <span className="truncate">{entry.exeName}</span>
       <button
@@ -140,7 +140,7 @@ function RememberedChip({
         onClick={() => onForget(entry.exeName)}
         aria-label={label}
         title={label}
-        className="flex h-4 w-4 flex-none items-center justify-center rounded text-text-muted outline-none transition-colors hover:bg-error/10 hover:text-error focus-visible:ring-2 focus-visible:ring-error/50"
+        className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full text-text-muted outline-none hover:bg-error/10 hover:text-error focus-visible:ring-2 focus-visible:ring-error/50"
       >
         <svg
           width="8"
@@ -247,7 +247,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 rounded text-[11px] font-medium text-text-muted outline-none transition-colors hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="pressable flex items-center gap-1.5 rounded-seg text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <svg
               width="12"
@@ -450,7 +450,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   onClick={() =>
                     void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)
                   }
-                  className="shrink-0 rounded bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+                  className="pressable shrink-0 rounded-ctl bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   {t('settings.feedCarrierApply')}
                 </button>

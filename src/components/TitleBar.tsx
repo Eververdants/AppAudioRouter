@@ -159,7 +159,7 @@ export function TitleBar({
             aria-label={t('settings.title')}
             title={t('settings.title')}
             aria-pressed={settingsOpen}
-            className={`flex h-6 w-6 items-center justify-center rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+            className={`pressable flex h-6 w-6 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
               settingsOpen
                 ? 'bg-accent-muted text-accent'
                 : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'

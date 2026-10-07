@@ -35,7 +35,7 @@ export function Switch({ checked, onChange, label, disabled = false }: SwitchPro
         aria-hidden="true"
         layout
         transition={SPRING_TAP}
-        className="h-4 w-4 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)]"
+        className="h-4 w-4 rounded-full border border-line-strong bg-white"
       />
     </motion.button>
   );

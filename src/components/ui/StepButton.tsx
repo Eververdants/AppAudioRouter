@@ -24,7 +24,7 @@ export function StepButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="flex h-6 w-6 flex-none items-center justify-center rounded border border-line text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default disabled:opacity-40 disabled:hover:border-line disabled:hover:text-text-secondary"
+      className="pressable flex h-6 w-6 flex-none items-center justify-center rounded-full border border-line text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default disabled:opacity-40 disabled:hover:border-line disabled:hover:text-text-secondary"
     >
       <svg
         width="9"

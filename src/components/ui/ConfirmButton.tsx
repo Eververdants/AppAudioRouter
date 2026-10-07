@@ -13,11 +13,12 @@ const CONFIRM_TIMEOUT_MS = 5000;
 
 /** The settings-row / table-header shape: a word that asks once before it acts. */
 const PILL_CLASS =
-  'shrink-0 rounded border px-2.5 py-1 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-muted';
+  'shrink-0 rounded-ctl border px-2.5 py-1 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-muted';
 /** The process-list header shape: here the idle look is an icon, so the armed
- * state has to read as "this one is asking something" on its own. */
+ * state has to read as "this one is asking something" on its own. Icon buttons
+ * are true circles — the same concentric mark every indicator wears. */
 const ICON_CLASS =
-  'mr-0.5 flex h-6 w-6 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-text-muted';
+  'mr-0.5 flex h-6 w-6 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-text-muted';
 
 /** Drawn in place of an icon button's glyph once it is armed. */
 const CONFIRM_GLYPH = (

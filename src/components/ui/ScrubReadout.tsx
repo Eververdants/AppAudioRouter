@@ -234,7 +234,7 @@ export function ScrubReadout({
           setEditing(true);
         }
       }}
-      className={`group/scrub relative flex h-4 cursor-ew-resize touch-none select-none items-center justify-center gap-px rounded-sm px-1 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent/60 ${
+      className={`group/scrub relative flex h-4 cursor-ew-resize touch-none select-none items-center justify-center gap-px rounded-full px-1 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent/60 ${
         dim ? 'opacity-50' : ''
       }`}
     >
