@@ -958,14 +958,57 @@ impl DuplicationManager {
             last_audio_ms: AtomicU64::new(0),
         });
 
-        // Claim the program's session volume for this route: the stored
-        // primary volume is what the primary device plays at, and the mirrors
-        // compensate for it (see `session_compensation`). What the program
-        // played at before is remembered so the route can give it back on
-        // stop — a session volume that outlived the route would keep the
-        // program quiet everywhere, and the volume mixer remembers the value
-        // for its next launch. Read before the set, so the restore hands back
-        // the user's own value rather than ours.
+        // Registering the engine is the moment two concurrent starts for the
+        // same PID are reconciled. `stop()` ran at the top of this method, but
+        // the COM work between there and here is slow enough that another
+        // `start` can have slipped its own engine in: without this check the
+        // loser is never told to shut down, its capture thread keeps writing
+        // the program's audio to its mirrors, and the user hears the route
+        // twice while its threads run until the process exits.
+        let losing = {
+            let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+            if engines.get(&pid).map(|e| e.generation).unwrap_or(0) > shared.generation {
+                // A newer engine took the seat while this start did its COM work.
+                // This one never spawned a thread, so withdrawing it is clean —
+                // and the caller is handed the generation of the engine that is
+                // actually serving the program.
+                return Ok(engines.get(&pid).map(|e| e.generation).unwrap_or(0));
+            }
+            // `insert` hands back whatever sat in the seat, so the eviction and
+            // the registration are one atomic step. The guard ends with this
+            // block: the loser is shut down outside the lock, the way `stop`
+            // does it, because handing its session volume back is a round of
+            // device and session enumeration and AudioSrv gets slow on a
+            // Bluetooth reconnect — seconds in which every command that wants
+            // `engines` would be queued behind us.
+            engines.insert(pid, Arc::clone(&shared))
+        };
+        if let Some(losing) = losing {
+            losing.shutdown.store(true, Ordering::Relaxed);
+            // A mirror parked on a quiet source waits on its own thread rather
+            // than on the device; wake it or the capture thread cannot join it
+            // until the park's backstop expires.
+            for mirror in &losing.mirrors {
+                mirror.wake();
+            }
+            // Losing the seat is a stop like any other: the program's session
+            // volume goes back to what the loser read before it claimed it.
+            losing.restore_session_volume();
+        }
+
+        // Claim the program's session volume for this route — only now that the
+        // seat is settled, and only after the engine that held it has handed its
+        // own value back. Reading the pre-route value any earlier lets a losing
+        // concurrent start leave *its* write standing (it returns above without
+        // a thread to restore it) and lets the winner read that write as the
+        // user's own setting: the original loudness would be lost for good, and
+        // `session_compensation` would divide by a percent the session is not
+        // actually at, which is how a copy ends up loud by twenty times.
+        //
+        // What the program played at before is remembered so the route can give
+        // it back on stop — a session volume that outlived the route would keep
+        // the program quiet everywhere, and the volume mixer remembers the value
+        // for its next launch.
         if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
             shared.restore_volume_percent.store(
                 (pre_route * 100.0).round().clamp(0.0, 100.0) as u32,
@@ -980,65 +1023,21 @@ impl DuplicationManager {
             warn!("no live session for PID {pid} — primary volume applies when it next sounds");
         }
 
-        // Registering the engine is the moment two concurrent starts for the
-        // same PID are reconciled. `stop()` ran at the top of this method, but
-        // the COM work between there and here is slow enough that another
-        // `start` can have slipped its own engine in: without this check the
-        // loser is never told to shut down, its capture thread keeps writing
-        // the program's audio to its mirrors, and the user hears the route
-        // twice while its threads run until the process exits.
-        if self
-            .engines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&pid)
-            .map(|e| e.generation)
-            .unwrap_or(0)
-            > shared.generation
-        {
-            // A newer engine took the seat while this start did its COM work.
-            // This one never spawned a thread, so withdrawing it is clean —
-            // and the caller is handed the generation of the engine that is
-            // actually serving the program.
-            return Ok(self
-                .engines
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&pid)
-                .map(|e| e.generation)
-                .unwrap_or(0));
-        }
-        // `insert` hands back whatever sat in the seat, so the eviction and the
-        // registration are one atomic step; the loser is shut down afterwards,
-        // outside the lock, exactly the way `stop` does it.
-        if let Some(losing) = self
-            .engines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(pid, Arc::clone(&shared))
-        {
-            losing.shutdown.store(true, Ordering::Relaxed);
-            // A mirror parked on a quiet source waits on its own thread rather
-            // than on the device; wake it or the capture thread cannot join it
-            // until the park's backstop expires.
-            for mirror in &losing.mirrors {
-                mirror.wake();
-            }
-            // Losing the seat is a stop like any other: the program's session
-            // volume goes back to what the loser read before it claimed it, or
-            // the restore would hand back a value this run wrote itself.
-            losing.restore_session_volume();
-        }
-
         let generation = shared.generation;
         let app = app.clone();
+        let thread_shared = Arc::clone(&shared);
         if let Err(e) = std::thread::Builder::new()
             .name(format!("aar-dup-{pid}"))
-            .spawn(move || capture_main(shared, app))
+            .spawn(move || capture_main(thread_shared, app))
         {
             // The engine never started, so no thread will unregister it; drop
             // the entry here or `active_routes` would report it forever.
             self.unregister(pid, generation);
+            // And give the loudness back: the thread that owns an engine's
+            // teardown is the only thing that would have, and it never ran, so
+            // the program would stay quiet on every path — with the volume
+            // mixer remembering our value for its next launch.
+            shared.restore_session_volume();
             return Err(AudioError::Api(format!("spawn capture thread failed: {e}")));
         }
         Ok(generation)
