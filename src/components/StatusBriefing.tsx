@@ -194,7 +194,7 @@ export function StatusBriefing() {
               exit={{ opacity: 0, y: 6, scale: 0.98 }}
               transition={SPRING_GLIDE}
               transformTemplate={MAIN_THREAD_TRANSFORM}
-              className="bg-surface border border-line shadow-float absolute bottom-full left-0 mb-2 w-[300px] rounded-card p-3.5"
+              className="bg-surface border border-line-strong absolute bottom-full left-0 mb-2 w-[300px] rounded-card p-3.5"
             >
               <ul className="flex flex-col gap-2">
                 {lines.map((line) => (

@@ -108,7 +108,7 @@ export function Toast() {
                 setHeld(false);
               }
             }}
-            className="bg-surface border-line shadow-float pointer-events-auto flex items-center gap-3 rounded-full border py-2 pl-4 pr-2"
+            className="bg-surface border-line-strong pointer-events-auto flex items-center gap-3 rounded-full border py-2 pl-4 pr-2"
           >
             <span className="text-[12px] text-text-secondary">
               {feedUndo.added
@@ -118,7 +118,7 @@ export function Toast() {
             <button
               type="button"
               onClick={() => void undoFeed()}
-              className="shrink-0 rounded px-2.5 py-1 text-[12px] font-semibold text-accent outline-none transition-colors hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold text-accent outline-none hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('toast.undo')}
             </button>
@@ -156,7 +156,7 @@ export function Toast() {
                 setHeld(false);
               }
             }}
-            className="bg-surface border border-line shadow-float pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-2"
+            className="bg-surface border border-line-strong pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-2"
           >
             <span className="text-[12px] text-text-secondary">
               {/* The offer names where the sound went, not just that it moved:
@@ -184,7 +184,7 @@ export function Toast() {
             <button
               type="button"
               onClick={() => void undoLastRoute()}
-              className="shrink-0 rounded px-2.5 py-1 text-[12px] font-semibold text-accent outline-none transition-colors hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold text-accent outline-none hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('toast.undo')}
             </button>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { Spinner } from '@/components/ui/Spinner';
 import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import type { ResetOutcome } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
@@ -55,15 +56,16 @@ export function StartupNoticeDialog() {
       aria-modal="true"
       aria-labelledby="startup-notice-title"
     >
-      {/* The one surface in the app that is genuinely above the page, so the
-          one that keeps a shadow: without it the dimmed backdrop alone does not
-          say which of the two layers the words belong to. */}
+      {/* The one surface in the app that is genuinely above the page. It stays
+          flat like everything else — the dimmed backdrop and a strong hairline
+          are what say which layer the words belong to; a shadow would only
+          tell the interface it does not believe its own borders. */}
       <motion.div
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={SPRING_GLIDE}
         transformTemplate={MAIN_THREAD_TRANSFORM}
-        className="bg-surface border border-line shadow-float w-full max-w-md rounded-panel p-5"
+        className="bg-surface border border-line-strong w-full max-w-md rounded-panel p-5"
       >
         <h2 id="startup-notice-title" className="text-[15px] font-semibold tracking-tight text-text-primary">
           {t('startup.upgradeTitle')}
@@ -78,7 +80,7 @@ export function StartupNoticeDialog() {
 
         {result !== null && (
           <p
-            className={`mt-3 rounded border border-line px-3 py-2 font-mono text-[11px] leading-relaxed tabular-nums ${
+            className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] leading-relaxed tabular-nums ${
               result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
             }`}
           >
@@ -93,15 +95,16 @@ export function StartupNoticeDialog() {
             type="button"
             onClick={() => void runReset()}
             disabled={busy}
-            className="rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+            className="pressable flex items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
           >
+            {busy && <Spinner size={11} />}
             {busy ? t('startup.resetting') : t('startup.resetAction')}
           </button>
           <button
             type="button"
             autoFocus
             onClick={() => void dismiss()}
-            className="rounded border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none transition-colors hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="pressable rounded-ctl border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             {t('startup.dismiss')}
           </button>
