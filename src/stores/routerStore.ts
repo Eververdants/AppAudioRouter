@@ -87,10 +87,11 @@ interface RouterState {
   selectedDeviceIds: string[];
   /**
    * Whether `selectedDeviceIds` is still the app's own guess (the process's
-   * live route, its remembered route, or the system default it already plays
-   * through) rather than something the user picked. A guess is replaced by the
-   * first device clicked, so choosing a device cannot silently keep the guessed
-   * one playing alongside it.
+   * live route, or the system default it already plays through) rather than
+   * something the user picked. A guess is replaced by the first device clicked,
+   * so choosing a device cannot silently keep the guessed one playing
+   * alongside it. The remembered route is deliberately not part of the guess —
+   * until it is restored into a live route it is not where the process plays.
    */
   deviceSelectionPrefilled: boolean;
   /** Devices each process is currently routed to, keyed by PID. */
@@ -951,7 +952,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   selectProcess: (pid) =>
     set((s) => ({
       // Single selection starts fresh from that process's active targets, or
-      // from the system default endpoint it already plays through.
+      // from the system default endpoint it already plays through. The
+      // remembered route is deliberately not a guess: until it has been
+      // restored into a live route the program is playing through the default,
+      // and proposing a route the user just stopped back at them is not a
+      // guess about where the process plays.
       selectedPids: [pid],
       selectedDeviceIds: s.routedPids[pid] ?? defaultTargets(s),
       // Whatever came out of that is a guess about where the process plays, not
