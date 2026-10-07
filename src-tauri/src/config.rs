@@ -124,6 +124,10 @@ impl RouteConfig {
     /// Save an app's ordered route targets.
     pub fn save_route(&self, exe_name: &str, device_ids: &[String]) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        // Drop any stored key that differs only in case before inserting, so one
+        // executable holds exactly one entry. Two entries for one program is how
+        // a remembered route ends up applied to two of a browser's processes.
+        inner.retain_routes_except(exe_name);
         inner
             .map
             .routes
@@ -134,7 +138,12 @@ impl RouteConfig {
     /// Remove a route mapping.
     pub fn remove_route(&self, exe_name: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        inner.map.routes.remove(exe_name);
+        if !inner.retain_routes_except(exe_name) {
+            // Nothing was stored under this name in any case. Still persist: the
+            // answer the caller gets is the same either way, and a file that
+            // already says what it should is not worth a write.
+            return Ok(());
+        }
         inner.persist()
     }
 
@@ -151,6 +160,23 @@ impl RouteConfig {
 }
 
 impl RouteConfigInner {
+    /// Drop every stored key that names `exe_name`, whatever its case, and
+    /// report whether anything went.
+    ///
+    /// The stored key is the name Windows has for the file as this run happened
+    /// to see it, so the same program can arrive once as `Chrome.exe` and once
+    /// as `chrome.exe`. Matched exactly, "forget this route" would answer
+    /// success, drop nothing, and put the route back on the next launch — and a
+    /// second entry for one executable is how a remembered route ends up applied
+    /// to two of a browser's processes.
+    fn retain_routes_except(&mut self, exe_name: &str) -> bool {
+        let before = self.map.routes.len();
+        self.map
+            .routes
+            .retain(|stored, _| !stored.eq_ignore_ascii_case(exe_name));
+        self.map.routes.len() != before
+    }
+
     /// Persist to disk.
     fn persist(&self) -> Result<(), String> {
         persist_json(&self.path, &self.map)
