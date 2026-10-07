@@ -186,7 +186,7 @@ AppAudioRouter/
 - 禁止在前端拼接 shell 命令
 - Rust 端 COM 调用必须校验输入（device_id 格式、pid 范围）
 - 每应用端点分配的清除只走槽 25 的 null HSTRING（单进程）；槽 27 的 `ClearAll...` 会连用户手设的一起清，禁止使用
-- 系统关键进程的路由必须在 `audio::routing::set_process_default_device` 被拒（`is_protected_process`），别在别处另开写入路径
+- 系统关键进程的路由必须在 `audio::routing::set_persisted_default`（两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
 - 前端永不传 URL：`open_carrier_download` 只收驱动 key，URL 映射固定在 Rust 侧（`commands.rs` 的 `CARRIER_PAGES`），页面经 `ShellExecuteW` 的 open 动词交给浏览器关联

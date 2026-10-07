@@ -599,16 +599,39 @@ impl EngineShared {
     /// is gone has nothing left to restore, and one whose mixer value could
     /// not be read at start was never touched.
     fn restore_session_volume(&self) {
-        if !self.restore_volume.load(Ordering::Relaxed) {
+        // Taking the promise rather than testing it is what keeps this off the
+        // double-write list: the exit worker may have collected the same promise
+        // a moment before its thread did.
+        let Some((pid, percent)) = self.take_restore_promise() else {
             return;
+        };
+        restore_session_volume_now(pid, percent);
+    }
+
+    /// Take this engine's promise to hand the program's loudness back, leaving
+    /// nothing behind. `None` when it never claimed one, or when somebody has
+    /// already taken it.
+    fn take_restore_promise(&self) -> Option<(u32, u32)> {
+        if !self.restore_volume.swap(false, Ordering::Relaxed) {
+            return None;
         }
-        self.restore_volume.store(false, Ordering::Relaxed);
-        let percent = self.restore_volume_percent.load(Ordering::Relaxed);
-        let touched =
-            super::sessions::set_session_volume(self.pid, percent as f32 / 100.0).unwrap_or(0);
-        if touched > 0 {
-            info!("restored session volume of PID {} to {percent}%", self.pid);
-        }
+        Some((
+            self.pid,
+            self.restore_volume_percent.load(Ordering::Relaxed),
+        ))
+    }
+}
+
+/// Write a program's session volume back and say so when it landed.
+///
+/// A free function because the exit path calls it from a thread that owns no
+/// `DuplicationManager`: the process is leaving, and holding one to do this
+/// would keep the audio service's slow round trips on the shutdown's critical
+/// path.
+pub fn restore_session_volume_now(pid: u32, percent: u32) {
+    let touched = super::sessions::set_session_volume(pid, percent as f32 / 100.0).unwrap_or(0);
+    if touched > 0 {
+        info!("restored session volume of PID {pid} to {percent}%");
     }
 }
 
@@ -781,7 +804,13 @@ impl DuplicationManager {
     /// Called on app exit: the route ends with the process, and a session
     /// volume left behind would keep the program quietly playing everywhere —
     /// the volume mixer remembers the value for its next launch.
-    pub fn restore_all_session_volumes(&self) {
+    /// The loudness every running engine still owes, as `(pid, percent)`, after
+    /// taking each engine's promise.
+    ///
+    /// Quitting collects these on the way out and hands the writes to the exit
+    /// worker, which cannot hold a `DuplicationManager` — and taking them is what
+    /// keeps an engine's own teardown from writing the same value a second time.
+    pub fn take_pending_session_volume_restores(&self) -> Vec<(u32, u32)> {
         // Same shape as `update_primary_volume`: snapshot under the lock, do
         // the session writes outside of it.
         let engines: Vec<Arc<EngineShared>> = self
@@ -791,9 +820,10 @@ impl DuplicationManager {
             .values()
             .cloned()
             .collect();
-        for engine in engines {
-            engine.restore_session_volume();
-        }
+        engines
+            .iter()
+            .filter_map(|engine| engine.take_restore_promise())
+            .collect()
     }
 
     /// Push a program's level to every engine running for it.

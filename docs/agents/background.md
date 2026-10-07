@@ -66,7 +66,8 @@
 - 清除后必须**读回校验**（`release_default_endpoints` 已这么做），并把结果回给前端；Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
 - 四条归还路径缺一不可，各自覆盖一种"分配比路由活得久"的情形：停止路由（`stop_route`）、退出应用（`main.rs` 的 `RunEvent::ExitRequested` → `release_pinned_blocking`，独立线程 + 有界等待，绝不能让音频服务卡住退出）、程序在路由期间退出后下次出声（`release_stale_routes`；音频服务按 pid 寻址，所以只能借它新的进程去释放）、设置页「重置每应用音频输出」（`reset_pinned_endpoints`，清旧版本留下的，跳过仍在路由的 pid）。
 - 新增任何"改变某程序输出"的代码路径，都要把这一套接上：写 → 登记 → 停止时归还。少一步就是把用户锁在错误的设备上，而且界面上没有任何东西能解释为什么。
-- 系统关键进程在 `set_process_default_device` 入口被 `is_protected_process` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径。
+- 系统关键进程在 `set_persisted_default`（渲染与捕获两条写入流共用）被 `routing_refusal` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径
+- ⚠️ **读不出进程名的 pid 一律拒绝**（`None` 不是「不在名单上」）：`csrss`/`lsass`/`audiodg` 对本应用不可见的原因，正是它们受保护。名字先用 `QueryFullProcessImageNameW` 再退回 `GetProcessImageFileNameA`——后者 260 字节的缓冲区对长路径返回 0，而「返回 0」当年就是放行系统进程的那个答案。代价是比本应用权限更高的程序无法被路由，提示语要说清是哪一种，别把它们都叫成系统进程。
 
 ## 启动提示（`install.rs`，2.1.1 起）
 

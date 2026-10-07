@@ -181,38 +181,45 @@ fn main() {
             // though the user switched to another one afterwards. (`ExitRequested`
             // covers both the tray's Quit and closing the last window.)
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                restore_session_volumes(app);
                 release_pinned_routes(app);
             }
         });
 }
 
-/// Give every routed program its pre-route loudness back before quitting.
+/// Release every endpoint assignment this run wrote, and give back every
+/// session volume it claimed, before the app goes away.
 ///
-/// The session volume a route wrote for its primary device would otherwise
-/// follow the program into its unrouted life — and the volume mixer remembers
-/// the value for the next launch — so it is handed back the same way the
-/// endpoint assignments are.
-fn restore_session_volumes(app: &AppHandle) {
-    if let Some(duplications) = app.try_state::<audio::duplication::DuplicationManager>() {
-        duplications.restore_all_session_volumes();
-    }
-}
-
-/// Release every endpoint assignment this run wrote, before the app goes away.
+/// Both are best effort with one bounded wait, on a thread of their own. The
+/// endpoint release has always been guarded this way — a shutdown must never
+/// hang on the audio service — and handing the loudness back is the same kind of
+/// work: one device and session enumeration per engine, across the same service.
+/// Left on this thread it could keep the window from closing, which is exactly
+/// what the bound below exists to prevent.
 ///
-/// Best effort with a bounded wait, on a thread of its own: a slow audio service
-/// must not keep the window from closing.
+/// The volumes go first: the endpoint release is the slower of the two, and a
+/// program that keeps the device this app chose matters more than a program that
+/// keeps the volume it chose.
 fn release_pinned_routes(app: &AppHandle) {
     let Some(pins) = app.try_state::<audio::routing::PinnedRoutes>() else {
         return;
     };
     // Taken, not copied: nothing will retry once the process is gone.
     let pids = pins.take_all();
-    if pids.is_empty() {
+    // The loudness each engine promised to hand back, collected here so the
+    // worker needs no reference to the manager — and taken once, so an engine's
+    // own teardown cannot write the same value a second time.
+    let restores = app
+        .try_state::<audio::duplication::DuplicationManager>()
+        .map(|manager| manager.take_pending_session_volume_restores())
+        .unwrap_or_default();
+    if pids.is_empty() && restores.is_empty() {
         return;
     }
-    let outcomes = audio::routing::release_pinned_blocking(pids, RELEASE_ON_EXIT_TIMEOUT);
+    let outcomes = audio::routing::exit_cleanup(pids, RELEASE_ON_EXIT_TIMEOUT, move || {
+        for (pid, percent) in restores {
+            audio::duplication::restore_session_volume_now(pid, percent);
+        }
+    });
     let stuck: Vec<String> = outcomes
         .iter()
         .filter(|(_, outcome)| *outcome != audio::routing::ReleaseOutcome::Released)

@@ -441,20 +441,43 @@ const PROTECTED_EXES: [&str; 9] = [
     "audiodg.exe",
 ];
 
-/// Whether routing this PID has to be refused.
+/// Why routing this PID must be refused, in the words the log and the frontend
+/// will see; `None` means it may be routed.
 ///
 /// PID 0 (the system-sounds session) and PID 4 (`System`) are protected by
 /// identity, everything else by executable name.
-pub fn is_protected_process(pid: u32) -> bool {
+///
+/// A name that cannot be read at all is refused too, and that is the part worth
+/// reading twice. The processes this list exists for are the ones an ordinary
+/// user cannot open — `csrss.exe`, `lsass.exe`, `audiodg.exe` are protected
+/// against exactly that — so an unreadable name is where they hide, and
+/// guessing "not on the list" re-points every session a program holds, which is
+/// the one mistake here that would take the whole machine's audio with it. The
+/// price is that a program running more elevated than this app cannot be routed;
+/// the message says which of the two happened instead of accusing it.
+pub fn routing_refusal(pid: u32) -> Option<&'static str> {
     if pid == 0 || pid == 4 {
-        return true;
+        return Some("a system-critical process");
     }
-    match crate::audio::sessions::get_process_exe_name(pid) {
+    match process_name_for_guard(pid) {
         Some(name) => PROTECTED_EXES
             .iter()
-            .any(|protected| name.eq_ignore_ascii_case(protected)),
-        None => false,
+            .any(|protected| name.eq_ignore_ascii_case(protected))
+            .then_some("a system-critical process"),
+        None => Some("a process this app cannot identify"),
     }
+}
+
+/// The executable name the guard compares against `PROTECTED_EXES`.
+///
+/// `QueryFullProcessImageNameW` first: it needs less of a right than the
+/// image-name API and hands back a real path. The `A` form is the fallback, not
+/// the other way round — its fixed 260-byte buffer reports nothing for a longer
+/// path, and "nothing" was the answer that let a protected process through.
+fn process_name_for_guard(pid: u32) -> Option<String> {
+    crate::audio::process_meta::process_image(pid)
+        .map(|(_, name)| name)
+        .or_else(|| crate::audio::sessions::get_process_exe_name(pid))
 }
 
 // ---------------------------------------------------------------------------
@@ -834,21 +857,32 @@ pub fn release_default_endpoints(
     result
 }
 
-/// Release several processes from a thread this module owns.
+/// Hand the user's programs back on the way out, on a thread this module owns,
+/// with one bounded wait covering the whole of it.
+///
+/// `first` runs before the endpoints: it is whatever else this run still owes
+/// (the session volumes it claimed), and it is the same kind of work — a device
+/// and session enumeration through the same service — so it belongs inside the
+/// same deadline rather than on the WebView2 main thread, where an unresponsive
+/// AudioSrv would keep the window from ever closing.
 ///
 /// The policy factory needs an MTA thread, and the shutdown path runs on the
-/// WebView2 main thread (STA), so the work moves here. The wait is bounded: a
-/// shutdown must never hang on the audio service.
-pub fn release_pinned_blocking(
+/// main thread (STA), so all of it moves here. The wait is bounded and never
+/// joined: a shutdown must not hang on the audio service.
+pub fn exit_cleanup(
     pids: Vec<u32>,
     timeout: std::time::Duration,
+    first: impl FnOnce() + Send + 'static,
 ) -> Vec<(u32, ReleaseOutcome)> {
-    if pids.is_empty() {
-        return Vec::new();
-    }
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(release_default_endpoints(&pids, Role::All));
+        first();
+        let result = if pids.is_empty() {
+            Ok(Vec::new())
+        } else {
+            release_default_endpoints(&pids, Role::All)
+        };
+        let _ = tx.send(result);
     });
     match rx.recv_timeout(timeout) {
         Ok(Ok(outcomes)) => outcomes,
@@ -971,9 +1005,9 @@ async fn set_process_default_endpoint_flow(
     if pid == 0 {
         return Err(AudioError::Api("invalid pid".to_string()));
     }
-    if is_protected_process(pid) {
+    if let Some(refusal) = routing_refusal(pid) {
         return Err(AudioError::Api(format!(
-            "PID {pid} is a system-critical process; routing it is refused"
+            "PID {pid} is {refusal}; routing it is refused"
         )));
     }
     validate_device_id(device_id)?;
@@ -1221,7 +1255,14 @@ mod tests {
 
     #[test]
     fn system_processes_are_protected() {
-        assert!(is_protected_process(0));
-        assert!(is_protected_process(4));
+        assert_eq!(routing_refusal(0), Some("a system-critical process"));
+        assert_eq!(routing_refusal(4), Some("a system-critical process"));
+    }
+
+    /// The guard reads a name it can and refuses only what is on the list — a
+    /// readable process that is not one of them stays routable.
+    #[test]
+    fn an_ordinary_process_is_not_protected() {
+        assert_eq!(routing_refusal(std::process::id()), None);
     }
 }
