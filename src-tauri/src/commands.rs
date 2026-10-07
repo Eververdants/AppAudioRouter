@@ -282,13 +282,6 @@ pub async fn stop_route(
         None => false,
     };
     duplications.stop(pid);
-    // Resolve the fallback endpoint before releasing the assignment: if the
-    // assignment cannot be released, the program is pointed here so it keeps
-    // playing where the user can hear it.
-    let default_device = tokio::task::spawn_blocking(audio::devices::get_default_render_device)
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
 
     if sibling_routed {
         // The assignment Windows persists is stored per executable, and a
@@ -360,14 +353,14 @@ pub async fn stop_route(
         }
         Ok(_) => {
             warn!("PID {pid} still carries an endpoint assignment after the release attempt");
-            Ok(pin_to_default(pid, &default_device.id, &pins).await)
+            Ok(pin_to_default_or_abandon(pid, &pins).await)
         }
         Err(e) => {
             // The policy object was unavailable, so nothing could be released;
             // fall back to the pre-2.1.1 behaviour rather than leaving the
             // program on the device it was routed to.
             warn!("releasing the endpoint assignment of PID {pid} failed: {e}");
-            Ok(pin_to_default(pid, &default_device.id, &pins).await)
+            Ok(pin_to_default_or_abandon(pid, &pins).await)
         }
     }
 }
@@ -399,6 +392,28 @@ async fn pin_to_default(pid: u32, device_id: &str, pins: &PinnedRoutes) -> StopO
             // and the board shows no route for the user to stop — leaving an app
             // restart as the only way back. It stays in the book, because the
             // assignment is still ours and quitting has to try again.
+            pins.mark_abandoned(pid);
+            StopOutcome {
+                released: false,
+                pinned_device: None,
+            }
+        }
+    }
+}
+
+/// The stop's fallback when the assignment would not release: point the
+/// program at the system default and admit the pin.
+///
+/// The default device is looked up here rather than before the release, and a
+/// failed lookup downgrades the entry instead of aborting the stop: by this
+/// line the engine is already down, and returning an error would strand a
+/// `Route` entry no later path can reach — the reset skips live routes, the
+/// sweep skips live pids, and the board shows no route to stop.
+async fn pin_to_default_or_abandon(pid: u32, pins: &PinnedRoutes) -> StopOutcome {
+    match tokio::task::spawn_blocking(audio::devices::get_default_render_device).await {
+        Ok(Ok(default)) => pin_to_default(pid, &default.id, pins).await,
+        _ => {
+            warn!("could not look up the default device to fall back on for PID {pid}");
             pins.mark_abandoned(pid);
             StopOutcome {
                 released: false,
