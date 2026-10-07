@@ -386,15 +386,21 @@ fn decode_icon(icon: &ICONINFO) -> Option<IconImage> {
             Some(&mut bmp as *mut BITMAP as *mut core::ffi::c_void),
         )
     };
-    if filled == 0 || bmp.bmWidth <= 0 || bmp.bmHeight <= 0 {
+    if filled == 0 || bmp.bmWidth == 0 || bmp.bmHeight == 0 {
         return None;
     }
-    let width = bmp.bmWidth as usize;
+    // A 32-bit icon's colour bitmap is a *top-down* DIB section, and GetObject
+    // reports that as a negative height. Measured as a signed number that reads
+    // as "no image", which is how every modern browser's icon used to fall back
+    // to a letter tile — and because a miss is never cached, the whole extract
+    // was paid for again on every refresh. `dib_bits` below always asks for
+    // top-down rows, so the magnitude is all either orientation needs.
+    let width = bmp.bmWidth.unsigned_abs() as usize;
     let height = if have_color {
-        bmp.bmHeight as usize
+        bmp.bmHeight.unsigned_abs() as usize
     } else {
         // The mask bitmap of a monochrome icon holds XOR half and AND half.
-        bmp.bmHeight as usize / 2
+        bmp.bmHeight.unsigned_abs() as usize / 2
     };
     if width == 0 || height == 0 {
         return None;
@@ -422,8 +428,16 @@ fn decode_icon(icon: &ICONINFO) -> Option<IconImage> {
 /// when the icon predates per-pixel alpha.
 fn decode_color_icon(hdc: HDC, icon: &ICONINFO, width: usize, height: usize) -> Option<IconImage> {
     let bgra = dib_bits(hdc, icon.hbmColor, width, height, 32)?;
-    let mask = dib_bits(hdc, icon.hbmMask, width, height, 1)?;
     let has_alpha = bgra.iter().skip(3).step_by(4).any(|&a| a != 0);
+    // The AND mask is only ever a fallback, and reading it unconditionally made
+    // it a requirement: a mask GDI refused to hand over threw away an icon whose
+    // own pixels carried a perfect alpha channel. Read it only when it is needed,
+    // and keep giving up when it is needed and missing.
+    let mask = if has_alpha {
+        Vec::new()
+    } else {
+        dib_bits(hdc, icon.hbmMask, width, height, 1)?
+    };
     let row_bytes = width.div_ceil(32) * 4;
     let mask_bit =
         |x: usize, y: usize| -> bool { mask[y * row_bytes + x / 8] >> (7 - (x % 8)) & 1 == 1 };
