@@ -1455,7 +1455,13 @@ fn session_compensation(shared: &EngineShared) -> f32 {
 /// Gain to apply to `mirror`'s frames: its own share of the group's loudest
 /// device, i.e. 1.0 when it is the loudest one (or the only one left).
 fn volume_gain(shared: &EngineShared, mirror: &MirrorChannel) -> f32 {
-    mirror.volume_percent.load(Ordering::Relaxed) as f32 / group_max_volume(shared) as f32
+    let own = mirror.volume_percent.load(Ordering::Relaxed);
+    // The group max re-reads every share, so a volume change that lands
+    // between the two loads can hand back a max below `own` — a gain above
+    // 1.0, one chunk at clip level, from an arithmetic that may only ever
+    // attenuate. `own` is part of that group, so a legit max is never smaller;
+    // the floor says so.
+    own as f32 / group_max_volume(shared).max(own) as f32
 }
 
 /// Gain for the program's own audio, from its persisted level.
@@ -2639,6 +2645,21 @@ mod tests {
         let shared = engine_with_volumes(&[20, 100], 50);
         shared.mirrors[1].enabled.store(false, Ordering::Relaxed);
         assert_eq!(group_max_volume(&shared), 20);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 1.0);
+    }
+
+    #[test]
+    fn a_share_above_the_reference_never_boosts() {
+        // The mirror's own share and the group max are two separate reads, and
+        // a volume change — or a mirror going out of service — between them
+        // can hand back a max below `own`. Attenuation is the only thing this
+        // gain may do, so the read floors at the mirror's own share rather
+        // than letting one chunk through at a boost.
+        let shared = engine_with_volumes(&[100, 20], 80);
+        shared.mirrors[0].enabled.store(false, Ordering::Relaxed);
+        // The loudest share is no longer counted in the reference...
+        assert_eq!(group_max_volume(&shared), 20);
+        // ...but its own gain still never boosts.
         assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 1.0);
     }
 
