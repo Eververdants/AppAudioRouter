@@ -77,6 +77,20 @@ impl SourceLevels {
             );
     }
 
+    /// Drop one engine's reading.
+    ///
+    /// Called when the engine that published under `(exe_name, pid)` is over:
+    /// nothing will refresh the number again, so the entry would sit in the
+    /// table for the life of the process. The pause-and-resume case the stale
+    /// filter below protects does not apply — there is no engine left to
+    /// resume.
+    pub fn forget(&self, exe_name: &str, pid: u32) {
+        self.levels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(exe_name.to_string(), pid));
+    }
+
     /// Every program still being measured, as `(exe_name, level)` pairs sorted
     /// by name so the order a caller sees does not shift under it.
     ///

@@ -1134,17 +1134,31 @@ impl DuplicationManager {
     }
 
     /// Remove `pid`'s engine unless a newer engine replaced it. Called by the
-    /// engine's own capture thread on exit; `true` when this engine was still
-    /// the one serving `pid`, which is what makes its own teardown steps (the
-    /// session-volume restore) safe to run.
-    fn unregister(&self, pid: u32, generation: u64) -> bool {
+    /// engine's own capture thread on exit; [`UnregisterOutcome::Current`] is
+    /// what makes its own teardown steps (the session-volume restore) safe to
+    /// run.
+    fn unregister(&self, pid: u32, generation: u64) -> UnregisterOutcome {
         let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
-        if engines.get(&pid).map(|e| e.generation) == Some(generation) {
-            engines.remove(&pid);
-            return true;
+        match engines.get(&pid).map(|e| e.generation) {
+            Some(g) if g == generation => {
+                engines.remove(&pid);
+                UnregisterOutcome::Current
+            }
+            Some(_) => UnregisterOutcome::Replaced,
+            None => UnregisterOutcome::Empty,
         }
-        false
     }
+}
+
+/// What [`DuplicationManager::unregister`] found in the seat.
+enum UnregisterOutcome {
+    /// This engine was still the one serving `pid`; it left the map with this
+    /// call.
+    Current,
+    /// A newer engine serves `pid` now.
+    Replaced,
+    /// No engine serves `pid` — `stop` already removed this one.
+    Empty,
 }
 
 /// Entry point of an engine's capture thread.
@@ -1177,7 +1191,7 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
         shared.capture_wakeups.load(Ordering::Relaxed),
         mirror_wakes
     );
-    let was_current = app
+    let outcome = app
         .state::<DuplicationManager>()
         .unregister(shared.pid, shared.generation);
     // An engine that died on its own error leaves the program playing at the
@@ -1185,8 +1199,18 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
     // (and with it the session) is gone. A clean `Stopped` exit was already
     // restored synchronously by `stop`, and restoring again here could clobber
     // a successor engine's freshly claimed volume.
-    if was_current && matches!(reason, ExitReason::Error(_)) {
+    if matches!(outcome, UnregisterOutcome::Current)
+        && matches!(reason, ExitReason::Error(_))
+    {
         shared.restore_session_volume();
+    }
+    // The level table holds one entry per engine, and this engine will publish
+    // no more — `run_capture` has returned — so a `Current` or `Empty` exit
+    // leaves its entry orphaned for the life of the process unless it goes
+    // now. A `Replaced` exit is the successor's seat: the successor publishes
+    // under the same key.
+    if !matches!(outcome, UnregisterOutcome::Replaced) {
+        shared.levels.forget(&shared.exe_name, shared.pid);
     }
     let _ = app.emit(
         "duplication-stopped",
