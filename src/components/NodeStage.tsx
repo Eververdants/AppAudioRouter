@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { SourceLevelDial } from '@/components/SourceLevelDial';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
+import { Spinner } from '@/components/ui/Spinner';
 import { useLiveness } from '@/hooks/useLiveness';
 import { clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
@@ -61,9 +62,10 @@ interface Placement {
 }
 
 /** Card chrome shared by hub, targets, feeders and the ghost: the continuous-
- *  curvature corner, the plane, the hairline, the one floating shadow. */
+ *  curvature corner, the plane, and the strong hairline that separates a card
+ *  from the sunken well — flat blocks with nothing cast and nothing lifted. */
 const CARD_CLASS =
-  'cc absolute rounded-panel bg-surface border border-line-strong shadow-float';
+  'cc absolute rounded-panel bg-surface border border-line-strong';
 /** The role word colour, by role. Literal classes: Tailwind scans source text. */
 const ROLE_TEXT_CLASS = {
   primary: 'text-type-primary',
@@ -274,7 +276,8 @@ export function NodeStage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The well: the plane the board sits on. Flat, sunken, hairlined from
-          the rail; the cards float above it and carry the one shadow. */}
+          the rail; the cards sit on it as solid blocks, separated by the
+          strength of their own borders — nothing casts anything. */}
       <div className="bg-surface-sunken min-h-0 flex-1 overflow-auto">
         <div
           ref={boardRef}
@@ -282,6 +285,33 @@ export function NodeStage() {
           style={{ width: BOARD_W, height }}
           onMouseLeave={() => setHoverKey(null)}
         >
+          {/* The halo: the hub's own concentric rings, drawn into the well as
+              line work. The interface's every indicator is two circles sharing
+              a centre; here the same mark is scaled up until it is scenery —
+              the plane declaring whose board this is without lighting, filling
+              or shadowing anything. Pure hairline, behind every card and every
+              wire, and it scrolls with the board rather than hovering over
+              it. */}
+          <svg
+            aria-hidden="true"
+            width={BOARD_W}
+            height={height}
+            className="pointer-events-none absolute inset-0"
+          >
+            {[96, 152, 208].map((r) => (
+              <circle
+                key={r}
+                cx={HUB_X + HUB_W / 2}
+                cy={height / 2}
+                r={r}
+                fill="none"
+                stroke="var(--hairline-strong)"
+                strokeWidth={1}
+                opacity={0.45}
+              />
+            ))}
+          </svg>
+
           {/* The wires. One grey line each — the role colour lives on the cards
               (number badge, role word), not on the wire, so a fan of routes
               reads as plumbing rather than as spaghetti. */}
@@ -411,6 +441,7 @@ export function NodeStage() {
                 </AnimatePresence>
               </span>
               <span className="text-[9.5px] text-text-muted">
+                {applying && <Spinner size={10} className="mr-1 inline-block align-[-1px] text-accent" />}
                 {sounding ? t('stage.sounding') : t('stage.quiet')}
                 {feedTargetStates.length > 0 && (
                   <span className="text-type-feed"> · {t('stage.feedCount', { n: feedTargetStates.length })}</span>
@@ -475,7 +506,7 @@ export function NodeStage() {
                     type="button"
                     title={t('stage.removeTarget', { name: deviceName })}
                     onClick={() => toggleTarget(deviceId)}
-                    className="absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted group-hover:grid hover:border-error hover:text-error"
+                    className="pressable absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted group-hover:grid hover:border-error hover:text-error"
                   >
                     ✕
                   </button>
@@ -598,7 +629,7 @@ export function NodeStage() {
                   type="button"
                   title={t('stage.removeFeed', { name: targetName })}
                   onClick={() => void removeFeed(pid ?? -1, targetSession.pid)}
-                  className="absolute -right-2 -top-2 z-10 grid h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
+                  className="pressable absolute -right-2 -top-2 z-10 grid h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
                 >
                   ✕
                 </button>
@@ -640,7 +671,7 @@ export function NodeStage() {
             aria-label={t('stage.addTarget')}
             title={t('stage.addTargetTitle')}
             onClick={() => setPickerOpen((value) => !value)}
-            className={`${CARD_CLASS} hover:border-accent/60 text-text-muted hover:text-accent focus-visible:border-accent focus-visible:outline-none grid place-items-center border-dashed !shadow-none`}
+            className={`${CARD_CLASS} hover:border-accent/60 text-text-muted hover:text-accent focus-visible:border-accent focus-visible:outline-none grid place-items-center border-dashed`}
             style={{
               left: TARGET_X,
               top: targetY(targetCount - 1, targetCount, height),
@@ -667,7 +698,7 @@ export function NodeStage() {
                 exit={{ opacity: 0, y: 4 }}
                 transition={SPRING_GLIDE}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
-                className="bg-surface border-line-strong shadow-float cc absolute z-30 w-[230px] rounded-card border p-1.5"
+                className="bg-surface border-line-strong cc absolute z-30 w-[230px] rounded-card border p-1.5"
                 style={{
                   left: Math.min(TARGET_X - 20, BOARD_W - 250),
                   top: Math.min(
@@ -691,7 +722,7 @@ export function NodeStage() {
                           toggleDeviceSelection(d.id);
                           setPickerOpen(false);
                         }}
-                        className="w-full rounded-[8px] px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                        className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
                       >
                         {d.name}
                       </button>
@@ -720,7 +751,7 @@ export function NodeStage() {
                           if (pid !== undefined) void addFeed(pid, s.pid);
                           setPickerOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                        className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
                       >
                         <span className="text-type-feed" aria-hidden="true">
                           ◧
@@ -794,15 +825,15 @@ function StripRow({
   upLabel: string;
 }) {
   return (
-    <div className="item rounded-[9px]" title={title}>
+    <div className="item rounded-seg" title={title}>
       <span className="text-[10.5px] text-text-secondary">{label}</span>
-      <span className="stp flex items-center gap-1 rounded-[8px] border border-line-strong px-1 py-0.5">
+      <span className="stp flex items-center gap-1 rounded-seg border border-line-strong px-1 py-0.5">
         <button
           type="button"
           aria-label={downLabel}
           onClick={onDown}
           disabled={!canDown}
-          className="h-4 w-4 rounded-[5px] text-[11px] leading-none text-text-muted transition-colors hover:bg-accent-muted hover:text-accent disabled:opacity-30 disabled:hover:bg-transparent"
+          className="pressable flex h-4 w-4 items-center justify-center rounded-full text-[11px] leading-none text-text-muted hover:bg-accent-muted hover:text-accent disabled:opacity-30 disabled:hover:bg-transparent"
         >
           −
         </button>
@@ -814,7 +845,7 @@ function StripRow({
           aria-label={upLabel}
           onClick={onUp}
           disabled={!canUp}
-          className="h-4 w-4 rounded-[5px] text-[11px] leading-none text-text-muted transition-colors hover:bg-accent-muted hover:text-accent disabled:opacity-30 disabled:hover:bg-transparent"
+          className="pressable flex h-4 w-4 items-center justify-center rounded-full text-[11px] leading-none text-text-muted hover:bg-accent-muted hover:text-accent disabled:opacity-30 disabled:hover:bg-transparent"
         >
           ＋
         </button>
