@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Mutex};
 
 use log::warn;
 use serde::Serialize;
@@ -158,6 +159,63 @@ struct SessionEvents {
     /// Process the watched session belongs to; `0` when it could not be read,
     /// in which case state events are dropped (expiry still works).
     pid: u32,
+    /// Which session this object watches, as the ledger below keys it. One
+    /// process holds a session per endpoint it plays to, and the callback does
+    /// not say which one moved.
+    session_id: String,
+    /// Every session of every process this thread is watching that is playing
+    /// right now, so a transition can be reported as the process's own.
+    sounding: Sounding,
+}
+
+/// What each process is doing right now, as `pid -> the sessions of it that are
+/// playing`.
+///
+/// `OnStateChanged` reports one *session*, but everything the frontend spends it
+/// on — the flowing wire, the pulsing ring, the "播放中" count — is about the
+/// process, and one process holds a session per endpoint it renders to. Passing
+/// the raw transition through let a browser that paused one tab read as silent
+/// while another tab was still playing, and nothing corrected it until the next
+/// re-enumeration. The ledger turns per-session news into per-process news: a
+/// message goes out only when the process's own answer changes.
+type Sounding = Arc<Mutex<HashMap<u32, HashSet<String>>>>;
+
+/// Record one session's state and report whether the process as a whole flipped.
+///
+/// `None` means the process was already answering that way, which is the common
+/// case for a program with several sessions and the reason this returns a
+/// decision rather than sending the message itself.
+fn note_session_state(
+    sounding: &Sounding,
+    pid: u32,
+    session_id: &str,
+    active: bool,
+) -> Option<bool> {
+    let mut sounding = sounding.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = sounding.entry(pid).or_default();
+    let was = !sessions.is_empty();
+    if active {
+        sessions.insert(session_id.to_string());
+    } else {
+        sessions.remove(session_id);
+    }
+    let now = !sessions.is_empty();
+    if !now {
+        // Nothing playing is nothing to remember, and the key is a PID — which
+        // Windows hands out again to somebody else.
+        sounding.remove(&pid);
+    }
+    (was != now).then_some(now)
+}
+
+/// Forget a session that went away. Its process's answer may change with it,
+/// and a stale entry would keep that process drawn as sounding for good.
+fn forget_session(sounding: &Sounding, session_id: &str) {
+    let mut sounding = sounding.lock().unwrap_or_else(|e| e.into_inner());
+    for sessions in sounding.values_mut() {
+        sessions.remove(session_id);
+    }
+    sounding.retain(|_, sessions| !sessions.is_empty());
 }
 
 impl IAudioSessionEvents_Impl for SessionEvents_Impl {
@@ -217,10 +275,18 @@ impl IAudioSessionEvents_Impl for SessionEvents_Impl {
         } else if self.pid != 0
             && (new_state == AudioSessionStateActive || new_state == AudioSessionStateInactive)
         {
-            let _ = self.tx.send(Msg::SessionState {
-                pid: self.pid,
-                active: new_state == AudioSessionStateActive,
-            });
+            let active = new_state == AudioSessionStateActive;
+            // Reported as the process's own change, and only when its answer
+            // actually moved: one of a browser's tabs going quiet says nothing
+            // about the others.
+            if let Some(now) =
+                note_session_state(&self.sounding, self.pid, &self.session_id, active)
+            {
+                let _ = self.tx.send(Msg::SessionState {
+                    pid: self.pid,
+                    active: now,
+                });
+            }
         }
         Ok(())
     }
@@ -243,6 +309,10 @@ impl IAudioSessionEvents_Impl for SessionEvents_Impl {
 struct WatchedSession {
     control: IAudioSessionControl,
     events: IAudioSessionEvents,
+    /// Which endpoint the session lives on, so a sync that could not read one
+    /// device's session list still prunes the stale watchers the *other*
+    /// devices are known to have lost.
+    device_id: String,
 }
 
 /// Start watching, if the audio graph allows it.
@@ -298,6 +368,10 @@ fn watch(app: AppHandle) {
     // These maps are also the owners that keep the COM registrations alive.
     let mut watched_managers: HashMap<String, IAudioSessionManager2> = HashMap::new();
     let mut watched_sessions: HashMap<String, WatchedSession> = HashMap::new();
+    // Which sessions are playing, so a state callback about one session can be
+    // reported as a change of its process. Shared with the callback objects,
+    // which Windows invokes on its own threads.
+    let sounding: Sounding = Arc::new(Mutex::new(HashMap::new()));
 
     // Wire the session watchers onto the graph as it already is. Both callbacks
     // only ever report *changes*, so without this pass a session that started
@@ -308,6 +382,7 @@ fn watch(app: AppHandle) {
         &enumerator,
         &session_client,
         &tx,
+        &sounding,
         &mut watched_managers,
         &mut watched_sessions,
     );
@@ -357,6 +432,7 @@ fn watch(app: AppHandle) {
                 &enumerator,
                 &session_client,
                 &tx,
+                &sounding,
                 &mut watched_managers,
                 &mut watched_sessions,
             );
@@ -395,6 +471,7 @@ fn sync(
     enumerator: &IMMDeviceEnumerator,
     session_client: &IAudioSessionNotification,
     tx: &Sender<Msg>,
+    sounding: &Sounding,
     watched_managers: &mut HashMap<String, IAudioSessionManager2>,
     watched_sessions: &mut HashMap<String, WatchedSession>,
 ) {
@@ -404,11 +481,15 @@ fn sync(
 
     let mut live_devices: HashSet<String> = HashSet::new();
     let mut live_sessions: HashSet<String> = HashSet::new();
-    // Pruning is only honest against a complete walk. If one device's manager
-    // cannot be opened, its sessions are missing from `live_sessions`, and
-    // pruning then would forget watchers that are still registered — the next
-    // sync would register a second one for the same session.
-    let mut complete = true;
+    // The endpoints whose session list this pass read to the end. Pruning is
+    // only honest against a complete walk, but it has to be decided *per
+    // endpoint*: one device that will not activate — a DisplayPort sink the
+    // audio service refuses, a shared-mode exclusive device — used to switch
+    // pruning off for every device, for the rest of the run. Each watcher then
+    // held two COM references and a channel sender for a session that had
+    // already expired, and every expiry it still reported provoked another full
+    // re-enumeration.
+    let mut walked: HashSet<String> = HashSet::new();
 
     for device in &devices {
         live_devices.insert(device.id.clone());
@@ -418,10 +499,7 @@ fn sync(
             None => {
                 let manager = match open_session_manager(&device.raw) {
                     Ok(manager) => manager,
-                    Err(_) => {
-                        complete = false;
-                        continue;
-                    }
+                    Err(_) => continue,
                 };
 
                 // SAFETY: manager and session_client are owned and used on this
@@ -439,6 +517,7 @@ fn sync(
 
         match sessions_of(&manager) {
             Some(sessions) => {
+                walked.insert(device.id.clone());
                 for session in sessions {
                     let id = session_identifier(&session);
                     if id.is_empty() {
@@ -451,13 +530,18 @@ fn sync(
                     if watched_sessions.contains_key(&id) {
                         continue;
                     }
+                    // SAFETY: GetProcessId on the session control this thread
+                    // just enumerated and owns.
+                    let pid = unsafe { session.GetProcessId() }.unwrap_or(0);
                     let events: IAudioSessionEvents = SessionEvents {
                         tx: tx.clone(),
                         // Read here, on the owner thread, while the control is
                         // in hand: the state callback has no identity of its
                         // own to report. `0` reads as "unknown" and only costs
                         // the liveness events, never the expiry ones.
-                        pid: unsafe { session.GetProcessId() }.unwrap_or(0),
+                        pid,
+                        session_id: id.clone(),
+                        sounding: Arc::clone(sounding),
                     }
                     .into();
                     let Ok(control) = session.cast::<IAudioSessionControl>() else {
@@ -467,33 +551,64 @@ fn sync(
                     // watched_sessions, so this registration remains valid until
                     // we unregister it during a prune or thread teardown.
                     if unsafe { session.RegisterAudioSessionNotification(&events) }.is_ok() {
-                        watched_sessions.insert(id, WatchedSession { control, events });
+                        // Seed the ledger with the state as it stands. The
+                        // frontend learns the same fact from the list it is
+                        // about to enumerate, and an unseeded ledger would read
+                        // this session's first pause as "nothing changed" —
+                        // leaving a program that fell silent drawn as sounding.
+                        if pid != 0 {
+                            // SAFETY: the session control is the one just read.
+                            let state =
+                                unsafe { session.GetState() }.unwrap_or(AudioSessionStateInactive);
+                            note_session_state(
+                                sounding,
+                                pid,
+                                &id,
+                                state == AudioSessionStateActive,
+                            );
+                        }
+                        watched_sessions.insert(
+                            id.clone(),
+                            WatchedSession {
+                                control,
+                                events,
+                                device_id: device.id.clone(),
+                            },
+                        );
                     }
                 }
             }
-            None => complete = false,
+            None => {}
         }
     }
 
-    if complete {
-        prune_watchers(
-            session_client,
-            watched_managers,
-            watched_sessions,
-            &live_devices,
-            &live_sessions,
-        );
-    }
+    prune_watchers(
+        session_client,
+        sounding,
+        watched_managers,
+        watched_sessions,
+        &live_devices,
+        &live_sessions,
+        &walked,
+    );
 }
 
 /// Drop watchers for devices and sessions that no longer exist, unregistering
-/// each COM callback before its owning interface is released.
+/// each COM callback before its owning interface is released, and forget each
+/// dropped session in the liveness ledger.
+///
+/// A watcher whose endpoint this pass could not walk is kept: its sessions are
+/// missing from `live_sessions` because the walk failed, not because they went
+/// away, and unregistering on that reading would drop callbacks for sessions
+/// that are still playing.
 fn prune_watchers(
     session_client: &IAudioSessionNotification,
+    sounding: &Sounding,
     watched_managers: &mut HashMap<String, IAudioSessionManager2>,
     watched_sessions: &mut HashMap<String, WatchedSession>,
     live_devices: &HashSet<String>,
     live_sessions: &HashSet<String>,
+    walked: &HashSet<String>,
 ) {
     watched_managers.retain(|id, manager| {
         if live_devices.contains(id) {
@@ -506,7 +621,15 @@ fn prune_watchers(
         false
     });
     watched_sessions.retain(|id, watched| {
-        if live_sessions.contains(id) {
+        let keep = if live_sessions.contains(id) {
+            true
+        } else if !live_devices.contains(&watched.device_id) {
+            // The endpoint itself is gone, so everything on it went with it.
+            false
+        } else {
+            !walked.contains(&watched.device_id)
+        };
+        if keep {
             return true;
         }
         // SAFETY: balances the registration recorded in this map.
@@ -515,6 +638,7 @@ fn prune_watchers(
                 .control
                 .UnregisterAudioSessionNotification(&watched.events);
         }
+        forget_session(sounding, id);
         false
     });
 }
