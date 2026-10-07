@@ -551,6 +551,13 @@ struct EngineShared {
     /// the pre-route volume was read from a live session, so a program we
     /// never touched keeps whatever the user had set in the mixer.
     restore_volume: AtomicBool,
+    /// Serializes the session-volume claim (in `start`) against this engine's
+    /// own restores (`stop`, teardown). The claim is two slow COM round trips
+    /// with the promise set in between; a restore that ran in that window
+    /// would decide nothing was claimed, and the claim's write would land
+    /// after it — the program left at the route's loudness with no engine and
+    /// no promise, the pre-route value gone for good. See the claim side.
+    volume_claim: Mutex<()>,
     /// The program's own level as a percentage of what it produced, applied to
     /// its audio before it reaches any device. Unlike a device's share of the
     /// group, this may exceed 100 — see `source_gain`. Live-adjustable.
@@ -601,7 +608,10 @@ impl EngineShared {
     fn restore_session_volume(&self) {
         // Taking the promise rather than testing it is what keeps this off the
         // double-write list: the exit worker may have collected the same promise
-        // a moment before its thread did.
+        // a moment before its thread did. Under the claim lock, so a claim that
+        // is mid-decision finishes before this restore reads the promise — the
+        // claim then finds the shutdown flag on its own check and never writes.
+        let _claim = self.volume_claim.lock().unwrap_or_else(|e| e.into_inner());
         let Some((pid, percent)) = self.take_restore_promise() else {
             return;
         };
@@ -972,6 +982,7 @@ impl DuplicationManager {
             session_volume_percent: AtomicU32::new(self.primary_volumes.get(exe_name)),
             restore_volume_percent: AtomicU32::new(100),
             restore_volume: AtomicBool::new(false),
+            volume_claim: Mutex::new(()),
             source_volume_percent: AtomicU32::new(self.sources.get(exe_name)),
             levels: self.levels.clone(),
             format,
@@ -1039,19 +1050,30 @@ impl DuplicationManager {
         // it back on stop — a session volume that outlived the route would keep
         // the program quiet everywhere, and the volume mixer remembers the value
         // for its next launch.
-        if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
-            shared.restore_volume_percent.store(
-                (pre_route * 100.0).round().clamp(0.0, 100.0) as u32,
-                Ordering::Relaxed,
-            );
-            shared.restore_volume.store(true, Ordering::Relaxed);
+        // The claim races `stop` on the other side of the same lock. Without
+        // it, a stop deciding "nothing was claimed yet" could restore before
+        // the promise is set, and the write below would land after it: the
+        // program left at the route's loudness, with no engine and no promise,
+        // and the pre-route value gone for good. Under the lock, a stop either
+        // finds the promise and restores it, or this claim finds the shutdown
+        // flag and never writes.
+        let claim = shared.volume_claim.lock().unwrap_or_else(|e| e.into_inner());
+        if !shared.shutdown.load(Ordering::Relaxed) {
+            if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
+                shared.restore_volume_percent.store(
+                    (pre_route * 100.0).round().clamp(0.0, 100.0) as u32,
+                    Ordering::Relaxed,
+                );
+                shared.restore_volume.store(true, Ordering::Relaxed);
+            }
+            let session_percent = shared.session_volume_percent.load(Ordering::Relaxed);
+            let touched = super::sessions::set_session_volume(pid, session_percent as f32 / 100.0)
+                .unwrap_or(0);
+            if touched == 0 {
+                warn!("no live session for PID {pid} — primary volume applies when it next sounds");
+            }
         }
-        let session_percent = shared.session_volume_percent.load(Ordering::Relaxed);
-        let touched =
-            super::sessions::set_session_volume(pid, session_percent as f32 / 100.0).unwrap_or(0);
-        if touched == 0 {
-            warn!("no live session for PID {pid} — primary volume applies when it next sounds");
-        }
+        drop(claim);
 
         let generation = shared.generation;
         let app = app.clone();
@@ -2333,6 +2355,7 @@ mod tests {
             session_volume_percent: AtomicU32::new(100),
             restore_volume_percent: AtomicU32::new(100),
             restore_volume: AtomicBool::new(false),
+            volume_claim: Mutex::new(()),
             source_volume_percent: AtomicU32::new(100),
             levels: Arc::new(SourceLevels::new()),
             format: Vec::new(),
