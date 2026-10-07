@@ -515,8 +515,10 @@ fn sync(
             }
         };
 
-        match sessions_of(&manager) {
-            Some(sessions) => {
+        // `None` here means the device's sessions could not be read at all, which
+        // is what keeps it out of `walked` below and off the prune list.
+        if let Some(sessions) = sessions_of(&manager) {
+            {
                 walked.insert(device.id.clone());
                 for session in sessions {
                     let id = session_identifier(&session);
@@ -578,7 +580,6 @@ fn sync(
                     }
                 }
             }
-            None => {}
         }
     }
 
