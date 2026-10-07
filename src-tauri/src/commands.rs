@@ -332,8 +332,8 @@ pub async fn stop_route(
             if let Some(exe) = &released_exe {
                 let routed_now: std::collections::HashSet<u32> =
                     pins.routed_pids().into_iter().collect();
-                for (feed_pid, feed_exe, is_capture) in pins.feed_pins() {
-                    if is_capture || !feed_exe.eq_ignore_ascii_case(exe) {
+                for (feed_pid, feed_exe) in pins.feed_source_pins() {
+                    if !feed_exe.eq_ignore_ascii_case(exe) {
                         continue;
                     }
                     if routed_now.contains(&feed_pid) {
@@ -393,6 +393,13 @@ async fn pin_to_default(pid: u32, device_id: &str, pins: &PinnedRoutes) -> StopO
         }
         Err(e) => {
             warn!("could not point PID {pid} at the default device: {e}");
+            // Neither the release nor the fallback landed. The entry has to come
+            // off `Route`: while it reads as a live route the settings page's
+            // reset skips the whole executable, the stale sweep skips the pid,
+            // and the board shows no route for the user to stop — leaving an app
+            // restart as the only way back. It stays in the book, because the
+            // assignment is still ours and quitting has to try again.
+            pins.mark_abandoned(pid);
             StopOutcome {
                 released: false,
                 pinned_device: None,
@@ -569,10 +576,19 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
             pins.forget(pid);
             continue;
         }
-        let outcomes =
-            audio::routing::release_process_default_devices(vec![relaunched_pid], audio::Role::All)
-                .await
-                .map_err(|e| e.to_string())?;
+        // The entry being swept is a route's, and a route owns only the *render*
+        // flow. The relaunched process may well be a feed target right now —
+        // that program has no live route, which is why this branch was reached —
+        // and clearing its capture half here would silence the feed while the
+        // pin stayed on the books and the board kept drawing it delivered. Only
+        // the settings reset and app exit are allowed to walk both flows.
+        let outcomes = audio::routing::release_process_default_devices_flow(
+            vec![relaunched_pid],
+            audio::Role::All,
+            false,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         if outcomes
             .iter()
             .all(|(_, outcome)| *outcome == ReleaseOutcome::Released)
@@ -586,16 +602,11 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
             }
         }
     }
-    // Feed pins whose program is gone are bookkeeping with nothing to hold:
-    // the endpoints they name died with the process. The rule itself stays in
-    // the feed memory — it is the user's, not the process's — so the sweep
-    // drops only the pin.
-    for (pid, _exe, _capture) in pins.feed_pins() {
-        if !live_pids.contains(&pid) {
-            pins.forget_feed_source(pid);
-            pins.forget_feed_capture(pid);
-        }
-    }
+    // Feed pins whose program is gone are bookkeeping with nothing to hold: the
+    // endpoints they name died with the process. The rule itself stays in the
+    // feed memory — it is the user's, not the process's — so the sweep drops
+    // only the pin.
+    pins.forget_dead_feed_pins(&live_pids);
     Ok(released)
 }
 
@@ -991,7 +1002,7 @@ pub async fn set_feed_target(
     // by a sibling process of the same program occupies the slot all the same
     // — writing the carrier over it would take the live route's primary
     // endpoint away while its mirrors kept playing.
-    let source_routed = (pins.holds(source_pid) && pins.device_of(source_pid).is_some())
+    let source_routed = pins.is_routed(source_pid)
         || pins.exe_routed_elsewhere(source_pid, &source_exe)
         || duplications.exe_duplicated_elsewhere(source_pid);
 
@@ -1109,8 +1120,9 @@ pub async fn remove_feed_target(
     // keeps its render assignment (that one belongs to the route, and the
     // feed was recorded as suspended), and a target with no capture pin of
     // ours is left alone.
-    if pins.feed_source_of(source_pid).is_some() && !pins.holds(source_pid) && !source_still_needed
-    {
+    let slot_held_by_a_route =
+        pins.is_routed(source_pid) || pins.exe_routed_elsewhere(source_pid, &source_exe);
+    if pins.feed_source_of(source_pid).is_some() && !slot_held_by_a_route && !source_still_needed {
         let _ = audio::routing::release_process_default_devices_flow(
             vec![source_pid],
             audio::Role::All,

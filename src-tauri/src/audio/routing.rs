@@ -482,6 +482,12 @@ pub enum PinKind {
     /// routing it — the entry is only here so that assignment stays ours to
     /// release later.
     ReturnedToDefault,
+    /// Neither the release nor the fallback write landed, so this run no longer
+    /// knows where the program is pointed and cannot move it. The entry stays
+    /// for the same reason `ReturnedToDefault` does — the assignment is still
+    /// ours — but it must not be read as a route, or nothing but an app restart
+    /// could ever clear it.
+    Abandoned,
 }
 
 /// A process this run has pointed at an explicit endpoint.
@@ -494,14 +500,13 @@ pub struct PinnedRoute {
     pub kind: PinKind,
 }
 
-/// One feed endpoint this run pinned.
+/// One feed endpoint this run pinned. Which of the two halves it is comes from
+/// the book it lives in, not from a field: one pid can hold both at once, when
+/// it receives one program's sound and feeds another's.
 #[derive(Debug, Clone)]
 pub struct FeedPin {
     pub exe_name: String,
     pub device_id: String,
-    /// True when this is the capture half (a feed target), false for the
-    /// render half (a feed source).
-    pub capture: bool,
 }
 
 /// The endpoint assignments this run wrote.
@@ -521,8 +526,14 @@ pub struct PinnedRoutes {
     /// Feed endpoints, tracked apart from the route assignments because they
     /// own the *other* data flow: a program can be routed to a device and feed
     /// another program at the same time, and releasing one must not touch the
-    /// other.
-    feeds: std::sync::Mutex<std::collections::HashMap<u32, FeedPin>>,
+    /// other. The two flows get one book each for the same reason: the audio
+    /// service addresses a program by pid on both, so a chain (`A` into `B`,
+    /// `B` into `C`) writes `B`'s capture half and its render half, and one
+    /// keyed by pid alone would lose whichever was pinned second. A lost pin is
+    /// a write nothing can reach again — the endpoint stays set after the UI
+    /// says the feed was removed.
+    feed_sources: std::sync::Mutex<std::collections::HashMap<u32, FeedPin>>,
+    feed_targets: std::sync::Mutex<std::collections::HashMap<u32, FeedPin>>,
 }
 
 impl PinnedRoutes {
@@ -539,6 +550,24 @@ impl PinnedRoutes {
     /// Windows would not release the assignment its route left behind.
     pub fn mark_returned(&self, pid: u32, exe_name: &str, device_id: &str) {
         self.insert(pid, exe_name, device_id, PinKind::ReturnedToDefault);
+    }
+
+    /// Downgrade `pid`'s entry: this run has lost control of that assignment —
+    /// the release was refused and the fallback write failed after it — so the
+    /// program sits on some endpoint and nothing here can move it any more.
+    ///
+    /// The entry stays, because that assignment is still ours and app exit has
+    /// to walk it, but its kind must come off `Route`. Left standing it hides
+    /// the program from the settings page's reset, which excludes every
+    /// executable with a live route, *and* from the stale sweep, which only
+    /// releases pids that have gone away — while the board shows no route for
+    /// the user to stop. Restarting this app would be the only way out, which is
+    /// the dead end 2.1.1 exists to close.
+    pub fn mark_abandoned(&self, pid: u32) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(route) = inner.get_mut(&pid) {
+            route.kind = PinKind::Abandoned;
+        }
     }
 
     fn insert(&self, pid: u32, exe_name: &str, device_id: &str, kind: PinKind) {
@@ -595,11 +624,17 @@ impl PinnedRoutes {
             .collect()
     }
 
-    /// Whether this app is holding an assignment for `pid`.
-    #[allow(dead_code)]
-    pub fn holds(&self, pid: u32) -> bool {
+    /// Whether `pid`'s render slot is held by a live device route of ours.
+    ///
+    /// This is the question a feed asks before writing the carrier over a
+    /// program's output. An entry that is not a route is not an answer either:
+    /// nothing is being mirrored, and no later `stop_route` will ever resume
+    /// what is recorded as waiting for it.
+    pub fn is_routed(&self, pid: u32) -> bool {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.contains_key(&pid)
+        inner
+            .get(&pid)
+            .is_some_and(|route| route.kind == PinKind::Route)
     }
 
     /// Take the pinned PIDs and a copy of the entries, for a sweep that will
@@ -616,21 +651,33 @@ impl PinnedRoutes {
     /// where nothing will retry afterwards.
     pub fn take_all(&self) -> Vec<u32> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let pids: Vec<u32> = inner.keys().copied().collect();
+        let mut all: Vec<u32> = inner.keys().copied().collect();
         inner.clear();
+        drop(inner);
         // Feed pins are ours to hand back too — on shutdown the release walks
-        // both data flows anyway, so their PIDs ride the same list.
-        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        let feed_pids: Vec<u32> = feeds.keys().copied().collect();
-        feeds.clear();
-        drop(feeds);
-        let mut all = pids;
-        for pid in feed_pids {
-            if !all.contains(&pid) {
-                all.push(pid);
+        // both data flows anyway, so their PIDs ride the same list. Each book
+        // is emptied in turn so no path here ever holds two of them at once.
+        for pids in self.take_feed_books() {
+            for pid in pids {
+                if !all.contains(&pid) {
+                    all.push(pid);
+                }
             }
         }
         all
+    }
+
+    /// Drain both feed books, handing back the PIDs each held. Sources first,
+    /// then targets — the order every method here takes them, which is what
+    /// keeps the two locks from ever being held at the same time.
+    fn take_feed_books(&self) -> [Vec<u32>; 2] {
+        fn drain(book: &std::sync::Mutex<std::collections::HashMap<u32, FeedPin>>) -> Vec<u32> {
+            let mut book = book.lock().unwrap_or_else(|e| e.into_inner());
+            let pids: Vec<u32> = book.keys().copied().collect();
+            book.clear();
+            pids
+        }
+        [drain(&self.feed_sources), drain(&self.feed_targets)]
     }
 
     // ------------------------------------------------------------- feed pins
@@ -638,13 +685,12 @@ impl PinnedRoutes {
     /// Record that this app pointed `pid`'s *render* endpoint at the carrier,
     /// which is how a feed source is wired.
     pub fn mark_feed(&self, pid: u32, exe_name: &str, device_id: &str) {
-        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        feeds.insert(
+        let mut book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
+        book.insert(
             pid,
             FeedPin {
                 exe_name: exe_name.to_string(),
                 device_id: device_id.to_string(),
-                capture: false,
             },
         );
     }
@@ -652,42 +698,32 @@ impl PinnedRoutes {
     /// Record that this app pointed `pid`'s *capture* endpoint at the carrier —
     /// the receiving half of a feed.
     pub fn mark_feed_capture(&self, pid: u32, exe_name: &str, device_id: &str) {
-        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        feeds.insert(
+        let mut book = self.feed_targets.lock().unwrap_or_else(|e| e.into_inner());
+        book.insert(
             pid,
             FeedPin {
                 exe_name: exe_name.to_string(),
                 device_id: device_id.to_string(),
-                capture: true,
             },
         );
     }
 
     /// The executable name a feed source pin was recorded under, if any.
     pub fn feed_source_exe_of(&self, pid: u32) -> Option<String> {
-        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        feeds
-            .get(&pid)
-            .filter(|pin| !pin.capture)
-            .map(|pin| pin.exe_name.clone())
+        let book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
+        book.get(&pid).map(|pin| pin.exe_name.clone())
     }
 
     /// The executable name a feed capture pin was recorded under, if any.
     pub fn feed_capture_exe_of(&self, pid: u32) -> Option<String> {
-        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        feeds
-            .get(&pid)
-            .filter(|pin| pin.capture)
-            .map(|pin| pin.exe_name.clone())
+        let book = self.feed_targets.lock().unwrap_or_else(|e| e.into_inner());
+        book.get(&pid).map(|pin| pin.exe_name.clone())
     }
 
     /// The render endpoint a feed source pin was recorded against.
     pub fn feed_source_device_of(&self, pid: u32) -> Option<String> {
-        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        feeds
-            .get(&pid)
-            .filter(|pin| !pin.capture)
-            .map(|pin| pin.device_id.clone())
+        let book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
+        book.get(&pid).map(|pin| pin.device_id.clone())
     }
 
     /// Whether a feed source (render half) pin exists for `pid`.
@@ -702,27 +738,33 @@ impl PinnedRoutes {
 
     /// Forget a feed source pin.
     pub fn forget_feed_source(&self, pid: u32) {
-        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        if feeds.get(&pid).is_some_and(|pin| !pin.capture) {
-            feeds.remove(&pid);
-        }
+        let mut book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
+        book.remove(&pid);
     }
 
     /// Forget a feed capture pin.
     pub fn forget_feed_capture(&self, pid: u32) {
-        let mut feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        if feeds.get(&pid).is_some_and(|pin| pin.capture) {
-            feeds.remove(&pid);
-        }
+        let mut book = self.feed_targets.lock().unwrap_or_else(|e| e.into_inner());
+        book.remove(&pid);
     }
 
-    /// Every feed endpoint this run pinned, as `(pid, exe_name, capture)`.
-    pub fn feed_pins(&self) -> Vec<(u32, String, bool)> {
-        let feeds = self.feeds.lock().unwrap_or_else(|e| e.into_inner());
-        feeds
-            .iter()
-            .map(|(pid, pin)| (*pid, pin.exe_name.clone(), pin.capture))
+    /// Every feed source (render half) pin, as `(pid, exe_name)`.
+    pub fn feed_source_pins(&self) -> Vec<(u32, String)> {
+        let book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
+        book.iter()
+            .map(|(pid, pin)| (*pid, pin.exe_name.clone()))
             .collect()
+    }
+
+    /// Forget every feed pin whose program is gone. The endpoints those pins
+    /// named died with the process, and the rule stays in the feed memory —
+    /// that one is the user's, not the process's — so the sweep drops only the
+    /// pin.
+    pub fn forget_dead_feed_pins(&self, live_pids: &std::collections::HashSet<u32>) {
+        for book in [&self.feed_sources, &self.feed_targets] {
+            let mut book = book.lock().unwrap_or_else(|e| e.into_inner());
+            book.retain(|pid, _| live_pids.contains(pid));
+        }
     }
 }
 
@@ -1128,14 +1170,53 @@ mod tests {
         let pins = PinnedRoutes::new();
         pins.mark(1, "game.exe", "device-a");
         pins.mark_returned(2, "browser.exe", "device-b");
+        pins.mark(3, "quiet.exe", "device-c");
+        pins.mark_abandoned(3);
 
         assert_eq!(pins.routed_pids(), vec![1]);
-        assert!(pins.holds(2));
+        assert!(pins.is_routed(1));
+        // Both ways an entry can stop being a route answer `no` here, and both
+        // still ride the shutdown release.
+        assert!(!pins.is_routed(2));
+        assert!(!pins.is_routed(3));
 
         pins.forget(1);
         assert!(pins.routed_pids().is_empty());
-        // Shutdown releases everything, handed-back entries included.
-        assert_eq!(pins.take_all(), vec![2]);
+        let mut released = pins.take_all();
+        released.sort();
+        assert_eq!(released, vec![2, 3]);
+    }
+
+    /// A chain — `A` into `B`, `B` into `C` — writes `B` on both flows, and
+    /// forgetting one half must not lose the other. A pin that goes missing is
+    /// an endpoint nothing can hand back any more: the program stays on the
+    /// carrier after the board says the feed was removed, which reads as the
+    /// removal having worked.
+    #[test]
+    fn one_program_holds_both_feed_halves() {
+        let pins = PinnedRoutes::new();
+        pins.mark_feed_capture(20, "b.exe", "carrier-capture");
+        pins.mark_feed(20, "b.exe", "carrier-render");
+
+        assert_eq!(
+            pins.feed_capture_of(20).as_deref(),
+            Some("b.exe"),
+            "the capture half outlived having the render half pinned after it"
+        );
+        assert_eq!(
+            pins.feed_source_device_of(20).as_deref(),
+            Some("carrier-render")
+        );
+
+        pins.forget_feed_source(20);
+        assert!(pins.feed_source_of(20).is_none());
+        assert!(pins.feed_capture_of(20).is_some());
+
+        // Both books feed the same shutdown list, and a pid in both appears once.
+        pins.mark_feed(21, "c.exe", "carrier-render");
+        let mut all = pins.take_all();
+        all.sort();
+        assert_eq!(all, vec![20, 21]);
     }
 
     #[test]
