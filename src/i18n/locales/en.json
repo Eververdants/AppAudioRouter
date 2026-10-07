@@ -118,6 +118,7 @@
     "resetEndpoints": "Reset per-app output",
     "resetEndpointsDesc": "Releases a program that no longer follows the system's playback device; routed programs are left alone",
     "resetEndpointsAction": "Reset",
+    "resetEndpointsConfirm": "Confirm?",
     "stopAllRoutes": "Stop all routing",
     "stopAllRoutesDesc": "Returns every routed program to the system default at once. The programs a route is not using are left alone.",
     "stopAllRoutesAction": "Stop all",

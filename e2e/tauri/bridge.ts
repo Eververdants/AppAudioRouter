@@ -219,8 +219,12 @@ function tauriBridge(initial: BridgeState): void {
         state.sourceVolumes = percent === 100 ? rest : [...rest, [exeName, percent]];
         return null;
       }
-      case 'set_source_volume':
       case 'align_source_levels':
+        // The real command answers with what it set, what it walked past and how
+        // many routed programs had a reading at all; the store destructures all
+        // three, so answering `null` here made every align in e2e take the catch
+        // branch and log a failure for an action the fake never performed.
+        return { aligned: [], leftAlone: [], playing: 0 };
       case 'set_tray_labels':
       case 'ack_startup_notice':
       case 'set_autostart':

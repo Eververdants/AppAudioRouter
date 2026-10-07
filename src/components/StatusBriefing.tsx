@@ -226,6 +226,7 @@ export function StatusBriefing() {
             onClick={() => setOpen((value) => !value)}
             whileTap={{ scale: 0.94 }}
             whileHover={{ scale: 1.05 }}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             transition={SPRING_TAP}
             className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11.5px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
               open

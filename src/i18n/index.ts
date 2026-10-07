@@ -24,11 +24,23 @@ function getInitialLanguage(): Language {
   return navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
 
+/** Keep the document's declared language with the rendered one. */
+function applyLanguage(lng: string): void {
+  document.documentElement.lang = lng;
+  try {
+    localStorage.setItem(STORAGE_KEY, lng);
+  } catch {
+    /* storage may be unavailable; the preference just does not persist */
+  }
+}
+
+const initialLanguage = getInitialLanguage();
+
 void i18next
   .use(initReactI18next)
   .init({
     resources,
-    lng: getInitialLanguage(),
+    lng: initialLanguage,
     fallbackLng: 'en',
     // React escapes rendered text itself; escaping here would double-encode.
     interpolation: { escapeValue: false },
@@ -37,14 +49,14 @@ void i18next
     console.warn('[i18n] initialization failed', error);
   });
 
-i18next.on('languageChanged', (lng) => {
-  document.documentElement.lang = lng;
-  try {
-    localStorage.setItem(STORAGE_KEY, lng);
-  } catch {
-    /* storage may be unavailable; the preference just does not persist */
-  }
-});
+// `languageChanged` is emitted from inside `init()` — before the listener below
+// can be attached — so the language this boot chose is applied here as well.
+// Left to the listener, <html lang> keeps whatever index.html hardcodes while
+// the UI renders in the other language: a screen reader pronounces the whole
+// page with the wrong engine, and the font fallback disagrees with the text.
+applyLanguage(initialLanguage);
+
+i18next.on('languageChanged', applyLanguage);
 
 /** The active UI language, normalized for callers outside React. */
 export function currentLanguage(): Language {

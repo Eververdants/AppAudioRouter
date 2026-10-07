@@ -107,15 +107,36 @@ function rowDy(count: number, height: number, maxDy: number): number {
 }
 
 /**
- * How tall the board has to be to hold `count` cards without squeezing them.
+ * How tall the board has to be to hold a column of `count` cards without
+ * squeezing them.
  *
  * `BOARD_H` is what the work area measures at the app's own default window;
  * a plan longer than that makes the board taller and the well scrolls, rather
  * than the cards closing in on each other.
+ *
+ * Both columns are asked for, because the left one is a column too: the
+ * programmes feeding *into* the hub stack with the same spacing rules, and a
+ * board sized only for the destinations lets eight of them run off the top edge
+ * — absolutely positioned children do not extend a scroll area upwards, so the
+ * cards that went negative are simply unreachable rather than scrolled to. A
+ * destination card is the taller of the two, so sizing for the taller of the
+ * two counts sizes for both.
  */
-export function boardHeight(count: number): number {
-  const needed = COLUMN_MARGIN * 2 + count * TARGET_H + (count - 1) * MIN_ROW_GAP;
+export function boardHeight(count: number, feederCount = 0): number {
+  const rows = Math.max(count, feederCount);
+  const needed = COLUMN_MARGIN * 2 + rows * TARGET_H + (rows - 1) * MIN_ROW_GAP;
   return Math.max(BOARD_H, needed);
+}
+
+/**
+ * A destination's number, as the corner badge and the wizard both teach it:
+ * zero-padded, because "01" is the order and "1" is a count. Three places draw
+ * it and the sketch in the first-run wizard draws it as 01/02 — one of those
+ * literals drifting is exactly the kind of disagreement this file exists to
+ * keep out of the board.
+ */
+export function orderLabel(ordinal: number): string {
+  return String(ordinal + 1).padStart(2, '0');
 }
 
 /** The board's vertical middle: where the hub sits and its wires leave from. */

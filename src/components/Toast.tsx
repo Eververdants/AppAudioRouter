@@ -29,22 +29,25 @@ export function Toast() {
   const feedUndo = useRouterStore((s) => s.feedUndo);
   const undoFeed = useRouterStore((s) => s.undoFeed);
   const dismissFeedUndo = useRouterStore((s) => s.dismissFeedUndo);
-  // Held while the pointer or the keyboard is on the offer, so a user reaching
-  // for the button does not have it taken away mid-reach.
-  const [held, setHeld] = useState(false);
+  // Held while the pointer or the keyboard is on *that* card, so a user reaching
+  // for the button does not have it taken away mid-reach. Which card is held,
+  // not whether one is: two offers can stand at once, and freezing both
+  // countdowns because the cursor is on one of them pauses the other's question
+  // indefinitely.
+  const [held, setHeld] = useState<'route' | 'feed' | null>(null);
 
   // Keyed on the snapshot itself, not on it being non-null: a route applied
   // while the offer is still standing replaces it, and the countdown starts over
   // rather than expiring under a question that has just changed. The feed offer
   // runs its own timer on the same rule.
   useEffect(() => {
-    if (snapshot === null || held) return;
+    if (snapshot === null || held === 'route') return;
     const timer = window.setTimeout(() => dismissUndo(), TOAST_DISMISS_MS);
     return () => window.clearTimeout(timer);
   }, [snapshot, held, dismissUndo]);
 
   useEffect(() => {
-    if (feedUndo === null || held) return;
+    if (feedUndo === null || held === 'feed') return;
     const timer = window.setTimeout(() => dismissFeedUndo(), TOAST_DISMISS_MS);
     return () => window.clearTimeout(timer);
   }, [feedUndo, held, dismissFeedUndo]);
@@ -52,9 +55,15 @@ export function Toast() {
   useEffect(() => {
     // A card that is gone cannot report the pointer leaving it: an offer that
     // ended while the pointer was on it — the button was clicked, Escape was
-    // pressed — must not leave the next one held forever.
-    if (snapshot === null && feedUndo === null) setHeld(false);
-  }, [snapshot, feedUndo]);
+    // pressed — must not leave the *other* one held forever, because nothing
+    // will ever clear it and that toast stops dismissing itself for the rest of
+    // the session.
+    if (snapshot === null && held === 'route') setHeld(null);
+  }, [snapshot, held]);
+
+  useEffect(() => {
+    if (feedUndo === null && held === 'feed') setHeld(null);
+  }, [feedUndo, held]);
 
   useEffect(() => {
     if (snapshot === null && feedUndo === null) return;
@@ -100,12 +109,12 @@ export function Toast() {
             exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
             transition={{ opacity: FADE, y: SPRING_GLIDE }}
             transformTemplate={MAIN_THREAD_TRANSFORM}
-            onPointerEnter={() => setHeld(true)}
-            onPointerLeave={() => setHeld(false)}
-            onFocus={() => setHeld(true)}
+            onPointerEnter={() => setHeld('feed')}
+            onPointerLeave={() => setHeld((current) => (current === 'feed' ? null : current))}
+            onFocus={() => setHeld('feed')}
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setHeld(false);
+                setHeld((current) => (current === 'feed' ? null : current));
               }
             }}
             className="bg-surface border-line-strong pointer-events-auto flex items-center gap-3 rounded-full border py-2 pl-4 pr-2"
@@ -146,14 +155,14 @@ export function Toast() {
             exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
             transition={{ opacity: FADE, y: SPRING_GLIDE }}
             transformTemplate={MAIN_THREAD_TRANSFORM}
-            onPointerEnter={() => setHeld(true)}
-            onPointerLeave={() => setHeld(false)}
-            onFocus={() => setHeld(true)}
+            onPointerEnter={() => setHeld('route')}
+            onPointerLeave={() => setHeld((current) => (current === 'route' ? null : current))}
+            onFocus={() => setHeld('route')}
             onBlur={(event) => {
               // Moving between the card's own controls is not a reason to start
               // counting down again; leaving it is.
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setHeld(false);
+                setHeld((current) => (current === 'route' ? null : current));
               }
             }}
             className="bg-surface border border-line-strong pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-2"

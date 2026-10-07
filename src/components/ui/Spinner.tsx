@@ -17,7 +17,7 @@ export function Spinner({ size = 12, className = '' }: { size?: number; classNam
       height={size}
       viewBox="0 0 16 16"
       fill="none"
-      className={`animate-spin ${className}`}
+      className={`animate-spin motion-reduce:animate-none ${className}`}
     >
       <circle
         cx="8"

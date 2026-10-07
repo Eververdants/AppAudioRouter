@@ -6,6 +6,7 @@ import {
   boardHeight,
   feederY,
   hubOutPort,
+  MINI_H,
   nodePath,
   targetInPort,
   targetY,
@@ -77,6 +78,23 @@ describe('board geometry', () => {
         const above = targetY(index - 1, count, height) + TARGET_H;
         expect(targetY(index, count, height)).toBeGreaterThanOrEqual(above);
       }
+    }
+  });
+
+  it('sizes the board for the feeding column too', () => {
+    // The programmes sending sound *into* the hub are a column as well, and they
+    // sit to its left. Sized only for the destinations, eight of them stack
+    // above the top edge — and absolutely positioned children do not extend a
+    // scroll area upwards, so those feeds become unreachable rather than merely
+    // scrolled off. The budget is the taller of the two columns.
+    const height = boardHeight(1, 8);
+    expect(height).toBeGreaterThan(BOARD_H);
+    expect(feederY(0, 8, height)).toBeGreaterThanOrEqual(0);
+    expect(feederY(7, 8, height) + MINI_H).toBeLessThanOrEqual(height);
+    for (let index = 1; index < 8; index += 1) {
+      expect(feederY(index, 8, height)).toBeGreaterThanOrEqual(
+        feederY(index - 1, 8, height) + MINI_H,
+      );
     }
   });
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { SPRING_TAP } from '@/lib/motion';
+import { MAIN_THREAD_TRANSFORM, SPRING_TAP } from '@/lib/motion';
 
 /**
  * How long an armed button waits before it forgets it was armed.
@@ -99,6 +99,7 @@ export function ConfirmButton({
       title={armed ? confirmLabel : label}
       whileHover={disabled || !asIcon ? undefined : { scale: 1.08 }}
       whileTap={disabled ? undefined : { scale: asIcon ? 0.9 : 0.96 }}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       transition={SPRING_TAP}
       onKeyDown={(event) => {
         // Escape disarms and goes no further: the key that answered this button

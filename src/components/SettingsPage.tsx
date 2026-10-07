@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
 import { detectCarrierPair, matchesCarrier } from '@/lib/carrierDetect';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
+import { isEditableTarget } from '@/lib/productionGuards';
 import { openCarrierDownload } from '@/lib/invoke';
 import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
@@ -231,8 +232,11 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Don't close settings when Escape is pressed inside an input (e.g. delay stepper).
-      if (e.target instanceof HTMLInputElement) return;
+      // Escape belongs to the control that has the focus first: the delay
+      // stepper's field, and the carrier pickers — a <select> that closes itself
+      // on Escape. Only HTMLInputElement was exempted, so pressing Escape while
+      // choosing a carrier fell through and took the whole page with it.
+      if (isEditableTarget(e.target)) return;
       if (e.key === 'Escape') onBack();
     };
     window.addEventListener('keydown', onKey);
@@ -357,13 +361,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             </div>
           )}
           <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
-            <button
-              type="button"
-              onClick={() => void resetPinnedEndpoints()}
-              className={ROW_BUTTON_CLASS}
-            >
-              {t('settings.resetEndpointsAction')}
-            </button>
+            {/* Every per-app assignment on the machine, both data flows, in one
+                press — and it reaches programs that are not on the board. The
+                same action asks first in the process list's header for the same
+                reason, so it asks here too. */}
+            <ConfirmButton
+              label={t('settings.resetEndpointsAction')}
+              confirmLabel={t('settings.resetEndpointsConfirm')}
+              onConfirm={() => void resetPinnedEndpoints()}
+            />
           </Row>
           {/* The same action as the process list header, and the same reason it
               asks first: it reaches every routed program, not just the one the

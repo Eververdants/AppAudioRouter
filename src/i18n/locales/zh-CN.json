@@ -118,6 +118,7 @@
     "resetEndpoints": "重置每应用音频输出",
     "resetEndpointsDesc": "当程序不再跟随系统播放设备时，可在此重置其固定输出；正在路由的程序不受影响",
     "resetEndpointsAction": "重置",
+    "resetEndpointsConfirm": "确认？",
     "stopAllRoutes": "停止全部路由",
     "stopAllRoutesDesc": "一次把所有已路由的程序交还系统默认设备；没有路由的程序不受影响。",
     "stopAllRoutesAction": "全部停止",

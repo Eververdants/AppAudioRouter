@@ -27,6 +27,7 @@ import {
   hubInPort,
   hubOutPort,
   nodePath,
+  orderLabel,
   targetInPort,
   targetY,
 } from '@/lib/stage';
@@ -139,6 +140,13 @@ export function NodeStage() {
   // The wires move only when what is drawn is what is playing — a plan waiting
   // for the hub is a proposal, and a proposal does not hum.
   const flowing = sounding && answered && liveness;
+  /**
+   * The number badge is the inspector's entry, and it is only a control once
+   * there is something to tune: a single-device route starts no engine, so a
+   * delay and a share have nowhere to act. Drawn as plain chrome otherwise —
+   * a button that answers nothing is a trap, not an affordance.
+   */
+  const badgeIsButton = drawn.length > 1;
 
   /** Programmes feeding sound *into* the hub, as sessions. */
   const feeders = useMemo(() => {
@@ -161,10 +169,11 @@ export function NodeStage() {
   // badges read 01, 02, … straight down the column, and 01 is always the one
   // Windows plays itself.
   const targetCount = drawn.length + feedTargets.length + 1; // + the ghost card
-  // The column's arithmetic may outgrow the default board: a plan with a dozen
+  // Either column may outgrow the default board: a plan with a dozen
   // destinations makes the board taller and the well scrolls, rather than the
-  // cards closing in on each other.
-  const height = boardHeight(targetCount);
+  // cards closing in on each other — and the programmes feeding *in* are a
+  // column too, which is the half that used to be left out of the budget.
+  const height = boardHeight(targetCount, feeders.length);
   const hubY = Math.round(boardCentre(height) - HUB_H / 2);
   const feedTargetStates = feedTargets.map((targetSession) => ({
     session: targetSession,
@@ -327,7 +336,12 @@ export function NodeStage() {
                 data-wire={wire.key.startsWith('dev:') ? `${pid}:${wire.key.slice(4)}` : undefined}
                 data-live={wire.live ? 'true' : undefined}
                 d={wire.d}
-                className={`nwire${wire.live && lit(wire.key) ? ' stage-flow' : ''}${lit(wire.key) ? ' lit' : ''}`}
+                // `live` is the route carrying sound right now, and that alone
+                // is what the moving dash reports. `lit` is the cursor, and only
+                // brightens the line: gating the flow on it made the animation
+                // unreachable in the steady state it describes, because a wire
+                // you are not hovering over was a still line even while playing.
+                className={`nwire${wire.live ? ' stage-flow' : ''}${lit(wire.key) ? ' lit' : ''}`}
               />
             ))}
           </svg>
@@ -394,7 +408,14 @@ export function NodeStage() {
               // drawn is what is playing, it goes back to being a label — a
               // board never asks anyone to confirm what they can hear. The
               // programme's own summary lives in the strip below either way.
-              disabled={!canApply}
+              //
+              // `aria-disabled` rather than `disabled`, because Chromium
+              // dispatches no mouse events on a disabled control and this card
+              // is where the hover that lights its wires begins — which is to
+              // say the hovering never happened exactly when the wires were
+              // flowing. The press is guarded below, and `cursor-default` says
+              // what the answer already is.
+              aria-disabled={!canApply}
               onMouseEnter={() => setHoverKey('hub')}
               onMouseLeave={() => setHoverKey(null)}
               onClick={() => {
@@ -402,6 +423,7 @@ export function NodeStage() {
               }}
               aria-label={canApply ? applyAria : undefined}
               whileTap={canApply ? { scaleX: 1.02, scaleY: 0.98 } : undefined}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               transition={SPRING_TAP}
               className={`${CARD_CLASS} ${
                 canApply
@@ -501,12 +523,16 @@ export function NodeStage() {
                     out of the selection, and the hub asks the same question it
                     always does. The last device cannot leave — a route to zero
                     devices is not a state this app offers. */}
-                {(drawn.length > 1 || !answered) && (
+                {/* Only ever offered where it can do something: the guard that
+                    keeps a route from being clicked empty lives in `toggleTarget`,
+                    so with one device staged the ✕ was drawn, clickable, and
+                    answered nothing. */}
+                {drawn.length > 1 && (
                   <button
                     type="button"
                     title={t('stage.removeTarget', { name: deviceName })}
                     onClick={() => toggleTarget(deviceId)}
-                    className="pressable absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted group-hover:grid hover:border-error hover:text-error"
+                    className="pressable absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted group-hover:grid group-focus-within:grid hover:border-error hover:text-error"
                   >
                     ✕
                   </button>
@@ -516,7 +542,7 @@ export function NodeStage() {
                     so neither a delay nor a share exists for it, and the
                     primary volume alone is not a control this route offers.
                     Same rule the disc stage always carried. */}
-                {drawn.length > 1 ? (
+                {badgeIsButton ? (
                   <button
                     type="button"
                     className="no cursor-pointer hover:border-accent hover:text-accent"
@@ -524,11 +550,11 @@ export function NodeStage() {
                     aria-label={t('stage.inspectAria', { name: deviceName })}
                     title={t('stage.inspectTitle', { name: deviceName })}
                   >
-                    {index + 1}
+                    {orderLabel(index)}
                   </button>
                 ) : (
                   <span className="no" aria-hidden="true">
-                    {index + 1}
+                    {orderLabel(index)}
                   </span>
                 )}
                 <div className="flex h-full flex-col justify-center gap-0.5 pl-3 pr-2">
@@ -592,7 +618,7 @@ export function NodeStage() {
               The ✕ disconnects at once — the toast carries the way back. */}
           {feedTargetStates.map(({ session: targetSession, state }, index) => {
             const targetName = targetSession.display_name ?? targetSession.exe_name;
-            const no = drawn.length + index + 1;
+            const no = orderLabel(drawn.length + index);
             const title =
               state === 'live'
                 ? t('stage.feedTitleLive', { name: targetName })
@@ -898,7 +924,15 @@ function Inspector({
   // anywhere to act. A key left over from a longer plan falls back to the
   // programme's own summary rather than describing levers that just went away.
   const devicePanelOpen =
-    inspectorKey !== null && inspectorKey.startsWith('dev:') && drawn.length > 1;
+    inspectorKey !== null &&
+    inspectorKey.startsWith('dev:') &&
+    drawn.length > 1 &&
+    // ...and the key still names a device that is in the route. Without this
+    // half of the guard, removing the copy being inspected leaves the strip
+    // open on it: `indexOf` answers -1, so it is read as a mirror and keeps
+    // offering delay and share for a device the route no longer has — tuning a
+    // lever that is attached to nothing.
+    drawn.includes(inspectorKey.slice(4));
   if (
     inspectorKey === null ||
     inspectorKey === 'hub' ||

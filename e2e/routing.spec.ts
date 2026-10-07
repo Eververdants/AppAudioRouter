@@ -437,15 +437,22 @@ test('a spoke flows only while its programme is sounding', async ({ page }) => {
   const wire = page.locator('main [data-wire="1001:speakers"]');
   await expect(wire).toHaveCount(1);
   await expect(wire).not.toHaveAttribute('data-live');
+  // The class, not only the attribute: `data-live` is set from the same flag but
+  // a spec that reads just it passes with the animation unmounted entirely —
+  // which is how a hover-gated flow survived while the dash never ran.
 
   // The session began to render audio — the same transition the backend's
   // notification thread forwards the moment it happens.
   await emit(page, 'session-activity', { pid: 1001, active: true });
   await expect(wire).toHaveAttribute('data-live', 'true');
+  // No pointer is on either card: flowing is the route's own state, not a
+  // response to the cursor.
+  await expect(wire).toHaveClass(/stage-flow/);
 
   // And when it stops, the flow is unmounted rather than left running.
   await emit(page, 'session-activity', { pid: 1001, active: false });
   await expect(wire).not.toHaveAttribute('data-live');
+  await expect(wire).not.toHaveClass(/stage-flow/);
 });
 
 test('a plan that is not the route has nothing flowing through it', async ({ page }) => {

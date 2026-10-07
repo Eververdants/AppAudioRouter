@@ -138,8 +138,14 @@ export function RoutedCapsule() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.98 }}
               transition={SPRING_GLIDE}
-              transformTemplate={MAIN_THREAD_TRANSFORM}
-              className="bg-surface border-line-strong cc absolute bottom-full left-1/2 mb-2 w-[320px] -translate-x-1/2 rounded-card border p-1.5"
+              // The centring rides the transform rather than the class: Motion
+              // writes an inline `transform` on every frame of this panel's
+              // travel, and an inline style outranks the class rule, so a
+              // `-translate-x-1/2` in the className would simply not be there —
+              // leaving the sheet half its width (160 px) right of the pill it
+              // hangs off, and off the edge of the window besides.
+              transformTemplate={(_, generated) => `translateX(-50%) ${generated}`}
+              className="bg-surface border-line-strong cc absolute bottom-full left-1/2 mb-2 w-[320px] rounded-card border p-1.5"
             >
               <div className="px-2 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">
                 {t('routed.title')}

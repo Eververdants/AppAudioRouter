@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { SPRING_TAP } from '@/lib/motion';
+import { MAIN_THREAD_TRANSFORM, SPRING_TAP } from '@/lib/motion';
 
 interface SwitchProps {
   checked: boolean;
@@ -26,6 +26,7 @@ export function Switch({ checked, onChange, label, disabled = false }: SwitchPro
       disabled={disabled}
       onClick={onChange}
       whileTap={disabled ? undefined : { scale: 0.94 }}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       transition={SPRING_TAP}
       className={`relative flex h-5 w-9 flex-none items-center rounded-full p-0.5 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-accent/60 ${
         checked ? 'justify-end bg-accent' : 'justify-start bg-bg-tertiary'

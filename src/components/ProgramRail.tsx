@@ -137,6 +137,7 @@ export function ProgramRail() {
             // would arrive as a truthy one if the handler were passed directly.
             onClick={() => void refreshSessions()}
             whileTap={{ scale: 0.96 }}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
             transition={SPRING_TAP}
             className="rounded-seg px-2 py-1 text-[11px] text-text-muted outline-none transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
           >
@@ -420,6 +421,7 @@ function MiniToggle({
       aria-label={label}
       whileTap={{ scale: 0.82 }}
       whileHover={{ scale: 1.12 }}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       transition={SPRING_TAP}
       className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
         pressed
