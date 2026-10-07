@@ -445,6 +445,55 @@ pub struct FeedMap {
     feeds: HashMap<String, Vec<String>>,
 }
 
+impl FeedMap {
+    /// Record that `source_exe`'s audio is sent into `target_exe`'s input.
+    ///
+    /// The rule lands under the spelling already on file: an image name carries
+    /// whatever case the launch used, so the same program can arrive once as
+    /// `Chrome.exe` and once as `chrome.exe`, and two entries for one program
+    /// is how a remembered feed ends up read twice — and how a removal that
+    /// found the other spelling leaves an endpoint pinned behind.
+    fn add_rule(&mut self, source_exe: &str, target_exe: &str) {
+        let key = self
+            .feeds
+            .keys()
+            .find(|name| name.eq_ignore_ascii_case(source_exe))
+            .cloned()
+            .unwrap_or_else(|| source_exe.to_string());
+        let entry = self.feeds.entry(key).or_default();
+        if !entry
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(target_exe))
+        {
+            entry.push(target_exe.to_string());
+        }
+    }
+
+    /// Drop one target from `source_exe`'s rule; a rule left empty is removed.
+    ///
+    /// Every case variant of the source's key goes, not just the first the map
+    /// yields: a file written before the keys were consolidated can hold two
+    /// spellings of one program, and a removal that cleaned only one would
+    /// leave the other holding the rule — resurrecting the feed on the next
+    /// launch and keeping the endpoint release from happening.
+    fn remove_rule(&mut self, source_exe: &str, target_exe: &str) {
+        let keys: Vec<String> = self
+            .feeds
+            .keys()
+            .filter(|name| name.eq_ignore_ascii_case(source_exe))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(entry) = self.feeds.get_mut(&key) {
+                entry.retain(|name| !name.eq_ignore_ascii_case(target_exe));
+                if entry.is_empty() {
+                    self.feeds.remove(&key);
+                }
+            }
+        }
+    }
+}
+
 /// Manages the feed memory file (interior mutability for Tauri State).
 pub struct FeedConfig {
     inner: Mutex<FeedConfigInner>,
@@ -474,36 +523,14 @@ impl FeedConfig {
     /// Record that `source_exe`'s audio is sent into `target_exe`'s input.
     pub fn add(&self, source_exe: &str, target_exe: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let entry = inner.map.feeds.entry(source_exe.to_string()).or_default();
-        if !entry
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case(target_exe))
-        {
-            entry.push(target_exe.to_string());
-        }
+        inner.map.add_rule(source_exe, target_exe);
         inner.persist()
     }
 
     /// Drop one target from a source's rule; an empty rule removes the entry.
     pub fn remove(&self, source_exe: &str, target_exe: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        // The map is keyed by whatever spelling the rule was recorded under,
-        // and an image name carries whatever case the launch used — match the
-        // same way the reader does, or a removal silently does nothing.
-        let key = inner
-            .map
-            .feeds
-            .keys()
-            .find(|name| name.eq_ignore_ascii_case(source_exe))
-            .cloned();
-        if let Some(key) = key {
-            if let Some(entry) = inner.map.feeds.get_mut(&key) {
-                entry.retain(|name| !name.eq_ignore_ascii_case(target_exe));
-                if entry.is_empty() {
-                    inner.map.feeds.remove(&key);
-                }
-            }
-        }
+        inner.map.remove_rule(source_exe, target_exe);
         inner.persist()
     }
 
@@ -1046,6 +1073,45 @@ mod tests {
         assert!(map.store("loud.exe", SOURCE_VOLUME_MAX + 1).is_err());
         assert!(map.store("loud.exe", SOURCE_VOLUME_MAX).is_ok());
         assert_eq!(map.level("loud.exe"), SOURCE_VOLUME_MAX);
+    }
+
+    #[test]
+    fn a_feed_rule_lands_under_the_spelling_already_on_file() {
+        let mut map: FeedMap =
+            serde_json::from_str(r#"{"feeds": {"Chrome.exe": ["obs64.exe"]}}"#).unwrap();
+        // The same program arriving under another case must join the entry it
+        // already has, not open a second one: two entries for one program is
+        // how a remembered feed ends up read twice.
+        map.add_rule("chrome.exe", "audacity.exe");
+        assert_eq!(map.feeds.len(), 1, "one program, one entry");
+        assert_eq!(
+            map.feeds["Chrome.exe"],
+            vec!["obs64.exe".to_string(), "audacity.exe".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_feed_target_is_not_recorded_twice() {
+        let mut map = FeedMap::default();
+        map.add_rule("game.exe", "OBS64.exe");
+        map.add_rule("game.exe", "obs64.exe");
+        assert_eq!(map.feeds["game.exe"].len(), 1);
+    }
+
+    #[test]
+    fn removing_a_feed_target_cleans_every_case_variant_of_the_source() {
+        // A file written before the keys were consolidated can hold two
+        // spellings of one program. A removal that cleaned only the first the
+        // map happened to yield would leave the other holding the rule —
+        // resurrecting the feed on the next launch and keeping the endpoint
+        // release from happening.
+        let mut map: FeedMap = serde_json::from_str(
+            r#"{"feeds": {"Chrome.exe": ["obs64.exe"], "chrome.exe": ["obs64.exe", "audacity.exe"]}}"#,
+        )
+        .unwrap();
+        map.remove_rule("chrome.exe", "obs64.exe");
+        assert_eq!(map.feeds.len(), 1, "the emptied variant goes too");
+        assert_eq!(map.feeds["chrome.exe"], vec!["audacity.exe".to_string()]);
     }
 
     #[test]
