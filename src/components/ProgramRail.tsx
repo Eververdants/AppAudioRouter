@@ -252,7 +252,11 @@ export function ProgramRail() {
             const isSubject = selectedPids[0] === session.pid;
             const joined = isSelected && !isSubject;
             const through = playsThrough(session.pid);
-            const sounding = soundingPids[session.pid] === true && targets.length > 0 && liveness;
+            // The ring reports the same fact it reports everywhere else — this
+            // programme is making sound — so an unrouted programme pulses too;
+            // its tone, not its pulse, is what says whether its audio has a
+            // route. `useLiveness` is the loop's only other gate.
+            const sounding = soundingPids[session.pid] === true && liveness;
             // The window names the program something a person can read; the exe
             // is the identity this app remembers and routes by, so it stays on
             // the record line whenever the display name differs from it.
