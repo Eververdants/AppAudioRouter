@@ -1,7 +1,9 @@
 {
   "meta": {
     "title": "App Audio Router — Per-app audio routing for Windows: one app, many devices",
-    "description": "Free, open-source per-app audio routing for Windows 10 / 11: one application → many playback devices, with per-device delay compensation and volume balance. No virtual audio driver required."
+    "description": "Free, open-source per-app audio routing for Windows 10 / 11: one app to many playback devices at once, each with its own delay compensation and volume. No virtual audio driver.",
+    "ogDescription": "Free, open-source per-app audio routing for Windows 10 / 11: one application → many devices, with per-device delay compensation and volume balance. No virtual audio driver required.",
+    "imageAlt": "App Audio Router routing Music.exe to a Bluetooth headset, an HDMI output and USB headphones at the same time, with its own delay and volume shown under each device"
   },
   "nav": {
     "features": "Features",
@@ -147,6 +149,14 @@
       "running": {
         "question": "Can it change the output of a program that is already running?",
         "answer": "Yes. Routing applies to the live audio session, so the program does not need to be restarted — a game or a browser tab keeps playing while it moves to the new device."
+      },
+      "reset": {
+        "question": "After I stop routing, does the program follow the system default device again?",
+        "answer": "Yes — that is what 2.1.1 fixed. While a route is live, Windows stores a fixed output device for that program (the very mechanism that moves a running program's audio), and that stored device outranks the system default. Stopping the route, quitting the app, and Settings → Reset per-app output each hand it back, so the program follows the default device again, including every device you pick afterwards. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device — or ignore your device switches — until the reset was done."
+      },
+      "missing": {
+        "question": "Why is my program not in the list?",
+        "answer": "A program only shows up while it holds an active audio session, so start playback in it — the list notices on its own, or press Refresh. Programs that use ASIO or WASAPI exclusive mode never create a session with the system audio engine and will not appear, and system-critical processes are deliberately excluded: a route for one is refused rather than half-applied."
       },
       "bluetooth": {
         "question": "Can it fix the desync between a Bluetooth headset and wired speakers?",

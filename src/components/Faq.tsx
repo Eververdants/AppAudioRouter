@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Section } from '@/components/Section';
-
-const FAQ_KEYS = ['free', 'driver', 'running', 'bluetooth', 'platform'] as const;
+import { FAQ_KEYS } from '@/lib/faq';
 
 interface FaqEntry {
   question: string;
