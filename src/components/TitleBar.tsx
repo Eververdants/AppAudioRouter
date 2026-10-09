@@ -85,10 +85,20 @@ export function TitleBar({
   // rather than in a status bar of its own, which would be a second strip
   // saying what the board already shows.
   const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
+  // Counts programs, not processes: a routed program is playing when any of its
+  // processes is making sound, and the one making it is often a sibling of the
+  // process holding the route (a browser's renderer, not its main process).
   const soundingCount = useRouterStore((s) => {
+    const soundingExes = new Set<string>();
+    for (const session of s.sessions) {
+      if (s.soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
+    }
     let count = 0;
-    for (const [pid, sounding] of Object.entries(s.soundingPids)) {
-      if (sounding && s.routedPids[Number(pid)] !== undefined) count += 1;
+    for (const raw of Object.keys(s.routedPids)) {
+      const pid = Number(raw);
+      if ((s.routedPids[pid]?.length ?? 0) === 0) continue;
+      const session = s.sessions.find((x) => x.pid === pid);
+      if (session !== undefined && soundingExes.has(session.exe_name.toLowerCase())) count += 1;
     }
     return count;
   });

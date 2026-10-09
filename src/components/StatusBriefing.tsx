@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { orderByDelay } from '@/lib/delay';
 import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { alreadyApplied } from '@/lib/stage';
@@ -75,6 +76,7 @@ export function StatusBriefing() {
   const devices = useRouterStore((s) => s.devices);
   const sessions = useRouterStore((s) => s.sessions);
   const routedPids = useRouterStore((s) => s.routedPids);
+  const routesByPid = useProgramRoutes();
   const soundingPids = useRouterStore((s) => s.soundingPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const selectedPids = useRouterStore((s) => s.selectedPids);
@@ -114,10 +116,17 @@ export function StatusBriefing() {
 
   const lines = useMemo<BriefingLine[]>(() => {
     const result: BriefingLine[] = [];
+    // Sounding is a fact about the program, not the process: a browser's audio
+    // comes out of a renderer while its route is held by another process, so a
+    // per-process reading would call a playing program quiet.
+    const soundingExes = new Set<string>();
+    for (const session of sessions) {
+      if (soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
+    }
     for (const session of sessions) {
       const ids = routedPids[session.pid];
       const name = session.display_name ?? session.exe_name;
-      const quiet = soundingPids[session.pid] !== true;
+      const quiet = !soundingExes.has(session.exe_name.toLowerCase());
       if (ids !== undefined && ids.length > 0) {
         if (ids.length === 1) {
           result.push({
@@ -181,7 +190,7 @@ export function StatusBriefing() {
   // line, because "the picture and the sound disagree" is the one thing this
   // screen cannot say in a single glance.
   const staged = orderByDelay(selectedDeviceIds, deviceDelays);
-  const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routedPids);
+  const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routesByPid);
 
   return (
     // Anchored above the board's tuning strip, not at the very bottom of the

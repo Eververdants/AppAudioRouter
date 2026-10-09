@@ -6,7 +6,9 @@ import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
+import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { programEntryOf } from '@/lib/routes';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -28,6 +30,11 @@ export function ProgramRail() {
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const routedPids = useRouterStore((s) => s.routedPids);
+  // The route each row reads, keyed by its own pid: a program's sibling
+  // processes carry the same route as the one holding it, so a browser window
+  // whose route lives on another process still says where its sound goes —
+  // and offers the way out.
+  const routesByPid = useProgramRoutes();
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const soundingPids = useRouterStore((s) => s.soundingPids);
   const selectProcess = useRouterStore((s) => s.selectProcess);
@@ -78,9 +85,9 @@ export function ProgramRail() {
       (s.display_name ?? '').toLowerCase().includes(q);
     const filtered = q ? sessions.filter(matches) : sessions;
     return [...filtered].sort(
-      (a, b) => (routedPids[b.pid]?.length ?? 0) - (routedPids[a.pid]?.length ?? 0),
+      (a, b) => (routesByPid[b.pid]?.length ?? 0) - (routesByPid[a.pid]?.length ?? 0),
     );
-  }, [sessions, filter, routedPids]);
+  }, [sessions, filter, routesByPid]);
 
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -89,7 +96,7 @@ export function ProgramRail() {
   }, [devices]);
 
   const playsThrough = (pid: number): string | null => {
-    const id = routedPids[pid]?.[0] ?? defaultDeviceId;
+    const id = routesByPid[pid]?.[0] ?? defaultDeviceId;
     if (id === undefined || id === null) return null;
     return nameById.get(id) ?? null;
   };
@@ -247,7 +254,7 @@ export function ProgramRail() {
             its new place rather than being redrawn there. */}
         <AnimatePresence initial={false}>
         {visibleSessions.map((session) => {
-            const targets = routedPids[session.pid] ?? [];
+            const targets = routesByPid[session.pid] ?? [];
             const isSelected = selectedPids.includes(session.pid);
             const isSubject = selectedPids[0] === session.pid;
             const joined = isSelected && !isSubject;
@@ -386,7 +393,15 @@ export function ProgramRail() {
                       variant="icon"
                       label={t('rail.stopRoute')}
                       confirmLabel={t('rail.stopRouteConfirm')}
-                      onConfirm={() => void stopRoute(session.pid)}
+                      onConfirm={() => {
+                        // The route is the program's, held under whichever
+                        // process it was applied to. Stop that one: `stopRoute`
+                        // of a sibling pid finds no entry and returns, leaving
+                        // the route running under the process it names.
+                        const owner =
+                          programEntryOf(sessions, routedPids, session.pid) ?? session.pid;
+                        void stopRoute(owner);
+                      }}
                       icon={
                         <svg
                           width="10"

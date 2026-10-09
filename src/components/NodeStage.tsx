@@ -6,8 +6,10 @@ import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { Spinner } from '@/components/ui/Spinner';
 import { useLiveness } from '@/hooks/useLiveness';
+import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { programEntryOf } from '@/lib/routes';
 import {
   BOARD_W,
   FEEDER_X,
@@ -107,6 +109,10 @@ export function NodeStage() {
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
+  // The route read by the process being drawn: a sibling process of a routed
+  // program carries the same route as the one holding it, so selecting one
+  // reports the program as answered instead of proposing what is already on.
+  const routesByPid = useProgramRoutes();
   const soundingPids = useRouterStore((s) => s.soundingPids);
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const deviceLatencyMs = useRouterStore((s) => s.deviceLatencyMs);
@@ -132,7 +138,7 @@ export function NodeStage() {
   const session = sessions.find((s) => s.pid === pid);
   const name = session?.display_name ?? session?.exe_name;
   const drawn = orderByDelay(selectedDeviceIds, deviceDelays);
-  const answered = alreadyApplied(drawn, selectedPids, routedPids);
+  const answered = alreadyApplied(drawn, selectedPids, routesByPid);
   const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
   const sounding = pid !== undefined && soundingPids[pid] === true;
   const hasPlan = drawn.length > 0;
@@ -160,7 +166,11 @@ export function NodeStage() {
   /** Programmes the hub feeds, as sessions in feed order. */
   const feedTargets = useMemo(() => {
     if (pid === undefined) return [];
-    return (feeds[pid] ?? [])
+    // A feed is keyed by the process that holds it — one per program, like a
+    // route — so a sibling process of the source resolves to it first.
+    const owner = programEntryOf(sessions, feeds, pid);
+    if (owner === undefined) return [];
+    return (feeds[owner] ?? [])
       .map((targetPid) => sessions.find((s) => s.pid === targetPid))
       .filter((s) => s !== undefined);
   }, [feeds, sessions, pid]);
@@ -914,11 +924,17 @@ function Inspector({
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const deviceVolumes = useRouterStore((s) => s.deviceVolumes);
   const primaryVolumes = useRouterStore((s) => s.primaryVolumes);
-  // A stable empty array, not a fresh `[]`: a store selector that returns a new
-  // reference on every call re-renders forever ("getSnapshot should be cached").
-  const feedTargets = useRouterStore((s) =>
-    selectedPids[0] === undefined ? NO_PIDS : (s.feeds[selectedPids[0]] ?? NO_PIDS),
-  );
+  const feeds = useRouterStore((s) => s.feeds);
+  // A stable empty array, not a fresh `[]`: a value that returns a new
+  // reference on every render churns the strip below it. Feeds are keyed by the
+  // process that holds them — one per program — so a sibling source resolves to
+  // it before the lookup.
+  const feedTargets = useMemo(() => {
+    const sourcePid = selectedPids[0];
+    if (sourcePid === undefined) return NO_PIDS;
+    const owner = programEntryOf(sessions, feeds, sourcePid);
+    return owner === undefined ? NO_PIDS : (feeds[owner] ?? NO_PIDS);
+  }, [sessions, feeds, selectedPids]);
   const setPrimaryVolume = useRouterStore((s) => s.setPrimaryVolume);
   const setDeviceVolume = useRouterStore((s) => s.setDeviceVolume);
   const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);

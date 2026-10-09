@@ -69,6 +69,13 @@ export function RoutedCapsule() {
   // Walk the session list, not the route table: a programme on its way out can
   // still carry a route for a breath, and a row without a name or an icon has
   // nothing to show for it. The briefing reads the list the same way.
+  //
+  // Sounding is read per program: the row is the program's, and the process
+  // making its sound may be a sibling of the one holding the route.
+  const soundingExes = new Set<string>();
+  for (const session of sessions) {
+    if (soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
+  }
   const rows: RoutedRow[] = [];
   for (const session of sessions) {
     const ids = routedPids[session.pid];
@@ -78,7 +85,7 @@ export function RoutedCapsule() {
       name: session.display_name ?? session.exe_name,
       exeName: session.exe_name,
       devices: ids.map((id) => devices.find((d) => d.id === id)?.name ?? id),
-      sounding: soundingPids[session.pid] === true,
+      sounding: soundingExes.has(session.exe_name.toLowerCase()),
     });
   }
 
