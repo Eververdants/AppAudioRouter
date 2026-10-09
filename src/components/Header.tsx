@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '@/hooks/useTheme';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
 import type { Language } from '@/i18n';
-import { REPO_URL } from '@/lib/site';
+import { REPO_URL, VERSION } from '@/lib/site';
 import { AnimatePresence } from 'framer-motion';
 import { GitHubIcon, MoonIcon, SunIcon } from '@/components/icons';
 
@@ -44,7 +44,7 @@ export function Header() {
           <img src={`${import.meta.env.BASE_URL}icon.png`} alt="" className="h-7 w-7 rounded" />
           <span className="truncate text-sm font-semibold text-text-primary">App Audio Router</span>
           <span className="hidden rounded bg-accent-muted px-1.5 py-px text-[10px] font-medium leading-4 text-accent sm:inline">
-            v2.1.0
+            v{VERSION}
           </span>
         </a>
 
