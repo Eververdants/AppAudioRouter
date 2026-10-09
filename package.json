@@ -1,15 +1,15 @@
 {
   "name": "app-audio-router-website",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "fmt": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
-    "fmt:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\""
+    "typecheck": "tsc -b && tsc -p tsconfig.node.json",
+    "fmt": "prettier --write \"src/**/*.{ts,tsx,css,json}\" \"scripts/**/*.ts\" \"*.config.ts\" \"tsconfig*.json\"",
+    "fmt:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\" \"scripts/**/*.ts\" \"*.config.ts\" \"tsconfig*.json\""
   },
   "dependencies": {
     "framer-motion": "^11.15.0",

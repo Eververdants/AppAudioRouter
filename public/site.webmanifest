@@ -1,0 +1,20 @@
+{
+  "name": "App Audio Router",
+  "short_name": "AAR",
+  "description": "Free, open-source per-app audio routing for Windows 10 / 11: one application to many playback devices at once, each with its own delay compensation and volume balance. No virtual audio driver.",
+  "id": "%BASE_URL%",
+  "start_url": "%BASE_URL%",
+  "scope": "%BASE_URL%",
+  "display": "browser",
+  "background_color": "#fafafa",
+  "theme_color": "#fafafa",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "%BASE_URL%icon.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    }
+  ]
+}

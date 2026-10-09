@@ -1,39 +1,39 @@
+# App Audio Router — robots.txt
+#
+# Public product copy for a free, open-source desktop app: everything on this
+# site is meant to be indexed, cached and quoted. %SITE_URL% is filled at build
+# time from src/lib/site.ts — edit that file, not this one.
+
 # Search engines
 User-agent: Googlebot
-Allow: /
-
 User-agent: Bingbot
-Allow: /
-
 User-agent: Baiduspider
+User-agent: DuckDuckBot
+User-agent: Sogou
+User-agent: 360Spider
 Allow: /
 
-# Answer / generative engines — content is factual and meant to be quotable
+# Answer / generative engines — the copy is factual and meant to be quotable
 User-agent: GPTBot
-Allow: /
-
 User-agent: OAI-SearchBot
-Allow: /
-
 User-agent: ChatGPT-User
-Allow: /
-
 User-agent: ClaudeBot
-Allow: /
-
+User-agent: Claude-SearchBot
+User-agent: anthropic-ai
 User-agent: PerplexityBot
-Allow: /
-
+User-agent: Perplexity-User
 User-agent: Google-Extended
-Allow: /
-
 User-agent: Applebot
-Allow: /
-
 User-agent: Applebot-Extended
+User-agent: Amazonbot
+User-agent: Meta-ExternalAgent
+User-agent: cohere-ai
+User-agent: MistralAI-User
+User-agent: DuckAssistBot
+User-agent: YouBot
 Allow: /
 
 User-agent: *
 Allow: /
 
-Sitemap: https://eververdants.github.io/AppAudioRouter/sitemap.xml
+Sitemap: %SITE_URL%sitemap.xml

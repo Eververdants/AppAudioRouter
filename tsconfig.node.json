@@ -7,10 +7,15 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
     "strict": true,
-    "composite": true,
-    "emitDeclarationOnly": true,
-    "outDir": "./.tsbuild"
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true
   },
-  "include": ["vite.config.ts"]
+  // The build-time metadata plugin reads the app's own constants and locale
+  // files, so they belong to this program as well. This project is checked on
+  // its own (`npm run typecheck`) rather than referenced from tsconfig.json:
+  // a composite project and the app project may not both own the same file.
+  "include": ["vite.config.ts", "scripts", "src/lib", "src/i18n/locales"]
 }

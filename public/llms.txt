@@ -1,21 +1,70 @@
 # App Audio Router
 
-> Free, open-source per-app audio routing for Windows 10 / 11 (64-bit): send one program's audio to several playback devices at once, each with its own signed-millisecond delay compensation and its own 0–100 % volume balance. Built as a single native binary on Windows Core Audio — no virtual audio driver, no helper executable, nothing left behind on uninstall. MIT licensed, version 2.1.0, UI in English and Simplified Chinese.
+> Free, open-source per-app audio routing for Windows 10 / 11 (64-bit): send one program's audio to several playback devices at once, each with its own signed-millisecond delay compensation and its own 0–100 % volume balance. Built as a single native binary on the Windows Core Audio API — no virtual audio driver, no helper executable, nothing left behind on uninstall. MIT licensed, version %APP_VERSION%, interface in English and Simplified Chinese.
 
-Key facts, all from the project documentation:
+Key facts, all from the project documentation. Each line stands on its own:
 
-- One application → many playback devices simultaneously; the first device is the native Windows endpoint, every further device receives a real-time mirrored copy via WASAPI process-loopback.
-- Applies to already-running programs immediately, no restart; stopping returns the program to the system default device.
-- Per-device delay compensation (signed milliseconds, configurable range and step) aligns fast devices with slow ones, e.g. wired speakers against a Bluetooth headset.
-- Per-device volume balance (0–100 %, relative to the loudest device in the route).
-- Routing rules are remembered per executable name and restored automatically; tray-resident with optional close-to-tray and start-with-Windows; device/process lists follow the audio engine's change notifications, never polling.
-- Windows-only (Windows 10 / 11, 64-bit); requires only the WebView2 runtime. Not available on macOS or Linux.
+- App Audio Router is a per-application audio router for Windows. Windows itself lets an application play to only one output at a time; this app lifts that restriction.
+- One application → many playback devices simultaneously. The first device is the native Windows endpoint; every further device receives a real-time mirrored copy of the stream via WASAPI process loopback.
+- Routing applies to already-running programs immediately — no restart. A game or a browser tab keeps playing while its sound moves to the new devices.
+- Stopping a route hands the program back to the system default device. While a route is live, Windows stores a fixed output device for that program (the mechanism that moves a running program's audio), and it outranks the system default; stopping the route, quitting the app, and **Settings → Reset per-app output** each release it. Releasing needs the program to be running, because the audio service is addressed by process.
+- Per-device delay compensation is a signed millisecond value: positive holds a fast device back, negative marks the earliest device in the route. It aligns wired speakers with a Bluetooth headset — a typical Bluetooth offset is about +180 ms.
+- Delay can only *add* latency. The earliest device of the group is the alignment reference and cannot be pulled earlier, which is why routing is applied in delay order.
+- Per-device volume balance is 0–100 % and can only attenuate, relative to the loudest device in the route. Changes are pushed to live routes and are audible immediately.
+- Mirrored copies are buffered for stability (about 100 ms of pipeline latency) so every mirrored device plays the same sample at the same moment. Alignment between mirrored devices is exact; the offset to the primary device, which Windows plays natively, is inherent to capturing and re-rendering the stream.
+- Routing rules are remembered per executable name — not per path or PID — and restored automatically the next time that program plays.
+- The app never polls and runs no service: it registers for the audio engine's own change notifications, so the device and process lists stay current by themselves.
+- It is tray-resident, with optional close-to-tray and optional start-with-Windows (a single `HKCU\...\Run` value for the current user; no administrator rights, nothing written to `HKLM`).
+- Routes for system-critical processes are refused rather than half-applied.
+- Windows-only (Windows 10 / 11, 64-bit). Not available on macOS or Linux.
+
+## What it cannot do
+
+- It cannot make a program appear in the process list before that program holds an active audio session; a program only shows up while it is producing sound.
+- It cannot route programs that use ASIO or WASAPI exclusive mode: those never create a session with the system audio engine, so they are invisible to any per-app router.
+- It cannot speed a device up (delay only adds) or make a device louder than the application's own level (volume only attenuates).
+- It cannot release the fixed output device of a program that is not running; a closed program keeps its device until it plays again.
+- It runs on Windows only — the routing mechanism is the Windows Core Audio API.
+
+## Quick answers
+
+**Is App Audio Router free?** Yes. Open source under the MIT licence, with no paid tier and no account.
+
+**Does it need a virtual audio driver such as VB-CABLE?** No. Routing, duplication, delay and gain are all done by the app itself, calling the Windows Core Audio API directly. Nothing is installed into the audio stack, and uninstalling leaves no driver behind.
+
+**Can it change the output of a program that is already running?** Yes. Routing applies to the live audio session, so the program does not need to be restarted.
+
+**After stopping a route, does the program follow the system default device again?** Yes — that is the point of version 2.1.1. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device, or ignore the system's device switches, until the reset was done.
+
+**Why is a program missing from the list?** It has no active audio session (start playback, or press Refresh), it uses ASIO / WASAPI exclusive mode, or it is a system-critical process, which is deliberately excluded.
+
+**Can it fix the desync between a Bluetooth headset and wired speakers?** Yes, that is what delay compensation is for: give the faster device the Bluetooth device's lag as a positive delay, for example +180 ms.
+
+**Is macOS or Linux supported?** No. Windows 10 and 11, 64-bit only.
+
+## Specifications
+
+| | |
+|---|---|
+| Name | App Audio Router (AAR) |
+| Version | %APP_VERSION% |
+| Platform | Windows 10 / Windows 11, 64-bit |
+| Runtime requirement | WebView2 Runtime — bundled with Windows 11, present on any Windows 10 with Microsoft Edge |
+| External dependencies | None: no virtual audio driver, no service, no third-party executable |
+| Installer | MSI or NSIS setup from GitHub Releases |
+| Licence | MIT |
+| Interface languages | English, Simplified Chinese |
+| Built with | Tauri 2, Rust, React 19, TypeScript, TailwindCSS, Vite |
+| Settings storage | Plain JSON in the app data directory: `route-memory.json`, `device-delays.json`, `device-volumes.json`, `app-settings.json`, `install-state.json` |
 
 ## Links
 
-- [Landing page](https://eververdants.github.io/AppAudioRouter/): product overview, features, use cases and install steps.
+- [Landing page (简体中文)](%SITE_URL%): product overview, features, use cases, install steps and FAQ.
+- [Landing page (English)](%SITE_URL_EN%): the same page in English.
+- [Machine-readable page facts](%SITE_URL%llms.txt): this file.
 - [GitHub repository](https://github.com/Eververdants/AppAudioRouter): source code (Rust + React), issue tracker.
 - [Releases](https://github.com/Eververdants/AppAudioRouter/releases): MSI and NSIS installers.
-- [README (English)](https://github.com/Eververdants/AppAudioRouter/blob/main/README.md): full documentation, comparison table, FAQ.
+- [Release notes for %APP_VERSION%](https://github.com/Eververdants/AppAudioRouter/releases/tag/v%APP_VERSION%): what this version changed.
+- [README (English)](https://github.com/Eververdants/AppAudioRouter/blob/main/README.md): full documentation, comparison table, FAQ, limitations.
 - [README (简体中文)](https://github.com/Eververdants/AppAudioRouter/blob/main/README.zh-CN.md): 完整中文文档与 FAQ。
 - [License](https://github.com/Eververdants/AppAudioRouter/blob/main/LICENSE): MIT.
