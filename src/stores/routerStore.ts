@@ -28,6 +28,7 @@ import {
 } from '@/lib/delay';
 import { rgbaToDataUrl } from '@/lib/icons';
 import * as api from '@/lib/invoke';
+import { programEntryOf } from '@/lib/routes';
 
 /** One executable's remembered feed rules: the programs its audio feeds into. */
 export interface RememberedFeedEntry {
@@ -61,16 +62,10 @@ export function feedLiveness(
   sessions: AudioSession[],
 ): FeedLiveness {
   if (carrier.render === null || carrier.capture === null) return 'no-carrier';
-  const routed = routedPids[sourcePid];
-  if (routed !== undefined && routed.length > 0) return 'suspended';
-  const exe = sessions.find((s) => s.pid === sourcePid)?.exe_name?.toLowerCase();
-  if (exe !== undefined) {
-    for (const [pid, ids] of Object.entries(routedPids)) {
-      if (ids.length === 0 || Number(pid) === sourcePid) continue;
-      const routedExe = sessions.find((s) => s.pid === Number(pid))?.exe_name;
-      if (routedExe !== undefined && routedExe.toLowerCase() === exe) return 'suspended';
-    }
-  }
+  // The render slot a live feed needs is one per *executable*, so a device
+  // route held by a sibling process of the source takes it all the same — and
+  // so does the source's own, which `programEntryOf` answers with `pid` itself.
+  if (programEntryOf(sessions, routedPids, sourcePid) !== undefined) return 'suspended';
   return 'live';
 }
 
@@ -950,19 +945,26 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   selectProcess: (pid) =>
-    set((s) => ({
-      // Single selection starts fresh from that process's active targets, or
-      // from the system default endpoint it already plays through. The
-      // remembered route is deliberately not a guess: until it has been
-      // restored into a live route the program is playing through the default,
-      // and proposing a route the user just stopped back at them is not a
-      // guess about where the process plays.
-      selectedPids: [pid],
-      selectedDeviceIds: s.routedPids[pid] ?? defaultTargets(s),
-      // Whatever came out of that is a guess about where the process plays, not
-      // something the user asked for yet.
-      deviceSelectionPrefilled: true,
-    })),
+    set((s) => {
+      // Single selection starts fresh from that process's program live route, or
+      // from the system default endpoint it already plays through. The route is
+      // read through the program's owner: it is one per executable, so a sibling
+      // process of a routed program plays where that route says, and the board
+      // must draw that rather than a default the program is not on. The
+      // remembered route is deliberately not a guess: until it has been restored
+      // into a live route the program is playing through the default, and
+      // proposing a route the user just stopped back at them is not a guess
+      // about where the process plays.
+      const owner = programEntryOf(s.sessions, s.routedPids, pid);
+      const routed = owner !== undefined ? s.routedPids[owner] : undefined;
+      return {
+        selectedPids: [pid],
+        selectedDeviceIds: routed ?? defaultTargets(s),
+        // Whatever came out of that is a guess about where the process plays,
+        // not something the user asked for yet.
+        deviceSelectionPrefilled: true,
+      };
+    }),
 
   toggleProcessSelection: (pid) =>
     set((s) => {

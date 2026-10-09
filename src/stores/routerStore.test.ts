@@ -231,6 +231,28 @@ describe('process and device selection', () => {
     expect(state().deviceSelectionPrefilled).toBe(true);
   });
 
+  it('prefills a sibling process from the route its program holds', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [
+        { pid: 2002, exe_name: 'music.exe' },
+        { pid: 2001, exe_name: 'music.exe' },
+      ],
+      routedPids: { 2001: ['tv'] },
+      defaultDeviceId: 'speakers',
+    });
+
+    // A route is one per executable, written to the lowest pid. Selecting
+    // another process of the same program has to read that route back, not the
+    // system default the program is not actually playing through.
+    state().selectProcess(2002);
+
+    expect(state().selectedPids).toEqual([2002]);
+    expect(state().selectedDeviceIds).toEqual(['tv']);
+    expect(state().deviceSelectionPrefilled).toBe(true);
+  });
+
   it('falls back to the system default, and to nothing when that device is gone', () => {
     installBackend();
     reset({
