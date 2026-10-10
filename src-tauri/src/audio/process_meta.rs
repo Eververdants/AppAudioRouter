@@ -319,44 +319,59 @@ pub fn icon_for_process(pid: u32) -> Option<IconImage> {
     Some(icon.as_ref().clone())
 }
 
-/// Ask the shell for the file's large icon and decode it into RGBA.
+/// Ask the file itself for its icon and decode it into RGBA.
+///
+/// `SHDefExtractIconW` reads the icon resource straight out of the file. The
+/// shell front door (`SHGetFileInfoW`) answers through the shell icon cache
+/// instead, and the cache does not only hold icons: after a failed
+/// extraction — a file caught mid-update, which is what Steam's self-update
+/// does to its own exe — later asks can be answered with the generic
+/// application icon *as a success*. Both sides would keep that answer: the
+/// run cache below as a hit, the frontend as a final data URL, and the
+/// program wears the wrong icon until the app restarts. A direct read has no
+/// such memory: it either returns the file's own icon or fails, and a
+/// failure is a miss, which the cache above and the frontend's retries are
+/// both built to get past.
 fn extract_icon(path: &str) -> Option<IconImage> {
     use windows::Win32::Graphics::Gdi::DeleteObject;
-    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
-    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
-    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
+    use windows::Win32::UI::Shell::SHDefExtractIconW;
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON};
 
     let path_w = wide(path);
-    let mut info = SHFILEINFOW::default();
-    // SAFETY: path_w is a NUL-terminated wide string and info is the output
-    // record the size argument describes. The file-attributes argument only
-    // matters with SHGFI_USEFILEATTRIBUTES, which is not set here.
+    let mut icon = HICON::default();
+    // The size word is MAKELONG(large, small): a 32-px square, what the
+    // large-icon ask used to answer and what the decode below expects.
+    // SAFETY: path_w is a NUL-terminated wide string and icon is the output
+    // handle this call writes or leaves untouched.
     let ok = unsafe {
-        SHGetFileInfoW(
+        SHDefExtractIconW(
             PCWSTR(path_w.as_ptr()),
-            FILE_ATTRIBUTE_NORMAL,
-            Some(&mut info),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_LARGEICON,
+            0,
+            0,
+            Some(&mut icon),
+            None,
+            32 | (16 << 16),
         )
     };
-    if ok == 0 {
+    // "No such icon" answers as S_FALSE — a *success* code that leaves the
+    // handle untouched — so the invalid check is what actually rejects it.
+    if ok.is_err() || icon.is_invalid() {
         return None;
     }
 
-    let mut icon = ICONINFO::default();
-    // SAFETY: icon is a valid output record for this HICON.
-    let decoded = unsafe { GetIconInfo(info.hIcon, &mut icon) }
+    let mut info = ICONINFO::default();
+    // SAFETY: info is a valid output record for this HICON.
+    let decoded = unsafe { GetIconInfo(icon, &mut info) }
         .ok()
-        .and_then(|()| decode_icon(&icon));
-    // SAFETY: GetIconInfo handed us the two bitmaps and SHGetFileInfoW the
+        .and_then(|()| decode_icon(&info));
+    // SAFETY: GetIconInfo handed us the two bitmaps and SHDefExtractIconW the
     // icon; each is balanced with its own destructor.
     unsafe {
-        let _ = DeleteObject(icon.hbmMask);
-        if !icon.hbmColor.is_invalid() {
-            let _ = DeleteObject(icon.hbmColor);
+        let _ = DeleteObject(info.hbmMask);
+        if !info.hbmColor.is_invalid() {
+            let _ = DeleteObject(info.hbmColor);
         }
-        let _ = DestroyIcon(info.hIcon);
+        let _ = DestroyIcon(icon);
     }
     decoded
 }
@@ -584,6 +599,22 @@ fn base64(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{base64, file_description};
+
+    #[test]
+    fn extract_icon_reads_the_file_itself() {
+        // The extraction asks the file directly (SHDefExtractIconW), so the
+        // shell icon cache must not leak in here: Edge ships at this path both
+        // here and on CI, and its exe carries a real icon — a cache answering
+        // with the generic application icon would fail the pin below.
+        let path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+        if !std::path::Path::new(path).exists() {
+            return; // an install without Edge cannot pin this
+        }
+        let icon = super::extract_icon(path).expect("Edge's exe carries an icon");
+        assert_eq!((icon.width, icon.height), (32, 32));
+        // A file that does not exist is a miss, never a generic answer.
+        assert!(super::extract_icon(r"C:\nonexistent\no-such-exe.exe").is_none());
+    }
 
     #[test]
     fn base64_matches_the_standard_vectors() {
