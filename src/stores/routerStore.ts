@@ -244,6 +244,16 @@ interface RouterState {
   selectProcess: (pid: number) => void;
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
+  /** Append one device to the plan's tail — always a copy, never a replacement.
+   * The add-destination picker's only verb: reaching for "add" must never take
+   * the single-device guess away, or the device you asked to add quietly takes
+   * the primary seat instead of joining as a copy. */
+  appendDeviceTarget: (deviceId: string) => void;
+  /** Make `deviceId` the primary: the seat Windows plays directly. A device
+   * already in the plan is moved to the front (roles swap with the old
+   * primary); one that is not replaces the primary and leaves in its place the
+   * copies the plan already had. */
+  setPrimaryDevice: (deviceId: string) => void;
   /** Move one staged device to the front of the plan — the seat the system
    * plays directly. A reorder of the plan and nothing else: membership belongs
    * to the disc toggle, no route moves until Apply, and the stage offers the
@@ -1010,6 +1020,43 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     }
+  },
+
+  appendDeviceTarget: (deviceId) => {
+    const { selectedDeviceIds } = get();
+    // Already in the plan: the row's own toggle owns membership, and appending
+    // a second time would put one device on two rows.
+    if (selectedDeviceIds.includes(deviceId)) return;
+    set({
+      deviceSelectionPrefilled: false,
+      selectedDeviceIds: [...selectedDeviceIds, deviceId],
+    });
+  },
+
+  setPrimaryDevice: (deviceId) => {
+    const { selectedDeviceIds, devices, selectedPids, sessions } = get();
+    if (!selectedDeviceIds.includes(deviceId) && !devices.some((d) => d.id === deviceId)) return;
+    const next = selectedDeviceIds.includes(deviceId)
+      ? // Already on the plan: roles swap. The old primary becomes a copy, so
+        // nothing the user built leaves the route.
+        [deviceId, ...selectedDeviceIds.filter((id) => id !== deviceId)]
+      : // A device from outside the plan takes the primary seat and the copies
+        // the plan already had stay exactly where they are.
+        [deviceId, ...selectedDeviceIds.slice(1)];
+    // Nothing moved (the picked device is already the primary): a no-op must not
+    // churn the array the stage's role words are keyed against.
+    if (next.length === selectedDeviceIds.length && next.every((id, i) => id === selectedDeviceIds[i])) {
+      return;
+    }
+    set({ selectedDeviceIds: next, deviceSelectionPrefilled: false });
+    const device = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+    const process = sessions.find((s) => s.pid === selectedPids[0])?.exe_name;
+    get().addLog(
+      process === undefined
+        ? i18next.t('log.deviceSwitched', { device })
+        : i18next.t('log.deviceSwitchedProcess', { process, device }),
+      'info',
+    );
   },
 
   promoteDevice: (deviceId) => {

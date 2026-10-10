@@ -128,6 +128,8 @@ export function NodeStage() {
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
   const applying = useRouterStore((s) => s.applying);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
+  const appendDeviceTarget = useRouterStore((s) => s.appendDeviceTarget);
+  const setPrimaryDevice = useRouterStore((s) => s.setPrimaryDevice);
   const promoteDevice = useRouterStore((s) => s.promoteDevice);
   const applyRoute = useRouterStore((s) => s.applyRoute);
   const addFeed = useRouterStore((s) => s.addFeed);
@@ -140,6 +142,8 @@ export function NodeStage() {
   const [inspectorKey, setInspectorKey] = useState<InspectorKey | null>(null);
   /** The add-destination picker, anchored to the copies panel's title row. */
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** The change-primary picker, anchored to the primary panel's title row. */
+  const [primaryPickerOpen, setPrimaryPickerOpen] = useState(false);
   /** How far the copies panel has been scrolled — its wires ride with it. */
   const [copyScroll, setCopyScroll] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
@@ -205,26 +209,28 @@ export function NodeStage() {
   const column = panelColumn(height, copiesRows);
   const hubY = Math.round(boardCentre(height) - HUB_H / 2);
 
-  // Escape closes the picker; registered only while it is open, so a standing
+  // Escape closes a picker; registered only while one is open, so a standing
   // listener never swallows the search box's Escape (the same rule the
   // briefing bubble follows).
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!pickerOpen && !primaryPickerOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
         setPickerOpen(false);
+        setPrimaryPickerOpen(false);
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [pickerOpen]);
+  }, [pickerOpen, primaryPickerOpen]);
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!pickerOpen && !primaryPickerOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       if (boardRef.current !== null && !boardRef.current.contains(event.target as Node)) {
         setPickerOpen(false);
+        setPrimaryPickerOpen(false);
       }
     };
     // The picker lives inside the board, so the outside-close only has to watch
@@ -232,7 +238,7 @@ export function NodeStage() {
     // picker's own rows or the title-row button that toggles it.
     window.addEventListener('pointerdown', onPointerDown, true);
     return () => window.removeEventListener('pointerdown', onPointerDown, true);
-  }, [pickerOpen]);
+  }, [pickerOpen, primaryPickerOpen]);
 
   // Selecting a different programme resets the inspector to the card that is
   // actually on screen — a key naming last programme's device must not survive —
@@ -240,6 +246,7 @@ export function NodeStage() {
   useEffect(() => {
     setInspectorKey(null);
     setPickerOpen(false);
+    setPrimaryPickerOpen(false);
     setHoverKey(null);
     setCopyScroll(0);
   }, [pid]);
@@ -566,6 +573,7 @@ export function NodeStage() {
                 onToggle={() => toggleTarget(primaryDeviceId)}
                 onRemove={() => undefined}
                 onPromote={() => undefined}
+                onPrimaryPick={() => setPrimaryPickerOpen((value) => !value)}
                 onInspect={() => setInspectorKey(`dev:${primaryDeviceId}`)}
                 onHover={setHoverKey}
               />
@@ -661,7 +669,9 @@ export function NodeStage() {
                         type="button"
                         role="menuitem"
                         onClick={() => {
-                          toggleDeviceSelection(d.id);
+                          // Append, never toggle: reaching for "add" must put a
+                          // copy on the plan's tail, not take the primary seat.
+                          appendDeviceTarget(d.id);
                           setPickerOpen(false);
                         }}
                         className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
@@ -705,6 +715,73 @@ export function NodeStage() {
                         </span>
                       </button>
                     ))}
+                </PickerSection>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* The change-primary picker: the way to hand the primary seat to
+              another device without touching the copies. A device whose delay
+              compensation is larger than the rest is offered disabled — the
+              system plays the main device directly, and software delay can only
+              hold sound back, so it could never take that seat. */}
+          <AnimatePresence>
+            {primaryPickerOpen && (
+              <motion.div
+                key="primary-picker"
+                role="menu"
+                aria-label={t('stage.changePrimary')}
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={SPRING_GLIDE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
+                className="cc absolute z-30 w-[230px] rounded-card border border-line-strong bg-surface p-1.5"
+                style={{
+                  left: Math.min(GROUP_X - 40, BOARD_W - 250),
+                  top: Math.min(column.primaryY + column.primaryHeight + 6, height - 190),
+                }}
+              >
+                <PickerSection label={t('stage.pickPrimary')}>
+                  {devices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                  {devices.map((d) => {
+                    const picked = d.id === primaryDeviceId;
+                    const others = drawn.filter((id) => id !== d.id);
+                    const minOther =
+                      others.length > 0
+                        ? Math.min(...others.map((id) => deviceDelays[id] ?? 0))
+                        : Number.POSITIVE_INFINITY;
+                    const blocked = !picked && (deviceDelays[d.id] ?? 0) > minOther;
+                    return (
+                      <button
+                        key={d.id}
+                        type="button"
+                        role="menuitem"
+                        aria-current={picked ? 'true' : undefined}
+                        disabled={blocked}
+                        title={blocked ? t('stage.promoteBlockedTitle') : undefined}
+                        onClick={() => {
+                          setPrimaryDevice(d.id);
+                          setPrimaryPickerOpen(false);
+                        }}
+                        className={`pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] ${
+                          blocked
+                            ? 'cursor-not-allowed text-text-muted opacity-60'
+                            : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                        }`}
+                      >
+                        <span
+                          className={`flex h-3 w-3 flex-none items-center justify-center text-[10px] ${
+                            picked ? 'text-accent' : 'text-transparent'
+                          }`}
+                          aria-hidden="true"
+                        >
+                          ✓
+                        </span>
+                        <span className="truncate">{d.name}</span>
+                      </button>
+                    );
+                  })}
                 </PickerSection>
               </motion.div>
             )}
@@ -805,6 +882,7 @@ function DeviceRow({
   onToggle,
   onRemove,
   onPromote,
+  onPrimaryPick,
   onInspect,
   onHover,
 }: {
@@ -821,6 +899,9 @@ function DeviceRow({
   onToggle: () => void;
   onRemove: () => void;
   onPromote: () => void;
+  /** Present on the primary row only: clicking the row opens the picker that
+   *  hands the primary seat to another device. */
+  onPrimaryPick?: () => void;
   onInspect: () => void;
   onHover: (key: string | null) => void;
 }) {
@@ -866,21 +947,45 @@ function DeviceRow({
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <button
           type="button"
-          aria-pressed={selectedDeviceIds.includes(deviceId)}
-          aria-label={deviceName}
-          onClick={onToggle}
+          aria-pressed={onPrimaryPick === undefined ? selectedDeviceIds.includes(deviceId) : undefined}
+          aria-label={
+            onPrimaryPick === undefined
+              ? deviceName
+              : t('stage.changePrimaryAria', { name: deviceName })
+          }
+          title={onPrimaryPick === undefined ? undefined : t('stage.changePrimaryTitle')}
+          onClick={onPrimaryPick ?? onToggle}
           className="truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
         >
           {deviceName}
         </button>
         <span className="flex items-center gap-1.5">
           {isPrimary ? (
-            <span
-              title={t('stage.primaryTitle')}
-              className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.primary}`}
-            >
-              {roleWord}
-            </span>
+            onPrimaryPick === undefined ? (
+              <span
+                title={t('stage.primaryTitle')}
+                className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.primary}`}
+              >
+                {roleWord}
+              </span>
+            ) : (
+              // On the board the role word doubles as the way to hand the seat
+              // over: it reads "Main" until the pointer or the keyboard arrives,
+              // then it offers the move — the same gesture the copies carry.
+              <button
+                type="button"
+                aria-label={t('stage.changePrimary')}
+                title={t('stage.changePrimaryTitle')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onPrimaryPick();
+                }}
+                className="text-[10px] font-semibold text-type-primary underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+              >
+                <span className="group-hover/copy:hidden">{roleWord}</span>
+                <span className="hidden group-hover/copy:inline">{t('stage.changePrimary')}</span>
+              </button>
+            )
           ) : canPromote ? (
             // The role word itself is the switch: it reads "Copy" until the
             // pointer or the keyboard arrives, then it offers the move. The

@@ -15,6 +15,7 @@ import { feedLiveness, useRouterStore } from './routerStore';
 
 const SPEAKERS: AudioDevice = { id: 'speakers', name: 'Speakers' };
 const TV: AudioDevice = { id: 'tv', name: 'TV' };
+const HEADPHONES: AudioDevice = { id: 'headphones', name: 'Headphones' };
 
 const MUSIC: AudioSession = { pid: 1001, exe_name: 'music.exe' };
 const GAME: AudioSession = { pid: 1002, exe_name: 'game.exe' };
@@ -304,6 +305,71 @@ describe('process and device selection', () => {
     expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
     state().toggleDeviceSelection('tv');
     expect(state().selectedDeviceIds).toEqual(['speakers']);
+  });
+
+  it('appends a copy from the add menu, never taking the primary seat', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      defaultDeviceId: 'speakers',
+    });
+    state().selectProcess(1001);
+    // The plan is still the app's own single-device guess. Reaching for "add"
+    // has to leave that device as the primary and put the new one on the tail —
+    // the flaw the add menu used to have was replacing the guess, which made
+    // the device you asked to add the one Windows played.
+    expect(state().selectedDeviceIds).toEqual(['speakers']);
+    expect(state().deviceSelectionPrefilled).toBe(true);
+
+    state().appendDeviceTarget('tv');
+
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+    expect(state().deviceSelectionPrefilled).toBe(false);
+  });
+
+  it('promotes a staged device to primary, swapping roles rather than dropping it', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      selectedDeviceIds: ['speakers', 'tv'],
+      deviceSelectionPrefilled: false,
+    });
+
+    state().setPrimaryDevice('tv');
+
+    // The old primary becomes a copy: nothing the user staged leaves the plan.
+    expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
+    expect(lastLog()?.message).toContain('TV');
+  });
+
+  it('replaces the primary with a device from outside the plan, keeping the copies', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV, HEADPHONES],
+      sessions: [MUSIC],
+      selectedDeviceIds: ['speakers', 'tv'],
+      deviceSelectionPrefilled: false,
+    });
+
+    state().setPrimaryDevice('headphones');
+
+    expect(state().selectedDeviceIds).toEqual(['headphones', 'tv']);
+  });
+
+  it('is a no-op when the picked device already holds the primary seat', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      selectedDeviceIds: ['speakers', 'tv'],
+      deviceSelectionPrefilled: false,
+    });
+
+    state().setPrimaryDevice('speakers');
+
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
   });
 
   it('keeps the shared targets when a process is added to the selection', () => {
