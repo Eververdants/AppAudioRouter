@@ -26,7 +26,7 @@
 
 App Audio Router (**AAR**) is a per-application audio router for Windows. Windows itself only lets an application play to one output at a time; App Audio Router lifts that restriction. Pick a program, pick one or more playback devices, and the program's audio goes to all of them at once — live, without restarting the program.
 
-It is aimed at ordinary users rather than audio engineers. There is no mixer graph and no driver installation: the whole app is one window — the programmes making sound in a sidebar on the left, and beside it a board with the programme you picked on the left-centre and its destinations as a column of numbered cards on the right. A wire from the programme's card to a destination card *is* that part of the route, so "where is this sound going?" is answered by which cards are wired up — and the number on each card is the order they play in, 01 being the device Windows plays itself. A destination can be a playback device **or another program's input**: pick a program's input and its audio is fed there, so Discord can hear Spotify the way a microphone would. A change becomes real only when you click the program's card, and a small "Straight talk" pill in the corner will tell you where things stand in plain words. The activity log sits one tab away.
+It is aimed at ordinary users rather than audio engineers. There is no mixer graph and no driver installation: the whole app is one window — the programmes making sound in a sidebar on the left, and beside it a board with the programme you picked on the left-centre and its destinations as a column of numbered cards on the right. A wire from the programme's card to a destination card *is* that part of the route, so "where is this sound going?" is answered by which cards are wired up — and the number on each card is the order they play in, 01 being the device Windows plays itself. A destination can be a playback device **or another program's input**: pick a program's input and its audio is fed there, so Discord can hear Spotify the way a microphone would. A change becomes real only when you click the program's card, and the second tab is a Status page that draws every program's destinations as a row of chips. The activity log sits one tab away.
 
 | | |
 |---|---|
@@ -201,10 +201,10 @@ AppAudioRouter/
 │   ├── components/
 │   │   ├── NodeStage.tsx         # the node board: the picked programme's card on the left-centre, a numbered column of destination cards on the right (devices, or another programme's input), a wire per route; the bottom strip tunes the picked card
 │   │   ├── ProgramRail.tsx       # programmes with an audio session, and whether each one joins the change
-│   │   ├── StatusBriefing.tsx    # the "straight talk" pill: where sound is going, in plain words, on demand
+│   │   ├── BriefingPage.tsx      # the Status tab: every redirected programme as a row of destination chips
 │   │   ├── SourceLevelDial.tsx   # a programme's own level, as a ring under the hub
-│   │   ├── SettingsPage.tsx      # theme, language, routing, background, delays, about
-│   │   ├── LogPanel.tsx          # activity log (the second tab)
+│   │   ├── SettingsPage.tsx      # a section rail beside the chosen section's rows
+│   │   ├── LogPanel.tsx          # activity log (the third tab)
 │   │   ├── TitleBar.tsx          # custom frameless title bar, with the routed/playing count
 │   │   └── ui/                   # Ring, Switch, UnderlineTabs, SegmentedControl, Tooltip, ConfirmButton, …
 │   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useLiveness
