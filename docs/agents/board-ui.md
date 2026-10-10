@@ -24,7 +24,7 @@
 | ④ 节点画布（自由布局） | `RouteCanvas` / `EdgeLayer` / `SourceNode` / `DeviceNode` / `RouteConfirmCapsule` / `lib/canvas.ts` / `--canvas-grid*` | 已删，**不要以"自由画布"的形式复活**：可拖摆的画布 = 可以被摆乱，还要平移缩放、ResizeObserver 与"动画期间钉住被测那一帧" |
 | ⑤ 同心圆舞台（圆环 + 圆盘 + 辐条） | `ConcentricStage.tsx` | **2.3.0 已删**：一个程序的去向只有一列时环形毫无用处，而"程序 → 程序"进来之后路由不再是一颗星，环形撑不住 |
 | ⑥ 节点看板（当前） | `NodeStage.tsx` + `lib/stage.ts` | 是**固定布局**的节点图：位置由路由顺序算出来，没有拖动、没有平移缩放、没有画布管理——节点是系统的（程序、设备、程序输入都是枚举出来的），用户永远不需要"创建"任何东西 |
-| ⑦ 去向分两块虚线面板（2026-10-10） | `Panel`（`NodeStage.tsx`）、`GROUP_X/GROUP_W/PANEL_BORDER`、`copiesPanelHeight` | 在 ⑥ 之上只做了一件事：把右侧一列**按角色装进两个虚线圆角矩形**——主设备一块、复制设备与送入一块；装了卡片的矩形不能画成卡片，所以用虚线 |
+| ⑦ 去向分两块虚线面板（2026-10-10） | `Panel`（`NodeStage.tsx`）、`GROUP_X/GROUP_W/PANEL_BORDER`、`panelColumn` | 在 ⑥ 之上只做了一件事：把右侧一列**按角色装进两个虚线圆角矩形**——主设备一块、复制设备与送入一块；装了卡片的矩形不能画成卡片，所以用虚线。两块面板合成**一列、在 hub 上居中**，所以线从 hub 出脚同时向上（主设备）和向下（其余）伸 |
 
 ⑥ 保留下来的旧资产：**`Ring` 同心圆**（卡片上的状态标记）、**点按生效**（计划/事实两段式）、
 **调音条**（角色决定有哪些杠杆）、**流动虚线**（正在出声）。⑥ 新增的词汇只有两个：**编号**（顺序）与**琥珀色**（程序输入）。
@@ -42,17 +42,20 @@
 
 ## 看板几何（`lib/stage.ts`）
 
-`BOARD_W(640)` / `BOARD_H(470)` / `HUB_W(190)` / `HUB_H(84)` / `HUB_X(196)` / `GROUP_X(430)` / `GROUP_W(200)` /
+`BOARD_W(640)` / `BOARD_H(470)` / `HUB_W(190)` / `HUB_H(84)` / `HUB_X(160)` / `GROUP_X(382)` / `GROUP_W(212)` /
 `GROUP_PAD(6)` / `GROUP_HEADER_H(24)` / `PANEL_BORDER(1)` / `ROW_X` / `ROW_W` / `ROW_H(52)` / `ROW_GAP(6)` /
-`MINI_W(140)` / `FEEDER_X(16)` / `PIN_D(11)` 是**唯一的**尺寸来源，由 `primaryPanelY()`、`copiesPanelY()`、
-`copiesPanelHeight()`、`panelContentHeight()`、`rowContentY()`、`rowPortY()`、`rowInPort()`、`rowVisible()`、
+`MINI_W(120)` / `FEEDER_X(12)` / `PIN_D(11)` 是**唯一的**尺寸来源，由 `panelColumn()`、`panelBodyHeight()`、
+`primaryPanelHeight()`、`rowContentY()`、`rowPortY()`、`rowInPort()`、`rowVisible()`、
 `feederY()`、`hubOutPort()`、`hubInPort()`、`feederOutPort()`、`nodePath()` 算出位置与线两端。
 组件用 `style` 从这些常量取宽高与坐标，**不要**改成 Tailwind 的 `w-[…]`：尺寸在两处各写一份，线迟早会离开卡片。
 
 ⚠️ **尺寸唯一的度量是井的高度**：`BOARD_H` 只在第一帧（井还没报高度时）顶一下，此后板子**正好等于井的高度**
-（`useElementHeight`，全项目唯一一处 ResizeObserver）。**舞台区永不滚动**（`overflow-y-hidden`）——
-自适应这件事落在这两句话上：主设备面板按内容固定高、复制面板吃掉剩下的全部高度，
-行装不下时**复制面板自己滚**（`overflow-y-auto`），而不是让板子长高。
+（`useElementHeight`，全项目唯一一处 ResizeObserver）。**舞台区永不滚动**（`overflow-y-hidden`）。
+⚠️ **两块面板是列，不是两块独立的东西**：`panelColumn(height, rows)` 一次给出整列的四个数——
+主设备面板固定一行高，复制面板取**内容**高度（空面板与一行高的面板一样高，免得第一台副本到场时整列跳一下），
+整列**在 hub 的横线上居中**。这就是「排布平衡」的全部机制：线从 hub 的出脚同时向上（主设备）和向下（其余）走。
+⚠️ **不要把它改成「复制面板吃掉剩余高度」**（2026-10-11 之前是这样）：那会让少设备时右下方空出一大块虚线框、
+整列偏左上，看着不平衡。行装不下时**复制面板自己滚**（`overflow-y-auto`），板子仍然不长高。
 ⚠️ 面板那 1px 描边也算进几何（`PANEL_BORDER`）：行是在**边框之内**再加内边距的，
 少算这一像素，每根线都会停在它那一行的左边一像素（这条踩过，`rowPortY` / `ROW_X` 里都写死着它）。
 

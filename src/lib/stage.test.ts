@@ -1,19 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOARD_H,
-  GROUP_HEADER_H,
   MINI_H,
   ROW_GAP,
   ROW_H,
   alreadyApplied,
-  copiesPanelHeight,
-  copiesPanelY,
   feederY,
   hubOutPort,
   nodePath,
-  panelContentHeight,
-  primaryPanelHeight,
-  primaryPanelY,
+  panelBodyHeight,
+  panelColumn,
   rowContentY,
   rowInPort,
   rowPortY,
@@ -65,52 +61,70 @@ describe('alreadyApplied', () => {
  * ends on the pin it names.
  */
 describe('board geometry', () => {
-  it('keeps both panels inside the board, whatever height the well reports', () => {
-    // The board takes the well's own height, so no height may push a panel off
-    // the bottom: that is what replaced the well's scrollbar.
+  it('keeps the column inside the board, whatever height the well reports', () => {
+    // The board takes the well's own height, so no height and no route length
+    // may push a panel off the board: that is what replaced the well's
+    // scrollbar.
     for (const height of [320, 470, 600, 900]) {
-      const primaryTop = primaryPanelY();
-      const primaryBottom = primaryTop + primaryPanelHeight();
-      const copiesTop = copiesPanelY();
-      const copiesBottom = copiesTop + copiesPanelHeight(height);
-      expect(primaryTop).toBeGreaterThanOrEqual(0);
-      expect(copiesTop).toBeGreaterThanOrEqual(primaryBottom);
-      expect(copiesBottom).toBeLessThanOrEqual(height);
+      for (const rows of [0, 1, 5, 40]) {
+        const column = panelColumn(height, rows);
+        expect(column.primaryY).toBeGreaterThanOrEqual(0);
+        expect(column.copiesY).toBeGreaterThanOrEqual(column.primaryY + column.primaryHeight);
+        expect(column.copiesY + column.copiesHeight).toBeLessThanOrEqual(height);
+      }
     }
   });
 
-  it('never squeezes the copies panel below its own title row', () => {
-    // A board shorter than the two panels still has to draw something; the
-    // panel gives up room, not the way in for a new destination.
-    expect(copiesPanelHeight(10)).toBeGreaterThan(GROUP_HEADER_H);
+  it('centres the column on the hub, however long the route is', () => {
+    // The fan of wires leaves the hub's pin with something to reach on either
+    // side of it: the column's own middle is the board's middle.
+    for (const rows of [0, 1, 4, 30]) {
+      const column = panelColumn(BOARD_H, rows);
+      const middle = column.primaryY + (column.copiesY + column.copiesHeight - column.primaryY) / 2;
+      expect(Math.abs(middle - BOARD_H / 2)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('gives the copies panel its content height until the board runs out', () => {
+    // A short route is a short column, not a dashed box running to the floor;
+    // a long one stops at the board's edge and scrolls inside itself.
+    const short = panelColumn(600, 2);
+    // Its title row, its hairlines and its two rows: nothing held open for a
+    // longer route than the one on screen.
+    expect(short.copiesHeight).toBeLessThan(200);
+    expect(short.copiesHeight).toBe(panelBodyHeight(2) + 26);
+    const long = panelColumn(600, 40);
+    expect(long.copiesHeight).toBeLessThan(panelBodyHeight(40));
+    expect(long.copiesY + long.copiesHeight).toBeLessThanOrEqual(600);
   });
 
   it('stacks rows without letting them touch', () => {
     for (const rows of [1, 2, 5, 12, 40]) {
-      const content = panelContentHeight(rows);
+      const body = panelBodyHeight(rows);
       for (let index = 1; index < rows; index += 1) {
         const above = rowContentY(index - 1) + ROW_H / 2;
         expect(rowContentY(index) - ROW_H / 2).toBeGreaterThanOrEqual(above);
       }
       const last = rowContentY(rows - 1) + ROW_H / 2;
-      expect(last).toBeLessThanOrEqual(content);
+      expect(last).toBeLessThanOrEqual(body);
     }
-    expect(panelContentHeight(0)).toBe(0);
-    expect(panelContentHeight(2) - panelContentHeight(1)).toBe(ROW_H + ROW_GAP);
+    // An empty panel is as tall as a one-row one, so the column does not
+    // shuffle the moment the first copy arrives.
+    expect(panelBodyHeight(0)).toBe(panelBodyHeight(1));
+    expect(panelBodyHeight(2) - panelBodyHeight(1)).toBe(ROW_H + ROW_GAP);
   });
 
   it('rides a row and its port with the panel scroll', () => {
     // The wire has to move with the row it belongs to, or scrolling the panel
     // would leave every line pointing at where the rows used to be.
-    const top = copiesPanelY();
+    const top = panelColumn(BOARD_H, 2).copiesY;
     expect(rowPortY(top, 0, 0) - rowPortY(top, 0, 40)).toBe(40);
   });
 
   it('leaves a row scrolled out of the panel without a wire to meet', () => {
-    const top = copiesPanelY();
-    const height = copiesPanelHeight(BOARD_H);
-    expect(rowVisible(top, height, 0, 0)).toBe(true);
-    expect(rowVisible(top, height, 0, 100000)).toBe(false);
+    const column = panelColumn(BOARD_H, 2);
+    expect(rowVisible(column.copiesY, column.copiesHeight, 0, 0)).toBe(true);
+    expect(rowVisible(column.copiesY, column.copiesHeight, 0, 100000)).toBe(false);
   });
 
   it('centres the hub on the board', () => {
@@ -120,8 +134,9 @@ describe('board geometry', () => {
   });
 
   it('ends a wire at the pin it names', () => {
+    const column = panelColumn(BOARD_H, 1);
     const from = hubOutPort(BOARD_H);
-    const to = rowInPort(primaryPanelY(), 0, 0);
+    const to = rowInPort(column.primaryY, 0, 0);
     const path = nodePath(from.x, from.y, to.x, to.y);
     expect(path.startsWith(`M ${from.x} ${from.y}`)).toBe(true);
     expect(path.endsWith(`${to.x} ${to.y}`)).toBe(true);

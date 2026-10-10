@@ -29,17 +29,14 @@ import {
   ROW_W,
   alreadyApplied,
   boardCentre,
-  copiesPanelHeight,
-  copiesPanelY,
   feederOutPort,
   feederY,
   hubInPort,
   hubOutPort,
   nodePath,
   orderLabel,
-  panelContentHeight,
-  primaryPanelHeight,
-  primaryPanelY,
+  panelBodyHeight,
+  panelColumn,
   rowContentY,
   rowInPort,
   rowVisible,
@@ -197,16 +194,16 @@ export function NodeStage() {
   // whole reason the stage never scrolls. Until the well has reported a height
   // (the very first frame), the app's own default window stands in.
   const height = measured > 0 ? Math.floor(measured) : BOARD_H;
-  const hubY = Math.round(boardCentre(height) - HUB_H / 2);
-  const primaryY = primaryPanelY();
-  const copiesY = copiesPanelY();
-  const copiesH = copiesPanelHeight(height);
   const feedTargetStates = feedTargets.map((targetSession) => ({
     session: targetSession,
     state: feedLiveness(pid ?? -1, feedCarrier, routedPids, sessions),
   }));
   /** Every row in the copies panel: the copies first, then the feeds. */
   const copiesRows = copyDeviceIds.length + feedTargetStates.length;
+  // The two panels, as one column centred on the hub: whatever the route's
+  // length, the hub sits in the middle of it with wires reaching both ways.
+  const column = panelColumn(height, copiesRows);
+  const hubY = Math.round(boardCentre(height) - HUB_H / 2);
 
   // Escape closes the picker; registered only while it is open, so a standing
   // listener never swallows the search box's Escape (the same rule the
@@ -252,7 +249,7 @@ export function NodeStage() {
   // wires light together when it is hovered.
   const from = hubOutPort(height);
   if (primaryDeviceId !== undefined) {
-    const to = rowInPort(primaryY, 0, 0);
+    const to = rowInPort(column.primaryY, 0, 0);
     wires.push({
       key: `dev:${primaryDeviceId}`,
       d: nodePath(from.x, from.y, to.x, to.y),
@@ -262,8 +259,8 @@ export function NodeStage() {
   copyDeviceIds.forEach((deviceId, index) => {
     // A row the panel has scrolled away has no wire to meet: the row is not on
     // screen, and neither is the line that would point at it.
-    if (!rowVisible(copiesY, copiesH, index, copyScroll)) return;
-    const to = rowInPort(copiesY, index, copyScroll);
+    if (!rowVisible(column.copiesY, column.copiesHeight, index, copyScroll)) return;
+    const to = rowInPort(column.copiesY, index, copyScroll);
     wires.push({
       key: `dev:${deviceId}`,
       d: nodePath(from.x, from.y, to.x, to.y),
@@ -272,8 +269,8 @@ export function NodeStage() {
   });
   feedTargetStates.forEach(({ session: targetSession, state }, offset) => {
     const index = copyDeviceIds.length + offset;
-    if (!rowVisible(copiesY, copiesH, index, copyScroll)) return;
-    const to = rowInPort(copiesY, index, copyScroll);
+    if (!rowVisible(column.copiesY, column.copiesHeight, index, copyScroll)) return;
+    const to = rowInPort(column.copiesY, index, copyScroll);
     wires.push({
       key: `feed:${targetSession.pid}`,
       d: nodePath(from.x, from.y, to.x, to.y),
@@ -545,13 +542,13 @@ export function NodeStage() {
           )}
 
           {/* The primary device, alone in the first panel: 01 is the endpoint
-              Windows plays itself, and it is the top of the column because that
-              is the order the numbering teaches. */}
+              Windows plays itself, and it sits above the copies because that is
+              the order the numbering teaches. */}
           <Panel
             label={t('stage.groupPrimary')}
-            top={primaryY}
-            height={primaryPanelHeight()}
-            contentHeight={panelContentHeight(primaryDeviceId !== undefined ? 1 : 0)}
+            top={column.primaryY}
+            height={column.primaryHeight}
+            rows={primaryDeviceId !== undefined ? 1 : 0}
             empty={t('stage.groupPrimaryEmpty')}
           >
             {primaryDeviceId !== undefined && (
@@ -576,13 +573,13 @@ export function NodeStage() {
           </Panel>
 
           {/* Everything else: the copies, then the programmes this sound is fed
-              into. It takes what is left of the board — a row too many and it
+              into. It is as tall as its rows — one too many to fit and it
               scrolls here, rather than the stage scrolling around it. */}
           <Panel
             label={t('stage.groupCopies')}
-            top={copiesY}
-            height={copiesH}
-            contentHeight={panelContentHeight(copiesRows)}
+            top={column.copiesY}
+            height={column.copiesHeight}
+            rows={copiesRows}
             empty={t('stage.groupCopiesEmpty')}
             onScroll={setCopyScroll}
             headerAction={
@@ -649,7 +646,7 @@ export function NodeStage() {
                 className="cc absolute z-30 w-[230px] rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
                   left: Math.min(GROUP_X - 40, BOARD_W - 250),
-                  top: Math.min(copiesY + GROUP_HEADER_H + 8, height - 190),
+                  top: Math.min(column.copiesY + GROUP_HEADER_H + 8, height - 190),
                 }}
               >
                 <PickerSection label={t('stage.pickDevice')}>
@@ -741,7 +738,7 @@ function Panel({
   label,
   top,
   height,
-  contentHeight,
+  rows,
   empty,
   headerAction,
   onScroll,
@@ -750,7 +747,7 @@ function Panel({
   label: string;
   top: number;
   height: number;
-  contentHeight: number;
+  rows: number;
   empty: string;
   headerAction?: React.ReactNode;
   onScroll?: (scrollTop: number) => void;
@@ -775,8 +772,8 @@ function Panel({
         style={{ height: height - PANEL_BORDER * 2 - GROUP_HEADER_H }}
         onScroll={onScroll ? (event) => onScroll(event.currentTarget.scrollTop) : undefined}
       >
-        {contentHeight > 0 ? (
-          <div className="relative" style={{ height: contentHeight }}>
+        {rows > 0 ? (
+          <div className="relative" style={{ height: panelBodyHeight(rows) }}>
             {children}
           </div>
         ) : (

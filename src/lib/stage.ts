@@ -73,11 +73,13 @@ export const HUB_H = 84;
 /** The hub sits one column in from the left edge; the column to its left is
  * reserved for the programmes feeding into it, so a feed appearing moves
  * nothing that is already on the board. */
-export const HUB_X = 196;
+export const HUB_X = 160;
 
-/** The destination column: two grouped panels, the primary above the rest. */
-export const GROUP_X = 430;
-export const GROUP_W = 200;
+/** The destination column: two grouped panels, the primary above the rest. The
+ *  pair is centred on the hub, so the whole board reads as one figure rather
+ *  than as a card pushed against the right edge. */
+export const GROUP_X = 382;
+export const GROUP_W = 212;
 /** Room between a panel's edge and the rows inside it. */
 export const GROUP_PAD = 6;
 /** A panel's title row: the group's name, and the way in for a new direction. */
@@ -95,54 +97,82 @@ export const ROW_H = 52;
 export const ROW_GAP = 6;
 
 /** One programme feeding sound *into* the hub. */
-export const MINI_W = 140;
+export const MINI_W = 120;
 export const MINI_H = 52;
-export const FEEDER_X = 16;
+export const FEEDER_X = 12;
 
 /** Side length of a pin — the stub a wire plugs into. Its centre sits on the
  *  edge it belongs to, which is what the ports below answer with. */
 export const PIN_D = 11;
 
-/** Breathing room at the board's top and bottom edges. */
+/** The least breathing room the column leaves at the board's top and bottom. */
 const BOARD_MARGIN = 14;
 /** The gap between the primary panel and the copies panel. */
-const GROUP_GAP = 12;
+const GROUP_GAP = 14;
 /** Vertical breathing room at the top and bottom of the feeders' column. */
 const COLUMN_MARGIN = 34;
 
-/** How tall the primary panel is: its hairlines, its title, one row, and the
- *  padding around them. One row, always — the primary is a single device — and
- *  it is the panel's border box, so the row inside it fits to the pixel. */
+/**
+ * How tall a panel's body is for `rows` rows.
+ *
+ * An empty panel is as tall as a one-row one: the column is centred, so a body
+ * that grew when the first copy arrived would shuffle both panels. `rows` is 0
+ * only where the body is showing its own sentence instead.
+ */
+export function panelBodyHeight(rows: number): number {
+  if (rows <= 0) return GROUP_PAD * 2 + ROW_H;
+  return GROUP_PAD * 2 + rows * ROW_H + (rows - 1) * ROW_GAP;
+}
+
+/** A panel's border-box height for a body of `body` px. */
+function panelHeight(body: number): number {
+  return PANEL_BORDER * 2 + GROUP_HEADER_H + body;
+}
+
+/** The primary panel's height: one row, always, because the primary is a single
+ *  device. Fixed so the wire to it never has to be re-derived. */
 export function primaryPanelHeight(): number {
-  return PANEL_BORDER * 2 + GROUP_HEADER_H + GROUP_PAD * 2 + ROW_H;
+  return panelHeight(panelBodyHeight(1));
 }
 
-/** Where the primary panel's top edge sits. It is anchored to the top of the
- *  board, as the first thing the column has to say. */
-export function primaryPanelY(): number {
-  return BOARD_MARGIN;
+/** The tallest the copies panel may be: what is left once the primary panel,
+ *  the gap between them and both margins have taken their share. */
+function copiesPanelMax(height: number): number {
+  return Math.max(
+    panelHeight(panelBodyHeight(0)),
+    height - BOARD_MARGIN * 2 - primaryPanelHeight() - GROUP_GAP,
+  );
 }
 
-/** Where the copies panel's top edge sits: directly under the primary's. */
-export function copiesPanelY(): number {
-  return primaryPanelY() + primaryPanelHeight() + GROUP_GAP;
+/** Where the two panels sit on the board. */
+export interface PanelColumn {
+  primaryY: number;
+  primaryHeight: number;
+  copiesY: number;
+  copiesHeight: number;
 }
 
 /**
- * How tall the copies panel may be.
+ * The two panels as one column, centred on the hub: the primary above the line
+ * the wires leave from, every other destination below it. So the fan of wires
+ * leaves the hub's pin with something to reach on both sides of it, and the
+ * column has the same room above it as below.
  *
- * It takes everything left below the primary panel, so the two of them always
- * fit the board exactly and the stage never has to scroll. A row too many and
- * the panel scrolls inside itself rather than the board growing.
+ * The copies panel takes its content's height — an empty board is a short
+ * column in the middle, not a dashed box running to the floor — but never more
+ * than what is left, so the stage still never scrolls: past that the panel
+ * scrolls inside itself.
  */
-export function copiesPanelHeight(height: number): number {
-  return Math.max(GROUP_HEADER_H + GROUP_PAD * 2, height - copiesPanelY() - BOARD_MARGIN);
-}
-
-/** How tall a panel's scroll content is, for `rows` rows. */
-export function panelContentHeight(rows: number): number {
-  if (rows <= 0) return 0;
-  return GROUP_PAD * 2 + rows * ROW_H + (rows - 1) * ROW_GAP;
+export function panelColumn(height: number, rows: number): PanelColumn {
+  const copiesHeight = Math.min(panelHeight(panelBodyHeight(rows)), copiesPanelMax(height));
+  const primaryHeight = primaryPanelHeight();
+  const top = Math.max(BOARD_MARGIN, Math.round((height - primaryHeight - GROUP_GAP - copiesHeight) / 2));
+  return {
+    primaryY: top,
+    primaryHeight,
+    copiesY: top + primaryHeight + GROUP_GAP,
+    copiesHeight,
+  };
 }
 
 /** The centre of row `index`, in the panel's own scroll content. */
