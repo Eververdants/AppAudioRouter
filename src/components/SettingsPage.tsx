@@ -391,7 +391,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               type="button"
               aria-current={active ? 'page' : undefined}
               onClick={() => setSection(id)}
-              className={`relative flex items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+              className={`pressable relative flex items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
                 active
                   ? 'bg-accent-muted font-medium text-accent'
                   : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'

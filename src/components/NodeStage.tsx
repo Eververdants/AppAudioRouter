@@ -988,7 +988,7 @@ function DeviceRow({
       {badgeIsButton ? (
         <button
           type="button"
-          className="no cursor-pointer hover:border-accent hover:text-accent"
+          className="no pressable cursor-pointer hover:border-accent hover:text-accent"
           onClick={onInspect}
           aria-label={t('stage.inspectAria', { name: deviceName })}
           title={t('stage.inspectTitle', { name: deviceName })}
@@ -1011,7 +1011,7 @@ function DeviceRow({
           }
           title={onPrimaryPick === undefined ? undefined : t('stage.changePrimaryTitle')}
           onClick={onPrimaryPick ?? onToggle}
-          className="truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
+          className="pressable truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
         >
           {deviceName}
         </button>
@@ -1036,7 +1036,7 @@ function DeviceRow({
                   event.stopPropagation();
                   onPrimaryPick();
                 }}
-                className="text-[10px] font-semibold text-type-primary underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+                className="pressable text-[10px] font-semibold text-type-primary underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
               >
                 <span className="group-hover/copy:hidden">{roleWord}</span>
                 <span className="hidden group-hover/copy:inline">{t('stage.changePrimary')}</span>
@@ -1055,7 +1055,7 @@ function DeviceRow({
                 event.stopPropagation();
                 onPromote();
               }}
-              className="text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+              className="pressable text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
             >
               <span className="group-hover/copy:hidden">{roleWord}</span>
               <span className="hidden group-hover/copy:inline">{t('stage.promote')}</span>

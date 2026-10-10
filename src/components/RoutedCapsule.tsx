@@ -179,7 +179,7 @@ export function RoutedCapsule() {
                         }}
                         title={t('routed.tune', { name: row.name })}
                         aria-label={t('routed.tune', { name: row.name })}
-                        className="min-w-0 flex-1 truncate text-left text-[12px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
+                        className="pressable min-w-0 flex-1 truncate text-left text-[12px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
                       >
                         {row.name}
                       </button>

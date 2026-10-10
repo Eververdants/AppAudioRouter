@@ -274,7 +274,7 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
                     }}
                     title={t('briefingPage.openBoard', { name: card.name })}
                     aria-label={t('briefingPage.openBoard', { name: card.name })}
-                    className="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
+                    className="pressable min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
                   >
                     {card.name}
                   </button>

@@ -338,7 +338,7 @@ export function ProgramRail() {
                         selectProcess(session.pid);
                       }
                     }}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                    className="pressable flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
                     {/* The executable's own icon, in a slot that is its size
                       whether the pixels have arrived or not. */}

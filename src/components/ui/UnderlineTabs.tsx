@@ -48,10 +48,10 @@ export function UnderlineTabs({
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(tab.id)}
-            className="relative flex flex-col justify-end outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+            className="group/tab relative flex flex-col justify-end outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           >
             <span
-              className={`px-0.5 pb-2 text-[12px] transition-colors ${
+              className={`px-0.5 pb-2 text-[12px] transition-[color,transform] duration-100 group-active/tab:scale-95 ${
                 selected
                   ? 'font-medium text-text-primary'
                   : 'text-text-muted hover:text-text-secondary'

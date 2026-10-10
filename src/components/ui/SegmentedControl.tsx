@@ -50,10 +50,10 @@ export function SegmentedControl<T extends string>({
             aria-checked={active}
             aria-label={option.ariaLabel}
             onClick={() => onChange(option.value)}
-            className="relative flex flex-col justify-end outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+            className="group/seg relative flex flex-col justify-end outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           >
             <span
-              className={`flex items-center gap-1 px-0.5 pb-1 text-[11px] transition-colors ${
+              className={`flex items-center gap-1 px-0.5 pb-1 text-[11px] transition-[color,transform] duration-100 group-active/seg:scale-95 ${
                 active
                   ? 'font-medium text-text-primary'
                   : 'text-text-muted hover:text-text-secondary'
