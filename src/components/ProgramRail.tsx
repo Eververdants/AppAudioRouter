@@ -289,7 +289,7 @@ export function ProgramRail() {
                   // slide buried under the moving pane, which reads as the
                   // icon flickering. Under them the pane slips beneath instead.
                   isSubject ? 'z-0' : 'z-10'
-                } mb-1 flex items-center rounded-full px-2 py-1.5 transition-colors ${
+                } mb-1 flex items-center rounded-ctl px-2 py-1.5 transition-colors ${
                   isSelected ? '' : 'hover:bg-surface-hover'
                 }`}
               >
@@ -299,19 +299,22 @@ export function ProgramRail() {
                     "the stage switched to this one" without words. The rows
                     added to the batch get a quieter wash — several programmes
                     are going to be changed at once, and only one of them is the
-                    one being shown. Both are capsules, and the mark that
-                    travels between rows is the same capsule. */}
+                    one being shown. Both are rounded rectangles rather than
+                    capsules, with an accent rule at the leading edge: a pill
+                    swallows the row's own shape, and the list is a list of rows. */}
                 {isSubject ? (
                   <motion.span
                     layoutId="rail-selection"
                     transition={SPRING_GLIDE}
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 rounded-full bg-surface"
-                  />
+                    className="pointer-events-none absolute inset-0 rounded-ctl bg-surface"
+                  >
+                    <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
+                  </motion.span>
                 ) : joined ? (
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 rounded-full bg-accent/[0.07]"
+                    className="pointer-events-none absolute inset-0 rounded-ctl bg-accent/[0.07]"
                   />
                 ) : null}
 
