@@ -97,11 +97,10 @@ export function RoutedCapsule() {
   }, [open, rows.length]);
 
   // Escape and outside-pointerdown follow the panel's visibility, exactly the
-  // way the stage's picker does it: a standing listener would swallow the
-  // search box's Escape for the whole session. The key is also left to a
-  // control that owns it — an armed ✕ in one of these rows answers Escape
-  // itself, and taking the whole panel down on that press would spend a
-  // question the user was looking at.
+  // way the stage's pickers do it: a standing listener would swallow the key
+  // for the whole session. The key is also left to a control that owns it — an
+  // armed ✕ in one of these rows answers Escape itself, and taking the whole
+  // panel down on that press would spend a question the user was looking at.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {

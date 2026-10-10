@@ -105,7 +105,10 @@ export const FEEDER_X = 12;
  *  edge it belongs to, which is what the ports below answer with. */
 export const PIN_D = 11;
 
-/** The least breathing room the column leaves at the board's top and bottom. */
+/** The breathing room the column reserves at the board's top and bottom when it
+ *  works out how much room the panels have. The centring itself is clamped at
+ *  0 rather than at this margin: a well too short to hold the column must keep
+ *  it inside the board, not push its top out of it. */
 const BOARD_MARGIN = 14;
 /** The gap between the primary panel and the copies panel. */
 const GROUP_GAP = 14;

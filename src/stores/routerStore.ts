@@ -1049,13 +1049,18 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // device that already holds it is not a change, and the comparison has to
     // be made against the ordered plan rather than the raw one: with delays set,
     // those two disagree by design.
-    if (orderByDelay(selectedDeviceIds, deviceDelays)[0] === deviceId) return;
-    // A device already on the plan keeps its seat and the others swap around it;
-    // one from outside takes the primary and the copies the plan already had
-    // stay exactly where they are (the old primary leaves with its seat).
+    const order = orderByDelay(selectedDeviceIds, deviceDelays);
+    if (order[0] === deviceId) return;
+    // Who stays when the picked device takes the seat:
+    // - already on the plan: everyone but itself (roles swap, membership kept);
+    // - from outside: everyone but **the device currently holding the seat** —
+    //   the same membership the board's picker offers, so a row the picker lets
+    //   you press is never a row this refuses. Taking the plan's first element
+    //   instead would drop a different device whenever the delay order and the
+    //   plan's own order disagree.
     const kept = selectedDeviceIds.includes(deviceId)
       ? selectedDeviceIds.filter((id) => id !== deviceId)
-      : selectedDeviceIds.slice(1);
+      : selectedDeviceIds.filter((id) => id !== order[0]);
     // Software delay can only hold sound back, so a device whose compensation is
     // larger than every remaining device's could never be the one Windows plays
     // directly: the request cannot be honoured, and the plan is left alone

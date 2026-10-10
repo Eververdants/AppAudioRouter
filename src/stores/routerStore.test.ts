@@ -406,6 +406,26 @@ describe('process and device selection', () => {
     expect(state().selectedDeviceIds).toEqual(['tv']);
   });
 
+  it('drops the device actually holding the seat, not the plan array\'s first entry', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV, HEADPHONES],
+      sessions: [MUSIC],
+      // The plan names the TV first, but its delay is endless, so the speakers
+      // hold the seat. Picking an outside device replaces the device Windows is
+      // playing — the speakers — not whichever entry the array happens to start
+      // with, or the board's picker (which reads the same ordered plan) and this
+      // store would disagree about whether the request is even allowed.
+      selectedDeviceIds: ['tv', 'speakers'],
+      deviceDelays: { tv: 100, speakers: 0, headphones: 50 },
+      deviceSelectionPrefilled: false,
+    });
+
+    state().setPrimaryDevice('headphones');
+
+    expect(state().selectedDeviceIds).toEqual(['headphones', 'tv']);
+  });
+
   it('keeps the shared targets when a process is added to the selection', () => {
     installBackend();
     reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME], selectedDeviceIds: ['tv'] });
