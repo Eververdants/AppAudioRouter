@@ -144,6 +144,29 @@ function copiesPanelMax(height: number): number {
   );
 }
 
+/**
+ * The body height of a scrolling panel: whole rows plus the top half of the
+ * next one.
+ *
+ * A panel that has run out of room must say so by itself — a row cut through
+ * the middle is the oldest answer to "there is more below", and it needs no
+ * label, no arrow and no scrollbar to be read. So when the rows do not fit, the
+ * panel takes the height of as many whole rows as fit plus half a row, and the
+ * cut edge does the talking (`Panel` adds a soft fade under it on top).
+ *
+ * `availableBody` is what the board has left for the body, border and title row
+ * already removed.
+ */
+function peekBodyHeight(availableBody: number): number {
+  // The most whole rows whose centre still fits, which is the row the panel ends
+  // halfway through: the cut edge lands on a row's own middle, so exactly half
+  // of that row shows.
+  const rowsThatFit = Math.floor(
+    (availableBody - GROUP_PAD - ROW_H / 2) / (ROW_H + ROW_GAP),
+  );
+  return Math.min(availableBody, rowContentY(Math.max(0, rowsThatFit)));
+}
+
 /** Where the two panels sit on the board. */
 export interface PanelColumn {
   primaryY: number;
@@ -164,7 +187,14 @@ export interface PanelColumn {
  * scrolls inside itself.
  */
 export function panelColumn(height: number, rows: number): PanelColumn {
-  const copiesHeight = Math.min(panelHeight(panelBodyHeight(rows)), copiesPanelMax(height));
+  const max = copiesPanelMax(height);
+  const wanted = panelHeight(panelBodyHeight(rows));
+  // Content that fits takes its own height; one that does not stops with a row
+  // cut in half, so the panel itself shows that there is more to scroll to.
+  const copiesHeight =
+    wanted <= max
+      ? wanted
+      : PANEL_BORDER * 2 + GROUP_HEADER_H + peekBodyHeight(max - PANEL_BORDER * 2 - GROUP_HEADER_H);
   const primaryHeight = primaryPanelHeight();
   const top = Math.max(BOARD_MARGIN, Math.round((height - primaryHeight - GROUP_GAP - copiesHeight) / 2));
   return {

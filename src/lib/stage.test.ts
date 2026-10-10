@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOARD_H,
+  GROUP_HEADER_H,
+  GROUP_PAD,
   MINI_H,
+  PANEL_BORDER,
   ROW_GAP,
   ROW_H,
   alreadyApplied,
@@ -96,6 +99,22 @@ describe('board geometry', () => {
     const long = panelColumn(600, 40);
     expect(long.copiesHeight).toBeLessThan(panelBodyHeight(40));
     expect(long.copiesY + long.copiesHeight).toBeLessThanOrEqual(600);
+  });
+
+  it('ends an overflowing copies panel halfway through a row', () => {
+    // A panel with no room left has to say so by itself: the cut lands on a
+    // row's centre, so exactly half of that row shows and the edge reads as
+    // "there is more below" without a label or an arrow.
+    for (const height of [400, 470, 560]) {
+      const column = panelColumn(height, 40);
+      const body = column.copiesHeight - (PANEL_BORDER * 2 + GROUP_HEADER_H);
+      const index = Math.round((body - GROUP_PAD - ROW_H / 2) / (ROW_H + ROW_GAP));
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(rowContentY(index)).toBeCloseTo(body, 6);
+      // ...and the wire to that half-visible row is drawn, so the cut row is
+      // still pointed at rather than left hanging.
+      expect(rowVisible(column.copiesY, column.copiesHeight, index, 0)).toBe(true);
+    }
   });
 
   it('stacks rows without letting them touch', () => {

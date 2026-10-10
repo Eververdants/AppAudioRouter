@@ -830,6 +830,18 @@ function Panel({
   onScroll?: (scrollTop: number) => void;
   children: React.ReactNode;
 }) {
+  const bodyHeight = height - PANEL_BORDER * 2 - GROUP_HEADER_H;
+  const contentHeight = rows > 0 ? panelBodyHeight(rows) : 0;
+  const [scrollTop, setScrollTop] = useState(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // When the content or the room changes, the browser clamps the scroll itself;
+  // read the clamped value back so a hint does not stay lit over a panel that
+  // has just come to rest at its new bottom.
+  useEffect(() => {
+    setScrollTop(scrollRef.current?.scrollTop ?? 0);
+  }, [rows, bodyHeight]);
+  const canScrollUp = rows > 0 && scrollTop > 0.5;
+  const canScrollDown = rows > 0 && scrollTop + bodyHeight < contentHeight - 0.5;
   return (
     <div
       className="cc absolute overflow-hidden rounded-card border border-dashed border-line-strong bg-surface-sunken"
@@ -844,18 +856,39 @@ function Panel({
         </span>
         {headerAction}
       </div>
-      <div
-        className="overflow-y-auto"
-        style={{ height: height - PANEL_BORDER * 2 - GROUP_HEADER_H }}
-        onScroll={onScroll ? (event) => onScroll(event.currentTarget.scrollTop) : undefined}
-      >
-        {rows > 0 ? (
-          <div className="relative" style={{ height: panelBodyHeight(rows) }}>
-            {children}
-          </div>
-        ) : (
-          <div className="px-3 py-2.5 text-[10.5px] leading-relaxed text-text-muted">{empty}</div>
-        )}
+      <div className="relative" style={{ height: bodyHeight }}>
+        <div
+          ref={scrollRef}
+          className="h-full overflow-y-auto"
+          onScroll={(event) => {
+            setScrollTop(event.currentTarget.scrollTop);
+            onScroll?.(event.currentTarget.scrollTop);
+          }}
+        >
+          {rows > 0 ? (
+            <div className="relative" style={{ height: contentHeight }}>
+              {children}
+            </div>
+          ) : (
+            <div className="px-3 py-2.5 text-[10.5px] leading-relaxed text-text-muted">{empty}</div>
+          )}
+        </div>
+        {/* The soft edge: the panel's own background closing over whatever runs
+            past it. It is what makes the half-row cut below read as "there is
+            more down there" rather than as a card that failed to render — a
+            gentle pull towards the content that is out of sight, fading in only
+            while there is something on that side to reach. Never interactive,
+            and it paints nothing while the rows fit. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-surface-sunken to-transparent transition-opacity duration-200"
+          style={{ opacity: canScrollUp ? 1 : 0 }}
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-surface-sunken to-transparent transition-opacity duration-200"
+          style={{ opacity: canScrollDown ? 1 : 0 }}
+        />
       </div>
     </div>
   );
