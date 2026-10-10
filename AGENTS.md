@@ -35,7 +35,7 @@ Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript 
 |------|-----------|
 | [state.md](docs/agents/state.md) | 改 `routerStore`、路由 / 送入 / 记忆 / 撤销、延迟、音量（份额 / 主输出 / 源电平）、显示名、图标 |
 | [background.md](docs/agents/background.md) | 改托盘 / 单实例 / 自启 / 启动提示、`notifications.rs`、`duplication.rs`、`routing.rs`（端点分配） |
-| [board-ui.md](docs/agents/board-ui.md) | 改 `NodeStage` / `ProgramRail` / `StatusBriefing` / `RoutedCapsule`、调音条、看板几何 |
+| [board-ui.md](docs/agents/board-ui.md) | 改 `NodeStage` / `ProgramRail` / `BriefingPage` / `RoutedCapsule`、调音条、看板几何、设置页布局 |
 | [theme.md](docs/agents/theme.md) | 改颜色、圆角、阴影、`Ring`、任何视觉与动效 |
 | [acceptance.md](docs/agents/acceptance.md) | 发版前、或大改动后自查 |
 
@@ -71,17 +71,17 @@ AppAudioRouter/
 │   │   ├── NodeStage.tsx           # 节点看板：路由唯一被表达的地方（hub/去向/来源三类卡 + Inspector 调音条）
 │   │   ├── ProgramRail.tsx         # 左栏程序列表（行末圆形开关取代 Ctrl+点击）
 │   │   ├── RoutedCapsule.tsx       # 「已路由 n」胶囊：所有路由的管理面（只有停止，没有开始）
-│   │   ├── StatusBriefing.tsx      # 「直说」现状气泡（按需的路由大白话摘要）
+│   │   ├── BriefingPage.tsx        # 「现状」页（路由与活动记录之间）：每个程序一行 chip 的去向图
 │   │   ├── SourceLevelDial.tsx     # hub 卡下的每程序电平环（仅多设备路由挂载）
 │   │   ├── Toast.tsx               # 瞬态提示：路由与送入的撤销入口（全项目唯一）
-│   │   ├── SettingsPage.tsx        # 设置独立页面
-│   │   ├── LogPanel.tsx            # 活动记录（下划线标签页第二页）
+│   │   ├── SettingsPage.tsx        # 设置独立页面（左分区导航 + 右内容）
+│   │   ├── LogPanel.tsx            # 活动记录（下划线标签页第三页）
 │   │   ├── TitleBar.tsx            # 自定义标题栏（透明；「已路由 · 播放中」计数 + 设置入口）
 │   │   ├── StartupWizard.tsx       # 首次启动全屏向导（四步）
 │   │   ├── StartupNoticeDialog.tsx # 升级提示弹窗（旧版本固定端点警告 + 就地重置）
-│   │   └── ui/                     # Ring（同心圆，全项目一枚）/ ProcessIcon / Switch / UnderlineTabs /
-│   │                               #   SegmentedControl / ScrubReadout / StepButton / Tooltip / ConfirmButton /
-│   │                               #   DelayStepper / Spinner
+│   │   ├── ui/                     # Ring（同心圆，全项目一枚）/ ProcessIcon / Switch / UnderlineTabs /
+│   │                               #   SegmentedControl / Select（自研下拉，带 data-owns-escape）/ ScrubReadout /
+│   │                               #   StepButton / Tooltip / ConfirmButton / DelayStepper / Spinner
 │   ├── hooks/                # useTheme / useLanguage / useDelayValue / useLiveness（声流闸门）/ useBackendEvent
 │   ├── stores/routerStore.ts # Zustand store
 │   ├── i18n/                 # en.json + zh-CN.json（键集合有对称测试保护）
@@ -166,9 +166,10 @@ AppAudioRouter/
 - 自动恢复「一个 pid 只试一次」的 Set **故意不按存活清理**；`restoreRememberedRoutes` 必须排在 `releaseStaleRoutes` 之后。
 
 **看板与前端**（[board-ui.md](docs/agents/board-ui.md)）
-- 路由只由看板表达，别在别处画第二份（树 / 状态条 / 常驻文字摘要）；现状气泡是按需例外。
-- 看板几何唯一来源 `lib/stage.ts`（组件用 `style` 取值，不用 Tailwind `w-[…]`）；没有拖动、平移、缩放。
-- 已删不复活：液态玻璃、自由画布、路由树、设备表格、同心圆舞台（[board-ui.md](docs/agents/board-ui.md) 有完整清单）；`tauri-plugin-*` 见「安全注意事项」。
+- 路由只由看板表达，别在别处画第二份（树 / 状态条 / 常驻文字摘要）；例外只有两个、都叫得出名字：**「现状」页**（一个标签页）与**已路由胶囊**。底部**没有**常驻 status bar——调音条只在点了某行编号时出现。
+- 看板几何唯一来源 `lib/stage.ts`（组件用 `style` 取值，不用 Tailwind `w-[…]`）；没有拖动、平移、缩放。复制面板装不下时以**半行**收尾 + 背景渐隐提示可滚动。
+- 左栏选中高亮是**圆角矩形 + 行首竖规**，不是胶囊。
+- 已删不复活：液态玻璃、自由画布、路由树、设备表格、同心圆舞台、`StatusBriefing`（「直说」浮层）（[board-ui.md](docs/agents/board-ui.md) 有完整清单）；`tauri-plugin-*` 见「安全注意事项」。
 
 ---
 

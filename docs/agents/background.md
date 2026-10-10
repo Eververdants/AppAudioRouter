@@ -22,6 +22,8 @@
 - 守卫在 `setup()` 里**最先**执行（读配置、建托盘、起通知线程之前），拿不到互斥就 `app.handle().exit(0)` 并直接返回：第二次启动不能碰任何配置或音频状态。返回的 guard 交给 `app.manage()` 持有到进程结束。
 - 第二次启动的语义是"把窗口叫出来"，不是"没反应"——托盘常驻的应用没有别的答案。第一个实例的 watcher 线程等到事件后调 `tray::reveal()`。
 - 事件**先于**互斥创建：`CreateEventW` 是按名字打开已有对象的，所以和第一个实例抢跑的那次启动依然唤得到同一个对象。判定依据是 `CreateMutexW` 成功但 `GetLastError() == ERROR_ALREADY_EXISTS`（`Ok` 路径不会动 getLastError，所以这里可靠）。
+  ⚠️ **调用前必须 `SetLastError(ERROR_SUCCESS)`**（2026-10-11）：`CreateMutexW` 成功创建新对象时**不保证**把 last-error 清零，而本线程更早的调用可能留下过一个 `ERROR_ALREADY_EXISTS`——那样**第一个实例**会误判"已经有人跑着"并当场退出。清零只影响本线程的 last-error 槽，是这条判定唯一可靠的前提。
+- 唤窗的观察线程在**窗口还没建出来**时不能退休（`continue` 而不是 `return`）：第二次启动抢在第一次启动的窗口之前到达正是这条事件存在的理由；auto-reset 事件只在被 signal 时唤醒，所以即使窗口最终没出现也不会空转。
 - 创建互斥失败只 `warn!` 并**以无守卫方式继续启动**：单实例是防打架，不是安全边界，绝不能因为一个内核对象建不出来就拒绝启动。
 - 手写而不用 `tauri-plugin-single-instance`，理由与 `autostart` 同款：插件为一次 `CreateMutexW` 带来一对需要版本锁步的 npm/Cargo 依赖。**不要把插件加回来。**
 
@@ -45,6 +47,12 @@
 - 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。`devices` 分支还会跟一次 `loadCaptureDevices()`：载体选择器列的是捕获侧，回环驱动装上后必须不重启就出现在列表里。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面两处才不至于永远停在旧值。
 - **第四个引擎事件 `duplication-ready`**（pid / generation）：最后一个镜像初始化完成时由 `mirror_ready` 发一次，因为镜像的 `GetStreamLatency` 是在**渲染线程**里、在一次异步设备激活**之后**才拿到的，而 `apply_route` 早就返回了——前端若只在收到路由回执时读一次，读到的必然是空值，而且**再也不会重读**。`reconcileActiveDuplications()` 因此有四处调用：开机、路由落地后、撤销后、以及这个事件；外加改延迟之后与 `syncFromNotification`。**每一条新起引擎的路径都要跟一次**，否则那台设备的读数要么不出现、要么停在改动之前。
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
+- ⚠️ **本应用自己不出现在程序列表里**（2026-10-11）：`enumerate_sessions` 结尾走 `exclude_own_processes`——
+  用一次 `CreateToolhelp32Snapshot` 走出**本进程树**（自己 + 所有后代），把它们从会话里剔除；再按 `current_exe()` 的**文件名**
+  兜第二道网（两条判据互补：快照拿不到时还有文件名，文件名读不出时还有树）。理由：WebView2 把界面（以及它发出的声音）
+  渲染在**子进程**里，只滤 `std::process::id()` 会漏掉真正挂着音频会话的那个子进程。
+  快照失败只 `warn!` 并退化成"只有自己这一个 pid"，**不能**退化成空集或报错。这条过滤在 `list_sessions`、
+  `align_source_levels` 等所有调用 `enumerate_sessions` 的地方一起生效——这是有意的：这些入口本就不该看到本应用。
 
 ## 引擎的唤醒成本（2.2 起）
 
