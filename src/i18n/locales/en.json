@@ -84,25 +84,7 @@
     "stripPrimaryNote": "This is the program's session volume — only the main path changes; the copies are compensated.",
     "stripPrimaryLatency": "The primary is played by Windows directly, so there is no measured latency to show here.",
     "stripDelay": "Delay",
-    "stripShare": "Share",
-    "inspectorHint": "Click a destination row's number to tune it — the program itself, a device's delay and volume. The \"+\" in the lower panel's title adds a destination.",
-    "inspectorHubNoRoute": "Not routed — pick destination rows to build a plan, then click the program card to apply it.",
-    "inspectorHubOne": "Plays through {{device}}.",
-    "inspectorHubMulti": "Plays through {{device}} (+{{m}} copies).",
-    "inspectorHubFeeds": "feeds {{n}} input(s)"
-  },
-  "briefing": {
-    "button": "Straight talk",
-    "tooltip": "Let me tell you where things stand — plainly, simply, no beating around the bush.",
-    "title": "Where things stand",
-    "empty": "Nothing is redirected: every app follows the system default device, {{device}}.",
-    "emptyNoDevice": "Nothing is redirected: every app follows the system default device.",
-    "routeOne": "{{process}} plays from {{device}} now, and follows nothing else.",
-    "routeMulti": "{{process}} plays from {{devices}} at once.",
-    "quiet": "(silent right now)",
-    "staged": "The board still has changes waiting — click the program card to make them real.",
-    "feedLine": "{{process}} is sending its audio into {{targets}}' input.",
-    "feedHeldLine": "{{process}} has a feed into {{targets}}, held while it plays through a device."
+    "stripShare": "Share"
   },
   "routed": {
     "capsule": "{{n}} routed",
@@ -219,7 +201,24 @@
   "tabs": {
     "label": "Views",
     "router": "Routing",
+    "briefing": "Status",
     "activity": "Activity"
+  },
+  "briefingPage": {
+    "defaultFallback": "System default device",
+    "defaultHint": "Programs that are not redirected follow it",
+    "following": "{{n}} following",
+    "empty": "Nothing is redirected yet",
+    "emptyHint": "Every sound follows the system default device, {{device}}.",
+    "emptyNoDevice": "Every sound follows the system default device.",
+    "openBoard": "Open {{name}}'s board",
+    "rolePrimary": "Main",
+    "roleCopy": "Copy",
+    "roleFeed": "Input",
+    "roleFeedHeld": "Held",
+    "roleFeedNoCarrier": "No carrier",
+    "quiet": "Silent",
+    "staged": "The board still has changes waiting — go back to Routing and press the program card to make them real."
   },
   "logPanel": {
     "empty": "No activity yet"

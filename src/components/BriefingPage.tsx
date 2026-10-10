@@ -1,0 +1,316 @@
+import { useMemo } from 'react';
+import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
+import { ProcessIcon } from '@/components/ui/ProcessIcon';
+import { Ring } from '@/components/ui/Ring';
+import { useLiveness } from '@/hooks/useLiveness';
+import { useProgramRoutes } from '@/hooks/useProgramRoutes';
+import { orderByDelay } from '@/lib/delay';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
+import { alreadyApplied } from '@/lib/stage';
+import { feedLiveness, useRouterStore } from '@/stores/routerStore';
+
+/** One destination, as the page draws it. */
+interface Destination {
+  key: string;
+  name: string;
+  /** Which colour the chip wears: the role colours, nothing else. */
+  role: 'primary' | 'copy' | 'feed';
+  /** Feed chips only: whether the feed is moving, held, or has no carrier. */
+  feedState?: 'live' | 'suspended' | 'no-carrier';
+}
+
+/** One program, and everywhere its sound is going right now. */
+interface Card {
+  pid: number;
+  name: string;
+  exeName: string;
+  sounding: boolean;
+  destinations: Destination[];
+}
+
+/** The colour of a role, as a CSS variable the chip's dot wears. */
+const ROLE_COLOR: Record<Destination['role'], string> = {
+  primary: 'var(--type-primary)',
+  copy: 'var(--type-mirror)',
+  feed: 'var(--type-feed)',
+};
+
+/** The little wire between a program and its destinations. Not animated: it is
+ *  a drawing of a fact, and the fact is stated by the chips at its end. */
+function Connector() {
+  return (
+    <svg
+      width="30"
+      height="12"
+      viewBox="0 0 30 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="flex-none text-text-muted"
+    >
+      <line x1="0" y1="6" x2="22" y2="6" />
+      <polyline points="18 3 22 6 18 9" />
+    </svg>
+  );
+}
+
+/** One destination chip: a role dot, the device's name, and the role in words. */
+function Chip({ destination, roleWord }: { destination: Destination; roleWord: string }) {
+  // A feed that is not moving is still a destination, but the chip says so:
+  // dimming it is the page's way of holding it apart from the ones that are.
+  const held = destination.feedState !== undefined && destination.feedState !== 'live';
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border border-line bg-surface py-0.5 pl-2 pr-2.5 ${
+        held ? 'opacity-70' : ''
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className="h-1.5 w-1.5 flex-none rounded-full"
+        style={{ background: ROLE_COLOR[destination.role] }}
+      />
+      <span className="max-w-[150px] truncate text-[11.5px] text-text-secondary">
+        {destination.name}
+      </span>
+      <span
+        className={`text-[9.5px] font-semibold uppercase tracking-[0.06em] ${
+          destination.role === 'feed' ? 'text-type-feed' : 'text-text-muted'
+        }`}
+      >
+        {roleWord}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The standing answer to "where is sound going right now", as a page.
+ *
+ * The board answers for one programme at a time; this answers for all of them,
+ * and it answers *visually* — every routed programme is a row, and the chips to
+ * the right of its arrow are the destinations, in the order the sound reaches
+ * them, wearing the same role colours the board uses. Reading it takes no
+ * vocabulary: a row with one chip is going one place, a row with three is going
+ * three, and a programme that is not on the page is following the system
+ * default like everything else.
+ *
+ * It reports; it never acts. What changes a route lives where the route is
+ * drawn, so the only action offered here is the pointer's own way back: the
+ * destination's name is a door to that programme's board.
+ */
+export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
+  const { t } = useTranslation();
+  const liveness = useLiveness();
+  const devices = useRouterStore((s) => s.devices);
+  const sessions = useRouterStore((s) => s.sessions);
+  const routedPids = useRouterStore((s) => s.routedPids);
+  const routesByPid = useProgramRoutes();
+  const soundingPids = useRouterStore((s) => s.soundingPids);
+  const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
+  const selectedPids = useRouterStore((s) => s.selectedPids);
+  const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
+  const deviceDelays = useRouterStore((s) => s.deviceDelays);
+  const feeds = useRouterStore((s) => s.feeds);
+  const feedCarrier = useRouterStore((s) => s.feedCarrier);
+  const selectProcess = useRouterStore((s) => s.selectProcess);
+
+  const nameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const device of devices) map.set(device.id, device.name);
+    return map;
+  }, [devices]);
+
+  const defaultName =
+    defaultDeviceId !== null ? (nameById.get(defaultDeviceId) ?? defaultDeviceId) : null;
+
+  const { cards, following } = useMemo(() => {
+    // Sounding is a fact about the program: its audio comes out of a sibling
+    // process while the route is held by another one.
+    const soundingExes = new Set<string>();
+    for (const session of sessions) {
+      if (soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
+    }
+
+    const cards: Card[] = [];
+    let following = 0;
+    for (const session of sessions) {
+      const ids = routedPids[session.pid] ?? [];
+      const targetPids = feeds[session.pid] ?? [];
+      if (ids.length === 0 && targetPids.length === 0) {
+        following += 1;
+        continue;
+      }
+      const destinations: Destination[] = ids.map((id, index) => ({
+        key: `dev:${id}`,
+        name: nameById.get(id) ?? id,
+        role: index === 0 ? 'primary' : 'copy',
+      }));
+      for (const targetPid of targetPids) {
+        const target = sessions.find((s) => s.pid === targetPid);
+        if (target === undefined) continue;
+        destinations.push({
+          key: `feed:${targetPid}`,
+          name: target.display_name ?? target.exe_name,
+          role: 'feed',
+          // The same reading the board's feed cards use: a device route takes
+          // the source's render slot, so the feed is held rather than moving.
+          feedState: feedLiveness(session.pid, feedCarrier, routedPids, sessions),
+        });
+      }
+      cards.push({
+        pid: session.pid,
+        name: session.display_name ?? session.exe_name,
+        exeName: session.exe_name,
+        sounding: soundingExes.has(session.exe_name.toLowerCase()),
+        destinations,
+      });
+    }
+    return { cards, following };
+  }, [sessions, routedPids, feeds, soundingPids, nameById, feedCarrier]);
+
+  // Changes staged on the board that have not landed: the one thing this page
+  // cannot show, because the page reports what is happening and those are not.
+  const staged = orderByDelay(selectedDeviceIds, deviceDelays);
+  const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routesByPid);
+
+  /** The word a chip wears, which for a feed is its own three-state reading. */
+  const roleWordOf = (destination: Destination): string => {
+    if (destination.role === 'primary') return t('briefingPage.rolePrimary');
+    if (destination.role === 'copy') return t('briefingPage.roleCopy');
+    switch (destination.feedState) {
+      case 'suspended':
+        return t('briefingPage.roleFeedHeld');
+      case 'no-carrier':
+        return t('briefingPage.roleFeedNoCarrier');
+      default:
+        return t('briefingPage.roleFeed');
+    }
+  };
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-8 py-7">
+        {/* The baseline every unredirected program is on, stated once and
+            first: the page is about the exceptions, so the rule comes before
+            them. */}
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={FADE}
+          transformTemplate={MAIN_THREAD_TRANSFORM}
+          className="flex items-center gap-3 rounded-card border border-line bg-surface-sunken px-4 py-3"
+        >
+          <span className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-line-strong text-text-muted">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 10v4h3l4 3V7L6 10H3z" />
+              <path d="M15 9a4 4 0 0 1 0 6" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12.5px] font-medium text-text-primary">
+              {defaultName ?? t('briefingPage.defaultFallback')}
+            </div>
+            <div className="truncate text-[11px] text-text-muted">
+              {t('briefingPage.defaultHint')}
+            </div>
+          </div>
+          <span className="flex-none text-[11px] tabular-nums text-text-muted">
+            {t('briefingPage.following', { n: following })}
+          </span>
+        </motion.div>
+
+        {cards.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+            className="flex flex-col items-center gap-2 rounded-card border border-dashed border-line-strong px-6 py-12 text-center"
+          >
+            <Ring tone="idle" size={18} />
+            <p className="text-[12.5px] font-medium text-text-secondary">
+              {t('briefingPage.empty')}
+            </p>
+            <p className="max-w-[44ch] text-[11px] leading-relaxed text-text-muted">
+              {defaultName !== null
+                ? t('briefingPage.emptyHint', { device: defaultName })
+                : t('briefingPage.emptyNoDevice')}
+            </p>
+          </motion.div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {cards.map((card) => (
+              <motion.div
+                key={card.pid}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={SPRING_GLIDE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
+                className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
+              >
+                <div className="flex w-[168px] flex-none items-center gap-2">
+                  <Ring tone="main" size={14} live={card.sounding && liveness} />
+                  <ProcessIcon exeName={card.exeName} name={card.name} size={18} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectProcess(card.pid);
+                      onOpenBoard();
+                    }}
+                    title={t('briefingPage.openBoard', { name: card.name })}
+                    aria-label={t('briefingPage.openBoard', { name: card.name })}
+                    className="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
+                  >
+                    {card.name}
+                  </button>
+                </div>
+                <Connector />
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                  {card.destinations.map((destination) => (
+                    <Chip
+                      key={destination.key}
+                      destination={destination}
+                      roleWord={roleWordOf(destination)}
+                    />
+                  ))}
+                </div>
+                {!card.sounding && (
+                  <span className="flex-none text-[10px] text-text-muted">
+                    {t('briefingPage.quiet')}
+                  </span>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {pending && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+            className="rounded-ctl border border-accent/40 bg-accent-muted px-3.5 py-2.5 text-[11.5px] leading-relaxed text-accent"
+          >
+            {t('briefingPage.staged')}
+          </motion.p>
+        )}
+      </div>
+    </div>
+  );
+}

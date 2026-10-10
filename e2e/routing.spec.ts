@@ -511,31 +511,27 @@ test('the hub follows the programme the rail picks', async ({ page }) => {
   await expect(hub(page)).toContainText('music.exe');
 });
 
-test('the briefing button says where things stand, in so many words', async ({ page }) => {
+test('the status page shows where everything is going, as a picture', async ({ page }) => {
   await openApp(page);
 
-  // Nothing is routed: the plain truth is that everything follows the default.
-  const briefing = page.getByRole('button', { name: /no beating around the bush/ });
-  await briefing.click();
-  await expect(page.getByText('Nothing is redirected')).toBeVisible();
+  // Nothing is routed: the page says so, and names the device everything follows.
+  await page.getByRole('tab', { name: 'Status' }).click();
+  await expect(page.getByText('Nothing is redirected yet')).toBeVisible();
+  await expect(page.getByText('Every sound follows the system default device')).toBeVisible();
 
-  // Escape takes the bubble down...
-  await page.keyboard.press('Escape');
-  await expect(page.getByText('Nothing is redirected')).toBeHidden();
-
-  // ...and a route changes the answer: one line per programme, naming devices.
+  // A route changes the answer: a row per programme, its destinations as chips
+  // wearing the role words.
+  await page.getByRole('tab', { name: 'Routing' }).click();
   await appRow(page, 'music.exe').click();
   await hub(page).click();
-  await briefing.click();
-  await expect(page.getByText(/plays from Speakers now/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Status' }).click();
+  await expect(page.getByText('Main', { exact: true })).toBeVisible();
+  await expect(page.getByText('Speakers').first()).toBeVisible();
 
-  // A press somewhere else closes it too — and the route behind it still lands.
-  await deviceRow(page, 'Speakers').click();
-  await expect(page.getByText(/plays from Speakers now/)).toBeHidden();
-
-  // The Escape that closed the bubble was unregistered with it, so the search
-  // box still owns its own.
-  await page.getByLabel('Search apps').fill('music');
-  await page.getByLabel('Search apps').press('Escape');
-  await expect(appRow(page, 'game.exe')).toBeVisible();
+  // The name is a door back to that programme's own board.
+  await page.getByRole('button', { name: "Open music.exe's board" }).click();
+  await expect(page.getByRole('tab', { name: 'Routing' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
 });

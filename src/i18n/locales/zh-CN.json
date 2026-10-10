@@ -84,25 +84,7 @@
     "stripPrimaryNote": "这是程序的会话音量——只有主输出这一路变化；副本会被等比补回。",
     "stripPrimaryLatency": "主输出由系统直接播放，这里没有可实测的延迟读数。",
     "stripDelay": "延迟",
-    "stripShare": "份额",
-    "inspectorHint": "点击去向行上的编号即可调音——程序本体、设备的延迟与音量都在这里；下块标题行里的「＋」用于添加去向。",
-    "inspectorHubNoRoute": "尚未路由——点选去向行搭好方案，再点程序卡生效。",
-    "inspectorHubOne": "正在通过 {{device}} 播放。",
-    "inspectorHubMulti": "正在通过 {{device}} 播放（+{{m}} 台复制）。",
-    "inspectorHubFeeds": "送入 {{n}} 个输入"
-  },
-  "briefing": {
-    "button": "直说",
-    "tooltip": "让我用最直白、最简单、最不绕弯子的方式来告诉你现状",
-    "title": "现在的播放情况",
-    "empty": "没有任何程序被改道：所有声音都跟着系统默认设备「{{device}}」走。",
-    "emptyNoDevice": "没有任何程序被改道：所有声音都跟着系统默认设备走。",
-    "routeOne": "「{{process}}」现在只从 {{device}} 出声。",
-    "routeMulti": "「{{process}}」现在同时从 {{devices}} 出声。",
-    "quiet": "（此刻没在出声）",
-    "staged": "看板上还有没生效的改动——点程序卡，立刻生效。",
-    "feedLine": "「{{process}}」正把声音送进「{{targets}}」的输入。",
-    "feedHeldLine": "「{{process}}」有一条送往「{{targets}}」的送入，暂因它正输出到设备而搁置。"
+    "stripShare": "份额"
   },
   "routed": {
     "capsule": "已路由 {{n}}",
@@ -219,7 +201,24 @@
   "tabs": {
     "label": "视图",
     "router": "路由",
+    "briefing": "现状",
     "activity": "活动记录"
+  },
+  "briefingPage": {
+    "defaultFallback": "系统默认设备",
+    "defaultHint": "没有改道的程序，声音都跟着它走",
+    "following": "{{n}} 个程序跟随",
+    "empty": "还没有任何程序被改道",
+    "emptyHint": "所有声音都跟着系统默认设备「{{device}}」走。",
+    "emptyNoDevice": "所有声音都跟着系统默认设备走。",
+    "openBoard": "打开「{{name}}」的看板",
+    "rolePrimary": "主输出",
+    "roleCopy": "副本",
+    "roleFeed": "输入",
+    "roleFeedHeld": "挂起",
+    "roleFeedNoCarrier": "未接通",
+    "quiet": "未在播放",
+    "staged": "看板上还有没生效的改动——回到「路由」按下程序卡即可生效。"
   },
   "logPanel": {
     "empty": "暂无活动记录"

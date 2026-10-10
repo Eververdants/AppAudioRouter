@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { BriefingPage } from '@/components/BriefingPage';
 import { NodeStage } from '@/components/NodeStage';
 import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
@@ -8,7 +9,6 @@ import { RoutedCapsule } from '@/components/RoutedCapsule';
 import { SettingsPage } from '@/components/SettingsPage';
 import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { StartupWizard } from '@/components/StartupWizard';
-import { StatusBriefing } from '@/components/StatusBriefing';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
 import { UnderlineTabs } from '@/components/ui/UnderlineTabs';
@@ -32,8 +32,8 @@ import { revealMainWindow } from '@/lib/window';
  */
 const AUDIO_SYNC_DEBOUNCE_MS = 400;
 
-/** The two things the work area can show. */
-type WorkTab = 'router' | 'activity';
+/** The things the work area can show. */
+type WorkTab = 'router' | 'briefing' | 'activity';
 
 /** Runs `task` once the browser is idle, falling back to a task tick. */
 function afterFirstPaint(task: () => void): () => void {
@@ -273,19 +273,19 @@ export default function App() {
                 onChange={(id) => setTab(id as WorkTab)}
                 tabs={[
                   { id: 'router', label: t('tabs.router') },
+                  { id: 'briefing', label: t('tabs.briefing') },
                   { id: 'activity', label: t('tabs.activity') },
                 ]}
               />
               {tab === 'router' ? (
                 <>
                   <NodeStage />
-                  {/* The plain-language answer to "where is sound going", in
-                      the corner the action dock used to float over. */}
-                  <StatusBriefing />
                   {/* Every live route at once, each with its own way out —
                       stop only; starting belongs to the hub. */}
                   <RoutedCapsule />
                 </>
+              ) : tab === 'briefing' ? (
+                <BriefingPage onOpenBoard={() => setTab('router')} />
               ) : (
                 <LogPanel />
               )}
