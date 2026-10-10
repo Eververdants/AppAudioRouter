@@ -1,6 +1,6 @@
 # 节点看板 UI 规范（2026-10-05 改版，2026-10-10 分组，专题）
 
-> 本文是 [AGENTS.md](../../AGENTS.md) 的专题延伸。改 `NodeStage`、`ProgramRail`、`StatusBriefing`、`RoutedCapsule`、调音条、看板几何之前先读这里；每条 ⚠️ 都是踩过的坑。令牌与阴影见 [theme.md](./theme.md)。
+> 本文是 [AGENTS.md](../../AGENTS.md) 的专题延伸。改 `NodeStage`、`ProgramRail`、`BriefingPage`（现状页）、`RoutedCapsule`、`SettingsPage`、调音条、看板几何之前先读这里；每条 ⚠️ 都是踩过的坑。令牌与阴影见 [theme.md](./theme.md)。
 
 ---
 
@@ -93,8 +93,9 @@
   送入行（琥珀）写「送入 / 挂起 / 未接通」三态之一，✕ 立刻断开（走 Toast 撤销，不是计划）。
   「＋ 添加去向」是下块标题行里的一枚小虚线圆钮（`stage.addTarget` 仍是它的无障碍名），选择器挂在它下面；
   它从原来那张虚线卡片搬到这里，是为了**无论行有多少都够得着**。
-  ⚠️ 选择器里的设备行走 `appendDeviceTarget`（**只追加到计划尾部 = 副本**），**不要**改回 `toggleDeviceSelection`：
-  后者带着 `replacesGuess` 语义，在计划还只有预填的一台设备时会把那台**替换掉**——用户想「加一台」，结果新加的坐了主位、原来的没了。
+  ⚠️ 选择器里的设备行走 `appendDeviceTarget`（**只追加到计划尾部，永不替换**），**不要**改回 `toggleDeviceSelection`：
+  后者带着 `replacesGuess` 语义，在计划还只有预填的一台设备时会把那台**替换掉**——用户想「加一台」，结果原来的没了。
+  ⚠️ 追加**不等于**"一定落在副本位"：落地后谁坐主位由延迟序决定，新加的设备延迟更小时照样会成为系统直放的那台。
 - **来源卡（左侧一列）**：谁把声音送进了当前程序。点它**切到那个程序的看板**——图一次讲一个程序，这是两个程序之间的门。
 
 ## 编号与调音条（`Inspector`）

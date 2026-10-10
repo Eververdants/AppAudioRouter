@@ -244,10 +244,14 @@ interface RouterState {
   selectProcess: (pid: number) => void;
   toggleProcessSelection: (pid: number) => void;
   toggleDeviceSelection: (deviceId: string) => void;
-  /** Append one device to the plan's tail — always a copy, never a replacement.
-   * The add-destination picker's only verb: reaching for "add" must never take
-   * the single-device guess away, or the device you asked to add quietly takes
-   * the primary seat instead of joining as a copy. */
+  /** Append one device to the plan's tail — the add-destination picker's only
+   * verb. It never *replaces* anything, which is the point: the picker used to
+   * go through `toggleDeviceSelection`, whose `replacesGuess` rule quietly
+   * swapped the single-device guess out, so "add a second output" could leave
+   * the output you had already picked gone. Where the new device lands after the
+   * apply is still the delay order's to decide — a device compensated earlier
+   * than the rest becomes the one Windows plays directly, exactly as it would
+   * have as a row. */
   appendDeviceTarget: (deviceId: string) => void;
   /** Make `deviceId` the seat the system plays directly. A device already in
    * the plan is moved to the front (its role swaps with the old primary and the

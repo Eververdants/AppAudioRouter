@@ -85,8 +85,8 @@ export function Select({
   };
 
   // Escape and outside-pointerdown follow the menu's visibility, exactly as the
-  // stage's picker and the briefing bubble do it — a standing listener would
-  // swallow the key for the whole session.
+  // stage's pickers do it — a standing listener would swallow the key for the
+  // whole session.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -175,7 +175,11 @@ export function Select({
         <span
           className={`min-w-0 flex-1 truncate ${selected === undefined ? 'text-text-muted' : 'text-text-secondary'}`}
         >
-          {selected?.label ?? placeholder ?? ''}
+          {/* A value that names no option is not silence: a device that was
+              unplugged after it was chosen still has its id stored, and showing
+              the id says "something is configured here, and it is gone" — a
+              blank trigger would read as "nothing is configured". */}
+          {selected?.label ?? (value === '' ? (placeholder ?? '') : value)}
         </span>
         {/* The chevron turns over as the menu arrives: the one mark that says
             the control is open, in place of a native menu's popup. */}

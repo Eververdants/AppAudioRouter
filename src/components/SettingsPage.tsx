@@ -300,8 +300,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     // the Escape that closes it must not also land in whatever sits underneath
     // — a route's undo offer lives one bubble-phase listener away, and spending
     // it silently as a side effect of leaving the page is the exact loss the
-    // toast's own comment describes. The picker, the briefing bubble and the
-    // routed capsule coordinate the same key the same way.
+    // toast's own comment describes. The stage's pickers and the routed
+    // capsule coordinate the same key the same way.
     const onKey = (e: KeyboardEvent) => {
       // Escape belongs to the control that has the focus first: the delay
       // stepper's field, and the carrier dropdowns — a listbox that closes

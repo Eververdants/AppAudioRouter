@@ -101,7 +101,8 @@ function Chip({ destination, roleWord }: { destination: Destination; roleWord: s
  *
  * It reports; it never acts. What changes a route lives where the route is
  * drawn, so the only action offered here is the pointer's own way back: the
- * destination's name is a door to that programme's board.
+ * **programme's** name is a door to its board. The destination chips are labels,
+ * not controls — one place to change a route, and this is not it.
  */
 export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
   const { t } = useTranslation();
@@ -136,15 +137,22 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
       if (soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
     }
 
+    // The route table is keyed by the process that holds the route — one per
+    // executable, written to the lowest pid — so reading it by the session's own
+    // pid is what keeps this page at **one row per program**: a browser's dozen
+    // processes yield one row, not a dozen. (The folded, per-program view is for
+    // callers asking about "this process's program"; here the question is "which
+    // programs are redirected", and the owner is the single answer.) `following`
+    // is counted the same way — per executable — so a routed program's siblings
+    // are not mistaken for programs still on the default.
+    const redirectedExes = new Set<string>();
     const cards: Card[] = [];
-    let following = 0;
     for (const session of sessions) {
+      const key = session.exe_name.toLowerCase();
       const ids = routedPids[session.pid] ?? [];
       const targetPids = feeds[session.pid] ?? [];
-      if (ids.length === 0 && targetPids.length === 0) {
-        following += 1;
-        continue;
-      }
+      if (ids.length === 0 && targetPids.length === 0) continue;
+      redirectedExes.add(key);
       const destinations: Destination[] = ids.map((id, index) => ({
         key: `dev:${id}`,
         name: nameById.get(id) ?? id,
@@ -166,11 +174,12 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
         pid: session.pid,
         name: session.display_name ?? session.exe_name,
         exeName: session.exe_name,
-        sounding: soundingExes.has(session.exe_name.toLowerCase()),
+        sounding: soundingExes.has(key),
         destinations,
       });
     }
-    return { cards, following };
+    const allExes = new Set(sessions.map((session) => session.exe_name.toLowerCase()));
+    return { cards, following: allExes.size - redirectedExes.size };
   }, [sessions, routedPids, feeds, soundingPids, nameById, feedCarrier]);
 
   // Changes staged on the board that have not landed: the one thing this page

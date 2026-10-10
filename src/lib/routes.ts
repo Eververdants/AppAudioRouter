@@ -41,11 +41,13 @@ export function programEntryOf<T>(
  * The route of the program each process belongs to, keyed by process id.
  *
  * `routedPids` holds one entry per routed program, under the pid it was applied
- * to. Everything that draws a route — the rail row, the board, the briefing —
- * asks by the process it is drawing, and a program's sibling processes have to
- * read the same route as the one holding it: left to the raw entry they would
- * describe a program that is not routed and offer no way out of a route that is
- * running.
+ * to. Everything that draws a route **per process** — the rail row, the board,
+ * the Status page's staged-vs-live comparison — asks by the process it is
+ * drawing, and a program's sibling processes have to read the same route as the
+ * one holding it: left to the raw entry they would describe a program that is
+ * not routed and offer no way out of a route that is running. Callers that need
+ * one entry per program (the Status page's rows, the routed capsule) read the
+ * raw table instead, keyed by the owner.
  */
 export function programRoutes(
   sessions: AudioSession[],

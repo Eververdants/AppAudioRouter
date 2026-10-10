@@ -680,8 +680,10 @@ export function NodeStage() {
                         type="button"
                         role="menuitem"
                         onClick={() => {
-                          // Append, never toggle: reaching for "add" must put a
-                          // copy on the plan's tail, not take the primary seat.
+                          // Append, never toggle: "add" has to leave the plan's
+                          // membership alone and put the new device on the tail.
+                          // The seat it ends up in is the delay order's call,
+                          // exactly as for any other row.
                           appendDeviceTarget(d.id);
                           setPickerOpen(false);
                         }}
@@ -795,7 +797,15 @@ export function NodeStage() {
                         >
                           ✓
                         </span>
-                        <span className="truncate">{d.name}</span>
+                        <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                        {/* A row that cannot take the seat says why on the row
+                            itself: its compensation is the reason, so the number
+                            is shown rather than hidden behind a tooltip. */}
+                        {blocked && (
+                          <span className="flex-none font-mono text-[10px] tabular-nums text-text-muted">
+                            {formatDelaySigned(deviceDelays[d.id] ?? 0)} ms
+                          </span>
+                        )}
                       </button>
                     );
                   })}

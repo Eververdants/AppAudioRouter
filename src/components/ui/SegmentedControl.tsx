@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { SPRING_TAP } from '@/lib/motion';
+import { SPRING_GLIDE } from '@/lib/motion';
 
 export interface SegmentedOption<T extends string> {
   value: T;
@@ -64,7 +64,10 @@ export function SegmentedControl<T extends string>({
             {active && (
               <motion.span
                 layoutId={layoutId}
-                transition={SPRING_TAP}
+                // The same curve the tab rows use for the same travelling
+                // rule: a mark that migrates between labels is "visible
+                // travel", not a press.
+                transition={SPRING_GLIDE}
                 className="absolute inset-x-0 bottom-0 h-0.5 bg-accent"
               />
             )}

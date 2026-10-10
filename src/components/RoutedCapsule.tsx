@@ -7,6 +7,7 @@ import { Ring } from '@/components/ui/Ring';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { useLiveness } from '@/hooks/useLiveness';
 import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { isEditableTarget } from '@/lib/productionGuards';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -68,7 +69,7 @@ export function RoutedCapsule() {
 
   // Walk the session list, not the route table: a programme on its way out can
   // still carry a route for a breath, and a row without a name or an icon has
-  // nothing to show for it. The briefing reads the list the same way.
+  // nothing to show for it. The Status page walks the list the same way.
   //
   // Sounding is read per program: the row is the program's, and the process
   // making its sound may be a sibling of the one holding the route.
@@ -96,15 +97,18 @@ export function RoutedCapsule() {
   }, [open, rows.length]);
 
   // Escape and outside-pointerdown follow the panel's visibility, exactly the
-  // way the briefing bubble and the stage's picker do it: a standing listener
-  // would swallow the search box's Escape for the whole session.
+  // way the stage's picker does it: a standing listener would swallow the
+  // search box's Escape for the whole session. The key is also left to a
+  // control that owns it — an armed ✕ in one of these rows answers Escape
+  // itself, and taking the whole panel down on that press would spend a
+  // question the user was looking at.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        setOpen(false);
-      }
+      if (event.key !== 'Escape') return;
+      if (isEditableTarget(event.target)) return;
+      event.stopPropagation();
+      setOpen(false);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -126,9 +130,10 @@ export function RoutedCapsule() {
   const anySounding = rows.some((row) => row.sounding);
 
   return (
-    // Anchored above the board's tuning strip — the band the briefing's corner
-    // also floats in — and centred, where the dock that once applied routes
-    // used to sit. Nothing in the layout is displaced by it.
+    // Anchored above the band the tuning strip takes when a row is being
+    // tuned. The strip no longer stands there, but it still takes that band
+    // when it appears, so the pill keeps clear of it rather than being painted
+    // over by it. Nothing in the layout is displaced by it.
     <div
       ref={rootRef}
       className="pointer-events-none absolute inset-x-0 bottom-[56px] z-30 flex justify-center px-4"

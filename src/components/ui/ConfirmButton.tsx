@@ -93,6 +93,12 @@ export function ConfirmButton({
     <motion.button
       type="button"
       disabled={disabled}
+      // While it is asking, the button owns the Escape that answers it — the
+      // page underneath must let the key through rather than closing on a press
+      // meant for this question. `data-owns-escape` is what the app's own
+      // Escape handlers (`isEditableTarget`) read; a listener of our own would
+      // be registered too late to beat their capture-phase ones.
+      {...(armed ? { 'data-owns-escape': '' } : {})}
       // The question travels with the button, so a screen reader hears the same
       // thing the pointer reads in the tooltip.
       aria-label={armed ? confirmLabel : label}
