@@ -211,6 +211,17 @@ export default function App() {
     [],
   );
 
+  // An icon ask that loses its race settles as a miss, and a miss gets a
+  // bounded number of its own retries — after that only a refresh asks again.
+  // On a quiet system nothing raises one, so a letter tile would hold for the
+  // rest of the run. Each time the window comes to the front is one more ask:
+  // not a poll, but a re-ask for whatever the user is actually looking at.
+  useEffect(() => {
+    const reAsk = () => useRouterStore.getState().loadMissingIcons();
+    window.addEventListener('focus', reAsk);
+    return () => window.removeEventListener('focus', reAsk);
+  }, []);
+
   return (
     // One flat plane of colour behind everything. Every surface that sits on it
     // is solid and separated by hairlines, so the plane carries no detail of its
