@@ -213,8 +213,9 @@ input[type='number']::-webkit-inner-spin-button {
   /* The board's card furniture: pin stubs, the number badge, and the wire.
      Sizes and positions come from lib/stage.ts; only the paint lives here. */
 
-  /* A pin: the stub a wire plugs into. Half outside the card's edge, so the
-     wire that meets it ends at the card's boundary rather than in its middle. */
+  /* A pin: the stub a wire plugs into. Centred on the edge it belongs to, so
+     the wire that meets it ends exactly at that edge — which is what the ports
+     in lib/stage.ts answer with, to the half pixel. */
   .pin {
     position: absolute;
     width: 11px;
@@ -224,12 +225,12 @@ input[type='number']::-webkit-inner-spin-button {
     border: 1px solid var(--bg-primary);
   }
   .pin-in {
-    left: -6px;
+    left: -5.5px;
     top: 50%;
     transform: translateY(-50%);
   }
   .pin-out {
-    right: -6px;
+    right: -5.5px;
     top: 50%;
     transform: translateY(-50%);
   }
@@ -240,12 +241,12 @@ input[type='number']::-webkit-inner-spin-button {
   }
 
   /* The route-order badge (01, 02, …). 01 is always the endpoint Windows plays
-     itself; the numbering runs straight down the destination column. */
+     itself; the numbering runs straight down the destination column. It leads
+     its row rather than sitting on a corner: a row inside a grouped panel has
+     no corner of its own to clip a badge to. */
   .no {
-    position: absolute;
-    top: -7px;
-    left: -7px;
-    min-width: 18px;
+    flex: none;
+    min-width: 20px;
     height: 18px;
     padding: 0 4px;
     border-radius: 6px;

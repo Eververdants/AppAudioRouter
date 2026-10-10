@@ -5,47 +5,59 @@ import { SourceLevelDial } from '@/components/SourceLevelDial';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { Spinner } from '@/components/ui/Spinner';
+import { useElementHeight } from '@/hooks/useElementHeight';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import { programEntryOf } from '@/lib/routes';
 import {
+  BOARD_H,
   BOARD_W,
   FEEDER_X,
+  GROUP_HEADER_H,
+  GROUP_PAD,
+  GROUP_W,
+  GROUP_X,
   HUB_H,
   HUB_W,
   HUB_X,
   MINI_H,
   MINI_W,
-  TARGET_H,
-  TARGET_W,
-  TARGET_X,
+  PANEL_BORDER,
+  ROW_H,
+  ROW_W,
   alreadyApplied,
   boardCentre,
-  boardHeight,
+  copiesPanelHeight,
+  copiesPanelY,
   feederOutPort,
   feederY,
   hubInPort,
   hubOutPort,
   nodePath,
   orderLabel,
-  targetInPort,
-  targetY,
+  panelContentHeight,
+  primaryPanelHeight,
+  primaryPanelY,
+  rowContentY,
+  rowInPort,
+  rowVisible,
 } from '@/lib/stage';
+import type { AudioSession } from '@/lib/types';
 import { feedLiveness, useRouterStore } from '@/stores/routerStore';
 
 /**
  * Which card the bottom strip is tuning right now. The hub shows the program
- * itself; a device card shows the levers that exist for its role.
+ * itself; a destination row shows the levers that exist for its role.
  */
 type InspectorKey = 'hub' | `dev:${string}`;
 
 /**
  * A wire drawn on the board, in the shape the SVG layer needs.
  *
- * `litKey` is what a hovered card lights: every wire of the hub lights together
- * when the hub is under the pointer, one wire when its own card is. The key
+ * `key` is what a hovered row lights: every wire of the hub lights together
+ * when the hub is under the pointer, one wire when its own row is. The key
  * doubles as the e2e hook (`data-wire`), which the old stage's spokes already
  * answered to.
  */
@@ -56,17 +68,9 @@ interface WireSpec {
   live: boolean;
 }
 
-/** Where a card sits on the board, in the coordinates `lib/stage.ts` answers. */
-interface Placement {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-/** Card chrome shared by hub, targets, feeders and the ghost: the continuous-
- *  curvature corner, the plane, and the strong hairline that separates a card
- *  from the sunken well — flat blocks with nothing cast and nothing lifted. */
+/** Card chrome for things that sit straight on the well: the continuous-
+ *  curvature corner, the plane, and the strong hairline — flat blocks with
+ *  nothing cast and nothing lifted. */
 const CARD_CLASS = 'cc absolute rounded-panel bg-surface border border-line-strong';
 /** The role word colour, by role. Literal classes: Tailwind scans source text. */
 const ROLE_TEXT_CLASS = {
@@ -75,30 +79,38 @@ const ROLE_TEXT_CLASS = {
   feed: 'text-type-feed',
 } as const;
 
-/** The card whose wire(s) light up under the pointer. */
+/** A stable empty array, not a fresh `[]`: a value that returns a new reference
+ *  on every render churns everything below it. */
 const NO_PIDS: number[] = [];
 
 /**
  * The node board: the one place a route is drawn.
  *
- * One programme per board. The hub card sits mid-left; a column of destination
- * cards stands at the right — output devices first in delay order, then the
- * programmes the sound is being sent into, each numbered in route order (01 is
- * the one Windows plays itself). A wire from the hub's out-pin to a card's
- * in-pin is the route; the wires are one grey line, and the colour lives on the
- * number badges and role words, the way a colourist's graph stays quiet.
+ * One programme per board. The hub card sits mid-left; down the right edge are
+ * two grouped panels — the primary device alone in the first, and under it one
+ * box holding every copy and every programme this sound is fed into, numbered
+ * in route order (01 is the one Windows plays itself). A wire from the hub's
+ * out-pin to a row is the route; the wires are one grey line each, and the
+ * colour lives on the number badges and role words, the way a colourist's graph
+ * stays quiet.
  *
- * The board is a proposal, exactly as the ring stage was: destination cards
- * toggle membership in the plan, and the hub — which wears a "click to apply"
- * capsule whenever the plan is not yet the truth — lands it. Feeds are the
- * exception, because their endpoint pair is theirs alone: they connect and
- * disconnect immediately, with the toast carrying the way back.
+ * The board takes the well's own height, so the panels always fit the stage and
+ * the stage never scrolls: the copies panel grows to fill what is left, and
+ * scrolls inside itself when its rows outnumber the room. That is why a wire to
+ * a row that has been scrolled out of that panel is not drawn at all — it would
+ * otherwise run out past the panel's edge and point at nothing.
  *
- * Nothing here measures anything: every position comes from `lib/stage.ts`,
- * so a card and the wire meeting it cannot disagree by a frame. The one
- * standing animation — dashes on wires that carry sound — is gated on
- * visibility, focus and the system's motion preference (`useLiveness`), and a
- * resting board paints nothing.
+ * The board is a proposal, exactly as the ring stage was: rows toggle
+ * membership in the plan, and the hub — which wears a "click to apply" capsule
+ * whenever the plan is not yet the truth — lands it. Feeds are the exception,
+ * because their endpoint pair is theirs alone: they connect and disconnect
+ * immediately, with the toast carrying the way back.
+ *
+ * Nothing here measures a card: every position comes from `lib/stage.ts` and
+ * the single height the well reports, so a row and the wire meeting it cannot
+ * disagree. The one standing animation — dashes on wires that carry sound — is
+ * gated on visibility, focus and the system's motion preference
+ * (`useLiveness`), and a resting board paints nothing.
  */
 export function NodeStage() {
   const { t } = useTranslation();
@@ -125,13 +137,17 @@ export function NodeStage() {
   const removeFeed = useRouterStore((s) => s.removeFeed);
   const selectProcess = useRouterStore((s) => s.selectProcess);
 
-  /** The card whose wire(s) light up under the pointer. */
+  /** The row whose wire(s) light up under the pointer. */
   const [hoverKey, setHoverKey] = useState<string | null>(null);
-  /** The card the bottom strip is tuning. */
+  /** The row the bottom strip is tuning. */
   const [inspectorKey, setInspectorKey] = useState<InspectorKey | null>(null);
-  /** The add-destination picker, anchored to the ghost card. */
+  /** The add-destination picker, anchored to the copies panel's title row. */
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** How far the copies panel has been scrolled — its wires ride with it. */
+  const [copyScroll, setCopyScroll] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const wellRef = useRef<HTMLDivElement | null>(null);
+  const measured = useElementHeight(wellRef);
 
   const pid = selectedPids[0];
   const session = sessions.find((s) => s.pid === pid);
@@ -141,6 +157,9 @@ export function NodeStage() {
   const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
   const sounding = pid !== undefined && soundingPids[pid] === true;
   const hasPlan = drawn.length > 0;
+
+  const primaryDeviceId = drawn[0];
+  const copyDeviceIds = drawn.slice(1);
 
   // The wires move only when what is drawn is what is playing — a plan waiting
   // for the hub is a proposal, and a proposal does not hum.
@@ -174,20 +193,20 @@ export function NodeStage() {
       .filter((s) => s !== undefined);
   }, [feeds, sessions, pid]);
 
-  // The destination column: devices in delay order, then feeds — the number
-  // badges read 01, 02, … straight down the column, and 01 is always the one
-  // Windows plays itself.
-  const targetCount = drawn.length + feedTargets.length + 1; // + the ghost card
-  // Either column may outgrow the default board: a plan with a dozen
-  // destinations makes the board taller and the well scrolls, rather than the
-  // cards closing in on each other — and the programmes feeding *in* are a
-  // column too, which is the half that used to be left out of the budget.
-  const height = boardHeight(targetCount, feeders.length);
+  // The board is as tall as the well it sits in, and no taller: that is the
+  // whole reason the stage never scrolls. Until the well has reported a height
+  // (the very first frame), the app's own default window stands in.
+  const height = measured > 0 ? Math.floor(measured) : BOARD_H;
   const hubY = Math.round(boardCentre(height) - HUB_H / 2);
+  const primaryY = primaryPanelY();
+  const copiesY = copiesPanelY();
+  const copiesH = copiesPanelHeight(height);
   const feedTargetStates = feedTargets.map((targetSession) => ({
     session: targetSession,
     state: feedLiveness(pid ?? -1, feedCarrier, routedPids, sessions),
   }));
+  /** Every row in the copies panel: the copies first, then the feeds. */
+  const copiesRows = copyDeviceIds.length + feedTargetStates.length;
 
   // Escape closes the picker; registered only while it is open, so a standing
   // listener never swallows the search box's Escape (the same rule the
@@ -213,33 +232,48 @@ export function NodeStage() {
     };
     // The picker lives inside the board, so the outside-close only has to watch
     // for clicks that land outside the whole board; clicks inside land on the
-    // picker's own rows or the ghost that toggles it.
+    // picker's own rows or the title-row button that toggles it.
     window.addEventListener('pointerdown', onPointerDown, true);
     return () => window.removeEventListener('pointerdown', onPointerDown, true);
   }, [pickerOpen]);
 
   // Selecting a different programme resets the inspector to the card that is
-  // actually on screen — a key naming last programme's device must not survive.
+  // actually on screen — a key naming last programme's device must not survive —
+  // and puts the copies panel back at the top, where it always starts.
   useEffect(() => {
     setInspectorKey(null);
     setPickerOpen(false);
     setHoverKey(null);
+    setCopyScroll(0);
   }, [pid]);
 
   const wires: WireSpec[] = [];
-  // Hub → destinations. The hub's own wires light together when it is hovered.
-  drawn.forEach((deviceId, index) => {
-    const from = hubOutPort(height);
-    const to = targetInPort(index, targetCount, height);
+  // Hub → the primary row, then → every row of the copies panel. The hub's own
+  // wires light together when it is hovered.
+  const from = hubOutPort(height);
+  if (primaryDeviceId !== undefined) {
+    const to = rowInPort(primaryY, 0, 0);
+    wires.push({
+      key: `dev:${primaryDeviceId}`,
+      d: nodePath(from.x, from.y, to.x, to.y),
+      live: flowing,
+    });
+  }
+  copyDeviceIds.forEach((deviceId, index) => {
+    // A row the panel has scrolled away has no wire to meet: the row is not on
+    // screen, and neither is the line that would point at it.
+    if (!rowVisible(copiesY, copiesH, index, copyScroll)) return;
+    const to = rowInPort(copiesY, index, copyScroll);
     wires.push({
       key: `dev:${deviceId}`,
       d: nodePath(from.x, from.y, to.x, to.y),
       live: flowing,
     });
   });
-  feedTargetStates.forEach(({ session: targetSession, state }, index) => {
-    const from = hubOutPort(height);
-    const to = targetInPort(drawn.length + index, targetCount, height);
+  feedTargetStates.forEach(({ session: targetSession, state }, offset) => {
+    const index = copyDeviceIds.length + offset;
+    if (!rowVisible(copiesY, copiesH, index, copyScroll)) return;
+    const to = rowInPort(copiesY, index, copyScroll);
     wires.push({
       key: `feed:${targetSession.pid}`,
       d: nodePath(from.x, from.y, to.x, to.y),
@@ -248,16 +282,16 @@ export function NodeStage() {
   });
   // Feeders → hub.
   feeders.forEach((feeder, index) => {
-    const from = feederOutPort(index, feeders.length, height);
+    const source = feederOutPort(index, feeders.length, height);
     const to = hubInPort(height);
     wires.push({
       key: `feeder:${feeder.pid}`,
-      d: nodePath(from.x, from.y, to.x, to.y),
+      d: nodePath(source.x, source.y, to.x, to.y),
       // The same rule the feed-target wires follow on the feeder's own board:
       // this wire reports sound actually arriving here, and a feed whose
       // source is itself routed (its render slot is taken) or whose carrier is
-      // not configured delivers nothing — the card reads 挂起 / 未接通, and a
-      // moving wire would say the opposite of the card it hangs from.
+      // not configured delivers nothing — the row reads 挂起 / 未接通, and a
+      // moving wire would say the opposite of the row it hangs from.
       live:
         soundingPids[feeder.pid] === true &&
         liveness &&
@@ -268,10 +302,10 @@ export function NodeStage() {
   const lit = (key: string): boolean =>
     hoverKey === 'hub' && !key.startsWith('feeder:') ? true : hoverKey === key;
 
-  const primaryDelay = drawn.length > 0 ? (deviceDelays[drawn[0] ?? ''] ?? 0) : 0;
+  const primaryDelay = primaryDeviceId !== undefined ? (deviceDelays[primaryDeviceId] ?? 0) : 0;
 
   /**
-   * Add or remove one device card.
+   * Add or remove one device row.
    *
    * The last device cannot be switched off: a route whose sound goes nowhere is
    * not a state this app offers, and the guard lives here rather than in the
@@ -298,9 +332,11 @@ export function NodeStage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The well: the plane the board sits on. Flat, sunken, hairlined from
-          the rail; the cards sit on it as solid blocks, separated by the
-          strength of their own borders — nothing casts anything. */}
-      <div className="min-h-0 flex-1 overflow-auto bg-surface-sunken">
+          the rail — and it never scrolls: the board is exactly as tall as the
+          well, so what used to make it grow now scrolls inside the copies
+          panel. A narrower window still gets a horizontal bar, because the
+          board's width is what the app's own default window measures. */}
+      <div ref={wellRef} className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-surface-sunken">
         <div
           ref={boardRef}
           className="relative mx-auto"
@@ -312,8 +348,7 @@ export function NodeStage() {
               a centre; here the same mark is scaled up until it is scenery —
               the plane declaring whose board this is without lighting, filling
               or shadowing anything. Pure hairline, behind every card and every
-              wire, and it scrolls with the board rather than hovering over
-              it. */}
+              wire. */}
           <svg
             aria-hidden="true"
             width={BOARD_W}
@@ -334,7 +369,7 @@ export function NodeStage() {
             ))}
           </svg>
 
-          {/* The wires. One grey line each — the role colour lives on the cards
+          {/* The wires. One grey line each — the role colour lives on the rows
               (number badge, role word), not on the wire, so a fan of routes
               reads as plumbing rather than as spaghetti. */}
           <svg
@@ -354,7 +389,7 @@ export function NodeStage() {
                 // brightens the line: gating the flow on it made the animation
                 // unreachable in the steady state it describes, because a wire
                 // you are not hovering over was a still line even while playing.
-                className={`nwire${wire.live ? 'stage-flow' : ''}${lit(wire.key) ? 'lit' : ''}`}
+                className={`nwire${wire.live ? ' stage-flow' : ''}${lit(wire.key) ? 'lit' : ''}`}
               />
             ))}
           </svg>
@@ -509,229 +544,96 @@ export function NodeStage() {
             </div>
           )}
 
-          {/* Destinations, numbered in route order; then the ghost. */}
-          {drawn.map((deviceId, index) => {
-            const device = devices.find((d) => d.id === deviceId);
-            const deviceName = device?.name ?? deviceId;
-            const role = index === 0 ? 'primary' : 'mirror';
-            const roleWord = role === 'primary' ? t('stage.main') : t('stage.copy');
-            const isPrimary = role === 'primary';
-            const delay = deviceDelays[deviceId] ?? 0;
-            const canPromote = !isPrimary && drawn.length > 1 && delay <= primaryDelay;
-            const placement: Placement = {
-              left: TARGET_X,
-              top: targetY(index, targetCount, height),
-              width: TARGET_W,
-              height: TARGET_H,
-            };
-            const wireKey = `dev:${deviceId}`;
-            return (
-              <motion.div
-                key={deviceId}
-                data-device-row={deviceId}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={FADE}
-                transformTemplate={MAIN_THREAD_TRANSFORM}
-                onMouseEnter={() => setHoverKey(wireKey)}
-                onMouseLeave={() => setHoverKey(null)}
-                className={`${CARD_CLASS} group/copy group ${inspectorKey === `dev:${deviceId}` ? 'border-accent' : ''}`}
-                style={placement}
-              >
-                <span className="pin pin-in" aria-hidden="true" />
-                {/* Removal is a plan edit like any other: it toggles the card
-                    out of the selection, and the hub asks the same question it
-                    always does. The last device cannot leave — a route to zero
-                    devices is not a state this app offers. */}
-                {/* Only ever offered where it can do something: the guard that
-                    keeps a route from being clicked empty lives in `toggleTarget`,
-                    so with one device staged the ✕ was drawn, clickable, and
-                    answered nothing. */}
-                {drawn.length > 1 && (
-                  <button
-                    type="button"
-                    title={t('stage.removeTarget', { name: deviceName })}
-                    onClick={() => toggleTarget(deviceId)}
-                    className="pressable absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted hover:border-error hover:text-error group-focus-within:grid group-hover:grid"
-                  >
-                    ✕
-                  </button>
-                )}
-                {/* The number badge opens the strip — but only once there is
-                    something to tune: a single-device route starts no engine,
-                    so neither a delay nor a share exists for it, and the
-                    primary volume alone is not a control this route offers.
-                    Same rule the disc stage always carried. */}
-                {badgeIsButton ? (
-                  <button
-                    type="button"
-                    className="no cursor-pointer hover:border-accent hover:text-accent"
-                    onClick={() => setInspectorKey(`dev:${deviceId}`)}
-                    aria-label={t('stage.inspectAria', { name: deviceName })}
-                    title={t('stage.inspectTitle', { name: deviceName })}
-                  >
-                    {orderLabel(index)}
-                  </button>
-                ) : (
-                  <span className="no" aria-hidden="true">
-                    {orderLabel(index)}
-                  </span>
-                )}
-                <div className="flex h-full flex-col justify-center gap-0.5 pl-3 pr-2">
-                  <button
-                    type="button"
-                    aria-pressed={selectedDeviceIds.includes(deviceId)}
-                    aria-label={deviceName}
-                    onClick={() => toggleTarget(deviceId)}
-                    className="truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
-                  >
-                    {deviceName}
-                  </button>
-                  <div className="flex items-center gap-1.5">
-                    {isPrimary ? (
-                      <span
-                        title={t('stage.primaryTitle')}
-                        className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.primary}`}
-                      >
-                        {roleWord}
-                      </span>
-                    ) : canPromote ? (
-                      // The role word itself is the switch: it reads "Copy"
-                      // until the pointer or the keyboard arrives, then it
-                      // offers the move. The accessible name is the action, so
-                      // a screen reader hears the control and not the state.
-                      <button
-                        type="button"
-                        aria-label={t('stage.promote')}
-                        title={t('stage.promoteTitle')}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          promoteDevice(deviceId);
-                        }}
-                        className="text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
-                      >
-                        <span className="group-hover/copy:hidden">{roleWord}</span>
-                        <span className="hidden group-hover/copy:inline">{t('stage.promote')}</span>
-                      </button>
-                    ) : (
-                      <span
-                        title={t('stage.promoteBlockedTitle')}
-                        className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.mirror}`}
-                      >
-                        {roleWord}
-                      </span>
-                    )}
-                    {!isPrimary && delay !== 0 && (
-                      <span className="font-mono text-[9.5px] tabular-nums text-text-muted">
-                        {formatDelaySigned(delay)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-
-          {/* Feed targets: amber, immediate, and honest about what is missing.
-              The ✕ disconnects at once — the toast carries the way back. */}
-          {feedTargetStates.map(({ session: targetSession, state }, index) => {
-            const targetName = targetSession.display_name ?? targetSession.exe_name;
-            const no = orderLabel(drawn.length + index);
-            const title =
-              state === 'live'
-                ? t('stage.feedTitleLive', { name: targetName })
-                : state === 'suspended'
-                  ? t('stage.feedTitleSuspended', { source: name ?? '', name: targetName })
-                  : t('stage.feedTitleNoCarrier', { name: targetName });
-            const stateWord =
-              state === 'live'
-                ? t('stage.feedRole')
-                : state === 'suspended'
-                  ? t('stage.feedHeld')
-                  : t('stage.feedNoCarrier');
-            return (
-              <motion.div
-                key={targetSession.pid}
-                data-feed-row={targetSession.pid}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={FADE}
-                transformTemplate={MAIN_THREAD_TRANSFORM}
-                onMouseEnter={() => setHoverKey(`feed:${targetSession.pid}`)}
-                onMouseLeave={() => setHoverKey(null)}
-                title={title}
-                className={`${CARD_CLASS} ${state !== 'live' ? 'opacity-90' : ''}`}
-                style={{
-                  left: TARGET_X,
-                  top: targetY(drawn.length + index, targetCount, height),
-                  width: TARGET_W,
-                  height: TARGET_H,
-                }}
-              >
-                <span className="pin pin-in pin-amber" aria-hidden="true" />
-                <button
-                  type="button"
-                  title={t('stage.removeFeed', { name: targetName })}
-                  onClick={() => void removeFeed(pid ?? -1, targetSession.pid)}
-                  className="pressable absolute -right-2 -top-2 z-10 grid h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
-                >
-                  ✕
-                </button>
-                <span className="no" aria-hidden="true">
-                  {no}
-                </span>
-                <div className="flex h-full flex-col justify-center gap-0.5 pl-3 pr-2">
-                  <div className="flex items-center gap-1.5">
-                    <ProcessIcon
-                      exeName={targetSession.exe_name}
-                      name={targetSession.display_name ?? targetSession.exe_name}
-                      size={15}
-                    />
-                    <span className="truncate text-[12px] font-bold text-text-primary">
-                      {targetName}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span
-                      className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.feed} ${state !== 'live' ? 'opacity-60' : ''}`}
-                    >
-                      {stateWord}
-                    </span>
-                    <span className="truncate text-[9.5px] text-text-muted">
-                      {t('stage.feedInputSuffix')}
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-
-          {/* The ghost: how a destination is added. Devices join the plan (the
-              hub still asks), feeds connect at once. */}
-          <motion.button
-            type="button"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={FADE}
-            transformTemplate={MAIN_THREAD_TRANSFORM}
-            aria-label={t('stage.addTarget')}
-            title={t('stage.addTargetTitle')}
-            onClick={() => setPickerOpen((value) => !value)}
-            className={`${CARD_CLASS} grid place-items-center border-dashed text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none`}
-            style={{
-              left: TARGET_X,
-              top: targetY(targetCount - 1, targetCount, height),
-              width: TARGET_W,
-              height: TARGET_H,
-            }}
+          {/* The primary device, alone in the first panel: 01 is the endpoint
+              Windows plays itself, and it is the top of the column because that
+              is the order the numbering teaches. */}
+          <Panel
+            label={t('stage.groupPrimary')}
+            top={primaryY}
+            height={primaryPanelHeight()}
+            contentHeight={panelContentHeight(primaryDeviceId !== undefined ? 1 : 0)}
+            empty={t('stage.groupPrimaryEmpty')}
           >
-            <span className="flex items-center gap-2 text-[12px] font-semibold">
-              <span aria-hidden="true" className="text-[15px] leading-none">
+            {primaryDeviceId !== undefined && (
+              <DeviceRow
+                deviceId={primaryDeviceId}
+                deviceName={devices.find((d) => d.id === primaryDeviceId)?.name ?? primaryDeviceId}
+                index={0}
+                top={rowContentY(0) - ROW_H / 2}
+                isPrimary
+                canPromote={false}
+                delay={0}
+                badgeIsButton={badgeIsButton}
+                removable={false}
+                inspected={inspectorKey === `dev:${primaryDeviceId}`}
+                onToggle={() => toggleTarget(primaryDeviceId)}
+                onRemove={() => undefined}
+                onPromote={() => undefined}
+                onInspect={() => setInspectorKey(`dev:${primaryDeviceId}`)}
+                onHover={setHoverKey}
+              />
+            )}
+          </Panel>
+
+          {/* Everything else: the copies, then the programmes this sound is fed
+              into. It takes what is left of the board — a row too many and it
+              scrolls here, rather than the stage scrolling around it. */}
+          <Panel
+            label={t('stage.groupCopies')}
+            top={copiesY}
+            height={copiesH}
+            contentHeight={panelContentHeight(copiesRows)}
+            empty={t('stage.groupCopiesEmpty')}
+            onScroll={setCopyScroll}
+            headerAction={
+              <button
+                type="button"
+                aria-label={t('stage.addTarget')}
+                title={t('stage.addTargetTitle')}
+                onClick={() => setPickerOpen((value) => !value)}
+                className="pressable flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] leading-none text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none"
+              >
                 ＋
-              </span>
-              {t('stage.addTarget')}
-            </span>
-          </motion.button>
+              </button>
+            }
+          >
+            {copyDeviceIds.map((deviceId, offset) => {
+              const delay = deviceDelays[deviceId] ?? 0;
+              const canPromote = drawn.length > 1 && delay <= primaryDelay;
+              return (
+                <DeviceRow
+                  key={deviceId}
+                  deviceId={deviceId}
+                  deviceName={devices.find((d) => d.id === deviceId)?.name ?? deviceId}
+                  index={offset + 1}
+                  top={rowContentY(offset) - ROW_H / 2}
+                  isPrimary={false}
+                  canPromote={canPromote}
+                  delay={delay}
+                  badgeIsButton={badgeIsButton}
+                  removable
+                  inspected={inspectorKey === `dev:${deviceId}`}
+                  onToggle={() => toggleTarget(deviceId)}
+                  onRemove={() => toggleTarget(deviceId)}
+                  onPromote={() => promoteDevice(deviceId)}
+                  onInspect={() => setInspectorKey(`dev:${deviceId}`)}
+                  onHover={setHoverKey}
+                />
+              );
+            })}
+            {feedTargetStates.map(({ session: targetSession, state }, offset) => (
+              <FeedRow
+                key={targetSession.pid}
+                session={targetSession}
+                state={state}
+                index={copyDeviceIds.length + offset + 1}
+                top={rowContentY(copyDeviceIds.length + offset) - ROW_H / 2}
+                sourceName={name ?? ''}
+                onRemove={() => void removeFeed(pid ?? -1, targetSession.pid)}
+                onHover={setHoverKey}
+              />
+            ))}
+          </Panel>
 
           <AnimatePresence>
             {pickerOpen && (
@@ -746,11 +648,8 @@ export function NodeStage() {
                 transformTemplate={MAIN_THREAD_TRANSFORM}
                 className="cc absolute z-30 w-[230px] rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
-                  left: Math.min(TARGET_X - 20, BOARD_W - 250),
-                  top: Math.min(
-                    targetY(targetCount - 1, targetCount, height) + TARGET_H + 8,
-                    height - 190,
-                  ),
+                  left: Math.min(GROUP_X - 40, BOARD_W - 250),
+                  top: Math.min(copiesY + GROUP_HEADER_H + 8, height - 190),
                 }}
               >
                 <PickerSection label={t('stage.pickDevice')}>
@@ -827,6 +726,298 @@ export function NodeStage() {
         deviceLatencyMs={deviceLatencyMs}
       />
     </div>
+  );
+}
+
+/**
+ * One of the two grouped panels down the right edge.
+ *
+ * A dashed rounded rectangle rather than a solid one: the panel holds cards,
+ * so it must not read as a card itself. Its title row stays put while the rows
+ * below it scroll, because the way in for a new direction has to be reachable
+ * however long the list has grown.
+ */
+function Panel({
+  label,
+  top,
+  height,
+  contentHeight,
+  empty,
+  headerAction,
+  onScroll,
+  children,
+}: {
+  label: string;
+  top: number;
+  height: number;
+  contentHeight: number;
+  empty: string;
+  headerAction?: React.ReactNode;
+  onScroll?: (scrollTop: number) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="cc absolute overflow-hidden rounded-card border border-dashed border-line-strong bg-surface-sunken"
+      style={{ left: GROUP_X, top, width: GROUP_W, height }}
+    >
+      <div
+        className="flex items-center justify-between gap-2 px-2"
+        style={{ height: GROUP_HEADER_H }}
+      >
+        <span className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+          {label}
+        </span>
+        {headerAction}
+      </div>
+      <div
+        className="overflow-y-auto"
+        style={{ height: height - PANEL_BORDER * 2 - GROUP_HEADER_H }}
+        onScroll={onScroll ? (event) => onScroll(event.currentTarget.scrollTop) : undefined}
+      >
+        {contentHeight > 0 ? (
+          <div className="relative" style={{ height: contentHeight }}>
+            {children}
+          </div>
+        ) : (
+          <div className="px-3 py-2.5 text-[10.5px] leading-relaxed text-text-muted">{empty}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One output device, as a row inside a panel.
+ *
+ * The row is placed by `lib/stage.ts` rather than by flow, so the wire that
+ * meets its in-pin cannot be a frame out of step with it; the panel's own
+ * scrolling moves the row and its wire together.
+ */
+function DeviceRow({
+  deviceId,
+  deviceName,
+  index,
+  top,
+  isPrimary,
+  canPromote,
+  delay,
+  badgeIsButton,
+  removable,
+  inspected,
+  onToggle,
+  onRemove,
+  onPromote,
+  onInspect,
+  onHover,
+}: {
+  deviceId: string;
+  deviceName: string;
+  index: number;
+  top: number;
+  isPrimary: boolean;
+  canPromote: boolean;
+  delay: number;
+  badgeIsButton: boolean;
+  removable: boolean;
+  inspected: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+  onPromote: () => void;
+  onInspect: () => void;
+  onHover: (key: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
+  const roleWord = isPrimary ? t('stage.main') : t('stage.copy');
+  const wireKey = `dev:${deviceId}`;
+
+  return (
+    <motion.div
+      data-device-row={deviceId}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={FADE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
+      onMouseEnter={() => onHover(wireKey)}
+      onMouseLeave={() => onHover(null)}
+      className={`group/copy group absolute flex items-center gap-2 rounded-ctl bg-surface pl-3 pr-2 ${
+        inspected ? 'ring-1 ring-accent' : 'hover:bg-surface-hover'
+      }`}
+      style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H }}
+    >
+      <span className="pin pin-in" aria-hidden="true" />
+      {/* The number badge opens the strip — but only once there is something to
+          tune: a single-device route starts no engine, so neither a delay nor a
+          share exists for it, and the primary volume alone is not a control this
+          route offers. Same rule the disc stage always carried. */}
+      {badgeIsButton ? (
+        <button
+          type="button"
+          className="no cursor-pointer hover:border-accent hover:text-accent"
+          onClick={onInspect}
+          aria-label={t('stage.inspectAria', { name: deviceName })}
+          title={t('stage.inspectTitle', { name: deviceName })}
+        >
+          {orderLabel(index)}
+        </button>
+      ) : (
+        <span className="no" aria-hidden="true">
+          {orderLabel(index)}
+        </span>
+      )}
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <button
+          type="button"
+          aria-pressed={selectedDeviceIds.includes(deviceId)}
+          aria-label={deviceName}
+          onClick={onToggle}
+          className="truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
+        >
+          {deviceName}
+        </button>
+        <span className="flex items-center gap-1.5">
+          {isPrimary ? (
+            <span
+              title={t('stage.primaryTitle')}
+              className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.primary}`}
+            >
+              {roleWord}
+            </span>
+          ) : canPromote ? (
+            // The role word itself is the switch: it reads "Copy" until the
+            // pointer or the keyboard arrives, then it offers the move. The
+            // accessible name is the action, so a screen reader hears the
+            // control and not the state.
+            <button
+              type="button"
+              aria-label={t('stage.promote')}
+              title={t('stage.promoteTitle')}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPromote();
+              }}
+              className="text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+            >
+              <span className="group-hover/copy:hidden">{roleWord}</span>
+              <span className="hidden group-hover/copy:inline">{t('stage.promote')}</span>
+            </button>
+          ) : (
+            <span
+              title={t('stage.promoteBlockedTitle')}
+              className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.mirror}`}
+            >
+              {roleWord}
+            </span>
+          )}
+          {!isPrimary && delay !== 0 && (
+            <span className="font-mono text-[9.5px] tabular-nums text-text-muted">
+              {formatDelaySigned(delay)}
+            </span>
+          )}
+        </span>
+      </span>
+      {/* Removal is a plan edit like any other: it toggles the row out of the
+          selection, and the hub asks the same question it always does. The last
+          device cannot leave — a route to zero devices is not a state this app
+          offers — so the primary row carries no ✕ at all. */}
+      {removable && (
+        <button
+          type="button"
+          title={t('stage.removeTarget', { name: deviceName })}
+          onClick={onRemove}
+          className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
+        >
+          ✕
+        </button>
+      )}
+    </motion.div>
+  );
+}
+
+/**
+ * One programme the hub's sound is fed into. Amber, immediate, and honest
+ * about what is missing: the ✕ disconnects at once, the toast carries the way
+ * back.
+ */
+function FeedRow({
+  session,
+  state,
+  index,
+  top,
+  sourceName,
+  onRemove,
+  onHover,
+}: {
+  session: AudioSession;
+  state: 'live' | 'suspended' | 'no-carrier';
+  index: number;
+  top: number;
+  sourceName: string;
+  onRemove: () => void;
+  onHover: (key: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const targetName = session.display_name ?? session.exe_name;
+  const title =
+    state === 'live'
+      ? t('stage.feedTitleLive', { name: targetName })
+      : state === 'suspended'
+        ? t('stage.feedTitleSuspended', { source: sourceName, name: targetName })
+        : t('stage.feedTitleNoCarrier', { name: targetName });
+  const stateWord =
+    state === 'live'
+      ? t('stage.feedRole')
+      : state === 'suspended'
+        ? t('stage.feedHeld')
+        : t('stage.feedNoCarrier');
+
+  return (
+    <motion.div
+      data-feed-row={session.pid}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={FADE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
+      onMouseEnter={() => onHover(`feed:${session.pid}`)}
+      onMouseLeave={() => onHover(null)}
+      title={title}
+      className={`absolute flex items-center gap-2 rounded-ctl bg-surface pl-3 pr-2 ${state !== 'live' ? 'opacity-90' : ''}`}
+      style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H }}
+    >
+      <span className="pin pin-in pin-amber" aria-hidden="true" />
+      <span className="no" aria-hidden="true">
+        {orderLabel(index)}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex items-center gap-1.5">
+          <ProcessIcon
+            exeName={session.exe_name}
+            name={session.display_name ?? session.exe_name}
+            size={15}
+          />
+          <span className="truncate text-[12px] font-bold text-text-primary">{targetName}</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span
+            className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.feed} ${state !== 'live' ? 'opacity-60' : ''}`}
+          >
+            {stateWord}
+          </span>
+          <span className="truncate text-[9.5px] text-text-muted">
+            {t('stage.feedInputSuffix')}
+          </span>
+        </span>
+      </span>
+      <button
+        type="button"
+        title={t('stage.removeFeed', { name: targetName })}
+        onClick={onRemove}
+        className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
+      >
+        ✕
+      </button>
+    </motion.div>
   );
 }
 

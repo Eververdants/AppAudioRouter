@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOARD_H,
-  TARGET_H,
+  GROUP_HEADER_H,
+  MINI_H,
+  ROW_GAP,
+  ROW_H,
   alreadyApplied,
-  boardHeight,
+  copiesPanelHeight,
+  copiesPanelY,
   feederY,
   hubOutPort,
-  MINI_H,
   nodePath,
-  targetInPort,
-  targetY,
+  panelContentHeight,
+  primaryPanelHeight,
+  primaryPanelY,
+  rowContentY,
+  rowInPort,
+  rowPortY,
+  rowVisible,
 } from './stage';
 
 /**
@@ -52,78 +60,79 @@ describe('alreadyApplied', () => {
  * The board's arithmetic.
  *
  * Wires are computed rather than measured, so the one thing that has to hold is
- * that a card and the wire that meets it agree: the column stays inside the
- * board, neighbouring cards never overlap, and a wire ends on the pin it names.
+ * that a row and the wire that meets it agree: both panels stay inside the
+ * board for whatever height the well reports, rows never overlap, and a wire
+ * ends on the pin it names.
  */
 describe('board geometry', () => {
-  it('keeps a column of cards inside the board, however many there are', () => {
-    for (const count of [1, 2, 3, 5, 8, 12]) {
-      const height = boardHeight(count);
-      const first = targetY(0, count, height);
-      const last = targetY(count - 1, count, height) + TARGET_H;
-      expect(first).toBeGreaterThanOrEqual(0);
-      expect(last).toBeLessThanOrEqual(height);
+  it('keeps both panels inside the board, whatever height the well reports', () => {
+    // The board takes the well's own height, so no height may push a panel off
+    // the bottom: that is what replaced the well's scrollbar.
+    for (const height of [320, 470, 600, 900]) {
+      const primaryTop = primaryPanelY();
+      const primaryBottom = primaryTop + primaryPanelHeight();
+      const copiesTop = copiesPanelY();
+      const copiesBottom = copiesTop + copiesPanelHeight(height);
+      expect(primaryTop).toBeGreaterThanOrEqual(0);
+      expect(copiesTop).toBeGreaterThanOrEqual(primaryBottom);
+      expect(copiesBottom).toBeLessThanOrEqual(height);
     }
   });
 
-  it('grows the board rather than squeezing cards into each other', () => {
-    // The default board is what the app's own window measures; past that the
-    // board gets taller and the well scrolls. What it must never do is close
-    // the gap until two destinations touch.
-    expect(boardHeight(3)).toBe(BOARD_H);
-    expect(boardHeight(12)).toBeGreaterThan(BOARD_H);
-    for (const count of [2, 3, 5, 8, 12, 20]) {
-      const height = boardHeight(count);
-      for (let index = 1; index < count; index += 1) {
-        const above = targetY(index - 1, count, height) + TARGET_H;
-        expect(targetY(index, count, height)).toBeGreaterThanOrEqual(above);
+  it('never squeezes the copies panel below its own title row', () => {
+    // A board shorter than the two panels still has to draw something; the
+    // panel gives up room, not the way in for a new destination.
+    expect(copiesPanelHeight(10)).toBeGreaterThan(GROUP_HEADER_H);
+  });
+
+  it('stacks rows without letting them touch', () => {
+    for (const rows of [1, 2, 5, 12, 40]) {
+      const content = panelContentHeight(rows);
+      for (let index = 1; index < rows; index += 1) {
+        const above = rowContentY(index - 1) + ROW_H / 2;
+        expect(rowContentY(index) - ROW_H / 2).toBeGreaterThanOrEqual(above);
       }
+      const last = rowContentY(rows - 1) + ROW_H / 2;
+      expect(last).toBeLessThanOrEqual(content);
     }
+    expect(panelContentHeight(0)).toBe(0);
+    expect(panelContentHeight(2) - panelContentHeight(1)).toBe(ROW_H + ROW_GAP);
   });
 
-  it('sizes the board for the feeding column too', () => {
-    // The programmes sending sound *into* the hub are a column as well, and they
-    // sit to its left. Sized only for the destinations, eight of them stack
-    // above the top edge — and absolutely positioned children do not extend a
-    // scroll area upwards, so those feeds become unreachable rather than merely
-    // scrolled off. The budget is the taller of the two columns.
-    const height = boardHeight(1, 8);
-    expect(height).toBeGreaterThan(BOARD_H);
-    expect(feederY(0, 8, height)).toBeGreaterThanOrEqual(0);
-    expect(feederY(7, 8, height) + MINI_H).toBeLessThanOrEqual(height);
-    for (let index = 1; index < 8; index += 1) {
-      expect(feederY(index, 8, height)).toBeGreaterThanOrEqual(
-        feederY(index - 1, 8, height) + MINI_H,
-      );
-    }
+  it('rides a row and its port with the panel scroll', () => {
+    // The wire has to move with the row it belongs to, or scrolling the panel
+    // would leave every line pointing at where the rows used to be.
+    const top = copiesPanelY();
+    expect(rowPortY(top, 0, 0) - rowPortY(top, 0, 40)).toBe(40);
   });
 
-  it('centres the column on the hub', () => {
-    // The hub's out-pin sits at the board's vertical middle, and a column with
-    // an odd count has to line up with it or the middle wire would be the only
-    // one that runs straight.
-    const height = boardHeight(3);
-    expect(hubOutPort(height).y).toBeCloseTo(height / 2, 5);
-    const middle = targetY(1, 3, height) + TARGET_H / 2;
-    expect(middle).toBeCloseTo(height / 2, 5);
+  it('leaves a row scrolled out of the panel without a wire to meet', () => {
+    const top = copiesPanelY();
+    const height = copiesPanelHeight(BOARD_H);
+    expect(rowVisible(top, height, 0, 0)).toBe(true);
+    expect(rowVisible(top, height, 0, 100000)).toBe(false);
+  });
+
+  it('centres the hub on the board', () => {
+    // The hub's out-pin sits at the board's vertical middle, and the wire that
+    // leaves it is the one every route is read from.
+    expect(hubOutPort(BOARD_H).y).toBeCloseTo(BOARD_H / 2, 5);
   });
 
   it('ends a wire at the pin it names', () => {
-    const height = boardHeight(3);
-    const from = hubOutPort(height);
-    const to = targetInPort(1, 3, height);
+    const from = hubOutPort(BOARD_H);
+    const to = rowInPort(primaryPanelY(), 0, 0);
     const path = nodePath(from.x, from.y, to.x, to.y);
     expect(path.startsWith(`M ${from.x} ${from.y}`)).toBe(true);
     expect(path.endsWith(`${to.x} ${to.y}`)).toBe(true);
   });
 
-  it('stacks feeders with the same spacing rules', () => {
+  it('stacks feeders inside the board', () => {
     for (const count of [1, 3, 6]) {
-      const height = boardHeight(count);
-      const first = feederY(0, count, height);
-      const last = feederY(count - 1, count, height);
+      const first = feederY(0, count, BOARD_H);
+      const last = feederY(count - 1, count, BOARD_H);
       expect(first).toBeGreaterThanOrEqual(0);
-      expect(last).toBeLessThanOrEqual(height);
+      expect(last + MINI_H).toBeLessThanOrEqual(BOARD_H);
     }
   });
 });
