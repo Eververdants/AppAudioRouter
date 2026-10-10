@@ -1,8 +1,10 @@
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { DelayStepper } from '@/components/ui/DelayStepper';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -10,6 +12,7 @@ import { detectCarrierPair, matchesCarrier } from '@/lib/carrierDetect';
 import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
 import { isEditableTarget } from '@/lib/productionGuards';
 import { openCarrierDownload } from '@/lib/invoke';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -21,50 +24,45 @@ import { useRouterStore } from '@/stores/routerStore';
 const ROW_BUTTON_CLASS =
   'pressable shrink-0 rounded-ctl border border-line px-2.5 py-1 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-text-secondary';
 
-/**
- * A titled group of rows.
- *
- * A rule and a small uppercase label, not a card: the settings page is one
- * column read top to bottom, and a box around each group would claim the groups
- * are separable objects rather than headings in a list. Nothing is rounded,
- * nothing is lifted, nothing is translucent.
- */
-function SectionCard({
-  icon,
-  label,
-  children,
-}: {
-  icon: ReactNode;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <section>
-      <h3 className="flex items-center gap-2 border-b border-line pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
-        <span className="text-accent">{icon}</span>
-        {label}
-      </h3>
-      {children}
-    </section>
-  );
-}
-
 /** One setting: what it is on the left, the control that changes it on the
  * right, and a hairline under it to separate it from the next. */
 function Row({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-line py-3 last:border-b-0">
+    <div className="flex items-center justify-between gap-4 border-b border-line py-3.5 last:border-b-0">
       <div className="min-w-0">
         <div className="text-[13px] text-text-primary">{title}</div>
         {/* Capped at a reading measure: a description that runs to the width of
             the page would push the control it describes out to the far edge. */}
         {desc && (
-          <div className="mt-0.5 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+          <div className="mt-1 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
             {desc}
           </div>
         )}
       </div>
       {children}
+    </div>
+  );
+}
+
+/** A stacked block: a title, an explanation, then whatever the setting owns. */
+function Block({
+  title,
+  desc,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-b border-line py-3.5 last:border-b-0">
+      <div className="text-[13px] text-text-primary">{title}</div>
+      {desc && (
+        <div className="mt-1 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+          {desc}
+        </div>
+      )}
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
@@ -139,7 +137,13 @@ function RememberedChip({
     .map((id) => devices.find((device) => device.id === id)?.name ?? id)
     .join(' · ');
   return (
-    <span
+    <motion.span
+      layout
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={FADE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       title={`${entry.exeName} → ${target}`}
       className="flex max-w-full items-center gap-1 rounded-seg border border-line bg-surface-raised py-0.5 pl-1.5 pr-0.5 font-mono text-[10px] text-text-secondary"
     >
@@ -164,7 +168,7 @@ function RememberedChip({
           <line x1="9" y1="1" x2="1" y2="9" />
         </svg>
       </button>
-    </span>
+    </motion.span>
   );
 }
 
@@ -188,14 +192,64 @@ const MoonIcon = (
   </svg>
 );
 
+/** The sections the settings rail can show, in the order it lists them. */
+type SettingsSection = 'appearance' | 'routing' | 'background' | 'delays' | 'levels' | 'about';
+
+/** The rail's glyphs, one per section. Drawn once and reused by the nav. */
+const SECTION_ICONS: Record<SettingsSection, ReactNode> = {
+  appearance: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  ),
+  routing: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  ),
+  background: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v11" />
+      <path d="M8 10.5 12 14.5 16 10.5" />
+      <path d="M4 17.5h16" />
+    </svg>
+  ),
+  delays: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 13.5" />
+    </svg>
+  ),
+  levels: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <circle cx="9" cy="6" r="2" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <circle cx="15" cy="12" r="2" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+      <circle cx="7" cy="18" r="2" />
+    </svg>
+  ),
+  about: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
+  ),
+};
+
 /**
  * Settings as a full page (not a modal): slides in over the content area from
- * the title-bar gear and slides back out. Owns everything app-level — theme,
- * language, the advanced-controls switch, auto-remember and the per-device
- * delay sliders.
+ * the title-bar gear and slides back out.
  *
- * One column, read top to bottom: a heading, then its rows, then a rule and the
- * next heading. No card, no shadow, no blur — the sections are the page itself.
+ * Laid out the way a settings surface is read: a rail of sections down the left
+ * and the chosen section's rows filling the right. The old single column grew
+ * with every addition — one long scroll where appearance, routing, delays and
+ * the about box all competed for the same attention — and a rail gives each
+ * group of decisions its own place without a card around any of them. The page
+ * itself is still one flat paper: a rail, a hairline, and rows.
  */
 export function SettingsPage({ onBack }: { onBack: () => void }) {
   const { t } = useTranslation();
@@ -223,6 +277,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
   const setFeedCarrier = useRouterStore((s) => s.setFeedCarrier);
   const captureDevices = useRouterStore((s) => s.captureDevices);
+
+  const [section, setSection] = useState<SettingsSection>('appearance');
+
   // Only ever disables one button, but it walks the whole session list, and
   // this page re-renders for every store field it reads — several of which
   // move whenever audio comes or goes.
@@ -247,9 +304,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     // routed capsule coordinate the same key the same way.
     const onKey = (e: KeyboardEvent) => {
       // Escape belongs to the control that has the focus first: the delay
-      // stepper's field, and the carrier pickers — a <select> that closes itself
-      // on Escape. Only HTMLInputElement was exempted, so pressing Escape while
-      // choosing a carrier fell through and took the whole page with it.
+      // stepper's field, and the carrier dropdowns — a listbox that closes
+      // itself on Escape carries `data-owns-escape`, so the page stands down
+      // for it rather than taking the whole surface down with it.
       if (isEditableTarget(e.target)) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -260,429 +317,436 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onBack]);
 
+  const SECTIONS: SettingsSection[] = [
+    'appearance',
+    'routing',
+    'background',
+    'delays',
+    'levels',
+    'about',
+  ];
+  // Written out rather than indexed by a template string: the i18n keys are
+  // type-checked, and `settings.${id}` would defeat that.
+  const sectionLabel = (id: SettingsSection): string => {
+    switch (id) {
+      case 'appearance':
+        return t('settings.appearance');
+      case 'routing':
+        return t('settings.routing');
+      case 'background':
+        return t('settings.background');
+      case 'delays':
+        return t('settings.delays');
+      case 'levels':
+        return t('settings.sourceLevels');
+      case 'about':
+        return t('settings.about');
+    }
+  };
+
+  const carrierOptions = [
+    { value: '', label: t('settings.feedCarrierNone') },
+    ...devices.map((device) => ({ value: device.id, label: device.name })),
+  ];
+  const captureOptions = [
+    { value: '', label: t('settings.feedCarrierNone') },
+    ...captureDevices.map((device) => ({ value: device.id, label: device.name })),
+  ];
+
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-9 px-8 pb-14 pt-8">
-        {/* Page header: the way back, then the name of the page. */}
-        <header className="border-b border-line pb-4">
-          <button
-            type="button"
-            onClick={onBack}
-            className="pressable flex items-center gap-1.5 rounded-seg text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+    <div className="flex h-full min-h-0">
+      {/* The rail: one section per row, the chosen one marked by a rule that
+          travels rather than by a pill that blinks on and off. */}
+      <nav
+        aria-label={t('settings.title')}
+        className="flex w-[190px] flex-none flex-col gap-0.5 border-r border-line px-2.5 py-3"
+      >
+        <button
+          type="button"
+          onClick={onBack}
+          className="pressable mb-2 flex items-center gap-1.5 self-start rounded-ctl px-2 py-1.5 text-[11px] font-medium text-text-muted outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="19" y1="12" x2="5" y2="12" />
-              <polyline points="12 19 5 12 12 5" />
-            </svg>
-            {t('settings.back')}
-          </button>
-          <h1 className="mt-3 text-[17px] font-semibold tracking-tight text-text-primary">
-            {t('settings.title')}
-          </h1>
-        </header>
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          {t('settings.back')}
+        </button>
 
-        <SectionCard
-          icon={
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            </svg>
-          }
-          label={t('settings.appearance')}
-        >
-          <Row title={t('settings.theme')}>
-            <SegmentedControl
-              layoutId="settings-theme-pill"
-              ariaLabel={t('settings.theme')}
-              value={theme}
-              onChange={setTheme}
-              options={[
-                {
-                  value: 'light',
-                  label: (
-                    <span className="flex items-center gap-1">
-                      {SunIcon}
-                      {t('settings.themeLight')}
-                    </span>
-                  ),
-                  ariaLabel: t('settings.themeLight'),
-                },
-                {
-                  value: 'dark',
-                  label: (
-                    <span className="flex items-center gap-1">
-                      {MoonIcon}
-                      {t('settings.themeDark')}
-                    </span>
-                  ),
-                  ariaLabel: t('settings.themeDark'),
-                },
-              ]}
-            />
-          </Row>
-          <Row title={t('settings.language')}>
-            <SegmentedControl
-              layoutId="settings-language-pill"
-              ariaLabel={t('settings.language')}
-              value={language}
-              onChange={setLanguage}
-              options={[
-                { value: 'zh-CN', label: '中文' },
-                { value: 'en', label: 'EN' },
-              ]}
-            />
-          </Row>
-        </SectionCard>
-
-        <SectionCard
-          icon={
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
-            </svg>
-          }
-          label={t('settings.routing')}
-        >
-          <Row title={t('settings.autoRemember')} desc={t('settings.autoRememberDesc')}>
-            <Switch
-              checked={autoRemember}
-              onChange={toggleAutoRemember}
-              label={t('settings.autoRemember')}
-            />
-          </Row>
-          {rememberedRoutes.length > 0 && (
-            <div className="border-b border-line py-3">
-              <div className="mb-2 text-[11px] text-text-muted">
-                {t('settings.rememberedRoutes')}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {rememberedRoutes.map((entry) => (
-                  <RememberedChip
-                    key={entry.exeName}
-                    entry={entry}
-                    devices={devices}
-                    onForget={forgetRememberedRoute}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-          <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
-            {/* Every per-app assignment on the machine, both data flows, in one
-                press — and it reaches programs that are not on the board. The
-                same action asks first in the process list's header for the same
-                reason, so it asks here too. */}
-            <ConfirmButton
-              label={t('settings.resetEndpointsAction')}
-              confirmLabel={t('settings.resetEndpointsConfirm')}
-              onConfirm={() => void resetPinnedEndpoints()}
-            />
-          </Row>
-          {/* The same action as the process list header, and the same reason it
-              asks first: it reaches every routed program, not just the one the
-              user has in mind. */}
-          <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
-            <ConfirmButton
-              label={t('settings.stopAllRoutesAction')}
-              confirmLabel={t('settings.stopAllRoutesConfirm')}
-              onConfirm={() => void stopAllRoutes()}
-              disabled={routedCount === 0}
-            />
-          </Row>
-          {/* Sending one program's audio into another's input runs through a
-              loopback pair: the source plays to the pair's playback side, the
-              target records from its recording side. The app ships no driver,
-              so the pair is picked here; without one, feeds are remembered and
-              shown on the board, but silent. */}
-          <div className="border-b border-line py-3">
-            <div className="text-[13px] text-text-primary">{t('settings.feedCarrier')}</div>
-            <div className="mt-0.5 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-              {t('settings.feedCarrierDesc')}
-            </div>
-            <div className="mt-2.5 flex flex-col gap-2">
-              <label className="flex items-center gap-3">
-                <span className="w-[130px] flex-none text-[11px] text-text-muted">
-                  {t('settings.feedCarrierRender')}
-                </span>
-                <select
-                  aria-label={t('settings.feedCarrierRender')}
-                  title={t('settings.feedCarrierRenderHint')}
-                  value={feedCarrier.render ?? ''}
-                  onChange={(event) =>
-                    void setFeedCarrier(
-                      event.target.value === '' ? null : event.target.value,
-                      feedCarrier.capture,
-                    )
-                  }
-                  className="min-w-0 flex-1 rounded-ctl border border-line-strong bg-surface px-2.5 py-1.5 text-[12px] text-text-secondary outline-none focus-visible:border-accent"
-                >
-                  <option value="">{t('settings.feedCarrierNone')}</option>
-                  {devices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-3">
-                <span className="w-[130px] flex-none text-[11px] text-text-muted">
-                  {t('settings.feedCarrierCapture')}
-                </span>
-                <select
-                  aria-label={t('settings.feedCarrierCapture')}
-                  title={t('settings.feedCarrierCaptureHint')}
-                  value={feedCarrier.capture ?? ''}
-                  onChange={(event) =>
-                    void setFeedCarrier(
-                      feedCarrier.render,
-                      event.target.value === '' ? null : event.target.value,
-                    )
-                  }
-                  className="min-w-0 flex-1 rounded-ctl border border-line-strong bg-surface px-2.5 py-1.5 text-[12px] text-text-secondary outline-none focus-visible:border-accent"
-                >
-                  <option value="">{t('settings.feedCarrierNone')}</option>
-                  {captureDevices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {/* The known loopback drivers announce themselves: pairing is one
-                click when one is here, and the free one is one click away when
-                none is. The button below hands a driver key to the backend —
-                the URL itself never crosses from the frontend. */}
-            {carrierMatch && !matchesCarrier(carrierMatch, feedCarrier) && (
-              <div className="mt-2.5 flex items-center justify-between gap-3">
-                <span className="text-[11px] text-text-secondary">
-                  {t('settings.feedCarrierDetected', { driver: carrierMatch.driver.display })}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)}
-                  className="pressable shrink-0 rounded-ctl bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
-                >
-                  {t('settings.feedCarrierApply')}
-                </button>
-              </div>
-            )}
-            {carrierMatch && matchesCarrier(carrierMatch, feedCarrier) && (
-              <div className="mt-2.5 text-[11px] text-text-muted">
-                {t('settings.feedCarrierPaired', { driver: carrierMatch.driver.display })}
-              </div>
-            )}
-            {!carrierMatch && !feedCarrier.render && !feedCarrier.capture && (
-              <div className="mt-2.5 flex items-center justify-between gap-3">
-                <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-                  {t('settings.feedCarrierMissing')}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void openCarrierDownload('vb-cable')}
-                  className={ROW_BUTTON_CLASS}
-                >
-                  {t('settings.feedCarrierDownload')}
-                </button>
-              </div>
-            )}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          icon={
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 3v11" />
-              <path d="M8 10.5 12 14.5 16 10.5" />
-              <path d="M4 17.5h16" />
-            </svg>
-          }
-          label={t('settings.background')}
-        >
-          <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
-            <Switch
-              checked={closeToTray}
-              onChange={() => void toggleCloseToTray()}
-              label={t('settings.closeToTray')}
-            />
-          </Row>
-          <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
-            <Switch
-              checked={autostart}
-              onChange={() => void toggleAutostart()}
-              label={t('settings.autostart')}
-            />
-          </Row>
-        </SectionCard>
-
-        <SectionCard
-          icon={
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="9" />
-              <polyline points="12 7 12 12 15.5 13.5" />
-            </svg>
-          }
-          label={t('settings.delays')}
-        >
-          <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
-            <SegmentedControl
-              layoutId="settings-delay-range"
-              ariaLabel={t('settings.delayRange')}
-              value={String(delayRangeMs)}
-              onChange={(value) => void setDelayRange(Number(value))}
-              options={DELAY_RANGE_OPTIONS.map((ms) => ({
-                value: String(ms),
-                label: `±${rangeSeconds(ms)}s`,
-              }))}
-            />
-          </Row>
-          <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
-            <SegmentedControl
-              layoutId="settings-delay-step"
-              ariaLabel={t('settings.delayStep')}
-              value={String(delayStepMs)}
-              onChange={(value) => setDelayStep(Number(value))}
-              options={DELAY_STEP_OPTIONS.map((ms) => ({
-                value: String(ms),
-                label: formatStep(ms),
-              }))}
-            />
-          </Row>
-          <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
-            {t('settings.delayNote')}
-          </p>
-          <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
-            {t('settings.calibrationNote')}
-          </p>
-          {devices.length === 0 ? (
-            <p className="py-6 text-center text-[11px] text-text-muted">
-              {t('settings.noDevices')}
-            </p>
-          ) : (
-            devices.map((device) => (
-              <DelayRow
-                key={device.id}
-                deviceId={device.id}
-                name={device.name}
-                rangeMs={delayRangeMs}
-              />
-            ))
-          )}
-        </SectionCard>
-
-        <SectionCard
-          icon={
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <circle cx="9" cy="6" r="2" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <circle cx="15" cy="12" r="2" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-              <circle cx="7" cy="18" r="2" />
-            </svg>
-          }
-          label={t('settings.sourceLevels')}
-        >
-          {/* One click and no confirmation: evening the levels out is the
-              feature, and what it covered is reported in the log rather than
-              in a question asked before it runs. */}
-          <Row title={t('settings.sourceLevelsAlign')} desc={t('settings.sourceLevelsAlignDesc')}>
+        {SECTIONS.map((id) => {
+          const active = id === section;
+          return (
             <button
+              key={id}
               type="button"
-              onClick={() => void alignSourceLevels()}
-              disabled={duplicated.length === 0}
-              className={ROW_BUTTON_CLASS}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => setSection(id)}
+              className={`relative flex items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                active
+                  ? 'bg-accent-muted font-medium text-accent'
+                  : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+              }`}
             >
-              {t('settings.sourceLevelsAlignAction')}
-            </button>
-          </Row>
-          {/* The levels themselves live on the board, as the ring each
-              duplicated program's source node wears — a value in the context it
-              acts in, not a second list here saying the same thing twice. */}
-          <p className="py-3 text-[11px] leading-relaxed text-text-muted">
-            {t('settings.sourceLevelsNote')}
-          </p>
-        </SectionCard>
-
-        <SectionCard
-          icon={
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 16v-4M12 8h.01" />
-            </svg>
-          }
-          label={t('settings.about')}
-        >
-          <div className="py-3">
-            <div className="mb-1 flex items-center justify-between gap-4">
-              <span className="text-[13px] font-medium text-text-primary">App Audio Router</span>
-              {/* The version is a fact, not an achievement: set in the same
-                  monospaced muted type as every other number in the app. */}
-              <span className="font-mono text-[10px] tabular-nums text-text-muted">
-                v{__APP_VERSION__}
+              <span className={active ? 'text-accent' : 'text-text-muted'}>
+                {SECTION_ICONS[id]}
               </span>
-            </div>
-            <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-              {t('settings.aboutDesc')}
-            </p>
-          </div>
-        </SectionCard>
+              <span className="truncate">{sectionLabel(id)}</span>
+              {active && (
+                <motion.span
+                  layoutId="settings-section-rule"
+                  transition={SPRING_GLIDE}
+                  aria-hidden="true"
+                  className="absolute -left-2.5 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
+                />
+              )}
+            </button>
+          );
+        })}
+
+        <div className="mt-auto px-2 pt-3 font-mono text-[10px] tabular-nums text-text-muted">
+          v{__APP_VERSION__}
+        </div>
+      </nav>
+
+      {/* The chosen section, on the paper. One entrance-only cross-fade keyed by
+          the section, so a change of section reads as a new page arriving. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-2xl px-8 py-8">
+          <h1 className="mb-1 text-[17px] font-semibold tracking-tight text-text-primary">
+            {sectionLabel(section)}
+          </h1>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={section}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={FADE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
+            >
+              {section === 'appearance' && (
+                <AppearanceSection
+                  theme={theme}
+                  setTheme={setTheme}
+                  language={language}
+                  setLanguage={setLanguage}
+                />
+              )}
+
+              {section === 'routing' && (
+                <>
+                  <Row title={t('settings.autoRemember')} desc={t('settings.autoRememberDesc')}>
+                    <Switch
+                      checked={autoRemember}
+                      onChange={toggleAutoRemember}
+                      label={t('settings.autoRemember')}
+                    />
+                  </Row>
+                  {rememberedRoutes.length > 0 && (
+                    <Block title={t('settings.rememberedRoutes')}>
+                      <div className="flex flex-wrap gap-1.5">
+                        <AnimatePresence initial={false}>
+                          {rememberedRoutes.map((entry) => (
+                            <RememberedChip
+                              key={entry.exeName}
+                              entry={entry}
+                              devices={devices}
+                              onForget={forgetRememberedRoute}
+                            />
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                    </Block>
+                  )}
+                  <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
+                    {/* Every per-app assignment on the machine, both data flows,
+                        in one press — and it reaches programs that are not on the
+                        board. The same action asks first in the process list's
+                        header for the same reason, so it asks here too. */}
+                    <ConfirmButton
+                      label={t('settings.resetEndpointsAction')}
+                      confirmLabel={t('settings.resetEndpointsConfirm')}
+                      onConfirm={() => void resetPinnedEndpoints()}
+                    />
+                  </Row>
+                  <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
+                    <ConfirmButton
+                      label={t('settings.stopAllRoutesAction')}
+                      confirmLabel={t('settings.stopAllRoutesConfirm')}
+                      onConfirm={() => void stopAllRoutes()}
+                      disabled={routedCount === 0}
+                    />
+                  </Row>
+                  {/* Sending one program's audio into another's input runs through
+                      a loopback pair: the source plays to the pair's playback
+                      side, the target records from its recording side. The app
+                      ships no driver, so the pair is picked here; without one,
+                      feeds are remembered and shown on the board, but silent. */}
+                  <Block title={t('settings.feedCarrier')} desc={t('settings.feedCarrierDesc')}>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-3">
+                        <span className="w-[130px] flex-none text-[11px] text-text-muted">
+                          {t('settings.feedCarrierRender')}
+                        </span>
+                        <Select
+                          ariaLabel={t('settings.feedCarrierRender')}
+                          title={t('settings.feedCarrierRenderHint')}
+                          value={feedCarrier.render ?? ''}
+                          options={carrierOptions}
+                          onChange={(next) =>
+                            void setFeedCarrier(next === '' ? null : next, feedCarrier.capture)
+                          }
+                        />
+                      </label>
+                      <label className="flex items-center gap-3">
+                        <span className="w-[130px] flex-none text-[11px] text-text-muted">
+                          {t('settings.feedCarrierCapture')}
+                        </span>
+                        <Select
+                          ariaLabel={t('settings.feedCarrierCapture')}
+                          title={t('settings.feedCarrierCaptureHint')}
+                          value={feedCarrier.capture ?? ''}
+                          options={captureOptions}
+                          onChange={(next) =>
+                            void setFeedCarrier(feedCarrier.render, next === '' ? null : next)
+                          }
+                        />
+                      </label>
+                    </div>
+                    {/* The known loopback drivers announce themselves: pairing is
+                        one click when one is here, and the free one is one click
+                        away when none is. The button below hands a driver key to
+                        the backend — the URL itself never crosses from the
+                        frontend. */}
+                    {carrierMatch && !matchesCarrier(carrierMatch, feedCarrier) && (
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-[11px] text-text-secondary">
+                          {t('settings.feedCarrierDetected', {
+                            driver: carrierMatch.driver.display,
+                          })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)
+                          }
+                          className="pressable shrink-0 rounded-ctl bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+                        >
+                          {t('settings.feedCarrierApply')}
+                        </button>
+                      </div>
+                    )}
+                    {carrierMatch && matchesCarrier(carrierMatch, feedCarrier) && (
+                      <div className="mt-3 text-[11px] text-text-muted">
+                        {t('settings.feedCarrierPaired', { driver: carrierMatch.driver.display })}
+                      </div>
+                    )}
+                    {!carrierMatch && !feedCarrier.render && !feedCarrier.capture && (
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                          {t('settings.feedCarrierMissing')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void openCarrierDownload('vb-cable')}
+                          className={ROW_BUTTON_CLASS}
+                        >
+                          {t('settings.feedCarrierDownload')}
+                        </button>
+                      </div>
+                    )}
+                  </Block>
+                </>
+              )}
+
+              {section === 'background' && (
+                <>
+                  <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
+                    <Switch
+                      checked={closeToTray}
+                      onChange={() => void toggleCloseToTray()}
+                      label={t('settings.closeToTray')}
+                    />
+                  </Row>
+                  <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
+                    <Switch
+                      checked={autostart}
+                      onChange={() => void toggleAutostart()}
+                      label={t('settings.autostart')}
+                    />
+                  </Row>
+                </>
+              )}
+
+              {section === 'delays' && (
+                <>
+                  <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
+                    <SegmentedControl
+                      layoutId="settings-delay-range"
+                      ariaLabel={t('settings.delayRange')}
+                      value={String(delayRangeMs)}
+                      onChange={(value) => void setDelayRange(Number(value))}
+                      options={DELAY_RANGE_OPTIONS.map((ms) => ({
+                        value: String(ms),
+                        label: `±${rangeSeconds(ms)}s`,
+                      }))}
+                    />
+                  </Row>
+                  <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
+                    <SegmentedControl
+                      layoutId="settings-delay-step"
+                      ariaLabel={t('settings.delayStep')}
+                      value={String(delayStepMs)}
+                      onChange={(value) => void setDelayStep(Number(value))}
+                      options={DELAY_STEP_OPTIONS.map((ms) => ({
+                        value: String(ms),
+                        label: formatStep(ms),
+                      }))}
+                    />
+                  </Row>
+                  <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+                    {t('settings.delayNote')}
+                  </p>
+                  <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+                    {t('settings.calibrationNote')}
+                  </p>
+                  {devices.length === 0 ? (
+                    <p className="py-6 text-center text-[11px] text-text-muted">
+                      {t('settings.noDevices')}
+                    </p>
+                  ) : (
+                    devices.map((device) => (
+                      <DelayRow
+                        key={device.id}
+                        deviceId={device.id}
+                        name={device.name}
+                        rangeMs={delayRangeMs}
+                      />
+                    ))
+                  )}
+                </>
+              )}
+
+              {section === 'levels' && (
+                <>
+                  {/* One click and no confirmation: evening the levels out is the
+                      feature, and what it covered is reported in the log rather
+                      than in a question asked before it runs. */}
+                  <Row
+                    title={t('settings.sourceLevelsAlign')}
+                    desc={t('settings.sourceLevelsAlignDesc')}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void alignSourceLevels()}
+                      disabled={duplicated.length === 0}
+                      className={ROW_BUTTON_CLASS}
+                    >
+                      {t('settings.sourceLevelsAlignAction')}
+                    </button>
+                  </Row>
+                  {/* The levels themselves live on the board, as the ring each
+                      duplicated program's source node wears — a value in the
+                      context it acts in, not a second list here saying the same
+                      thing twice. */}
+                  <p className="py-3 text-[11px] leading-relaxed text-text-muted">
+                    {t('settings.sourceLevelsNote')}
+                  </p>
+                </>
+              )}
+
+              {section === 'about' && (
+                <div className="py-3">
+                  <div className="mb-1 flex items-center justify-between gap-4">
+                    <span className="text-[13px] font-medium text-text-primary">
+                      App Audio Router
+                    </span>
+                    {/* The version is a fact, not an achievement: set in the same
+                        monospaced muted type as every other number in the app. */}
+                    <span className="font-mono text-[10px] tabular-nums text-text-muted">
+                      v{__APP_VERSION__}
+                    </span>
+                  </div>
+                  <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                    {t('settings.aboutDesc')}
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** Theme and language, as the page's first section. */
+function AppearanceSection({
+  theme,
+  setTheme,
+  language,
+  setLanguage,
+}: {
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+  language: 'zh-CN' | 'en';
+  setLanguage: (language: 'zh-CN' | 'en') => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Row title={t('settings.theme')}>
+        <SegmentedControl
+          layoutId="settings-theme-pill"
+          ariaLabel={t('settings.theme')}
+          value={theme}
+          onChange={setTheme}
+          options={[
+            {
+              value: 'light',
+              label: (
+                <span className="flex items-center gap-1">
+                  {SunIcon}
+                  {t('settings.themeLight')}
+                </span>
+              ),
+              ariaLabel: t('settings.themeLight'),
+            },
+            {
+              value: 'dark',
+              label: (
+                <span className="flex items-center gap-1">
+                  {MoonIcon}
+                  {t('settings.themeDark')}
+                </span>
+              ),
+              ariaLabel: t('settings.themeDark'),
+            },
+          ]}
+        />
+      </Row>
+      <Row title={t('settings.language')}>
+        <SegmentedControl
+          layoutId="settings-language-pill"
+          ariaLabel={t('settings.language')}
+          value={language}
+          onChange={setLanguage}
+          options={[
+            { value: 'zh-CN', label: '中文' },
+            { value: 'en', label: 'EN' },
+          ]}
+        />
+      </Row>
+    </>
   );
 }

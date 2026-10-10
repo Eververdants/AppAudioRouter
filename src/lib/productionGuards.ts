@@ -10,7 +10,10 @@
 
 const EDITING_KEYS = new Set(['a', 'c', 'v', 'x', 'y', 'z']);
 
-/** Returns true when `target` is an editable control. */
+/** Returns true when `target` is an editable control, or sits inside one that
+ *  owns its own `Escape` (the custom `Select`: it closes its menu itself, and
+ *  spending the key on the page underneath would be the exact loss the settings
+ *  page's own comment describes). */
 export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   // `isContentEditable` is coerced: it is not implemented everywhere the app
@@ -20,7 +23,8 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     target.tagName === 'INPUT' ||
     target.tagName === 'TEXTAREA' ||
     target.tagName === 'SELECT' ||
-    Boolean(target.isContentEditable)
+    Boolean(target.isContentEditable) ||
+    target.closest('[data-owns-escape]') !== null
   );
 }
 

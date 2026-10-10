@@ -47,6 +47,14 @@ describe('isEditableTarget', () => {
     expect(isEditableTarget(div)).toBe(false);
   });
 
+  it('recognises a control that owns its own Escape', () => {
+    const own = document.createElement('div');
+    own.setAttribute('data-owns-escape', '');
+    const inner = document.createElement('button');
+    own.appendChild(inner);
+    expect(isEditableTarget(inner)).toBe(true);
+  });
+
   it('is false for ordinary elements, non-elements and nothing at all', () => {
     expect(isEditableTarget(document.createElement('div'))).toBe(false);
     expect(isEditableTarget(document.createTextNode('text'))).toBe(false);
