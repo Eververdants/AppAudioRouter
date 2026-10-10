@@ -341,7 +341,6 @@ describe('process and device selection', () => {
 
     // The old primary becomes a copy: nothing the user staged leaves the plan.
     expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
-    expect(lastLog()?.message).toContain('TV');
   });
 
   it('replaces the primary with a device from outside the plan, keeping the copies', () => {
@@ -358,18 +357,53 @@ describe('process and device selection', () => {
     expect(state().selectedDeviceIds).toEqual(['headphones', 'tv']);
   });
 
-  it('is a no-op when the picked device already holds the primary seat', () => {
+  it('is a no-op when the delay order already plays the picked device first', () => {
     installBackend();
     reset({
       devices: [SPEAKERS, TV],
       sessions: [MUSIC],
-      selectedDeviceIds: ['speakers', 'tv'],
+      // The plan names the speakers first, but the TV's delay is endless, so the
+      // apply's own order puts the speakers first anyway. Asking for the
+      // speakers is asking for what is already true.
+      selectedDeviceIds: ['tv', 'speakers'],
+      deviceDelays: { tv: 100, speakers: 0 },
       deviceSelectionPrefilled: false,
     });
 
     state().setPrimaryDevice('speakers');
 
+    expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
+  });
+
+  it('refuses a device the delay order could never seat first', () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV, HEADPHONES],
+      sessions: [MUSIC],
+      selectedDeviceIds: ['speakers', 'tv'],
+      deviceDelays: { headphones: 50, tv: 10 },
+      deviceSelectionPrefilled: false,
+    });
+
+    // Software delay can only hold sound back, so a device compensated later
+    // than everything it would lead cannot be the one Windows plays directly;
+    // the plan is left alone rather than reordered into an order the apply
+    // would not produce.
+    state().setPrimaryDevice('headphones');
     expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+
+    // ...and the same rule applies inside the plan.
+    state().setPrimaryDevice('tv');
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+  });
+
+  it('adds a first device when nothing is staged', () => {
+    installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC], selectedDeviceIds: [] });
+
+    state().setPrimaryDevice('tv');
+
+    expect(state().selectedDeviceIds).toEqual(['tv']);
   });
 
   it('keeps the shared targets when a process is added to the selection', () => {

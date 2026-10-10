@@ -135,15 +135,6 @@ export function primaryPanelHeight(): number {
   return panelHeight(panelBodyHeight(1));
 }
 
-/** The tallest the copies panel may be: what is left once the primary panel,
- *  the gap between them and both margins have taken their share. */
-function copiesPanelMax(height: number): number {
-  return Math.max(
-    panelHeight(panelBodyHeight(0)),
-    height - BOARD_MARGIN * 2 - primaryPanelHeight() - GROUP_GAP,
-  );
-}
-
 /**
  * The body height of a scrolling panel: whole rows plus the top half of the
  * next one.
@@ -187,16 +178,23 @@ export interface PanelColumn {
  * scrolls inside itself.
  */
 export function panelColumn(height: number, rows: number): PanelColumn {
-  const max = copiesPanelMax(height);
+  const primaryHeight = primaryPanelHeight();
+  // Everything the column may take: the board's height, less both margins, the
+  // primary panel and the gap between the two. Never negative, so a well too
+  // short to hold the column still keeps it inside itself instead of letting it
+  // run off the bottom edge — the board never scrolls, whatever height it is
+  // given.
+  const room = Math.max(0, height - BOARD_MARGIN * 2 - primaryHeight - GROUP_GAP);
   const wanted = panelHeight(panelBodyHeight(rows));
   // Content that fits takes its own height; one that does not stops with a row
   // cut in half, so the panel itself shows that there is more to scroll to.
   const copiesHeight =
-    wanted <= max
+    wanted <= room
       ? wanted
-      : PANEL_BORDER * 2 + GROUP_HEADER_H + peekBodyHeight(max - PANEL_BORDER * 2 - GROUP_HEADER_H);
-  const primaryHeight = primaryPanelHeight();
-  const top = Math.max(BOARD_MARGIN, Math.round((height - primaryHeight - GROUP_GAP - copiesHeight) / 2));
+      : PANEL_BORDER * 2 +
+        GROUP_HEADER_H +
+        peekBodyHeight(Math.max(0, room - PANEL_BORDER * 2 - GROUP_HEADER_H));
+  const top = Math.max(0, Math.round((height - primaryHeight - GROUP_GAP - copiesHeight) / 2));
   return {
     primaryY: top,
     primaryHeight,

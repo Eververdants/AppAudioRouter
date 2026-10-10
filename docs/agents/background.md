@@ -49,10 +49,12 @@
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
 - ⚠️ **本应用自己不出现在程序列表里**（2026-10-11）：`enumerate_sessions` 结尾走 `exclude_own_processes`——
   用一次 `CreateToolhelp32Snapshot` 走出**本进程树**（自己 + 所有后代），把它们从会话里剔除；再按 `current_exe()` 的**文件名**
-  兜第二道网（两条判据互补：快照拿不到时还有文件名，文件名读不出时还有树）。理由：WebView2 把界面（以及它发出的声音）
-  渲染在**子进程**里，只滤 `std::process::id()` 会漏掉真正挂着音频会话的那个子进程。
-  快照失败只 `warn!` 并退化成"只有自己这一个 pid"，**不能**退化成空集或报错。这条过滤在 `list_sessions`、
-  `align_source_levels` 等所有调用 `enumerate_sessions` 的地方一起生效——这是有意的：这些入口本就不该看到本应用。
+  兜第二道网。理由：WebView2 把界面（以及它发出的声音）渲染在**子进程**里，只滤 `std::process::id()` 会漏掉真正挂着音频会话的那个子进程。
+  ⚠️ **两道网不是等价的**：文件名那道只对**宿主进程**成立（WebView2 子进程叫 `msedgewebview2.exe`），
+  所以快照失败、进程树退化成"只有自己这一个 pid"时，子进程仍可能冒出来——`own_process_tree` 为此**必须 warn**，
+  一个不出声的半残过滤看起来和好的没有区别。退化的下限是"不崩、不空集"，不是"过滤仍然完整"。
+  这条过滤在 `list_sessions`、`reset_pinned_endpoints`、`release_stale_routes` 这三个调用 `enumerate_sessions` 的命令上一起生效——
+  有意的：这些入口本就不该看到本应用。（`align_source_levels` 不走它，它读的是 `levels` 与已路由的 exe 名。）
 
 ## 引擎的唤醒成本（2.2 起）
 

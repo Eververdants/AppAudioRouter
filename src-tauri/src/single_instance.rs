@@ -69,6 +69,10 @@ pub fn acquire(app: AppHandle) -> Option<SingleInstanceGuard> {
         Ok(handle) => handle,
         Err(e) => {
             log::warn!("could not create the single-instance mutex: {e}; running unguarded");
+            // The event goes with this return, so no second launch can ask this
+            // instance to show its window any more. That is the documented cost
+            // of running unguarded rather than refusing to start: the app works,
+            // it just cannot be summoned.
             return Some(SingleInstanceGuard { mutex: None });
         }
     };
@@ -76,8 +80,11 @@ pub fn acquire(app: AppHandle) -> Option<SingleInstanceGuard> {
     // A success carrying ERROR_ALREADY_EXISTS means the name was taken and this
     // handle is a duplicate of the winner's mutex, not a new object. GetLastError
     // stays untouched on the crate's Ok path, so checking it here is reliable.
+    // SAFETY: GetLastError only reads this thread's last-error slot.
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         // Balance the duplicate; the winner's mutex is the one that lives.
+        // SAFETY: `mutex` came from CreateMutexW and its ownership is handed to
+        // the owned handle exactly once.
         drop(unsafe { OwnedHandle::from_raw_handle(mutex.0) });
         if let Some(event) = &event {
             // SAFETY: `event` is a valid handle; signaling it is infallible for
@@ -90,6 +97,8 @@ pub fn acquire(app: AppHandle) -> Option<SingleInstanceGuard> {
     if let Some(event) = event {
         spawn_reveal_watcher(event, app);
     }
+    // SAFETY: the guard owns the mutex handle for the process lifetime; this is
+    // the one place its ownership is taken, and the earlier branch returned.
     Some(SingleInstanceGuard {
         mutex: Some(unsafe { OwnedHandle::from_raw_handle(mutex.0) }),
     })

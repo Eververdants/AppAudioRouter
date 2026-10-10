@@ -67,8 +67,10 @@ describe('board geometry', () => {
   it('keeps the column inside the board, whatever height the well reports', () => {
     // The board takes the well's own height, so no height and no route length
     // may push a panel off the board: that is what replaced the well's
-    // scrollbar.
-    for (const height of [320, 470, 600, 900]) {
+    // scrollbar. The small numbers are wells far shorter than any the window
+    // can produce — the column has to stay inside those too, not only the
+    // comfortable ones.
+    for (const height of [200, 240, 320, 470, 600, 900]) {
       for (const rows of [0, 1, 5, 40]) {
         const column = panelColumn(height, rows);
         expect(column.primaryY).toBeGreaterThanOrEqual(0);

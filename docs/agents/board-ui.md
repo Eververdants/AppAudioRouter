@@ -199,10 +199,12 @@
 
 布局是**一条分区导航 + 右侧内容**：左侧 190px 的 rail（返回、六个分区、版本号），一条竖细线，右边是当前分区的行。
 分区：外观 / 路由 / 后台运行 / 延迟补偿 / 程序电平 / 关于。选中分区由一根 `layoutId="settings-section-rule"` 的
-**左侧竖规**标记（不是胶囊）；内容区用 `AnimatePresence mode="wait"` 做一次纯透明度换页。
+**左侧竖规**标记（不是胶囊）；内容区用 `AnimatePresence mode="wait"` 做一次换页入场，曲线取 **`SPRING_GLIDE`**
+（有位移的视图切换，所以不是 `FADE`）。
 
 - ⚠️ **改版前的单列长滚动是错的**（外观、路由、延迟、关于全挤在同一条滚动里），别再合并回去。
 - **载体下拉是自研的 `ui/Select.tsx`，不许换回原生 `<select>`**：原生菜单不可样式化、不可动效。它是完整的 combobox
-  （Enter/Space/↓ 打开、方向键与 Home/End 移动、Enter 选中、Escape 关自己）。它带 `data-owns-escape`，
-  所以 `isEditableTarget` 会放行、设置页的 Escape 不会连带把整页关掉——**这两处必须一起改**。
+  （Enter/Space/↓ 打开、方向键与 Home/End 移动、Enter 选中、Escape 关自己）。它**只在菜单展开时**挂 `data-owns-escape`，
+  于是 `isEditableTarget` 放行、设置页的 Escape 不会连带把整页关掉；菜单收起后标记撤下，Escape 交还给页面——
+  **这两处必须一起改**（常挂标记会让"关闭态下按 Escape"什么都不发生）。
 - 正文里的数字/版本号仍用 `font-mono tabular-nums`；分区里的行仍是"左标题右控件 + 下划线"。没有卡片、没有阴影。

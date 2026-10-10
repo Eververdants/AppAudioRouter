@@ -204,35 +204,38 @@ export function NodeStage() {
   const column = panelColumn(height, copiesRows);
   const hubY = Math.round(boardCentre(height) - HUB_H / 2);
 
-  // Escape closes a picker; registered only while one is open, so a standing
-  // listener never swallows the search box's Escape (the same rule the
-  // briefing bubble follows).
+  // Escape closes a picker and a click outside the board closes it too; both
+  // listeners are registered only while one of the two pickers is open, so a
+  // standing listener never swallows the search box's Escape (the same rule the
+  // routed capsule follows). Both pickers are shut together: they are never
+  // open at once, and whichever key or click arrives belongs to the one on
+  // screen.
   useEffect(() => {
     if (!pickerOpen && !primaryPickerOpen) return;
+    const closePickers = () => {
+      setPickerOpen(false);
+      setPrimaryPickerOpen(false);
+    };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        setPickerOpen(false);
-        setPrimaryPickerOpen(false);
+        closePickers();
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      // The pickers live inside the board, so the outside-close only has to
+      // watch for clicks that land outside the whole board; clicks inside land
+      // on the pickers' own rows or the buttons that toggle them.
+      if (boardRef.current !== null && !boardRef.current.contains(event.target as Node)) {
+        closePickers();
       }
     };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [pickerOpen, primaryPickerOpen]);
-
-  useEffect(() => {
-    if (!pickerOpen && !primaryPickerOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (boardRef.current !== null && !boardRef.current.contains(event.target as Node)) {
-        setPickerOpen(false);
-        setPrimaryPickerOpen(false);
-      }
-    };
-    // The picker lives inside the board, so the outside-close only has to watch
-    // for clicks that land outside the whole board; clicks inside land on the
-    // picker's own rows or the title-row button that toggles it.
     window.addEventListener('pointerdown', onPointerDown, true);
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, [pickerOpen, primaryPickerOpen]);
 
   // Selecting a different programme resets the inspector to the card that is
@@ -754,10 +757,16 @@ export function NodeStage() {
                   {devices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
                   {devices.map((d) => {
                     const picked = d.id === primaryDeviceId;
-                    const others = drawn.filter((id) => id !== d.id);
+                    // The devices that would stay if this one took the seat:
+                    // the plan minus the picked device when it is on the plan,
+                    // otherwise minus the primary it would replace — exactly the
+                    // membership `setPrimaryDevice` lands on.
+                    const kept = drawn.includes(d.id)
+                      ? drawn.filter((id) => id !== d.id)
+                      : drawn.slice(1);
                     const minOther =
-                      others.length > 0
-                        ? Math.min(...others.map((id) => deviceDelays[id] ?? 0))
+                      kept.length > 0
+                        ? Math.min(...kept.map((id) => deviceDelays[id] ?? 0))
                         : Number.POSITIVE_INFINITY;
                     const blocked = !picked && (deviceDelays[d.id] ?? 0) > minOther;
                     return (

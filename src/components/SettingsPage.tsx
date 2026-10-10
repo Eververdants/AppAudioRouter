@@ -431,7 +431,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
-              transition={FADE}
+              transition={SPRING_GLIDE}
               transformTemplate={MAIN_THREAD_TRANSFORM}
             >
               {section === 'appearance' && (

@@ -93,26 +93,36 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
 /// The app's own audio, when there is any, is rendered by a **WebView2 child
 /// process**, not by the process that owns the window — so filtering just
 /// `std::process::id()` would leave the child in the list. Everything in this
-/// process's tree goes, and the executable name is checked as a second fence:
-/// a process the snapshot could not enumerate (a race, a refused snapshot) is
-/// still caught by its own file name, and vice versa.
+/// process's tree goes.
+///
+/// The executable name is a second fence over the **host process only**: it
+/// catches an own-exe session the snapshot missed, but it cannot stand in for a
+/// WebView2 child (that file is `msedgewebview2.exe`). So when the snapshot
+/// fails, the tree degrades to this process alone and a child could still show
+/// up — `own_process_tree` warns when that happens, because a silent partial
+/// filter would look like a working one.
 fn exclude_own_processes(sessions: &mut Vec<AudioSession>) {
     let tree = own_process_tree();
     let own_exe = std::env::current_exe()
         .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()));
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()));
     sessions.retain(|session| {
         if tree.contains(&session.pid) {
             debug!("leaving this app's own process {} out of the list", session.pid);
             return false;
         }
-        match (&own_exe, session.exe_name.is_empty()) {
-            (Some(own), false) if session.exe_name.to_lowercase() == *own => {
-                debug!("leaving this app's own executable {} out of the list", session.exe_name);
-                false
+        // `read_session` never leaves the name empty — it falls back to
+        // "PID <n>" — so this is a plain case-insensitive name match.
+        if let Some(own) = own_exe.as_deref() {
+            if session.exe_name.eq_ignore_ascii_case(own) {
+                debug!(
+                    "leaving this app's own executable {} out of the list",
+                    session.exe_name
+                );
+                return false;
             }
-            _ => true,
         }
+        true
     });
 }
 
@@ -120,7 +130,8 @@ fn exclude_own_processes(sessions: &mut Vec<AudioSession>) {
 ///
 /// A failed snapshot degrades to "just this process" rather than to an empty
 /// set: the app's own pid is the one thing that is always knowable, and the
-/// exe-name fence in the caller covers the rest.
+/// caller's exe-name fence covers the host process too. The warning is the part
+/// that matters — the degradation is partial, and nothing else would say so.
 fn own_process_tree() -> std::collections::HashSet<u32> {
     use std::collections::{HashMap, HashSet};
 

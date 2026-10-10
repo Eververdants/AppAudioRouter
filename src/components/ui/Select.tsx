@@ -147,7 +147,14 @@ export function Select({
   const activeId = open ? `${listId}-option-${activeIndex}` : undefined;
 
   return (
-    <div ref={rootRef} data-owns-escape className="relative min-w-0 flex-1">
+    <div
+      ref={rootRef}
+      // The marker is mounted only while the menu is up: a closed dropdown does
+      // not own the Escape key, and leaving it on would leave the settings page
+      // unable to be closed by the keyboard for as long as focus sat here.
+      {...(open ? { 'data-owns-escape': '' } : {})}
+      className="relative min-w-0 flex-1"
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -161,7 +168,7 @@ export function Select({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onTriggerKeyDown}
-        className={`flex h-8 w-full min-w-0 items-center gap-2 rounded-ctl border bg-surface px-2.5 text-left text-[12px] outline-none transition-colors focus-visible:border-accent ${
+        className={`flex h-8 w-full min-w-0 items-center gap-2 rounded-ctl border bg-surface px-2.5 text-left text-[12px] outline-none transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.99] focus-visible:border-accent ${
           open ? 'border-accent/60' : 'border-line-strong hover:border-line-strong hover:bg-surface-hover'
         } ${disabled ? 'cursor-not-allowed opacity-45' : ''}`}
       >
@@ -176,6 +183,7 @@ export function Select({
           aria-hidden="true"
           animate={{ rotate: open ? 180 : 0 }}
           transition={SPRING_TAP}
+          transformTemplate={MAIN_THREAD_TRANSFORM}
           className="flex-none text-text-muted"
         >
           <svg
@@ -205,7 +213,7 @@ export function Select({
             exit={{ opacity: 0, y: -3, scale: 0.99 }}
             transition={SPRING_GLIDE}
             transformTemplate={MAIN_THREAD_TRANSFORM}
-            className="cc absolute left-0 right-0 top-full z-30 mt-1 max-h-[220px] overflow-y-auto rounded-ctl border border-line-strong bg-surface p-1"
+            className="cc absolute left-0 right-0 top-full z-30 mt-1 max-h-[220px] overflow-y-auto rounded-card border border-line-strong bg-surface p-1"
           >
             {options.length === 0 && (
               <div className="px-2.5 py-1.5 text-[11px] text-text-muted">{placeholder ?? ''}</div>

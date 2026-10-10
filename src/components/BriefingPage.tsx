@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
@@ -201,7 +201,7 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={FADE}
+          transition={SPRING_GLIDE}
           transformTemplate={MAIN_THREAD_TRANSFORM}
           className="flex items-center gap-3 rounded-card border border-line bg-surface-sunken px-4 py-3"
         >
@@ -254,15 +254,17 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
           </motion.div>
         ) : (
           <div className="flex flex-col gap-2.5">
-            {cards.map((card) => (
-              <motion.div
-                key={card.pid}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={SPRING_GLIDE}
-                transformTemplate={MAIN_THREAD_TRANSFORM}
-                className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
-              >
+            <AnimatePresence initial={false}>
+              {cards.map((card) => (
+                <motion.div
+                  key={card.pid}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={SPRING_GLIDE}
+                  transformTemplate={MAIN_THREAD_TRANSFORM}
+                  className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
+                >
                 <div className="flex w-[168px] flex-none items-center gap-2">
                   <Ring tone="main" size={14} live={card.sounding && liveness} />
                   <ProcessIcon exeName={card.exeName} name={card.name} size={18} />
@@ -294,8 +296,9 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
                     {t('briefingPage.quiet')}
                   </span>
                 )}
-              </motion.div>
-            ))}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
 

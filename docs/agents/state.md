@@ -18,8 +18,9 @@
   - **「＋ 添加去向」改走 `appendDeviceTarget`（2026-10-11）**：它**只追加到计划尾部**（= 副本），**永不替换**预填的那台。
     `replacesGuess` 的语义只留给**点去向行名字**这一种手势，选择器那条路不再沾它。
   - **换主设备走 `setPrimaryDevice(deviceId)`（2026-10-11）**：已在计划里 → 提到首位（两者角色对调，成员不变）；
-    计划外 → 它接任首位、副本原样留下；已经是首位 → 空操作（不 churn 数组）。写一行 `deviceSwitched`/`deviceSwitchedProcess` 日志。
-    选择器里对"延迟补偿严格大于其余设备"的项**禁用**（软件延迟只能往后加，坐不上主位），与 `promoteDevice` 同一条硬约束。
+    计划外 → 它接任首位、原主设备**随主位一起离开**、副本原样留下；已经是**延迟序**首位 → 空操作；
+    延迟补偿严格大于其余设备的请求**被拒**（软件延迟只能往后加，坐不上主位），计划原地不动。
+    **它是纯计划编辑，不写日志**——与 `promoteDevice` 一致，反馈是看板上角色词的当场对调。
 - 系统默认渲染设备由 `get_default_device` 取得并存入 `defaultDeviceId`；进程无可记忆路由时以它作为默认关联设备（选中进程即自动选中），进程列表每行显示该进程当前播放到的设备
 - 路由记忆配置由 Rust 端持久化到 `app_data_dir/route-memory.json`（`config.rs`，exe -> 设备列表，兼容旧版单设备格式）
 - **记忆的路由会自动恢复**（`restoreRememberedRoutes`）：`autoRemember` 开关存 localStorage（`aar-auto-remember`），
