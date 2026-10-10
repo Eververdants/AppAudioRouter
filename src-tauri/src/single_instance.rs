@@ -15,7 +15,9 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use tauri::{AppHandle, Manager};
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{
+    GetLastError, SetLastError, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HANDLE, WAIT_OBJECT_0,
+};
 use windows::Win32::System::Threading::{
     CreateEventW, CreateMutexW, SetEvent, WaitForSingleObject, INFINITE,
 };
@@ -53,6 +55,13 @@ pub fn acquire(app: AppHandle) -> Option<SingleInstanceGuard> {
             None
         }
     };
+
+    // The check below reads GetLastError, and the crate's `Ok` path does not clear
+    // it: a stale ERROR_ALREADY_EXISTS left by anything earlier on this thread
+    // would make the *first* instance believe another is already running and
+    // quit at once. Reset it so the flag below is only ever this call's answer.
+    // SAFETY: SetLastError only writes this thread's last-error slot.
+    unsafe { SetLastError(ERROR_SUCCESS) };
 
     // SAFETY: no security attributes, not initially owned, and the name is a
     // static wide literal.
@@ -112,7 +121,12 @@ fn spawn_reveal_watcher(event: OwnedHandle, app: AppHandle) {
             }
             log::info!("second launch detected; showing the window");
             let Some(window) = app.get_webview_window("main") else {
-                return; // the window is gone, so there is nothing to reveal
+                // The window is not there *yet* — a second launch racing this
+                // one's startup is exactly the case this event exists for — so
+                // keep waiting rather than retiring the watcher. An auto-reset
+                // event only wakes this loop when signalled, so this is not a
+                // spin even if the window never appears.
+                continue;
             };
             crate::tray::reveal(&window);
         });
