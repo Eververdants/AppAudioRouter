@@ -6,12 +6,17 @@
 
 use log::{debug, warn};
 use windows::core::Interface;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Media::Audio::{
     eRender, AudioSessionStateActive, IAudioSessionControl, IAudioSessionControl2,
     IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice, IMMDeviceCollection,
     IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+    TH32CS_SNAPPROCESS,
+};
 
 use crate::audio::process_meta;
 use crate::audio::AudioError;
@@ -71,12 +76,97 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
 
         fill_display_names(&mut sessions);
 
+        // This app is not a program the user routes: it is the thing doing the
+        // routing. Leave it out of its own list — see `exclude_own_processes`.
+        exclude_own_processes(&mut sessions);
+
         Ok(sessions)
     })();
 
     crate::audio::uninit_com(com_owned);
 
     result
+}
+
+/// Drop every session that belongs to this app itself.
+///
+/// The app's own audio, when there is any, is rendered by a **WebView2 child
+/// process**, not by the process that owns the window — so filtering just
+/// `std::process::id()` would leave the child in the list. Everything in this
+/// process's tree goes, and the executable name is checked as a second fence:
+/// a process the snapshot could not enumerate (a race, a refused snapshot) is
+/// still caught by its own file name, and vice versa.
+fn exclude_own_processes(sessions: &mut Vec<AudioSession>) {
+    let tree = own_process_tree();
+    let own_exe = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()));
+    sessions.retain(|session| {
+        if tree.contains(&session.pid) {
+            debug!("leaving this app's own process {} out of the list", session.pid);
+            return false;
+        }
+        match (&own_exe, session.exe_name.is_empty()) {
+            (Some(own), false) if session.exe_name.to_lowercase() == *own => {
+                debug!("leaving this app's own executable {} out of the list", session.exe_name);
+                false
+            }
+            _ => true,
+        }
+    });
+}
+
+/// This process's own pid plus every descendant, from one process snapshot.
+///
+/// A failed snapshot degrades to "just this process" rather than to an empty
+/// set: the app's own pid is the one thing that is always knowable, and the
+/// exe-name fence in the caller covers the rest.
+fn own_process_tree() -> std::collections::HashSet<u32> {
+    use std::collections::{HashMap, HashSet};
+
+    let root = std::process::id();
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    // SAFETY: TH32CS_SNAPPROCESS is the documented flag for a process snapshot;
+    // the entry is sized before the walk, and the snapshot handle is closed
+    // below whatever the walk returns.
+    unsafe {
+        let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(handle) => handle,
+            Err(e) => {
+                warn!("could not snapshot the process list: {e}");
+                return HashSet::from([root]);
+            }
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                children
+                    .entry(entry.th32ParentProcessID)
+                    .or_default()
+                    .push(entry.th32ProcessID);
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        // SAFETY: `snapshot` came from CreateToolhelp32Snapshot and is closed once.
+        let _ = CloseHandle(snapshot);
+    }
+
+    let mut tree: HashSet<u32> = HashSet::new();
+    let mut stack = vec![root];
+    while let Some(pid) = stack.pop() {
+        if !tree.insert(pid) {
+            continue;
+        }
+        if let Some(kids) = children.get(&pid) {
+            stack.extend(kids.iter().copied());
+        }
+    }
+    tree
 }
 
 /// Collect the sessions of one render device into `sessions`.
@@ -224,7 +314,6 @@ fn fill_display_names(sessions: &mut [AudioSession]) {
 /// Shared with `routing.rs`, which needs the name to tell a system-critical
 /// process from a routable one.
 pub(crate) fn get_process_exe_name(pid: u32) -> Option<String> {
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::System::ProcessStatus::GetProcessImageFileNameA;
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
