@@ -44,11 +44,10 @@ import {
 import type { AudioSession } from '@/lib/types';
 import { feedLiveness, useRouterStore } from '@/stores/routerStore';
 
-/**
- * Which card the bottom strip is tuning right now. The hub shows the program
- * itself; a destination row shows the levers that exist for its role.
- */
-type InspectorKey = 'hub' | `dev:${string}`;
+/** Which card the bottom strip is tuning right now: a destination row. The
+ *  strip only exists while one is picked — there is no standing bar under the
+ *  board. */
+type InspectorKey = `dev:${string}`;
 
 /**
  * A wire drawn on the board, in the shape the SVG layer needs.
@@ -75,10 +74,6 @@ const ROLE_TEXT_CLASS = {
   mirror: 'text-type-mirror',
   feed: 'text-type-feed',
 } as const;
-
-/** A stable empty array, not a fresh `[]`: a value that returns a new reference
- *  on every render churns everything below it. */
-const NO_PIDS: number[] = [];
 
 /**
  * The node board: the one place a route is drawn.
@@ -250,6 +245,19 @@ export function NodeStage() {
     setHoverKey(null);
     setCopyScroll(0);
   }, [pid]);
+
+  // The strip names a device and shows the levers that belong to it. If that
+  // device leaves the plan — its row removed, or the plan come down to a single
+  // device, which has no engine and therefore no levers — the strip has nothing
+  // left to describe, so it closes with the row it was opened from. Read from a
+  // joined signature rather than the array itself: `drawn` is a fresh array on
+  // every render, and depending on it here would re-run this on every pass.
+  const drawnSignature = drawn.join('|');
+  useEffect(() => {
+    if (inspectorKey === null) return;
+    const ids = drawnSignature === '' ? [] : drawnSignature.split('|');
+    if (ids.length <= 1 || !ids.includes(inspectorKey.slice(4))) setInspectorKey(null);
+  }, [drawnSignature, inspectorKey]);
 
   const wires: WireSpec[] = [];
   // Hub → the primary row, then → every row of the copies panel. The hub's own
@@ -789,16 +797,31 @@ export function NodeStage() {
         </div>
       </div>
 
-      {/* The strip: what a clicked card tunes. Nothing here is drawn for
-          decoration — when nothing is selected it says how to get here. */}
-      <Inspector
-        inspectorKey={inspectorKey}
-        onClear={() => setInspectorKey(null)}
-        drawn={drawn}
-        hubName={name}
-        hubSounding={sounding}
-        deviceLatencyMs={deviceLatencyMs}
-      />
+      {/* The strip: what a clicked card tunes. It exists only while something
+          is being tuned — there is no standing status bar under the board any
+          more, because a bar that is always there is a bar nobody reads. It
+          makes room for itself as it arrives, and gives the room back as it
+          leaves. */}
+      <AnimatePresence initial={false}>
+        {inspectorKey !== null && (
+          <motion.div
+            key="inspector"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={SPRING_GLIDE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+            className="flex-none overflow-hidden"
+          >
+            <Inspector
+              inspectorKey={inspectorKey}
+              onClear={() => setInspectorKey(null)}
+              drawn={drawn}
+              deviceLatencyMs={deviceLatencyMs}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1226,21 +1249,18 @@ function StripRow({
   );
 }
 
-/** The bottom strip of the board: the levers that exist for the selected card,
- *  and the honest sentence about the ones that do not. */
+/** The bottom strip of the board: the levers that exist for the clicked row.
+ *  It is only mounted while a row is picked — the caller decides that — so
+ *  everything here may assume the row it names is on the plan. */
 function Inspector({
   inspectorKey,
   onClear,
   drawn,
-  hubName,
-  hubSounding,
   deviceLatencyMs,
 }: {
-  inspectorKey: InspectorKey | null;
+  inspectorKey: InspectorKey;
   onClear: () => void;
   drawn: string[];
-  hubName: string | undefined;
-  hubSounding: boolean;
   deviceLatencyMs: Record<string, number>;
 }) {
   const { t } = useTranslation();
@@ -1252,150 +1272,90 @@ function Inspector({
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const deviceVolumes = useRouterStore((s) => s.deviceVolumes);
   const primaryVolumes = useRouterStore((s) => s.primaryVolumes);
-  const feeds = useRouterStore((s) => s.feeds);
-  // A stable empty array, not a fresh `[]`: a value that returns a new
-  // reference on every render churns the strip below it. Feeds are keyed by the
-  // process that holds them — one per program — so a sibling source resolves to
-  // it before the lookup.
-  const feedTargets = useMemo(() => {
-    const sourcePid = selectedPids[0];
-    if (sourcePid === undefined) return NO_PIDS;
-    const owner = programEntryOf(sessions, feeds, sourcePid);
-    return owner === undefined ? NO_PIDS : (feeds[owner] ?? NO_PIDS);
-  }, [sessions, feeds, selectedPids]);
   const setPrimaryVolume = useRouterStore((s) => s.setPrimaryVolume);
   const setDeviceVolume = useRouterStore((s) => s.setDeviceVolume);
   const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);
 
-  const session = sessions.find((s) => s.pid === selectedPids[0]);
-  const exeName = session?.exe_name;
+  const exeName = sessions.find((s) => s.pid === selectedPids[0])?.exe_name;
+  const deviceId = inspectorKey.slice(4);
+  const device = devices.find((d) => d.id === deviceId);
+  // The strip only exists while the plan has copies (`drawn.length > 1`, the
+  // caller's guard), so a device at index 0 is the primary and every other one
+  // is a copy. A device whose delay is not the group's smallest is still a
+  // mirror; the role words below follow the plan's own order.
+  const isPrimary = drawn.indexOf(deviceId) === 0;
 
   let body: React.ReactNode;
-  // A device panel only exists while a route has copies: a single-device route
-  // is played by the system directly, and neither a delay nor a share has
-  // anywhere to act. A key left over from a longer plan falls back to the
-  // programme's own summary rather than describing levers that just went away.
-  const devicePanelOpen =
-    inspectorKey !== null &&
-    inspectorKey.startsWith('dev:') &&
-    drawn.length > 1 &&
-    // ...and the key still names a device that is in the route. Without this
-    // half of the guard, removing the copy being inspected leaves the strip
-    // open on it: `indexOf` answers -1, so it is read as a mirror and keeps
-    // offering delay and share for a device the route no longer has — tuning a
-    // lever that is attached to nothing.
-    drawn.includes(inspectorKey.slice(4));
-  if (
-    inspectorKey === null ||
-    inspectorKey === 'hub' ||
-    session === undefined ||
-    !devicePanelOpen
-  ) {
-    // Nothing picked, or the programme itself: the strip is the programme's own
-    // summary — where it plays, how many devices, how many feeds. The board's
-    // hub card carries the name; this is the sentence under it.
-    body =
-      session !== undefined ? (
-        <>
-          <div className="who flex items-center gap-2.5">
-            <span className="nm text-[12.5px] font-bold">{hubName}</span>
-            <span className="text-[10px] text-text-muted">
-              {hubSounding ? t('stage.sounding') : t('stage.quiet')}
-            </span>
-          </div>
-          <span className="text-[11.5px] text-text-muted">
-            {drawn.length === 0
-              ? t('stage.inspectorHubNoRoute')
-              : drawn.length === 1
-                ? t('stage.inspectorHubOne', {
-                    device: devices.find((d) => d.id === drawn[0])?.name ?? '',
-                  })
-                : t('stage.inspectorHubMulti', {
-                    device: devices.find((d) => d.id === drawn[0])?.name ?? '',
-                    m: drawn.length - 1,
-                  })}
-            {feedTargets.length > 0 &&
-              ` · ${t('stage.inspectorHubFeeds', { n: feedTargets.length })}`}
+  if (isPrimary) {
+    const volume = primaryVolumes[exeName ?? ''] ?? 100;
+    body = (
+      <>
+        <div className="who flex items-center gap-2.5">
+          <Ring tone="main" size={14} />
+          <span>
+            <span className="nm block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
+            <span className="text-[9.5px] text-text-muted">{t('stage.main')}</span>
           </span>
-        </>
-      ) : (
-        <span className="text-[11.5px] text-text-muted">{t('stage.inspectorHint')}</span>
-      );
+        </div>
+        <StripRow
+          label={t('stage.stripPrimaryVolume')}
+          title={t('primaryVolume.hint')}
+          value={`${volume}%`}
+          onDown={() => void setPrimaryVolume(exeName ?? '', Math.max(5, volume - 5))}
+          onUp={() => void setPrimaryVolume(exeName ?? '', Math.min(100, volume + 5))}
+          canDown={volume > 5}
+          canUp={volume < 100}
+          downLabel={t('primaryVolume.stepDown', { step: '5%' })}
+          upLabel={t('primaryVolume.stepUp', { step: '5%' })}
+        />
+        <span className="text-[10.5px] text-text-muted">{t('stage.stripPrimaryNote')}</span>
+      </>
+    );
   } else {
-    const deviceId = inspectorKey.slice(4);
-    const device = devices.find((d) => d.id === deviceId);
-    const role = drawn.indexOf(deviceId) === 0 ? 'primary' : 'mirror';
-    if (role === 'primary') {
-      const volume = primaryVolumes[exeName ?? ''] ?? 100;
-      body = (
-        <>
-          <div className="who flex items-center gap-2.5">
-            <Ring tone="main" size={14} />
-            <span>
-              <span className="nm block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
-              <span className="text-[9.5px] text-text-muted">{t('stage.main')}</span>
-            </span>
-          </div>
-          <StripRow
-            label={t('stage.stripPrimaryVolume')}
-            title={t('primaryVolume.hint')}
-            value={`${volume}%`}
-            onDown={() => void setPrimaryVolume(exeName ?? '', Math.max(5, volume - 5))}
-            onUp={() => void setPrimaryVolume(exeName ?? '', Math.min(100, volume + 5))}
-            canDown={volume > 5}
-            canUp={volume < 100}
-            downLabel={t('primaryVolume.stepDown', { step: '5%' })}
-            upLabel={t('primaryVolume.stepUp', { step: '5%' })}
-          />
-          <span className="text-[10.5px] text-text-muted">{t('stage.stripPrimaryNote')}</span>
-        </>
-      );
-    } else {
-      const delay = deviceDelays[deviceId] ?? 0;
-      const share = deviceVolumes[deviceId] ?? 100;
-      const latency = deviceLatencyMs[deviceId];
-      body = (
-        <>
-          <div className="who flex items-center gap-2.5">
-            <Ring tone="copy" size={14} />
-            <span>
-              <span className="nm block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
-              <span className="text-[9.5px] text-text-muted">{t('stage.copy')}</span>
-            </span>
-          </div>
-          <StripRow
-            label={t('stage.stripDelay')}
-            title={
-              latency !== undefined
-                ? t('deviceLatency.reading', { ms: latency })
-                : t('deviceDelay.valueLabel', { device: device?.name ?? deviceId })
-            }
-            value={`${formatDelaySigned(delay)} ms`}
-            onDown={() =>
-              void setDeviceDelayValue(deviceId, clampDelay(delay - delayStepMs, delayRangeMs))
-            }
-            onUp={() =>
-              void setDeviceDelayValue(deviceId, clampDelay(delay + delayStepMs, delayRangeMs))
-            }
-            canDown={delay > -delayRangeMs}
-            canUp={delay < delayRangeMs}
-            downLabel={t('deviceDelay.stepDown', { step: formatStep(delayStepMs) })}
-            upLabel={t('deviceDelay.stepUp', { step: formatStep(delayStepMs) })}
-          />
-          <StripRow
-            label={t('stage.stripShare')}
-            title={t('deviceVolume.valueLabel', { device: device?.name ?? deviceId })}
-            value={`${share}%`}
-            onDown={() => void setDeviceVolume(deviceId, Math.max(0, share - 5))}
-            onUp={() => void setDeviceVolume(deviceId, Math.min(100, share + 5))}
-            canDown={share > 0}
-            canUp={share < 100}
-            downLabel={t('deviceVolume.stepDown', { step: '5%' })}
-            upLabel={t('deviceVolume.stepUp', { step: '5%' })}
-          />
-        </>
-      );
-    }
+    const delay = deviceDelays[deviceId] ?? 0;
+    const share = deviceVolumes[deviceId] ?? 100;
+    const latency = deviceLatencyMs[deviceId];
+    body = (
+      <>
+        <div className="who flex items-center gap-2.5">
+          <Ring tone="copy" size={14} />
+          <span>
+            <span className="nm block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
+            <span className="text-[9.5px] text-text-muted">{t('stage.copy')}</span>
+          </span>
+        </div>
+        <StripRow
+          label={t('stage.stripDelay')}
+          title={
+            latency !== undefined
+              ? t('deviceLatency.reading', { ms: latency })
+              : t('deviceDelay.valueLabel', { device: device?.name ?? deviceId })
+          }
+          value={`${formatDelaySigned(delay)} ms`}
+          onDown={() =>
+            void setDeviceDelayValue(deviceId, clampDelay(delay - delayStepMs, delayRangeMs))
+          }
+          onUp={() =>
+            void setDeviceDelayValue(deviceId, clampDelay(delay + delayStepMs, delayRangeMs))
+          }
+          canDown={delay > -delayRangeMs}
+          canUp={delay < delayRangeMs}
+          downLabel={t('deviceDelay.stepDown', { step: formatStep(delayStepMs) })}
+          upLabel={t('deviceDelay.stepUp', { step: formatStep(delayStepMs) })}
+        />
+        <StripRow
+          label={t('stage.stripShare')}
+          title={t('deviceVolume.valueLabel', { device: device?.name ?? deviceId })}
+          value={`${share}%`}
+          onDown={() => void setDeviceVolume(deviceId, Math.max(0, share - 5))}
+          onUp={() => void setDeviceVolume(deviceId, Math.min(100, share + 5))}
+          canDown={share > 0}
+          canUp={share < 100}
+          downLabel={t('deviceVolume.stepDown', { step: '5%' })}
+          upLabel={t('deviceVolume.stepUp', { step: '5%' })}
+        />
+      </>
+    );
   }
 
   return (
@@ -1403,20 +1363,19 @@ function Inspector({
       data-tuner-strip
       className="flex flex-none items-center gap-4 overflow-x-auto border-t border-line px-4 py-2.5"
     >
-      {inspectorKey !== null && (
-        <button
-          type="button"
-          onClick={onClear}
-          className="text-[10.5px] text-text-muted hover:text-text-primary"
-          title={t('stage.inspectClear')}
-        >
-          ✕
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onClear}
+        className="pressable flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
+        title={t('stage.inspectClear')}
+        aria-label={t('stage.inspectClear')}
+      >
+        ✕
+      </button>
       {body}
       {/* A primary delay reading would describe a stream that does not exist:
           the system plays this device itself. The strip says so in words. */}
-      {devicePanelOpen && drawn[0] === inspectorKey.slice(4) && (
+      {isPrimary && (
         <span className="text-[10.5px] text-text-muted">{t('stage.stripPrimaryLatency')}</span>
       )}
     </div>
