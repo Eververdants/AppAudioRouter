@@ -65,9 +65,12 @@ export function StartupNoticeDialog() {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={SPRING_GLIDE}
         transformTemplate={MAIN_THREAD_TRANSFORM}
-        className="bg-surface border border-line-strong w-full max-w-md rounded-panel p-5"
+        className="w-full max-w-md rounded-panel border border-line-strong bg-surface p-5"
       >
-        <h2 id="startup-notice-title" className="text-[15px] font-semibold tracking-tight text-text-primary">
+        <h2
+          id="startup-notice-title"
+          className="text-[15px] font-semibold tracking-tight text-text-primary"
+        >
           {t('startup.upgradeTitle')}
         </h2>
         <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
@@ -80,7 +83,7 @@ export function StartupNoticeDialog() {
 
         {result !== null && (
           <p
-            className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] leading-relaxed tabular-nums ${
+            className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] tabular-nums leading-relaxed ${
               result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
             }`}
           >

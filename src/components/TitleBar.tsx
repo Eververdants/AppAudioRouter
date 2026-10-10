@@ -150,7 +150,9 @@ export function TitleBar({
         {/* The version is reference information, so it reads as one: muted,
             monospaced, and not wearing the accent reserved for what can be
             acted on. */}
-        <span className="font-mono text-[10px] tabular-nums text-text-muted">v{__APP_VERSION__}</span>
+        <span className="font-mono text-[10px] tabular-nums text-text-muted">
+          v{__APP_VERSION__}
+        </span>
       </div>
 
       <div className="flex items-center">

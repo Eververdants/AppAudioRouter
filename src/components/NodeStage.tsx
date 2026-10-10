@@ -67,8 +67,7 @@ interface Placement {
 /** Card chrome shared by hub, targets, feeders and the ghost: the continuous-
  *  curvature corner, the plane, and the strong hairline that separates a card
  *  from the sunken well — flat blocks with nothing cast and nothing lifted. */
-const CARD_CLASS =
-  'cc absolute rounded-panel bg-surface border border-line-strong';
+const CARD_CLASS = 'cc absolute rounded-panel bg-surface border border-line-strong';
 /** The role word colour, by role. Literal classes: Tailwind scans source text. */
 const ROLE_TEXT_CLASS = {
   primary: 'text-type-primary',
@@ -267,9 +266,7 @@ export function NodeStage() {
   });
 
   const lit = (key: string): boolean =>
-    hoverKey === 'hub' && !key.startsWith('feeder:')
-      ? true
-      : hoverKey === key;
+    hoverKey === 'hub' && !key.startsWith('feeder:') ? true : hoverKey === key;
 
   const primaryDelay = drawn.length > 0 ? (deviceDelays[drawn[0] ?? ''] ?? 0) : 0;
 
@@ -289,9 +286,7 @@ export function NodeStage() {
   // The hub's accessible name lists every device the plan reaches, joined the
   // way the disc stage always joined them: a screen reader hears the whole
   // answer, not just the primary.
-  const targets = drawn
-    .map((id) => devices.find((d) => d.id === id)?.name ?? id)
-    .join(' + ');
+  const targets = drawn.map((id) => devices.find((d) => d.id === id)?.name ?? id).join(' + ');
   const applyAria =
     selectedPids.length > 1
       ? t('stage.applyAriaMany', { n: selectedPids.length, device: targets })
@@ -305,7 +300,7 @@ export function NodeStage() {
       {/* The well: the plane the board sits on. Flat, sunken, hairlined from
           the rail; the cards sit on it as solid blocks, separated by the
           strength of their own borders — nothing casts anything. */}
-      <div className="bg-surface-sunken min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto bg-surface-sunken">
         <div
           ref={boardRef}
           className="relative mx-auto"
@@ -359,7 +354,7 @@ export function NodeStage() {
                 // brightens the line: gating the flow on it made the animation
                 // unreachable in the steady state it describes, because a wire
                 // you are not hovering over was a still line even while playing.
-                className={`nwire${wire.live ? ' stage-flow' : ''}${lit(wire.key) ? ' lit' : ''}`}
+                className={`nwire${wire.live ? 'stage-flow' : ''}${lit(wire.key) ? 'lit' : ''}`}
               />
             ))}
           </svg>
@@ -382,7 +377,7 @@ export function NodeStage() {
                 onClick={() => selectProcess(feeder.pid)}
                 aria-label={t('stage.feederAria', { process: feederName, target: name ?? '' })}
                 title={t('stage.feederTitle', { target: name ?? '' })}
-                className={`${CARD_CLASS} hover:border-line-strong focus-visible:border-accent focus-visible:outline-none flex flex-col items-start justify-center gap-1 px-3 text-left`}
+                className={`${CARD_CLASS} flex flex-col items-start justify-center gap-1 px-3 text-left hover:border-line-strong focus-visible:border-accent focus-visible:outline-none`}
                 style={{
                   left: FEEDER_X,
                   top: feederY(index, feeders.length, height),
@@ -392,7 +387,11 @@ export function NodeStage() {
               >
                 <span className="pin pin-out" aria-hidden="true" />
                 <span className="flex w-full items-center gap-2">
-                  <Ring tone="idle" size={12} live={soundingPids[feeder.pid] === true && liveness} />
+                  <Ring
+                    tone="idle"
+                    size={12}
+                    live={soundingPids[feeder.pid] === true && liveness}
+                  />
                   <ProcessIcon exeName={feeder.exe_name} name={feederName} size={16} />
                   <span className="truncate text-[11.5px] font-semibold text-text-primary">
                     {feederName}
@@ -447,11 +446,11 @@ export function NodeStage() {
                 canApply
                   ? 'cursor-pointer border-accent/60 hover:border-accent focus-visible:border-accent'
                   : 'cursor-default'
-              } focus-visible:outline-none flex flex-col items-center justify-center gap-1 px-4 text-center`}
+              } flex flex-col items-center justify-center gap-1 px-4 text-center focus-visible:outline-none`}
               style={{ left: HUB_X, top: hubY, width: HUB_W, height: HUB_H }}
             >
               {canApply && (
-                <span className="bg-accent text-accent-ink absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-semibold">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink">
                   {t('stage.applyHint')}
                 </span>
               )}
@@ -461,11 +460,7 @@ export function NodeStage() {
                   size={16}
                   live={sounding && liveness}
                 />
-                <ProcessIcon
-                  exeName={session.exe_name}
-                  name={name ?? session.exe_name}
-                  size={18}
-                />
+                <ProcessIcon exeName={session.exe_name} name={name ?? session.exe_name} size={18} />
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={name ?? ''}
@@ -481,10 +476,15 @@ export function NodeStage() {
                 </AnimatePresence>
               </span>
               <span className="text-[9.5px] text-text-muted">
-                {applying && <Spinner size={10} className="mr-1 inline-block align-[-1px] text-accent" />}
+                {applying && (
+                  <Spinner size={10} className="mr-1 inline-block align-[-1px] text-accent" />
+                )}
                 {sounding ? t('stage.sounding') : t('stage.quiet')}
                 {feedTargetStates.length > 0 && (
-                  <span className="text-type-feed"> · {t('stage.feedCount', { n: feedTargetStates.length })}</span>
+                  <span className="text-type-feed">
+                    {' '}
+                    · {t('stage.feedCount', { n: feedTargetStates.length })}
+                  </span>
                 )}
               </span>
               {/* The in-pin exists only when someone is feeding this programme;
@@ -502,7 +502,10 @@ export function NodeStage() {
               className="absolute flex justify-center"
               style={{ left: HUB_X - 40, top: hubY + HUB_H + 12, width: HUB_W + 80 }}
             >
-              <SourceLevelDial exeName={session.exe_name} displayName={session.display_name ?? undefined} />
+              <SourceLevelDial
+                exeName={session.exe_name}
+                displayName={session.display_name ?? undefined}
+              />
             </div>
           )}
 
@@ -514,8 +517,7 @@ export function NodeStage() {
             const roleWord = role === 'primary' ? t('stage.main') : t('stage.copy');
             const isPrimary = role === 'primary';
             const delay = deviceDelays[deviceId] ?? 0;
-            const canPromote =
-              !isPrimary && drawn.length > 1 && delay <= primaryDelay;
+            const canPromote = !isPrimary && drawn.length > 1 && delay <= primaryDelay;
             const placement: Placement = {
               left: TARGET_X,
               top: targetY(index, targetCount, height),
@@ -533,7 +535,7 @@ export function NodeStage() {
                 transformTemplate={MAIN_THREAD_TRANSFORM}
                 onMouseEnter={() => setHoverKey(wireKey)}
                 onMouseLeave={() => setHoverKey(null)}
-                className={`${CARD_CLASS} group group/copy ${inspectorKey === `dev:${deviceId}` ? 'border-accent' : ''}`}
+                className={`${CARD_CLASS} group/copy group ${inspectorKey === `dev:${deviceId}` ? 'border-accent' : ''}`}
                 style={placement}
               >
                 <span className="pin pin-in" aria-hidden="true" />
@@ -550,7 +552,7 @@ export function NodeStage() {
                     type="button"
                     title={t('stage.removeTarget', { name: deviceName })}
                     onClick={() => toggleTarget(deviceId)}
-                    className="pressable absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted group-hover:grid group-focus-within:grid hover:border-error hover:text-error"
+                    className="pressable absolute -right-2 -top-2 z-10 hidden h-4 w-4 place-items-center rounded-full border border-line-strong bg-surface text-[9px] leading-none text-text-muted hover:border-error hover:text-error group-focus-within:grid group-hover:grid"
                   >
                     ✕
                   </button>
@@ -609,9 +611,7 @@ export function NodeStage() {
                         className="text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
                       >
                         <span className="group-hover/copy:hidden">{roleWord}</span>
-                        <span className="hidden group-hover/copy:inline">
-                          {t('stage.promote')}
-                        </span>
+                        <span className="hidden group-hover/copy:inline">{t('stage.promote')}</span>
                       </button>
                     ) : (
                       <span
@@ -692,7 +692,9 @@ export function NodeStage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.feed} ${state !== 'live' ? 'opacity-60' : ''}`}>
+                    <span
+                      className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.feed} ${state !== 'live' ? 'opacity-60' : ''}`}
+                    >
                       {stateWord}
                     </span>
                     <span className="truncate text-[9.5px] text-text-muted">
@@ -715,7 +717,7 @@ export function NodeStage() {
             aria-label={t('stage.addTarget')}
             title={t('stage.addTargetTitle')}
             onClick={() => setPickerOpen((value) => !value)}
-            className={`${CARD_CLASS} hover:border-accent/60 text-text-muted hover:text-accent focus-visible:border-accent focus-visible:outline-none grid place-items-center border-dashed`}
+            className={`${CARD_CLASS} grid place-items-center border-dashed text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none`}
             style={{
               left: TARGET_X,
               top: targetY(targetCount - 1, targetCount, height),
@@ -742,7 +744,7 @@ export function NodeStage() {
                 exit={{ opacity: 0, y: 4 }}
                 transition={SPRING_GLIDE}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
-                className="bg-surface border-line-strong cc absolute z-30 w-[230px] rounded-card border p-1.5"
+                className="cc absolute z-30 w-[230px] rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
                   left: Math.min(TARGET_X - 20, BOARD_W - 250),
                   top: Math.min(
@@ -979,12 +981,15 @@ function Inspector({
             {drawn.length === 0
               ? t('stage.inspectorHubNoRoute')
               : drawn.length === 1
-                ? t('stage.inspectorHubOne', { device: devices.find((d) => d.id === drawn[0])?.name ?? '' })
+                ? t('stage.inspectorHubOne', {
+                    device: devices.find((d) => d.id === drawn[0])?.name ?? '',
+                  })
                 : t('stage.inspectorHubMulti', {
                     device: devices.find((d) => d.id === drawn[0])?.name ?? '',
                     m: drawn.length - 1,
                   })}
-            {feedTargets.length > 0 && ` · ${t('stage.inspectorHubFeeds', { n: feedTargets.length })}`}
+            {feedTargets.length > 0 &&
+              ` · ${t('stage.inspectorHubFeeds', { n: feedTargets.length })}`}
           </span>
         </>
       ) : (

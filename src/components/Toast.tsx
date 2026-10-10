@@ -84,14 +84,16 @@ export function Toast() {
   const entries = snapshot?.entries ?? [];
   const only = entries[0];
   const sessions = useRouterStore((s) => s.sessions);
-  const feedSource = feedUndo !== null
-    ? sessions.find((s) => s.pid === feedUndo.sourcePid)?.display_name ??
-      sessions.find((s) => s.pid === feedUndo.sourcePid)?.exe_name
-    : undefined;
-  const feedTarget = feedUndo !== null
-    ? sessions.find((s) => s.pid === feedUndo.targetPid)?.display_name ??
-      sessions.find((s) => s.pid === feedUndo.targetPid)?.exe_name
-    : undefined;
+  const feedSource =
+    feedUndo !== null
+      ? (sessions.find((s) => s.pid === feedUndo.sourcePid)?.display_name ??
+        sessions.find((s) => s.pid === feedUndo.sourcePid)?.exe_name)
+      : undefined;
+  const feedTarget =
+    feedUndo !== null
+      ? (sessions.find((s) => s.pid === feedUndo.targetPid)?.display_name ??
+        sessions.find((s) => s.pid === feedUndo.targetPid)?.exe_name)
+      : undefined;
 
   return (
     // The layer spans the bottom of the window but takes no pointer events: only
@@ -117,7 +119,7 @@ export function Toast() {
                 setHeld((current) => (current === 'feed' ? null : current));
               }
             }}
-            className="bg-surface border-line-strong pointer-events-auto flex items-center gap-3 rounded-full border py-2 pl-4 pr-2"
+            className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-surface py-2 pl-4 pr-2"
           >
             <span className="text-[12px] text-text-secondary">
               {feedUndo.added
@@ -165,7 +167,7 @@ export function Toast() {
                 setHeld((current) => (current === 'route' ? null : current));
               }
             }}
-            className="bg-surface border border-line-strong pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-2"
+            className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-surface py-2 pl-4 pr-2"
           >
             <span className="text-[12px] text-text-secondary">
               {/* The offer names where the sound went, not just that it moved:

@@ -70,7 +70,15 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
 }
 
 /** A device row: name + the shared −/value/+ delay stepper. */
-function DelayRow({ deviceId, name, rangeMs }: { deviceId: string; name: string; rangeMs: number }) {
+function DelayRow({
+  deviceId,
+  name,
+  rangeMs,
+}: {
+  deviceId: string;
+  name: string;
+  rangeMs: number;
+}) {
   return (
     <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0">
       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={name}>
@@ -285,7 +293,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
         <SectionCard
           icon={
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <circle cx="12" cy="12" r="4" />
               <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
             </svg>
@@ -338,7 +353,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
         <SectionCard
           icon={
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <polyline points="4 17 10 11 4 5" />
               <line x1="12" y1="19" x2="20" y2="19" />
             </svg>
@@ -462,9 +484,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)
-                  }
+                  onClick={() => void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)}
                   className="pressable shrink-0 rounded-ctl bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   {t('settings.feedCarrierApply')}
@@ -530,7 +550,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
         <SectionCard
           icon={
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <circle cx="12" cy="12" r="9" />
               <polyline points="12 7 12 12 15.5 13.5" />
             </svg>
@@ -627,7 +654,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
         <SectionCard
           icon={
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <circle cx="12" cy="12" r="9" />
               <path d="M12 16v-4M12 8h.01" />
             </svg>
@@ -636,9 +670,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
         >
           <div className="py-3">
             <div className="mb-1 flex items-center justify-between gap-4">
-              <span className="text-[13px] font-medium text-text-primary">
-                App Audio Router
-              </span>
+              <span className="text-[13px] font-medium text-text-primary">App Audio Router</span>
               {/* The version is a fact, not an achievement: set in the same
                   monospaced muted type as every other number in the app. */}
               <span className="font-mono text-[10px] tabular-nums text-text-muted">

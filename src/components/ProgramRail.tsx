@@ -81,8 +81,7 @@ export function ProgramRail() {
   const visibleSessions = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const matches = (s: AudioSession) =>
-      s.exe_name.toLowerCase().includes(q) ||
-      (s.display_name ?? '').toLowerCase().includes(q);
+      s.exe_name.toLowerCase().includes(q) || (s.display_name ?? '').toLowerCase().includes(q);
     const filtered = q ? sessions.filter(matches) : sessions;
     return [...filtered].sort(
       (a, b) => (routesByPid[b.pid]?.length ?? 0) - (routesByPid[a.pid]?.length ?? 0),
@@ -253,7 +252,7 @@ export function ProgramRail() {
             worth watching, so each row fades where it stands and *travels* to
             its new place rather than being redrawn there. */}
         <AnimatePresence initial={false}>
-        {visibleSessions.map((session) => {
+          {visibleSessions.map((session) => {
             const targets = routesByPid[session.pid] ?? [];
             const isSelected = selectedPids.includes(session.pid);
             const isSubject = selectedPids[0] === session.pid;
@@ -307,7 +306,7 @@ export function ProgramRail() {
                     layoutId="rail-selection"
                     transition={SPRING_GLIDE}
                     aria-hidden="true"
-                    className="bg-surface pointer-events-none absolute inset-0 rounded-full"
+                    className="pointer-events-none absolute inset-0 rounded-full bg-surface"
                   />
                 ) : joined ? (
                   <span
@@ -317,108 +316,108 @@ export function ProgramRail() {
                 ) : null}
 
                 <div className="relative flex min-w-0 flex-1 items-center gap-2">
-                <Ring
-                  size={14}
-                  tone={targets.length > 0 ? 'main' : 'idle'}
-                  live={sounding}
-                  className="transition-transform group-hover/row:scale-110"
-                />
+                  <Ring
+                    size={14}
+                    tone={targets.length > 0 ? 'main' : 'idle'}
+                    live={sounding}
+                    className="transition-transform group-hover/row:scale-110"
+                  />
 
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    // Ctrl+click adds to the batch the same way the + on the row
-                    // does; either gesture is fine, both are explicit. Nothing
-                    // here depends on the user knowing a modifier exists.
-                    if (event.ctrlKey || event.metaKey) {
-                      toggleProcessSelection(session.pid);
-                    } else {
-                      selectProcess(session.pid);
-                    }
-                  }}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                >
-                  {/* The executable's own icon, in a slot that is its size
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      // Ctrl+click adds to the batch the same way the + on the row
+                      // does; either gesture is fine, both are explicit. Nothing
+                      // here depends on the user knowing a modifier exists.
+                      if (event.ctrlKey || event.metaKey) {
+                        toggleProcessSelection(session.pid);
+                      } else {
+                        selectProcess(session.pid);
+                      }
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  >
+                    {/* The executable's own icon, in a slot that is its size
                       whether the pixels have arrived or not. */}
-                  <ProcessIcon exeName={session.exe_name} name={name} size={16} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-text-primary">
-                      {name}
-                    </span>
-                    {/* PID, the exe it really is when the window names it
+                    <ProcessIcon exeName={session.exe_name} name={name} size={16} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-medium text-text-primary">
+                        {name}
+                      </span>
+                      {/* PID, the exe it really is when the window names it
                         differently, and — only once something has actually been
                         routed — where its sound goes. */}
-                    <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
-                      {exeDiffers && (
-                        <>
-                          {session.exe_name}
-                          <span aria-hidden="true" className="opacity-50">
-                            {' · '}
-                          </span>
-                        </>
-                      )}
-                      {t('rail.pid', { pid: session.pid })}
-                      {targets.length > 0 && through !== null && (
-                        <>
-                          <span aria-hidden="true" className="opacity-50">
-                            {' · '}
-                          </span>
-                          <span className="font-sans">{through}</span>
-                          {targets.length > 1 && (
-                            <span className="text-accent"> +{targets.length - 1}</span>
-                          )}
-                        </>
-                      )}
+                      <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
+                        {exeDiffers && (
+                          <>
+                            {session.exe_name}
+                            <span aria-hidden="true" className="opacity-50">
+                              {' · '}
+                            </span>
+                          </>
+                        )}
+                        {t('rail.pid', { pid: session.pid })}
+                        {targets.length > 0 && through !== null && (
+                          <>
+                            <span aria-hidden="true" className="opacity-50">
+                              {' · '}
+                            </span>
+                            <span className="font-sans">{through}</span>
+                            {targets.length > 1 && (
+                              <span className="text-accent"> +{targets.length - 1}</span>
+                            )}
+                          </>
+                        )}
+                      </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
 
-                {/* Include this one in the change. Replacing Ctrl+click with a
+                  {/* Include this one in the change. Replacing Ctrl+click with a
                     control someone can see is the whole point: a batch of five
                     programmes is not something a user should discover they made. */}
-                {!isSubject && (
-                  <MiniToggle
-                    pressed={joined}
-                    label={t('rail.alsoHint')}
-                    onClick={() => toggleProcessSelection(session.pid)}
-                  />
-                )}
+                  {!isSubject && (
+                    <MiniToggle
+                      pressed={joined}
+                      label={t('rail.alsoHint')}
+                      onClick={() => toggleProcessSelection(session.pid)}
+                    />
+                  )}
 
-                {targets.length > 0 && (
-                  <span className="flex flex-none scale-75 items-center opacity-0 transition duration-200 group-hover/row:scale-100 group-hover/row:opacity-100 group-focus-within/row:scale-100 group-focus-within/row:opacity-100">
-                    {/* Stopping sends the programme's sound back to the system
+                  {targets.length > 0 && (
+                    <span className="flex flex-none scale-75 items-center opacity-0 transition duration-200 group-focus-within/row:scale-100 group-focus-within/row:opacity-100 group-hover/row:scale-100 group-hover/row:opacity-100">
+                      {/* Stopping sends the programme's sound back to the system
                         default — harmless, but baffling when it happens under an
                         accidental click, so it asks first. */}
-                    <ConfirmButton
-                      variant="icon"
-                      label={t('rail.stopRoute')}
-                      confirmLabel={t('rail.stopRouteConfirm')}
-                      onConfirm={() => {
-                        // The route is the program's, held under whichever
-                        // process it was applied to. Stop that one: `stopRoute`
-                        // of a sibling pid finds no entry and returns, leaving
-                        // the route running under the process it names.
-                        const owner =
-                          programEntryOf(sessions, routedPids, session.pid) ?? session.pid;
-                        void stopRoute(owner);
-                      }}
-                      icon={
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 10 10"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          aria-hidden="true"
-                        >
-                          <line x1="1" y1="1" x2="9" y2="9" />
-                          <line x1="9" y1="1" x2="1" y2="9" />
-                        </svg>
-                      }
-                    />
-                  </span>
-                )}
+                      <ConfirmButton
+                        variant="icon"
+                        label={t('rail.stopRoute')}
+                        confirmLabel={t('rail.stopRouteConfirm')}
+                        onConfirm={() => {
+                          // The route is the program's, held under whichever
+                          // process it was applied to. Stop that one: `stopRoute`
+                          // of a sibling pid finds no entry and returns, leaving
+                          // the route running under the process it names.
+                          const owner =
+                            programEntryOf(sessions, routedPids, session.pid) ?? session.pid;
+                          void stopRoute(owner);
+                        }}
+                        icon={
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 10 10"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            aria-hidden="true"
+                          >
+                            <line x1="1" y1="1" x2="9" y2="9" />
+                            <line x1="9" y1="1" x2="1" y2="9" />
+                          </svg>
+                        }
+                      />
+                    </span>
+                  )}
                 </div>
               </motion.div>
             );
@@ -453,7 +452,7 @@ function MiniToggle({
       className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
         pressed
           ? 'border-accent bg-accent text-accent-ink'
-          : 'border-line bg-surface text-text-muted opacity-0 hover:text-accent group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-visible:opacity-100'
+          : 'border-line bg-surface text-text-muted opacity-0 hover:text-accent focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
       }`}
     >
       {/* The plus does not turn into a tick, it is replaced by one: the mark
@@ -470,11 +469,27 @@ function MiniToggle({
           className="flex"
         >
           {pressed ? (
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+            <svg
+              width="9"
+              height="9"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              aria-hidden="true"
+            >
               <polyline points="1.5 5.5 4 8 8.5 2.5" />
             </svg>
           ) : (
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+            <svg
+              width="9"
+              height="9"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              aria-hidden="true"
+            >
               <line x1="5" y1="1.5" x2="5" y2="8.5" />
               <line x1="1.5" y1="5" x2="8.5" y2="5" />
             </svg>

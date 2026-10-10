@@ -32,14 +32,15 @@ function levelRing(shown: number): ReactNode {
   const fraction = Math.max(0, Math.min(1, shown / SOURCE_LEVEL_NEUTRAL));
   const neutral = shown === SOURCE_LEVEL_NEUTRAL;
   return (
-    <svg
-      aria-hidden="true"
-      width={16}
-      height={16}
-      viewBox="0 0 16 16"
-      className="flex-none"
-    >
-      <circle cx={8} cy={8} r={RADIUS} fill="none" stroke="var(--hairline-strong)" strokeWidth={2} />
+    <svg aria-hidden="true" width={16} height={16} viewBox="0 0 16 16" className="flex-none">
+      <circle
+        cx={8}
+        cy={8}
+        r={RADIUS}
+        fill="none"
+        stroke="var(--hairline-strong)"
+        strokeWidth={2}
+      />
       {fraction > 0 && (
         <circle
           cx={8}

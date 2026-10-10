@@ -223,10 +223,7 @@ export async function setFeedTarget(
  * source's carrier pin goes with it when nothing else still needs it. Resolves
  * to the programs that stay fixed to the carrier because Windows refused to
  * hand their endpoint back — empty when everything came free. */
-export async function removeFeedTarget(
-  sourcePid: number,
-  targetPid: number,
-): Promise<string[]> {
+export async function removeFeedTarget(sourcePid: number, targetPid: number): Promise<string[]> {
   return invoke<string[]>('remove_feed_target', { sourcePid, targetPid });
 }
 

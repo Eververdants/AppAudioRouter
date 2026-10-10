@@ -128,7 +128,9 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         const target = backend.sessions.find((s2) => s2.pid === args.targetPid)?.exe_name ?? '';
         backend.feeds = backend.feeds.filter(
           ([s2, t]) =>
-            !(s2.toLowerCase() === source.toLowerCase() && t.toLowerCase() === target.toLowerCase()),
+            !(
+              s2.toLowerCase() === source.toLowerCase() && t.toLowerCase() === target.toLowerCase()
+            ),
         );
         return [];
       }
@@ -824,9 +826,7 @@ describe('feeds', () => {
     await state().addFeed(MUSIC.pid, GAME.pid);
 
     expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
-    expect(state().rememberedFeeds).toEqual([
-      { sourceExe: 'music.exe', targetExe: ['game.exe'] },
-    ]);
+    expect(state().rememberedFeeds).toEqual([{ sourceExe: 'music.exe', targetExe: ['game.exe'] }]);
     // Connected at once: a feed pins its own endpoints, so no hub press waits
     // between the pick and the sound.
     expect(backend.calls.some((call) => call.cmd === 'set_feed_target')).toBe(true);

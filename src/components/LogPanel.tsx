@@ -61,7 +61,9 @@ export function LogPanel() {
   }, [lastLog?.id]);
 
   if (logs.length === 0) {
-    return <p className="px-5 py-8 text-center text-[11px] text-text-muted">{t('logPanel.empty')}</p>;
+    return (
+      <p className="px-5 py-8 text-center text-[11px] text-text-muted">{t('logPanel.empty')}</p>
+    );
   }
 
   return (

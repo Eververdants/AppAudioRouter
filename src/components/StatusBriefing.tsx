@@ -184,7 +184,17 @@ export function StatusBriefing() {
       });
     }
     return result;
-  }, [sessions, routedPids, soundingPids, devices, defaultDeviceId, feeds, feedCarrier, t, i18n.language]);
+  }, [
+    sessions,
+    routedPids,
+    soundingPids,
+    devices,
+    defaultDeviceId,
+    feeds,
+    feedCarrier,
+    t,
+    i18n.language,
+  ]);
 
   // Changes staged on the stage that the hub has not landed yet — worth a
   // line, because "the picture and the sound disagree" is the one thing this
@@ -209,7 +219,7 @@ export function StatusBriefing() {
               exit={{ opacity: 0, y: 6, scale: 0.98 }}
               transition={SPRING_GLIDE}
               transformTemplate={MAIN_THREAD_TRANSFORM}
-              className="bg-surface border border-line-strong absolute bottom-full left-0 mb-2 w-[300px] rounded-card p-3.5"
+              className="absolute bottom-full left-0 mb-2 w-[300px] rounded-card border border-line-strong bg-surface p-3.5"
             >
               <ul className="flex flex-col gap-2">
                 {lines.map((line) => (

@@ -152,7 +152,7 @@ export function RoutedCapsule() {
               // leaving the sheet half its width (160 px) right of the pill it
               // hangs off, and off the edge of the window besides.
               transformTemplate={(_, generated) => `translateX(-50%) ${generated}`}
-              className="bg-surface border-line-strong cc absolute bottom-full left-1/2 mb-2 w-[320px] rounded-card border p-1.5"
+              className="cc absolute bottom-full left-1/2 mb-2 w-[320px] rounded-card border border-line-strong bg-surface p-1.5"
             >
               <div className="px-2 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">
                 {t('routed.title')}
@@ -164,7 +164,7 @@ export function RoutedCapsule() {
                     <div
                       key={row.pid}
                       data-routed-row={row.pid}
-                      className="hover:bg-surface-hover flex items-center gap-2 rounded-seg px-2 py-1.5 transition-colors"
+                      className="flex items-center gap-2 rounded-seg px-2 py-1.5 transition-colors hover:bg-surface-hover"
                     >
                       <Ring tone="main" size={12} live={row.sounding && liveness} />
                       <ProcessIcon exeName={row.exeName} name={row.name} size={16} />

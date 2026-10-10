@@ -475,10 +475,13 @@ function scheduleIconRetry(exeName: string): void {
   iconRetries.set(exeName, used + 1);
   iconRetryTimers.set(
     exeName,
-    setTimeout(() => {
-      iconRetryTimers.delete(exeName);
-      useRouterStore.getState().loadMissingIcons();
-    }, ICON_RETRY_BASE_MS * 2 ** used),
+    setTimeout(
+      () => {
+        iconRetryTimers.delete(exeName);
+        useRouterStore.getState().loadMissingIcons();
+      },
+      ICON_RETRY_BASE_MS * 2 ** used,
+    ),
   );
 }
 
@@ -650,7 +653,10 @@ function rememberFeedTargets(
   if (already) return entries;
   return [
     ...others,
-    { sourceExe: existing?.sourceExe ?? sourceExe, targetExe: [...(existing?.targetExe ?? []), targetExe] },
+    {
+      sourceExe: existing?.sourceExe ?? sourceExe,
+      targetExe: [...(existing?.targetExe ?? []), targetExe],
+    },
   ];
 }
 
@@ -1199,7 +1205,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // now, the backend records the rule and pins whatever endpoints it can.
     set((s) => ({
       feeds: { ...s.feeds, [sourcePid]: [...(s.feeds[sourcePid] ?? []), targetPid] },
-      rememberedFeeds: rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, true),
+      rememberedFeeds: rememberFeedTargets(
+        s.rememberedFeeds,
+        source.exe_name,
+        target.exe_name,
+        true,
+      ),
       feedUndo: { sourcePid, targetPid, added: true },
     }));
     try {
@@ -1289,10 +1300,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // Say it here, and name the way out — this is the one case where the
       // settings page's reset is the only thing left that can reach it.
       if (stuck.length > 0) {
-        get().addLog(
-          i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }),
-          'error',
-        );
+        get().addLog(i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }), 'error');
       }
     } catch (e) {
       // The backend kept the rule: put the wire and the memory back rather than
@@ -1620,10 +1628,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // for, which is rare enough that a line in the log is the right cost.
       const skipped = applied.map((t) => t.exeName).filter((name) => !isRememberableName(name));
       if (autoRemember && skipped.length > 0) {
-        get().addLog(
-          i18next.t('log.notRememberable', { process: skipped.join(', ') }),
-          'info',
-        );
+        get().addLog(i18next.t('log.notRememberable', { process: skipped.join(', ') }), 'info');
       }
       // The engines are up now, and this is the only pass that asks each of them
       // how far behind its device plays. The badges above say what was applied;
@@ -2338,7 +2343,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         for (const route of active) {
           if (route.deviceIds.length === 0) continue;
           const liveIds =
-            devices.length > 0 ? route.deviceIds.filter((id) => liveDeviceIds.has(id)) : route.deviceIds;
+            devices.length > 0
+              ? route.deviceIds.filter((id) => liveDeviceIds.has(id))
+              : route.deviceIds;
           if (liveIds.length === 0) {
             if ((engineGenerations[route.pid] ?? 0) === route.generation) {
               delete routedPids[route.pid];

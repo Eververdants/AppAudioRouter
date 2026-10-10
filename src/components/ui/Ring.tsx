@@ -38,7 +38,5 @@ export function Ring({
   const classes = ['con-ring', TONE_CLASS[tone], live ? 'con-ring-live' : '', className]
     .filter(Boolean)
     .join(' ');
-  return (
-    <span aria-hidden="true" className={classes} style={{ width: size, height: size }} />
-  );
+  return <span aria-hidden="true" className={classes} style={{ width: size, height: size }} />;
 }

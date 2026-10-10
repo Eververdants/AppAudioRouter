@@ -257,7 +257,11 @@ function WelcomeStep() {
         <Ring size={40} tone="main" />
       </motion.div>
       <h1 className="text-[19px] font-semibold tracking-tight text-text-primary">
-        <BlurText text={t('wizard.welcomeTitle', { product: t('productName') })} base={0.05} step={0.022} />
+        <BlurText
+          text={t('wizard.welcomeTitle', { product: t('productName') })}
+          base={0.05}
+          step={0.022}
+        />
       </h1>
       <div className="mt-3 text-[12.5px] leading-relaxed text-text-secondary">
         <StepProse text={t('wizard.welcomeBody')} />

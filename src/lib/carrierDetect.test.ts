@@ -9,7 +9,10 @@ function device(id: string, name: string): AudioDevice {
 describe('detectCarrierPair', () => {
   it('recognizes VB-Cable by its two stable names, suffixes and case aside', () => {
     const match = detectCarrierPair(
-      [device('r1', 'Speakers (Realtek Audio)'), device('r2', 'CABLE Input (VB-Audio Virtual Cable)')],
+      [
+        device('r1', 'Speakers (Realtek Audio)'),
+        device('r2', 'CABLE Input (VB-Audio Virtual Cable)'),
+      ],
       [device('c1', 'Microphone (USB Mic)'), device('c2', 'CABLE Output (VB-Audio Virtual Cable)')],
     );
     expect(match).not.toBeNull();
