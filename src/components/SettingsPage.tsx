@@ -432,22 +432,28 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               onClick={() => setSection(id)}
               className={`pressable relative flex items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
                 active
-                  ? 'bg-accent-muted font-medium text-accent'
+                  ? 'font-medium text-accent'
                   : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
               }`}
             >
-              <span className={active ? 'text-accent' : 'text-text-muted'}>
-                {SECTION_ICONS[id]}
-              </span>
-              <span className="truncate">{sectionLabel(id)}</span>
+              {/* The chosen section's wash is one object that slides between
+                  rows — the same pane the rail's selection uses, with the rule
+                  riding its left edge — so a switch reads as the mark moving
+                  rather than as one background blinking off and another on. */}
               {active && (
                 <motion.span
-                  layoutId="settings-section-rule"
+                  layoutId="settings-section-pane"
                   transition={SPRING_GLIDE}
                   aria-hidden="true"
-                  className="absolute -left-2.5 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
-                />
+                  className="pointer-events-none absolute inset-0 rounded-ctl bg-accent-muted"
+                >
+                  <span className="absolute -left-2.5 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
+                </motion.span>
               )}
+              <span className={`relative ${active ? 'text-accent' : 'text-text-muted'}`}>
+                {SECTION_ICONS[id]}
+              </span>
+              <span className="relative truncate">{sectionLabel(id)}</span>
             </button>
           );
         })}
@@ -467,9 +473,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           language and then changing section left the paper blank). */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-2xl px-8 py-8">
-          <h1 className="mb-1 text-[17px] font-semibold tracking-tight text-text-primary">
-            {sectionLabel(section)}
-          </h1>
           <motion.div
             key={section}
             initial={firstSection.current ? false : { opacity: 0, y: 6 }}
@@ -477,6 +480,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             transition={SPRING_GLIDE}
             transformTemplate={MAIN_THREAD_TRANSFORM}
           >
+            {/* The heading rides the same arrival as its rows: a title that
+                snaps while the content beneath it eases in reads as two
+                half-animations, not as one page change. */}
+            <h1 className="mb-1 text-[17px] font-semibold tracking-tight text-text-primary">
+              {sectionLabel(section)}
+            </h1>
             {section === 'appearance' && (
               <AppearanceSection
                 theme={theme}

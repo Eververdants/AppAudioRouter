@@ -200,9 +200,11 @@
 ## 设置页（`SettingsPage`，2026-10-11 改版）
 
 布局是**一条分区导航 + 右侧内容**：左侧 190px 的 rail（返回、六个分区、版本号），一条竖细线，右边是当前分区的行。
-分区：外观 / 路由 / 后台运行 / 延迟补偿 / 程序电平 / 关于。选中分区由一根 `layoutId="settings-section-rule"` 的
-**左侧竖规**标记（不是胶囊）；内容区按 `section` 挂 `key` 的 `motion.div` 做一次**只入场**的换页（曲线取 **`SPRING_GLIDE`**，
-有位移的视图切换，所以不是 `FADE`），旧分区立即卸载——和顶层视图切换同一条法子（[App.tsx](../../src/App.tsx) 的注释）。
+分区：外观 / 路由 / 后台运行 / 延迟补偿 / 程序电平 / 关于。选中分区由一枚 `layoutId="settings-section-pane"` 的
+**滑动选中 pane**标记（淡 accent 底 + 左缘 2px accent 竖规，与左栏程序列表的选中 pane 同一种手势——
+背景不是原地闪现的）；内容区按 `section` 挂 `key` 的 `motion.div` 做一次**只入场**的换页（曲线取 **`SPRING_GLIDE`**，
+有位移的视图切换，所以不是 `FADE`），**分区标题（h1）也在这枚 motion.div 里**、与行一起到场，旧分区立即卸载——
+和顶层视图切换同一条法子（[App.tsx](../../src/App.tsx) 的注释）。
 
 - ⚠️ **内容区不要套 `AnimatePresence mode="wait"`**（2026-10-11 修掉的一处空白）。外观分区里的主题/语言 `SegmentedControl`
   用 `layoutId` 画那根滑动的下划线（AGENTS.md 动效规范里的"下划线迁移"）；当一个 `layoutId` 元素正在**退场中的分区内部**
