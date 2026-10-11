@@ -377,8 +377,32 @@ input[type='number']::-webkit-inner-spin-button {
   animation: stage-flow 0.5s linear infinite;
 }
 
+/* The draw-in on a wire that has just been proposed: the line runs itself out
+   of the hub's pin towards the row it points at, once, when the destination
+   joins the plan. A keyframe rather than Motion because framer-motion's own
+   pathLength writes stroke-dasharray inline, and an inline dash pattern would
+   permanently override this class's the moment the wire starts flowing — the
+   proposal carries `pathLength="1"` (normalizing every dash number to the
+   path's own length) plus this class, and when the route lands, the attribute
+   and the class both leave and `stage-flow` takes over untouched. The fill
+   keeps the finished wire at offset 0: a fully drawn line. */
+@keyframes stage-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.stage-draw {
+  stroke-dasharray: 1 1;
+  animation: stage-draw 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .stage-flow,
+  .stage-draw,
   .con-ring-live::before {
     animation: none;
   }

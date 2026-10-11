@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import type { Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { SourceLevelDial } from '@/components/SourceLevelDial';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
@@ -8,8 +9,8 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useElementHeight } from '@/hooks/useElementHeight';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
-import { clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
-import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { DELAY_MAX_MS, clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
+import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_ROUTE, SPRING_TAP } from '@/lib/motion';
 import { programEntryOf } from '@/lib/routes';
 import {
   BOARD_H,
@@ -74,6 +75,27 @@ const ROLE_TEXT_CLASS = {
   mirror: 'text-type-mirror',
   feed: 'text-type-feed',
 } as const;
+
+/**
+ * The pickers' items light up one after another as the menu opens: a stagger
+ * carried by variants, opacity only — the menu's own glide brings the travel,
+ * and items that never write a transform keep their `.pressable` press intact
+ * (Motion and the CSS transform must never sit on one element).
+ */
+const PICKER_VARIANTS: Variants = {
+  closed: { opacity: 0, y: 6, scale: 0.98 },
+  open: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { ...SPRING_GLIDE, staggerChildren: 0.024, delayChildren: 0.02 },
+  },
+};
+
+const PICKER_ITEM_VARIANTS: Variants = {
+  closed: { opacity: 0 },
+  open: { opacity: 1, transition: FADE },
+};
 
 /**
  * The node board: the one place a route is drawn.
@@ -141,8 +163,22 @@ export function NodeStage() {
   const [primaryPickerOpen, setPrimaryPickerOpen] = useState(false);
   /** How far the copies panel has been scrolled — its wires ride with it. */
   const [copyScroll, setCopyScroll] = useState(0);
-  const boardRef = useRef<HTMLDivElement | null>(null);
+  /** The copies-panel row a just-added destination landed in, one-shot: the
+   *  panel scrolls it into view and hands null back. */
+  const [revealIndex, setRevealIndex] = useState<number | null>(null);
+  /** How many times a proposal has become the truth on this programme's board —
+   *  the key that replays the hub's landing beat. */
+  const [landPulse, setLandPulse] = useState(0);
   const wellRef = useRef<HTMLDivElement | null>(null);
+  /** The board's rows as of the last pass, as one signature — what the reveal
+   *  diff reads to find the destination that has just arrived. */
+  const prevRowsRef = useRef<string | null>(null);
+  /** The last programme and answered-ness this component saw, so the landing
+   *  beat fires on a press and never on a programme switch. */
+  const prevApplyRef = useRef<{ pid: number | undefined; answered: boolean }>({
+    pid: undefined,
+    answered: false,
+  });
   const measured = useElementHeight(wellRef);
 
   const pid = selectedPids[0];
@@ -204,12 +240,20 @@ export function NodeStage() {
   const column = panelColumn(height, copiesRows);
   const hubY = Math.round(boardCentre(height) - HUB_H / 2);
 
-  // Escape closes a picker and a click outside the board closes it too; both
-  // listeners are registered only while one of the two pickers is open, so a
-  // standing listener never swallows the search box's Escape (the same rule the
-  // routed capsule follows). Both pickers are shut together: they are never
-  // open at once, and whichever key or click arrives belongs to the one on
-  // screen.
+  // The pickers scroll instead of growing past the board: each caps itself to
+  // the room under its anchor (bounded by a sane maximum), and the menu's own
+  // border and padding (2 + 12 px) come off what the inner list may take.
+  const addPickerTop = Math.min(column.copiesY + GROUP_HEADER_H + 8, height - 190);
+  const addPickerCap = Math.max(96, Math.min(288, height - addPickerTop - 6));
+  const primaryPickerTop = Math.min(column.primaryY + column.primaryHeight + 6, height - 190);
+  const primaryPickerCap = Math.max(96, Math.min(288, height - primaryPickerTop - 6));
+
+  // Escape closes a picker and a pointerdown anywhere outside one closes it
+  // too — blank space on the board included. Both listeners are registered
+  // only while one of the two pickers is open, so a standing listener never
+  // swallows the search box's Escape (the same rule the routed capsule
+  // follows). Both pickers are shut together: they are never open at once, and
+  // whichever key or press arrives belongs to the one on screen.
   useEffect(() => {
     if (!pickerOpen && !primaryPickerOpen) return;
     const closePickers = () => {
@@ -223,12 +267,14 @@ export function NodeStage() {
       }
     };
     const onPointerDown = (event: PointerEvent) => {
-      // The pickers live inside the board, so the outside-close only has to
-      // watch for clicks that land outside the whole board; clicks inside land
-      // on the pickers' own rows or the buttons that toggle them.
-      if (boardRef.current !== null && !boardRef.current.contains(event.target as Node)) {
-        closePickers();
-      }
+      // A press that does not land on a picker surface — or on the buttons
+      // that toggle one, where the close must not race the button's own click
+      // and turn "toggle shut" into "close then reopen" — shuts both. Those
+      // surfaces carry `data-owns-picker`; everything else on the board (the
+      // well, the halo, the cards, the strip) closes them.
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-owns-picker]')) return;
+      closePickers();
     };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('pointerdown', onPointerDown, true);
@@ -240,13 +286,17 @@ export function NodeStage() {
 
   // Selecting a different programme resets the inspector to the card that is
   // actually on screen — a key naming last programme's device must not survive —
-  // and puts the copies panel back at the top, where it always starts.
+  // and puts the copies panel back at the top, where it always starts. The
+  // pending reveal and the landing beat's memory are dropped too: whatever the
+  // last programme was doing, the new board starts quiet.
   useEffect(() => {
     setInspectorKey(null);
     setPickerOpen(false);
     setPrimaryPickerOpen(false);
     setHoverKey(null);
     setCopyScroll(0);
+    setRevealIndex(null);
+    prevRowsRef.current = null;
   }, [pid]);
 
   // The strip names a device and shows the levers that belong to it. If that
@@ -261,6 +311,49 @@ export function NodeStage() {
     const ids = drawnSignature === '' ? [] : drawnSignature.split('|');
     if (ids.length <= 1 || !ids.includes(inspectorKey.slice(4))) setInspectorKey(null);
   }, [drawnSignature, inspectorKey]);
+
+  // A destination that has just joined the plan deserves to be seen: if its row
+  // landed below the copies panel's cut, one scroll brings it into view. Only a
+  // single-row change reveals — a batch (remembered routes restoring, a
+  // programme switch re-filling the plan) decides nothing about where the eye
+  // should go, and a removal never scrolls anything.
+  const feedSig = feedTargetStates.map((f) => f.session.pid).join(',');
+  useEffect(() => {
+    const sig = `${drawnSignature}#${feedSig}`;
+    const prev = prevRowsRef.current;
+    prevRowsRef.current = sig;
+    if (prev === null) return;
+    const [prevDev = '', prevFeed = ''] = prev.split('#');
+    const prevDeviceIds = prevDev === '' ? [] : prevDev.split('|');
+    const nextDeviceIds = drawnSignature === '' ? [] : drawnSignature.split('|');
+    const prevFeedPids = prevFeed === '' ? [] : prevFeed.split(',');
+    const nextFeedPids = feedSig === '' ? [] : feedSig.split(',');
+    const addedDevices = nextDeviceIds.filter((id) => !prevDeviceIds.includes(id));
+    const addedFeeds = nextFeedPids.filter((p) => !prevFeedPids.includes(p));
+    if (addedDevices.length === 1 && addedFeeds.length === 0) {
+      // The new device's copies-panel seat is its drawn index minus the
+      // primary — unless it took the primary seat itself, which the top panel
+      // always shows and needs no scroll.
+      const index = nextDeviceIds.indexOf(addedDevices[0] ?? '');
+      if (index > 0) setRevealIndex(index - 1);
+    } else if (addedFeeds.length === 1 && addedDevices.length === 0) {
+      const feedIndex = nextFeedPids.indexOf(addedFeeds[0] ?? '');
+      if (feedIndex >= 0) setRevealIndex(Math.max(0, nextDeviceIds.length - 1) + feedIndex);
+    }
+  }, [drawnSignature, feedSig]);
+
+  // One beat when the plan becomes the truth: `answered` flipping while the
+  // same programme is on screen keys a single expanding hairline on the hub.
+  // Restoring a remembered route starts answered, and selecting a programme
+  // that already answers does not count — only a press lands.
+  useEffect(() => {
+    if (pid === prevApplyRef.current.pid && answered && !prevApplyRef.current.answered) {
+      setLandPulse((n) => n + 1);
+    }
+    prevApplyRef.current = { pid, answered };
+  }, [pid, answered]);
+
+  const clearReveal = useCallback(() => setRevealIndex(null), []);
 
   const wires: WireSpec[] = [];
   // Hub → the primary row, then → every row of the copies panel. The hub's own
@@ -351,9 +444,11 @@ export function NodeStage() {
           well, so what used to make it grow now scrolls inside the copies
           panel. A narrower window still gets a horizontal bar, because the
           board's width is what the app's own default window measures. */}
-      <div ref={wellRef} className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-surface-sunken">
+      <div
+        ref={wellRef}
+        className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-surface-sunken"
+      >
         <div
-          ref={boardRef}
           className="relative mx-auto"
           style={{ width: BOARD_W, height }}
           onMouseLeave={() => setHoverKey(null)}
@@ -399,12 +494,19 @@ export function NodeStage() {
                 data-wire={wire.key.startsWith('dev:') ? `${pid}:${wire.key.slice(4)}` : undefined}
                 data-live={wire.live ? 'true' : undefined}
                 d={wire.d}
+                // A proposal wire draws itself once, out of the hub's pin; the
+                // `pathLength` normalization is what lets one fixed dasharray
+                // cover a path of any shape. A flowing wire never carries the
+                // attribute — a normalized length would rescale the flow's own
+                // dash pattern into a solid line — so it leaves the moment the
+                // route lands, together with the class.
+                pathLength={wire.live ? undefined : 1}
                 // `live` is the route carrying sound right now, and that alone
                 // is what the moving dash reports. `lit` is the cursor, and only
                 // brightens the line: gating the flow on it made the animation
                 // unreachable in the steady state it describes, because a wire
                 // you are not hovering over was a still line even while playing.
-                className={`nwire${wire.live ? ' stage-flow' : ''}${lit(wire.key) ? 'lit' : ''}`}
+                className={`nwire${wire.live ? 'stage-flow' : 'stage-draw'}${lit(wire.key) ? 'lit' : ''}`}
               />
             ))}
           </svg>
@@ -418,9 +520,11 @@ export function NodeStage() {
               <motion.button
                 key={feeder.pid}
                 type="button"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={FADE}
+                // A source taking its seat: it grows out of the edge its wire
+                // leaves from, so the pin stays put and the line never chases.
+                initial={{ opacity: 0, scaleX: 0.94 }}
+                animate={{ opacity: 1, scaleX: 1 }}
+                transition={SPRING_TAP}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
                 onMouseEnter={() => setHoverKey(`feeder:${feeder.pid}`)}
                 onMouseLeave={() => setHoverKey(null)}
@@ -433,6 +537,7 @@ export function NodeStage() {
                   top: feederY(index, feeders.length, height),
                   width: MINI_W,
                   height: MINI_H,
+                  transformOrigin: 'right center',
                 }}
               >
                 <span className="pin pin-out" aria-hidden="true" />
@@ -489,7 +594,7 @@ export function NodeStage() {
                 if (canApply) void applyRoute();
               }}
               aria-label={canApply ? applyAria : undefined}
-              whileTap={canApply ? { scaleX: 1.02, scaleY: 0.98 } : undefined}
+              whileTap={canApply ? { scale: 0.98 } : undefined}
               transformTemplate={MAIN_THREAD_TRANSFORM}
               transition={SPRING_TAP}
               className={`${CARD_CLASS} ${
@@ -499,10 +604,43 @@ export function NodeStage() {
               } flex flex-col items-center justify-center gap-1 px-4 text-center focus-visible:outline-none`}
               style={{ left: HUB_X, top: hubY, width: HUB_W, height: HUB_H }}
             >
-              {canApply && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink">
-                  {t('stage.applyHint')}
-                </span>
+              {/* The apply capsule pops in when the plan departs from the truth
+                  and shrinks back the moment it lands — both ends animated,
+                  because an instant swap makes the landing itself unread.
+                  Motion owns the whole transform: a Tailwind
+                  `-translate-x-1/2` centering would be overridden by the inline
+                  transform, so the centering rides inside the animated values
+                  as a constant `x`. */}
+              <AnimatePresence initial={false}>
+                {canApply && (
+                  <motion.span
+                    key="apply-hint"
+                    initial={{ opacity: 0, x: '-50%', y: -4, scale: 0.9 }}
+                    animate={{ opacity: 1, x: '-50%', y: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: '-50%', y: -3, scale: 0.96 }}
+                    transition={SPRING_TAP}
+                    transformTemplate={MAIN_THREAD_TRANSFORM}
+                    className="absolute -top-3 left-1/2 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink"
+                  >
+                    {t('stage.applyHint')}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+              {/* One beat when a proposal becomes the truth: a single accent
+                  hairline expands off the card and dies. While the programme is
+                  silent this is the landing's only feedback — a flowing wire and
+                  a pulsing ring both need sound to report — and it plays once,
+                  never standing. */}
+              {landPulse > 0 && (
+                <motion.span
+                  key={landPulse}
+                  aria-hidden="true"
+                  initial={{ opacity: 0.55, scale: 0.94 }}
+                  animate={{ opacity: 0, scale: 1.06 }}
+                  transition={SPRING_ROUTE}
+                  transformTemplate={MAIN_THREAD_TRANSFORM}
+                  className="pointer-events-none absolute inset-0 rounded-panel border border-accent"
+                />
               )}
               <span className="flex items-center gap-2">
                 <Ring
@@ -601,9 +739,12 @@ export function NodeStage() {
             rows={copiesRows}
             empty={t('stage.groupCopiesEmpty')}
             onScroll={setCopyScroll}
+            revealIndex={revealIndex}
+            onRevealed={clearReveal}
             headerAction={
               <button
                 type="button"
+                data-owns-picker
                 aria-label={t('stage.addTarget')}
                 title={t('stage.addTargetTitle')}
                 onClick={() => setPickerOpen((value) => !value)}
@@ -656,79 +797,87 @@ export function NodeStage() {
               <motion.div
                 key="picker"
                 role="menu"
+                data-owns-picker
                 aria-label={t('stage.addTarget')}
-                initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 4 }}
-                transition={SPRING_GLIDE}
+                initial="closed"
+                animate="open"
+                exit="closed"
+                variants={PICKER_VARIANTS}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
-                className="cc absolute z-30 w-[230px] rounded-card border border-line-strong bg-surface p-1.5"
+                className="cc absolute z-30 w-[230px] overflow-hidden rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
                   left: Math.min(GROUP_X - 40, BOARD_W - 250),
-                  top: Math.min(column.copiesY + GROUP_HEADER_H + 8, height - 190),
+                  top: addPickerTop,
+                  maxHeight: addPickerCap,
                 }}
               >
-                <PickerSection label={t('stage.pickDevice')}>
-                  {devices.filter((d) => !drawn.includes(d.id)).length === 0 && (
-                    <PickerEmpty text={t('stage.pickNone')} />
-                  )}
-                  {devices
-                    .filter((d) => !drawn.includes(d.id))
-                    .map((d) => (
-                      <button
-                        key={d.id}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          // Append, never toggle: "add" has to leave the plan's
-                          // membership alone and put the new device on the tail.
-                          // The seat it ends up in is the delay order's call,
-                          // exactly as for any other row.
-                          appendDeviceTarget(d.id);
-                          setPickerOpen(false);
-                        }}
-                        className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                      >
-                        {d.name}
-                      </button>
-                    ))}
-                </PickerSection>
-                <PickerSection label={t('stage.pickFeed')}>
-                  {sessions.filter(
-                    (s) =>
-                      s.pid !== pid &&
-                      s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
-                      !feedTargetStates.some((f) => f.session.pid === s.pid),
-                  ).length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
-                  {sessions
-                    .filter(
+                <div className="overflow-y-auto" style={{ maxHeight: addPickerCap - 14 }}>
+                  <PickerSection label={t('stage.pickDevice')}>
+                    {devices.filter((d) => !drawn.includes(d.id)).length === 0 && (
+                      <PickerEmpty text={t('stage.pickNone')} />
+                    )}
+                    {devices
+                      .filter((d) => !drawn.includes(d.id))
+                      .map((d) => (
+                        <motion.button
+                          key={d.id}
+                          type="button"
+                          role="menuitem"
+                          variants={PICKER_ITEM_VARIANTS}
+                          transformTemplate={MAIN_THREAD_TRANSFORM}
+                          onClick={() => {
+                            // Append, never toggle: "add" has to leave the plan's
+                            // membership alone and put the new device on the tail.
+                            // The seat it ends up in is the delay order's call,
+                            // exactly as for any other row.
+                            appendDeviceTarget(d.id);
+                            setPickerOpen(false);
+                          }}
+                          className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                        >
+                          {d.name}
+                        </motion.button>
+                      ))}
+                  </PickerSection>
+                  <PickerSection label={t('stage.pickFeed')}>
+                    {sessions.filter(
                       (s) =>
                         s.pid !== pid &&
                         s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
                         !feedTargetStates.some((f) => f.session.pid === s.pid),
-                    )
-                    .map((s) => (
-                      <button
-                        key={s.pid}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          if (pid !== undefined) void addFeed(pid, s.pid);
-                          setPickerOpen(false);
-                        }}
-                        className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                      >
-                        <span className="text-type-feed" aria-hidden="true">
-                          ◧
-                        </span>
-                        <span className="truncate">
-                          {t('stage.pickFeedItem', {
-                            process: s.display_name ?? s.exe_name,
-                          })}
-                        </span>
-                      </button>
-                    ))}
-                </PickerSection>
+                    ).length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {sessions
+                      .filter(
+                        (s) =>
+                          s.pid !== pid &&
+                          s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
+                          !feedTargetStates.some((f) => f.session.pid === s.pid),
+                      )
+                      .map((s) => (
+                        <motion.button
+                          key={s.pid}
+                          type="button"
+                          role="menuitem"
+                          variants={PICKER_ITEM_VARIANTS}
+                          transformTemplate={MAIN_THREAD_TRANSFORM}
+                          onClick={() => {
+                            if (pid !== undefined) void addFeed(pid, s.pid);
+                            setPickerOpen(false);
+                          }}
+                          className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                        >
+                          <span className="text-type-feed" aria-hidden="true">
+                            ◧
+                          </span>
+                          <span className="truncate">
+                            {t('stage.pickFeedItem', {
+                              process: s.display_name ?? s.exe_name,
+                            })}
+                          </span>
+                        </motion.button>
+                      ))}
+                  </PickerSection>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -743,73 +892,79 @@ export function NodeStage() {
               <motion.div
                 key="primary-picker"
                 role="menu"
+                data-owns-picker
                 aria-label={t('stage.changePrimary')}
-                initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 4 }}
-                transition={SPRING_GLIDE}
+                initial="closed"
+                animate="open"
+                exit="closed"
+                variants={PICKER_VARIANTS}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
-                className="cc absolute z-30 w-[230px] rounded-card border border-line-strong bg-surface p-1.5"
+                className="cc absolute z-30 w-[230px] overflow-hidden rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
                   left: Math.min(GROUP_X - 40, BOARD_W - 250),
-                  top: Math.min(column.primaryY + column.primaryHeight + 6, height - 190),
+                  top: primaryPickerTop,
+                  maxHeight: primaryPickerCap,
                 }}
               >
-                <PickerSection label={t('stage.pickPrimary')}>
-                  {devices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
-                  {devices.map((d) => {
-                    const picked = d.id === primaryDeviceId;
-                    // The devices that would stay if this one took the seat:
-                    // the plan minus the picked device when it is on the plan,
-                    // otherwise minus the primary it would replace — exactly the
-                    // membership `setPrimaryDevice` lands on.
-                    const kept = drawn.includes(d.id)
-                      ? drawn.filter((id) => id !== d.id)
-                      : drawn.slice(1);
-                    const minOther =
-                      kept.length > 0
-                        ? Math.min(...kept.map((id) => deviceDelays[id] ?? 0))
-                        : Number.POSITIVE_INFINITY;
-                    const blocked = !picked && (deviceDelays[d.id] ?? 0) > minOther;
-                    return (
-                      <button
-                        key={d.id}
-                        type="button"
-                        role="menuitem"
-                        aria-current={picked ? 'true' : undefined}
-                        disabled={blocked}
-                        title={blocked ? t('stage.promoteBlockedTitle') : undefined}
-                        onClick={() => {
-                          setPrimaryDevice(d.id);
-                          setPrimaryPickerOpen(false);
-                        }}
-                        className={`pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] ${
-                          blocked
-                            ? 'cursor-not-allowed text-text-muted opacity-60'
-                            : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                        }`}
-                      >
-                        <span
-                          className={`flex h-3 w-3 flex-none items-center justify-center text-[10px] ${
-                            picked ? 'text-accent' : 'text-transparent'
+                <div className="overflow-y-auto" style={{ maxHeight: primaryPickerCap - 14 }}>
+                  <PickerSection label={t('stage.pickPrimary')}>
+                    {devices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {devices.map((d) => {
+                      const picked = d.id === primaryDeviceId;
+                      // The devices that would stay if this one took the seat:
+                      // the plan minus the picked device when it is on the plan,
+                      // otherwise minus the primary it would replace — exactly the
+                      // membership `setPrimaryDevice` lands on.
+                      const kept = drawn.includes(d.id)
+                        ? drawn.filter((id) => id !== d.id)
+                        : drawn.slice(1);
+                      const minOther =
+                        kept.length > 0
+                          ? Math.min(...kept.map((id) => deviceDelays[id] ?? 0))
+                          : Number.POSITIVE_INFINITY;
+                      const blocked = !picked && (deviceDelays[d.id] ?? 0) > minOther;
+                      return (
+                        <motion.button
+                          key={d.id}
+                          type="button"
+                          role="menuitem"
+                          variants={PICKER_ITEM_VARIANTS}
+                          transformTemplate={MAIN_THREAD_TRANSFORM}
+                          aria-current={picked ? 'true' : undefined}
+                          disabled={blocked}
+                          title={blocked ? t('stage.promoteBlockedTitle') : undefined}
+                          onClick={() => {
+                            setPrimaryDevice(d.id);
+                            setPrimaryPickerOpen(false);
+                          }}
+                          className={`pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] ${
+                            blocked
+                              ? 'cursor-not-allowed text-text-muted opacity-60'
+                              : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
                           }`}
-                          aria-hidden="true"
                         >
-                          ✓
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">{d.name}</span>
-                        {/* A row that cannot take the seat says why on the row
+                          <span
+                            className={`flex h-3 w-3 flex-none items-center justify-center text-[10px] ${
+                              picked ? 'text-accent' : 'text-transparent'
+                            }`}
+                            aria-hidden="true"
+                          >
+                            ✓
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                          {/* A row that cannot take the seat says why on the row
                             itself: its compensation is the reason, so the number
                             is shown rather than hidden behind a tooltip. */}
-                        {blocked && (
-                          <span className="flex-none font-mono text-[10px] tabular-nums text-text-muted">
-                            {formatDelaySigned(deviceDelays[d.id] ?? 0)} ms
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </PickerSection>
+                          {blocked && (
+                            <span className="flex-none font-mono text-[10px] tabular-nums text-text-muted">
+                              {formatDelaySigned(deviceDelays[d.id] ?? 0)} ms
+                            </span>
+                          )}
+                        </motion.button>
+                      );
+                    })}
+                  </PickerSection>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -861,6 +1016,8 @@ function Panel({
   empty,
   headerAction,
   onScroll,
+  revealIndex,
+  onRevealed,
   children,
 }: {
   label: string;
@@ -870,6 +1027,10 @@ function Panel({
   empty: string;
   headerAction?: React.ReactNode;
   onScroll?: (scrollTop: number) => void;
+  /** One-shot: the row index to bring into view; handed back via
+   *  `onRevealed` once the panel has done its single scroll. */
+  revealIndex?: number | null;
+  onRevealed?: () => void;
   children: React.ReactNode;
 }) {
   const bodyHeight = height - PANEL_BORDER * 2 - GROUP_HEADER_H;
@@ -882,6 +1043,21 @@ function Panel({
   useEffect(() => {
     setScrollTop(scrollRef.current?.scrollTop ?? 0);
   }, [rows, bodyHeight]);
+  // A destination that has just joined the plan may have landed below the cut:
+  // one instant scroll brings its row fully into view — the row's own entrance
+  // spring carries the "it arrived" moment, and the wire draws in after the
+  // scroll settles it. It only ever reaches down: a row the eye can already
+  // see never pulls the panel back up.
+  useEffect(() => {
+    if (revealIndex === undefined || revealIndex === null) return;
+    const el = scrollRef.current;
+    if (el === null) return;
+    const maxScroll = Math.max(0, contentHeight - bodyHeight);
+    const target = rowContentY(revealIndex) + ROW_H / 2 + GROUP_PAD - bodyHeight;
+    const next = Math.max(el.scrollTop, Math.min(target, maxScroll));
+    if (next !== el.scrollTop) el.scrollTop = next;
+    onRevealed?.();
+  }, [revealIndex, bodyHeight, contentHeight, onRevealed]);
   const canScrollUp = rows > 0 && scrollTop > 0.5;
   const canScrollDown = rows > 0 && scrollTop + bodyHeight < contentHeight - 0.5;
   return (
@@ -912,7 +1088,15 @@ function Panel({
               {children}
             </div>
           ) : (
-            <div className="px-3 py-2.5 text-[10.5px] leading-relaxed text-text-muted">{empty}</div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={FADE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
+              className="px-3 py-2.5 text-[10.5px] leading-relaxed text-text-muted"
+            >
+              {empty}
+            </motion.div>
           )}
         </div>
         {/* The soft edge: the panel's own background closing over whatever runs
@@ -988,16 +1172,18 @@ function DeviceRow({
   return (
     <motion.div
       data-device-row={deviceId}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={FADE}
+      // A destination taking its seat: it grows out of the edge its wire meets,
+      // so the pin stays put and the line never chases it into place.
+      initial={{ opacity: 0, scaleX: 0.94 }}
+      animate={{ opacity: 1, scaleX: 1 }}
+      transition={SPRING_TAP}
       transformTemplate={MAIN_THREAD_TRANSFORM}
       onMouseEnter={() => onHover(wireKey)}
       onMouseLeave={() => onHover(null)}
       className={`group/copy group absolute flex items-center gap-2 rounded-ctl bg-surface pl-3 pr-2 ${
         inspected ? 'ring-1 ring-accent' : 'hover:bg-surface-hover'
       }`}
-      style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H }}
+      style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H, transformOrigin: 'left center' }}
     >
       <span className="pin pin-in" aria-hidden="true" />
       {/* The number badge opens the strip — but only once there is something to
@@ -1022,7 +1208,13 @@ function DeviceRow({
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <button
           type="button"
-          aria-pressed={onPrimaryPick === undefined ? selectedDeviceIds.includes(deviceId) : undefined}
+          // The primary row's name opens the change-primary picker: the press
+          // that opens it must not be the press that closes it, so the button
+          // is exempt from the outside-close like the pickers themselves.
+          data-owns-picker={onPrimaryPick !== undefined ? 'true' : undefined}
+          aria-pressed={
+            onPrimaryPick === undefined ? selectedDeviceIds.includes(deviceId) : undefined
+          }
           aria-label={
             onPrimaryPick === undefined
               ? deviceName
@@ -1049,6 +1241,7 @@ function DeviceRow({
               // then it offers the move — the same gesture the copies carry.
               <button
                 type="button"
+                data-owns-picker
                 aria-label={t('stage.changePrimary')}
                 title={t('stage.changePrimaryTitle')}
                 onClick={(event) => {
@@ -1152,15 +1345,17 @@ function FeedRow({
   return (
     <motion.div
       data-feed-row={session.pid}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={FADE}
+      // Same seat-taking entrance the device rows carry: it grows out of the
+      // edge the amber wire meets, pin first, line never chasing.
+      initial={{ opacity: 0, scaleX: 0.94 }}
+      animate={{ opacity: 1, scaleX: 1 }}
+      transition={SPRING_TAP}
       transformTemplate={MAIN_THREAD_TRANSFORM}
       onMouseEnter={() => onHover(`feed:${session.pid}`)}
       onMouseLeave={() => onHover(null)}
       title={title}
       className={`absolute flex items-center gap-2 rounded-ctl bg-surface pl-3 pr-2 ${state !== 'live' ? 'opacity-90' : ''}`}
-      style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H }}
+      style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H, transformOrigin: 'left center' }}
     >
       <span className="pin pin-in pin-amber" aria-hidden="true" />
       <span className="no" aria-hidden="true">
@@ -1251,9 +1446,20 @@ function StripRow({
         >
           −
         </button>
-        <span className="min-w-[44px] text-center font-mono text-[10.5px] tabular-nums text-text-secondary">
+        {/* The readout rolls a beat on every step: the old number is gone the
+            instant the new one lands, and the arrival itself is the only
+            animation — a key swap, no cross-fade, so rapid presses read as a
+            counting roll rather than as a blur. */}
+        <motion.span
+          key={value}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={FADE}
+          transformTemplate={MAIN_THREAD_TRANSFORM}
+          className="min-w-[44px] text-center font-mono text-[10.5px] tabular-nums text-text-secondary"
+        >
           {value}
-        </span>
+        </motion.span>
         <button
           type="button"
           aria-label={upLabel}
@@ -1287,7 +1493,6 @@ function Inspector({
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
-  const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const deviceVolumes = useRouterStore((s) => s.deviceVolumes);
   const primaryVolumes = useRouterStore((s) => s.primaryVolumes);
@@ -1351,14 +1556,10 @@ function Inspector({
               : t('deviceDelay.valueLabel', { device: device?.name ?? deviceId })
           }
           value={`${formatDelaySigned(delay)} ms`}
-          onDown={() =>
-            void setDeviceDelayValue(deviceId, clampDelay(delay - delayStepMs, delayRangeMs))
-          }
-          onUp={() =>
-            void setDeviceDelayValue(deviceId, clampDelay(delay + delayStepMs, delayRangeMs))
-          }
-          canDown={delay > -delayRangeMs}
-          canUp={delay < delayRangeMs}
+          onDown={() => void setDeviceDelayValue(deviceId, clampDelay(delay - delayStepMs))}
+          onUp={() => void setDeviceDelayValue(deviceId, clampDelay(delay + delayStepMs))}
+          canDown={delay > -DELAY_MAX_MS}
+          canUp={delay < DELAY_MAX_MS}
           downLabel={t('deviceDelay.stepDown', { step: formatStep(delayStepMs) })}
           upLabel={t('deviceDelay.stepUp', { step: formatStep(delayStepMs) })}
         />
