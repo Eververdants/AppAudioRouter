@@ -43,7 +43,7 @@
 
 ## 看板几何（`lib/stage.ts`）
 
-`BOARD_W(640)` / `BOARD_H(470)` / `HUB_W(190)` / `HUB_H(84)` / `HUB_X(160)` / `GROUP_X(382)` / `GROUP_W(212)` /
+`BOARD_W(640)` / `BOARD_H(470)` / `HUB_W(190)` / `HUB_H(84)` / `HUB_X(160)` / `GROUP_X(398)` / `GROUP_W(212)` /
 `GROUP_PAD(6)` / `GROUP_HEADER_H(24)` / `PANEL_BORDER(1)` / `ROW_X` / `ROW_W` / `ROW_H(52)` / `ROW_GAP(6)` /
 `MINI_W(120)` / `FEEDER_X(12)` / `PIN_D(11)` 是**唯一的**尺寸来源，由 `panelColumn()`、`panelBodyHeight()`、
 `primaryPanelHeight()`、`rowContentY()`、`rowPortY()`、`rowInPort()`、`rowVisible()`、

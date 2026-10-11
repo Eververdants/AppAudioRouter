@@ -262,12 +262,15 @@ input[type='number']::-webkit-inner-spin-button {
 
   /* The wire. One grey line per route — the role colour lives on the cards
      (badge, role word), never on the wire, so a fan of routes reads as
-     plumbing. Lit (hovered) it darkens and thickens; flowing it takes the
-     same dash the spokes wore, gated by `useLiveness` upstream. */
+     plumbing. The serpentine from `nodePath` carries the shape; the round
+     caps keep its ends (and every flowing dash) rounded instead of sheared.
+     Lit (hovered) it darkens and thickens; flowing it takes the same dash the
+     spokes wore, gated by `useLiveness` upstream. */
   .nwire {
     fill: none;
     stroke: var(--text-muted);
-    stroke-width: 1.75;
+    stroke-width: 2;
+    stroke-linecap: round;
     opacity: 0.55;
     transition:
       opacity 0.15s ease,
@@ -275,7 +278,7 @@ input[type='number']::-webkit-inner-spin-button {
   }
   .nwire.lit {
     opacity: 1;
-    stroke-width: 2.25;
+    stroke-width: 2.75;
   }
 
   /* The concentric indicator — the mark this interface is made of.

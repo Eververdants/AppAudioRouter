@@ -77,8 +77,10 @@ export const HUB_X = 160;
 
 /** The destination column: two grouped panels, the primary above the rest. The
  *  pair is centred on the hub, so the whole board reads as one figure rather
- *  than as a card pushed against the right edge. */
-export const GROUP_X = 382;
+ *  than as a card pushed against the right edge. The panel edge leaves the
+ *  hub's out-pin a corridor wide enough for the wires to turn in: a curve
+ *  given no horizontal room reads as a kinked Z, not as a line. */
+export const GROUP_X = 398;
 export const GROUP_W = 212;
 /** Room between a panel's edge and the rows inside it. */
 export const GROUP_PAD = 6;
@@ -297,13 +299,15 @@ export function feederOutPort(
 /**
  * The wire between two pins.
  *
- * A horizontal-ease-then-vertical-ease-then-horizontal S: the shape node
- * editors draw between vertically offset cards, and the reason a fan of wires
- * out of one pin separates within the first few pixels instead of bunching
- * into a rope. Control points sit at fixed fractions of the run, so two wires
- * to cards at different heights cannot cross near their shared origin.
+ * A serpentine whose two controls sit on the far corners of the run: the first
+ * holds the arrival x at the departure y, the second holds the departure x at
+ * the arrival y. x therefore travels monotonically — vertical tangent exactly
+ * at the midpoint — and y follows a smoothstep, so the line leaves its pin
+ * horizontally, spends the middle of the run vertical, and lands horizontally
+ * on the other pin without a kink anywhere. Wires to rows at different heights
+ * stay nested (each keeps its own y band the whole way), so a fan out of one
+ * pin peels into strands instead of crossing itself.
  */
 export function nodePath(x1: number, y1: number, x2: number, y2: number): string {
-  const dx = x2 - x1;
-  return `M ${x1} ${y1} C ${x1 + dx * 0.4} ${y1}, ${x1 + dx * 0.6} ${y2}, ${x2} ${y2}`;
+  return `M ${x1} ${y1} C ${x2} ${y1}, ${x1} ${y2}, ${x2} ${y2}`;
 }
