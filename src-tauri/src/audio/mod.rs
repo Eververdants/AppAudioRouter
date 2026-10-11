@@ -5,6 +5,7 @@
 //! - Session enumeration (IAudioSessionEnumerator)
 //! - Per-app default device routing (IPolicyConfigVista)
 
+pub mod calibration;
 pub mod devices;
 pub mod duplication;
 pub mod levels;

@@ -6,10 +6,11 @@ import { DelayStepper } from '@/components/ui/DelayStepper';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+import { DelayCalibration } from '@/components/DelayCalibration';
 import { useTheme } from '@/hooks/useTheme';
 import { useLanguage } from '@/hooks/useLanguage';
 import { detectCarrierPair, matchesCarrier } from '@/lib/carrierDetect';
-import { DELAY_RANGE_OPTIONS, DELAY_STEP_OPTIONS, formatStep, rangeSeconds } from '@/lib/delay';
+import { DELAY_STEP_OPTIONS, formatStep } from '@/lib/delay';
 import { isEditableTarget } from '@/lib/productionGuards';
 import { openCarrierDownload } from '@/lib/invoke';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
@@ -45,22 +46,12 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
 }
 
 /** A stacked block: a title, an explanation, then whatever the setting owns. */
-function Block({
-  title,
-  desc,
-  children,
-}: {
-  title: string;
-  desc?: string;
-  children: ReactNode;
-}) {
+function Block({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
   return (
     <div className="border-b border-line py-3.5 last:border-b-0">
       <div className="text-[13px] text-text-primary">{title}</div>
       {desc && (
-        <div className="mt-1 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-          {desc}
-        </div>
+        <div className="mt-1 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">{desc}</div>
       )}
       <div className="mt-3">{children}</div>
     </div>
@@ -68,21 +59,13 @@ function Block({
 }
 
 /** A device row: name + the shared −/value/+ delay stepper. */
-function DelayRow({
-  deviceId,
-  name,
-  rangeMs,
-}: {
-  deviceId: string;
-  name: string;
-  rangeMs: number;
-}) {
+function DelayRow({ deviceId, name }: { deviceId: string; name: string }) {
   return (
     <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0">
       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={name}>
         {name}
       </span>
-      <DelayStepper deviceId={deviceId} name={name} rangeMs={rangeMs} />
+      <DelayStepper deviceId={deviceId} name={name} />
     </div>
   );
 }
@@ -198,32 +181,72 @@ type SettingsSection = 'appearance' | 'routing' | 'background' | 'delays' | 'lev
 /** The rail's glyphs, one per section. Drawn once and reused by the nav. */
 const SECTION_ICONS: Record<SettingsSection, ReactNode> = {
   appearance: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+    >
       <circle cx="12" cy="12" r="4" />
       <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
     </svg>
   ),
   routing: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   ),
   background: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 3v11" />
       <path d="M8 10.5 12 14.5 16 10.5" />
       <path d="M4 17.5h16" />
     </svg>
   ),
   delays: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+    >
       <circle cx="12" cy="12" r="9" />
       <polyline points="12 7 12 12 15.5 13.5" />
     </svg>
   ),
   levels: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+    >
       <line x1="4" y1="6" x2="20" y2="6" />
       <circle cx="9" cy="6" r="2" />
       <line x1="4" y1="12" x2="20" y2="12" />
@@ -233,7 +256,14 @@ const SECTION_ICONS: Record<SettingsSection, ReactNode> = {
     </svg>
   ),
   about: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+    >
       <circle cx="12" cy="12" r="9" />
       <path d="M12 16v-4M12 8h.01" />
     </svg>
@@ -263,8 +293,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
-  const delayRangeMs = useRouterStore((s) => s.delayRangeMs);
-  const setDelayRange = useRouterStore((s) => s.setDelayRange);
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const setDelayStep = useRouterStore((s) => s.setDelayStep);
   const sessions = useRouterStore((s) => s.sessions);
@@ -279,6 +307,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const captureDevices = useRouterStore((s) => s.captureDevices);
 
   const [section, setSection] = useState<SettingsSection>('appearance');
+  // The delay wizard; mounted over the page while it runs.
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
   // The section that is already on the paper when the page opens lands in
   // place; only a *change* of section plays the arrival. A ref rather than
   // state: it is read on the section's own mount, so it has to be a value that
@@ -312,10 +342,11 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     // capsule coordinate the same key the same way.
     const onKey = (e: KeyboardEvent) => {
       // Escape belongs to the control that has the focus first: the delay
-      // stepper's field, and the carrier dropdowns — a listbox that closes
+      // stepper's field, the carrier dropdowns — a listbox that closes
       // itself on Escape carries `data-owns-escape`, so the page stands down
-      // for it rather than taking the whole surface down with it.
-      if (isEditableTarget(e.target)) return;
+      // for it rather than taking the whole surface down with it. The delay
+      // wizard owns the key for its whole open life, the same bargain.
+      if (calibrationOpen || isEditableTarget(e.target)) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         onBack();
@@ -323,7 +354,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onBack]);
+  }, [onBack, calibrationOpen]);
 
   const SECTIONS: SettingsSection[] = [
     'appearance',
@@ -602,17 +633,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
             {section === 'delays' && (
               <>
-                <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
-                  <SegmentedControl
-                    layoutId="settings-delay-range"
-                    ariaLabel={t('settings.delayRange')}
-                    value={String(delayRangeMs)}
-                    onChange={(value) => void setDelayRange(Number(value))}
-                    options={DELAY_RANGE_OPTIONS.map((ms) => ({
-                      value: String(ms),
-                      label: `±${rangeSeconds(ms)}s`,
-                    }))}
-                  />
+                <Row title={t('settings.delayCalibrate')} desc={t('settings.delayCalibrateDesc')}>
+                  <button
+                    type="button"
+                    onClick={() => setCalibrationOpen(true)}
+                    disabled={devices.length < 2}
+                    className={ROW_BUTTON_CLASS}
+                  >
+                    {t('settings.delayCalibrateAction')}
+                  </button>
                 </Row>
                 <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
                   <SegmentedControl
@@ -638,12 +667,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   </p>
                 ) : (
                   devices.map((device) => (
-                    <DelayRow
-                      key={device.id}
-                      deviceId={device.id}
-                      name={device.name}
-                      rangeMs={delayRangeMs}
-                    />
+                    <DelayRow key={device.id} deviceId={device.id} name={device.name} />
                   ))
                 )}
               </>
@@ -697,6 +721,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           </motion.div>
         </div>
       </div>
+
+      {/* The delay wizard reads devices that are already on the page; it sits
+          above the paper like every other surface does. */}
+      {calibrationOpen && (
+        <DelayCalibration devices={devices} onClose={() => setCalibrationOpen(false)} />
+      )}
     </div>
   );
 }

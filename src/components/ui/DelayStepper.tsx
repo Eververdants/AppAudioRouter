@@ -11,18 +11,10 @@ import { useDelayValue } from '@/hooks/useDelayValue';
  * also stepped from the mirror's row in the board's tuning dock (`NodeStage`),
  * and both share the editing logic in `useDelayValue`.
  */
-export function DelayStepper({
-  deviceId,
-  name,
-  rangeMs,
-}: {
-  deviceId: string;
-  name: string;
-  rangeMs: number;
-}) {
+export function DelayStepper({ deviceId, name }: { deviceId: string; name: string }) {
   const { t } = useTranslation();
   const { committed, draft, setDraft, commit, nudge, cancel, stepMs, stepLabel, atMin, atMax } =
-    useDelayValue(deviceId, rangeMs);
+    useDelayValue(deviceId);
 
   return (
     <div className="flex flex-none items-center gap-1">
@@ -38,8 +30,6 @@ export function DelayStepper({
           type="number"
           inputMode="numeric"
           step={stepMs}
-          min={-rangeMs}
-          max={rangeMs}
           value={draft ?? String(committed)}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}

@@ -76,7 +76,7 @@ use windows::Win32::System::Threading::{
 use crate::audio::levels::SourceLevels;
 use crate::audio::AudioError;
 use crate::config::{
-    DelayConfig, PrimaryVolumeConfig, SourceVolumeConfig, VolumeConfig, DELAY_RANGE_MAX_MS,
+    DelayConfig, PrimaryVolumeConfig, SourceVolumeConfig, VolumeConfig, DELAY_MAX_MS,
 };
 
 /// Shared-mode stream buffer, in hundreds of nanoseconds (200 ms).
@@ -895,28 +895,6 @@ impl DuplicationManager {
         engines.values().any(|e| e.pid != pid && e.exe_name.eq(exe))
     }
 
-    /// Re-read every device's persisted delay. Needed after the configured
-    /// range changed, which may have clamped values that live engines are still
-    /// applying.
-    pub fn reload_delays(&self) {
-        for engine in self
-            .engines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-        {
-            engine.primary_delay_ms.store(
-                self.delays.get(&engine.primary_device_id),
-                Ordering::Relaxed,
-            );
-            for mirror in &engine.mirrors {
-                mirror
-                    .delay_ms
-                    .store(self.delays.get(&mirror.device_id), Ordering::Relaxed);
-            }
-        }
-    }
-
     /// Start duplicating `pid`'s audio to `mirror_device_ids`, replacing any
     /// engine already running for the process.
     ///
@@ -947,9 +925,10 @@ impl DuplicationManager {
         let sample = SampleFormat::parse(&format);
         // Ring must hold the worst case pipeline a configuration can ask for:
         // the base latency plus the largest spread between the earliest and the
-        // latest device, which two opposite extremes of the range can produce.
+        // latest device, which two opposite extremes of the hard bound can
+        // produce.
         let ring_capacity = sample_rate as usize
-            * (LATENCY_TARGET_MS + 2 * DELAY_RANGE_MAX_MS as usize + TRIM_SLACK_MS + 100)
+            * (LATENCY_TARGET_MS + 2 * DELAY_MAX_MS as usize + TRIM_SLACK_MS + 100)
             / 1000
             * block_align;
         let mirrors = mirror_device_ids
@@ -2216,7 +2195,10 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivateHandler_Impl {
 /// Returns `(raw format bytes, bytes per frame, samples per second)`. The
 /// engine's shared-mode format is the natural capture format for process
 /// loopback, and mirrors let WASAPI auto-convert it to their own mix format.
-fn default_mix_format() -> Result<(Vec<u8>, usize, u32), AudioError> {
+/// Shared with the calibration tone player, which initializes its render client
+/// against the same format so a stream takes the same conversion path no matter
+/// who is feeding the device.
+pub(crate) fn default_mix_format() -> Result<(Vec<u8>, usize, u32), AudioError> {
     let com_owned = crate::audio::init_com()?;
     let result = (|| -> Result<(Vec<u8>, usize, u32), AudioError> {
         let enumerator: IMMDeviceEnumerator = unsafe {

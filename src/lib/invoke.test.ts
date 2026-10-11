@@ -44,7 +44,7 @@ describe('invoke wrappers', () => {
     });
   });
 
-  it('sends the delay, volume and range edits with their values', async () => {
+  it('sends the delay and volume edits with their values', async () => {
     const seen: [string, Record<string, unknown>][] = [];
     mockIPC((cmd, args) => {
       seen.push([cmd, (args ?? {}) as Record<string, unknown>]);
@@ -52,18 +52,29 @@ describe('invoke wrappers', () => {
     });
 
     await api.setDeviceDelay('tv', -250);
-    await api.setDelayRange(2000);
     await api.setDeviceVolume('tv', 80);
     await api.setSourceVolume('music.exe', 150);
     await api.clearRoute('music.exe');
 
     expect(seen).toEqual([
       ['set_device_delay', { deviceId: 'tv', delayMs: -250 }],
-      ['set_delay_range', { rangeMs: 2000 }],
       ['set_device_volume', { deviceId: 'tv', percent: 80 }],
       ['set_source_volume', { exeName: 'music.exe', percent: 150 }],
       ['clear_route', { exeName: 'music.exe' }],
     ]);
+  });
+
+  it('asks for the calibration tone by its registered name', async () => {
+    const seen: string[] = [];
+    mockIPC((cmd) => {
+      seen.push(cmd);
+      return null;
+    });
+
+    await api.calibrationStart('speakers');
+    await api.calibrationCancel();
+
+    expect(seen).toEqual(['calibration_start', 'calibration_cancel']);
   });
 
   it('returns the values the backend answered with', async () => {
@@ -71,8 +82,6 @@ describe('invoke wrappers', () => {
       switch (cmd) {
         case 'get_device_delays':
           return [['tv', -250]];
-        case 'get_delay_range':
-          return 5000;
         case 'get_device_volumes':
           return [['tv', 80]];
         case 'get_source_volumes':
@@ -95,7 +104,6 @@ describe('invoke wrappers', () => {
     });
 
     await expect(api.getDeviceDelays()).resolves.toEqual([['tv', -250]]);
-    await expect(api.getDelayRange()).resolves.toBe(5000);
     await expect(api.getDeviceVolumes()).resolves.toEqual([['tv', 80]]);
     await expect(api.getSourceVolumes()).resolves.toEqual([['music.exe', 150]]);
     await expect(api.getRememberedRoutes()).resolves.toEqual([['music.exe', ['tv']]]);

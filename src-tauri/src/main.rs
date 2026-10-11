@@ -100,6 +100,8 @@ fn main() {
             // the assignment after this process is gone, and a program left
             // pinned ignores the device the user picks afterwards.
             app.manage(audio::routing::PinnedRoutes::new());
+            // The delay wizard's tone player: one run at a time, cancellable.
+            app.manage(audio::calibration::CalibrationState::default());
             // Whether this is a first run or an update, and therefore whether the
             // window should say something about assignments an older version may
             // have left behind.
@@ -145,8 +147,8 @@ fn main() {
             commands::get_active_duplications,
             commands::set_device_delay,
             commands::get_device_delays,
-            commands::get_delay_range,
-            commands::set_delay_range,
+            commands::calibration_start,
+            commands::calibration_cancel,
             commands::get_remembered_routes,
             commands::clear_route,
             commands::set_device_volume,

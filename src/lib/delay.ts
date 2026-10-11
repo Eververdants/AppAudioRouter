@@ -15,10 +15,22 @@ const DELAY_STEP_MAX_MS = 1000;
  * aar-language keys written by the boot script. */
 export const DELAY_STEP_STORAGE_KEY = 'aar-delay-step';
 
-/** Delay ranges (milliseconds, half-range) offered by the settings, and the
- * initial store value until the backend reports the persisted one. */
-export const DELAY_RANGE_OPTIONS = [1000, 2000, 5000, 10000] as const;
-export const DEFAULT_DELAY_RANGE_MS = 5000;
+/**
+ * Hard ceiling for one device's delay, in milliseconds, mirrored from Rust's
+ * `config::DELAY_MAX_MS` (the two are literals with nothing binding them —
+ * change one, change the other). There is no user-configurable range any
+ * more; this is only the rail the engine's ring buffers are sized to.
+ */
+export const DELAY_MAX_MS = 10_000;
+
+/**
+ * The pipeline depth every mirror holds between the capture tap and playback,
+ * in milliseconds — mirrored from `duplication.rs`'s `LATENCY_TARGET_MS`
+ * (two literals with nothing binding them; change one, change the other).
+ * The calibration wizard subtracts it: a copy's compensation is the measured
+ * latency difference minus this pipeline, which the copy would carry anyway.
+ */
+export const LATENCY_TARGET_MS = 100;
 
 /** Clamp a step to the accepted bounds, rounded to whole milliseconds. */
 export function clampStep(ms: number): number {
@@ -40,14 +52,12 @@ export function readDelayStep(): number {
   return DEFAULT_DELAY_STEP_MS;
 }
 
-/** Clamp a delay to the configured ± range, rounded to whole milliseconds. */
-export function clampDelay(ms: number, rangeMs: number): number {
-  // A range that is not a finite number (a malformed read, a NaN on the way
+/** Clamp a delay to whole milliseconds inside the hard bound. */
+export function clampDelay(ms: number): number {
+  // A value that is not a finite number (a malformed read, a NaN on the way
   // in) would clamp to NaN, which would then be written back and displayed.
-  // The store's pre-backend default is the sanest bound to fall back to.
-  const range = Number.isFinite(rangeMs) ? rangeMs : DEFAULT_DELAY_RANGE_MS;
   const rounded = Math.round(Number.isFinite(ms) ? ms : 0);
-  return Math.max(-range, Math.min(range, rounded));
+  return Math.max(-DELAY_MAX_MS, Math.min(DELAY_MAX_MS, rounded));
 }
 
 /**
@@ -69,20 +79,9 @@ export function formatDelaySigned(ms: number): string {
  * coarser or finer step lands on the current grid instead of keeping an odd
  * offset.
  */
-export function stepDelay(
-  ms: number,
-  direction: 1 | -1,
-  rangeMs: number,
-  stepMs: number,
-  times = 1,
-): number {
+export function stepDelay(ms: number, direction: 1 | -1, stepMs: number, times = 1): number {
   const snapped = Math.round(ms / stepMs) * stepMs;
-  return clampDelay(snapped + direction * stepMs * times, rangeMs);
-}
-
-/** Whole seconds, for labels that state the configured range. */
-export function rangeSeconds(rangeMs: number): number {
-  return Math.round(rangeMs / 1000);
+  return clampDelay(snapped + direction * stepMs * times);
 }
 
 /** Step size as a label: whole seconds read as seconds, anything else as ms. */

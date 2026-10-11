@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { clampDelay, formatStep, stepDelay } from '@/lib/delay';
+import { DELAY_MAX_MS, clampDelay, formatStep, stepDelay } from '@/lib/delay';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -10,7 +10,7 @@ import { useRouterStore } from '@/stores/routerStore';
  * (persist + notify the engine); the store applies the change optimistically
  * and rolls it back if the backend rejects it.
  */
-export function useDelayValue(deviceId: string, rangeMs: number) {
+export function useDelayValue(deviceId: string) {
   const committed = useRouterStore((s) => s.deviceDelays[deviceId] ?? 0);
   const stepMs = useRouterStore((s) => s.delayStepMs);
   const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);
@@ -29,7 +29,7 @@ export function useDelayValue(deviceId: string, rangeMs: number) {
     if (raw === null) return;
     const parsed = Number(raw);
     if (raw.trim() === '' || !Number.isFinite(parsed)) return;
-    void setDeviceDelayValue(deviceId, clampDelay(parsed, rangeMs));
+    void setDeviceDelayValue(deviceId, clampDelay(parsed));
   };
 
   /**
@@ -43,7 +43,7 @@ export function useDelayValue(deviceId: string, rangeMs: number) {
     // typed; step from that value so the click never discards the edit.
     const parsed = raw !== null && raw.trim() !== '' ? Number(raw) : Number.NaN;
     const base = Number.isFinite(parsed) ? parsed : committed;
-    void setDeviceDelayValue(deviceId, stepDelay(base, direction, rangeMs, stepMs, times));
+    void setDeviceDelayValue(deviceId, stepDelay(base, direction, stepMs, times));
   };
 
   /** Escape abandons the draft instead of committing it on blur. */
@@ -60,7 +60,7 @@ export function useDelayValue(deviceId: string, rangeMs: number) {
     cancel,
     stepMs,
     stepLabel: formatStep(stepMs),
-    atMin: committed <= -rangeMs,
-    atMax: committed >= rangeMs,
+    atMin: committed <= -DELAY_MAX_MS,
+    atMax: committed >= DELAY_MAX_MS,
   };
 }

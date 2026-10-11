@@ -191,8 +191,6 @@ function tauriBridge(initial: BridgeState): void {
         return state.delays;
       case 'set_device_delay':
         return null;
-      case 'get_delay_range':
-        return 5000;
       case 'get_device_volumes':
         return state.volumes;
       case 'set_device_volume':

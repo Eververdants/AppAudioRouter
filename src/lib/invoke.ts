@@ -91,19 +91,20 @@ export async function getDeviceDelays(): Promise<DeviceDelay[]> {
 }
 
 /** Set a device's delay compensation (ms, signed); live engines pick it up
- * instantly. Rejected when the magnitude exceeds the configured range. */
+ * instantly. Rejected when the magnitude exceeds the hard bound. */
 export async function setDeviceDelay(deviceId: string, delayMs: number): Promise<void> {
   await invoke('set_device_delay', { deviceId, delayMs });
 }
 
-/** Largest magnitude a delay may be set to, in milliseconds. */
-export async function getDelayRange(): Promise<number> {
-  return invoke<number>('get_delay_range');
+/** Play the delay wizard's test tone on one device: three short bursts, each
+ * bracketed by `calibration-tone` events. Resolves when the sequence is done. */
+export async function calibrationStart(deviceId: string): Promise<void> {
+  await invoke('calibration_start', { deviceId });
 }
 
-/** Set the delay range; values outside the new bound are clamped and applied. */
-export async function setDelayRange(rangeMs: number): Promise<void> {
-  await invoke('set_delay_range', { rangeMs });
+/** Ask the running calibration to stop; its start command rejects shortly after. */
+export async function calibrationCancel(): Promise<void> {
+  await invoke('calibration_cancel');
 }
 
 /** Set a device's volume (percent, 0–100), live engines pick it up instantly. */

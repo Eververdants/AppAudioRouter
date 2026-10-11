@@ -18,12 +18,10 @@ import type {
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import {
-  DEFAULT_DELAY_RANGE_MS,
   DELAY_STEP_STORAGE_KEY,
   clampDelay,
   clampStep,
   orderByDelay,
-  rangeSeconds,
   readDelayStep,
 } from '@/lib/delay';
 import { rgbaToDataUrl } from '@/lib/icons';
@@ -107,8 +105,6 @@ interface RouterState {
   defaultDeviceId: string | null;
   /** Per-device delay compensation in milliseconds (signed). */
   deviceDelays: Record<string, number>;
-  /** Largest magnitude a delay may be set to, in milliseconds. */
-  delayRangeMs: number;
   /** How much one −/+ click changes a delay, in milliseconds. A UI preference
    * (persisted to localStorage, like the theme), not an engine setting. */
   delayStepMs: number;
@@ -328,7 +324,6 @@ interface RouterState {
    * in one action, and re-read the values that wrote. */
   alignSourceLevels: () => Promise<void>;
   setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
-  setDelayRange: (rangeMs: number) => Promise<void>;
   setDelayStep: (stepMs: number) => void;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   /** One process began or stopped rendering audio. Display state for the
@@ -780,7 +775,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   deviceLatencyMs: {},
   defaultDeviceId: null,
   deviceDelays: {},
-  delayRangeMs: DEFAULT_DELAY_RANGE_MS,
   delayStepMs: readDelayStep(),
   deviceVolumes: {},
   primaryVolumes: {},
@@ -1948,15 +1942,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   loadDelaySettings: async () => {
     try {
-      const [delays, delayRangeMs] = await Promise.all([
-        api.getDeviceDelays(),
-        api.getDelayRange(),
-      ]);
+      const delays = await api.getDeviceDelays();
       const deviceDelays: Record<string, number> = {};
       for (const [deviceId, delayMs] of delays) {
         deviceDelays[deviceId] = delayMs;
       }
-      set({ deviceDelays, delayRangeMs });
+      set({ deviceDelays });
     } catch (e) {
       get().addLog(i18next.t('log.delaySettingsFailed', { error: String(e) }), 'error');
     }
@@ -2191,7 +2182,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   setDeviceDelayValue: async (deviceId, delayMs) => {
     const current = get().deviceDelays[deviceId] ?? 0;
-    const next = clampDelay(delayMs, get().delayRangeMs);
+    const next = clampDelay(delayMs);
     if (current === next) return;
     const device = get().devices.find((d) => d.id === deviceId);
     set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: next } }));
@@ -2219,33 +2210,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         return { deviceDelays };
       });
       get().addLog(i18next.t('log.delaySetFailed', { error: String(e) }), 'error');
-    }
-  },
-
-  setDelayRange: async (rangeMs) => {
-    const { delayRangeMs: previousRange, deviceDelays: previousDelays } = get();
-    if (previousRange === rangeMs) return;
-    // Lowering the range pulls the affected values down with it, matching what
-    // the backend does when it persists the new bound.
-    set((s) => {
-      const deviceDelays: Record<string, number> = {};
-      for (const [deviceId, delayMs] of Object.entries(s.deviceDelays)) {
-        const clamped = clampDelay(delayMs, rangeMs);
-        if (clamped !== 0) deviceDelays[deviceId] = clamped;
-      }
-      return { delayRangeMs: rangeMs, deviceDelays };
-    });
-    try {
-      await api.setDelayRange(rangeMs);
-      get().addLog(i18next.t('log.delayRangeSet', { n: rangeSeconds(rangeMs) }), 'info');
-      // Every delay in the group just moved, and with it the order a live route
-      // would land in and the pipeline each mirror is holding. Same rule as a
-      // single device's delay: the reading is only ever rebuilt at an event, and
-      // this is one of those events.
-      await get().reconcileActiveDuplications();
-    } catch (e) {
-      set({ delayRangeMs: previousRange, deviceDelays: previousDelays });
-      get().addLog(i18next.t('log.delayRangeSetFailed', { error: String(e) }), 'error');
     }
   },
 

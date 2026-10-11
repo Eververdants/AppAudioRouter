@@ -142,8 +142,6 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         return backend.delays;
       case 'set_device_delay':
         return null;
-      case 'get_delay_range':
-        return 5000;
       case 'get_device_volumes':
         return backend.volumes;
       case 'set_device_volume':
@@ -190,7 +188,6 @@ function reset(overrides: Partial<StoreState> = {}): void {
     engineGenerations: {},
     deviceLatencyMs: {},
     deviceDelays: {},
-    delayRangeMs: 5000,
     delayStepMs: 10,
     deviceVolumes: {},
     sourceVolumes: {},
@@ -406,7 +403,7 @@ describe('process and device selection', () => {
     expect(state().selectedDeviceIds).toEqual(['tv']);
   });
 
-  it('drops the device actually holding the seat, not the plan array\'s first entry', () => {
+  it("drops the device actually holding the seat, not the plan array's first entry", () => {
     installBackend();
     reset({
       devices: [SPEAKERS, TV, HEADPHONES],
@@ -913,15 +910,13 @@ describe('settings and log', () => {
     expect(state().logs[state().logs.length - 1]?.message).toBe('entry 259');
   });
 
-  it('clamps stored delays when the range is narrowed', async () => {
+  it('clamps a delay past the hard bound before storing it', async () => {
     installBackend();
-    reset({ deviceDelays: { tv: 4000, speakers: -4000 }, delayRangeMs: 5000 });
+    reset({ deviceDelays: {} });
 
-    await state().setDelayRange(2000);
+    await state().setDeviceDelayValue('tv', 99_999);
 
-    expect(state().delayRangeMs).toBe(2000);
-    expect(state().deviceDelays.tv).toBe(2000);
-    expect(state().deviceDelays.speakers).toBe(-2000);
+    expect(state().deviceDelays.tv).toBe(10_000);
   });
 
   it('persists the auto-remember switch', () => {

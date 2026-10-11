@@ -677,7 +677,8 @@ pub fn get_active_duplications(duplications: State<'_, DuplicationManager>) -> V
 ///
 /// Positive holds the device back; negative marks it as the earliest device in
 /// the group, which lifts the other mirrors instead. A magnitude beyond the
-/// configured range is rejected.
+/// hard bound (`config::DELAY_MAX_MS`, the rail the engine's ring buffers are
+/// sized to) is rejected.
 #[tauri::command]
 pub fn set_device_delay(
     device_id: String,
@@ -697,24 +698,42 @@ pub fn get_device_delays(delays: State<'_, Arc<DelayConfig>>) -> Vec<(String, i3
     delays.all()
 }
 
-/// Largest magnitude a delay may be set to, in milliseconds.
+/// Play the delay-wizard's test tone on one device: three short bursts with
+/// pauses between them, each burst bracketed by a `calibration-tone` event
+/// pair (`start` when its first frame is written, `end` when its last one is).
+///
+/// Resolves when the whole sequence has played, so the frontend treats the
+/// command's promise as "this device is measured" and the events as the
+/// timeline itself. Only one run exists at a time; `calibration_cancel` ends
+/// the current one within a backstop interval.
 #[tauri::command]
-pub fn get_delay_range(delays: State<'_, Arc<DelayConfig>>) -> u32 {
-    delays.range_ms()
+pub async fn calibration_start(
+    device_id: String,
+    app: AppHandle,
+    state: State<'_, audio::calibration::CalibrationState>,
+) -> Result<(), String> {
+    info!("cmd: calibration_start device={device_id}");
+    audio::routing::validate_device_id(&device_id).map_err(|e| e.to_string())?;
+    if !state.begin() {
+        return Err("a calibration run is already in progress".to_string());
+    }
+    let (guard, cancel) = state.worker_tokens();
+    tokio::task::spawn_blocking(move || {
+        // The guard hands the busy flag back on every exit, panics included.
+        let _guard = guard;
+        audio::calibration::play_test_tone(&device_id, &app, &cancel)
+    })
+    .await
+    .map_err(|e| format!("calibration worker failed: {e}"))?
+    .map_err(|e| e.to_string())
 }
 
-/// Set the delay range. Stored values outside the new bound are clamped, so
-/// live engines are refreshed as well.
+/// Ask the running calibration to stop. The start command resolves with an
+/// error shortly after; the frontend that called cancel simply ignores it.
 #[tauri::command]
-pub fn set_delay_range(
-    range_ms: u32,
-    delays: State<'_, Arc<DelayConfig>>,
-    duplications: State<'_, DuplicationManager>,
-) -> Result<(), String> {
-    info!("cmd: set_delay_range range=±{range_ms}ms");
-    delays.set_range_ms(range_ms)?;
-    duplications.reload_delays();
-    Ok(())
+pub fn calibration_cancel(state: State<'_, audio::calibration::CalibrationState>) {
+    info!("cmd: calibration_cancel");
+    state.cancel();
 }
 
 /// Set a device's volume (percent, 0–100) and push it to any live engine using
