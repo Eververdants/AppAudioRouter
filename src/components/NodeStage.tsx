@@ -10,7 +10,14 @@ import { useElementHeight } from '@/hooks/useElementHeight';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { DELAY_MAX_MS, clampDelay, formatDelaySigned, formatStep } from '@/lib/delay';
-import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_ROUTE, SPRING_TAP } from '@/lib/motion';
+import {
+  FADE,
+  MAIN_THREAD_TRANSFORM,
+  SPRING_GLIDE,
+  SPRING_ROUTE,
+  SPRING_TAP,
+  charSwapTransitions,
+} from '@/lib/motion';
 import { programEntryOf } from '@/lib/routes';
 import {
   BOARD_H,
@@ -184,6 +191,35 @@ export function NodeStage() {
   const pid = selectedPids[0];
   const session = sessions.find((s) => s.pid === pid);
   const name = session?.display_name ?? session?.exe_name;
+  // The hub card remounts on every programme switch (`key={session.pid}` on
+  // the button), which would reset a name swap held inside the card — the
+  // words would simply be there, animation dropped on the floor. Tracked one
+  // level up, where the switch is just a prop change, the remount instead
+  // carries the swap in: ghost and arrivals play on the fresh mount exactly
+  // as they would in place.
+  const hubName = clampHubName(name ?? '');
+  const [nameSwap, setNameSwap] = useState({ text: hubName, prev: null as string | null, key: 0 });
+  if (hubName !== nameSwap.text) {
+    setNameSwap({ text: hubName, prev: nameSwap.text, key: nameSwap.key + 1 });
+  }
+  // The tile swaps on the executable, not the name — a display_name can change
+  // under a running programme without the programme changing. The ghost tile's
+  // fallback letter reads the name this render is replacing (nameSwap still
+  // holds it here, both adjustments reading pre-update state), so a
+  // not-yet-loaded icon dissolves as a letter instead of a blank.
+  const exe = session?.exe_name ?? '';
+  const [iconSwap, setIconSwap] = useState<{
+    exe: string;
+    prev: { exeName: string; name: string } | null;
+    key: number;
+  }>({ exe, prev: null, key: 0 });
+  if (exe !== iconSwap.exe) {
+    setIconSwap({
+      exe,
+      prev: iconSwap.exe ? { exeName: iconSwap.exe, name: nameSwap.text || iconSwap.exe } : null,
+      key: iconSwap.key + 1,
+    });
+  }
   // The plan draws in its own order: the first device the user staged is the
   // primary, and the apply lands exactly this order — preview and fact are the
   // same sequence, so a delay value can never push another device onto the
@@ -644,26 +680,26 @@ export function NodeStage() {
                   className="pointer-events-none absolute inset-0 rounded-panel border border-accent"
                 />
               )}
+              {/* Balanced around the name: icon prefix + name slot + trailing
+                  ring total exactly the card's inner width (18 + 8 + 106 + 10
+                  + 16 = 158), so the slot's centre — and with it every name
+                  that swaps inside — sits on the card's centreline, the same
+                  axis as the status line below and the apply capsule above. */}
               <span className="flex items-center gap-2">
+                <ProcessIcon
+                  exeName={session.exe_name}
+                  name={name ?? session.exe_name}
+                  size={18}
+                  prev={iconSwap.prev}
+                  swapKey={iconSwap.key}
+                />
+                <CharSwapText text={hubName} prev={nameSwap.prev} swapKey={nameSwap.key} />
                 <Ring
                   tone={hasPlan || feedTargetStates.length > 0 ? 'main' : 'idle'}
                   size={16}
                   live={sounding && liveness}
+                  className="ml-0.5"
                 />
-                <ProcessIcon exeName={session.exe_name} name={name ?? session.exe_name} size={18} />
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={name ?? ''}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={FADE}
-                    transformTemplate={MAIN_THREAD_TRANSFORM}
-                    className="max-w-[110px] truncate text-[12.5px] font-bold text-text-primary"
-                  >
-                    {name}
-                  </motion.span>
-                </AnimatePresence>
               </span>
               <span className="text-[9.5px] text-text-muted">
                 {applying && (
@@ -1272,6 +1308,118 @@ function DeviceRow({
         </button>
       )}
     </motion.div>
+  );
+}
+
+/**
+ * The name slot is a fixed stage: the words swap inside it without ever
+ * moving the ring or the icon, and nothing on it may be clipped — the blur
+ * and the travel spill freely, so overflow is impossible by construction.
+ * Names longer than the slot are therefore capped in data, estimated per
+ * character width (fullwidth ≈ 1em at 12.5px, everything else ≈ 0.55em),
+ * with an ellipsis where the cut happened.
+ */
+const NAME_SLOT_PX = 106;
+const NAME_BUDGET_PX = 96;
+
+function clampHubName(name: string): string {
+  let w = 0;
+  const chars = Array.from(name);
+  for (let i = 0; i < chars.length; i++) {
+    const code = chars[i]!.codePointAt(0) ?? 0;
+    w += code > 0x2e7f ? 12.5 : 7;
+    if (w > NAME_BUDGET_PX) return `${chars.slice(0, i).join('')}…`;
+  }
+  return name;
+}
+
+/**
+ * The hub's programme name, swapping character by character when the programme
+ * changes. The old word dips for a beat, then lifts away up, smaller, fainter
+ * and blurring; the new word arrives from below and settles with a slight
+ * overshoot — anticipation before the move, follow-through after it
+ * (`charSwapTransitions` in lib/motion.ts owns the timings). Each character is
+ * its own box; the slot itself is fixed (`NAME_SLOT_PX`) and clips nothing, so
+ * both the blur and the travel stay whole — the slot's other occupant, the
+ * arriving word, owns the layout while the departing word rides over it as an
+ * absolutely positioned ghost sharing the slot's centre, so every name — long
+ * or short — lives at the same fixed position and the row never moves. A
+ * rapid re-selection cuts the previous ghost where it stands rather than
+ * queueing it.
+ *
+ * The swap itself lives in the parent (`nameSwap`) — the hub card remounts on
+ * every programme switch, and a swap held here would be reset by the very
+ * switch it describes. Held one level up, this component may mount fresh mid-
+ * swap and still play it: ghost and arrivals start from their keyframes either
+ * way. `swapKey === 0` is the board's first landing, which renders in place.
+ */
+function CharSwapText({
+  text,
+  prev,
+  swapKey,
+}: {
+  text: string;
+  prev: string | null;
+  swapKey: number;
+}) {
+  const chars = Array.from(text);
+  const prevChars = prev === null ? null : Array.from(prev);
+  const first = swapKey === 0;
+  return (
+    <span
+      className="relative inline-block h-[17px] text-[12.5px] font-bold leading-none text-text-primary"
+      style={{ width: NAME_SLOT_PX }}
+    >
+      <span className="flex h-full items-center justify-center">
+        {chars.map((ch, i) => {
+          const { enter } = charSwapTransitions(i, chars.length);
+          return (
+            <motion.span
+              key={`${swapKey}:${i}`}
+              initial={first ? false : { y: 9, scale: 0.9, opacity: 0, filter: 'blur(3px)' }}
+              animate={{
+                y: first ? 0 : [9, -2, 0],
+                scale: first ? 1 : [0.9, 1.03, 1],
+                opacity: first ? 1 : [0, 1, 1],
+                filter: first ? 'blur(0px)' : ['blur(3px)', 'blur(0.5px)', 'blur(0px)'],
+              }}
+              transition={enter}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
+              className="inline-block whitespace-pre leading-none"
+            >
+              {ch}
+            </motion.span>
+          );
+        })}
+      </span>
+      {prevChars !== null && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        >
+          {prevChars.map((ch, i) => {
+            const { exit } = charSwapTransitions(i, prevChars.length);
+            return (
+              <motion.span
+                key={`g:${swapKey}:${i}`}
+                initial={{ y: 0, scale: 1, opacity: 1, filter: 'blur(0px)' }}
+                animate={{
+                  y: [0, 2.5, -11],
+                  scale: [1, 0.985, 0.86],
+                  opacity: [1, 0.9, 0],
+                  filter: ['blur(0px)', 'blur(1.5px)', 'blur(3px)'],
+                }}
+                transition={exit}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
+                className="inline-block whitespace-pre leading-none"
+              >
+                {ch}
+              </motion.span>
+            );
+          })}
+        </span>
+      )}
+    </span>
   );
 }
 
