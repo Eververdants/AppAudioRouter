@@ -62,10 +62,10 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 
 ### Per-device fine-tuning
 
-- **Delay compensation** — a signed millisecond value per device to align a fast device with a slow one, for example wired speakers against a Bluetooth headset whose codec adds inherent latency. Range and step are configurable (±1/2/5/10 s; 1/10/50/100/1000 ms, 10 ms by default).
+- **Delay compensation** — a signed millisecond value per device to align a fast device with a slow one, for example wired speakers against a Bluetooth headset whose codec adds inherent latency. The step is configurable (1/10/50/100/1000 ms, 10 ms by default), and **Settings → Delay compensation → Calibrate** plays short tones on each device to measure how late you really hear it, then writes the values itself.
 - **Volume balance** — a 0–100 % value per device that attenuates that device relative to the loudest copy in the route, so a quiet headset and a loud speaker rig can be brought in line. The device Windows plays directly gets a volume of its own: it moves the program's session volume, and the copies are compensated for it automatically, so it changes the main path alone.
 - **Reported latency** — the software-side latency each device is actually playing at, measured from the running stream. It is a reading and not a setting, so it lives in the tooltip of the delay value rather than beside it: the cell holds the value you asked for, and the tooltip holds what you got.
-- **Stepped, not scraped** — each value moves with the `−` and `+` beside it: delay by the configured step, level by 5 %, both stopped at the ends of their range. They are buttons rather than drag surfaces because these two change what you are hearing, and resting a finger on a scroll wheel should not be able to move them.
+- **Stepped, not scraped** — each value moves with the `−` and `+` beside it: delay by the configured step up to ±10 s, level by 5 % between 0 and 100 %, both stopped at the ends. They are buttons rather than drag surfaces because these two change what you are hearing, and resting a finger on a scroll wheel should not be able to move them.
 - **Only where they can act** — click a copy's number badge and the strip below hands you its delay and its volume share; the main device's card offers a volume of its own (the program's session volume, compensated so the copies stay put) but no delay, because nothing of this app's sits on its path to hold back. A single-device route starts no engine, so its number is not a button at all and the strip offers no device panel — a greyed-out control that could never work would promise otherwise.
 
 ### Stays out of the way
@@ -134,7 +134,8 @@ Two speakers playing the same audio will not sound in sync if one of them is a B
 - **Positive holds that device back; negative marks it as the earliest device in the route**, which lifts the others instead.
 - **Software delay can only be added, never removed.** The earliest device of the group is therefore the reference: it is the one Windows plays directly, and every other device is held back by the difference. The relative difference you configure is reproduced exactly; the absolute value is normalised to the earliest device.
 - **The route is applied in delay order**, so the earliest device normally becomes the primary (the one Windows drives). Lowering a delay while a route is running simply shifts the whole group instead of glitching.
-- **Range and step are yours to set** in Settings → Delay compensation: ±1/2/5/10 s for the range, 1/10/50/100/1000 ms for the step (10 ms by default). Shrinking the range clamps stored values that no longer fit.
+- **The assistant measures it for you.** Settings → Delay compensation → **Calibrate…**: pick the device you want Windows to drive and the copies, then each device plays three short tones in turn — hold the button while you hear one, release when it stops. Only the *differences* between devices are used, so your own reaction time sits in every measurement equally and cancels; the device that sounded last becomes the alignment reference (it ends at 0, so it is also the one Windows will drive), and every other device receives its difference minus the 100 ms of pipeline a copy holds anyway. Nothing is guessed from the device's type, and if the result is still a hair off you can nudge it on the board's tuning strip.
+- **Step, and a ceiling.** The step is yours to set (1/10/50/100/1000 ms, 10 ms by default). There is no configurable range any more: a delay is held inside ±10 s, which is the width the engine's ring buffers are sized for.
 - **A delay needs something to delay.** It is realised by the mirrored copy, so it exists only when at least one further device receives a copy. Route a program to a single device and Windows plays it directly: the value is kept for when you add a second device, and the readout is dimmed with a note saying it is not applied — rather than showing a number that looks like it is doing something.
 
 ## Volume balancing explained
@@ -281,7 +282,7 @@ One thing, once. Windows stores a program's output device per executable and kee
 
 ### Can it fix the delay between a Bluetooth headset and wired speakers?
 
-Yes, that is what delay compensation is for. Measure or estimate how far behind the Bluetooth device is, then give the faster device that value as a positive delay (for example `+180 ms`). Positive values hold a device back; a negative value marks it as the earliest device in the route.
+Yes, that is what delay compensation is for, and the assistant in Settings can measure it rather than leave you to estimate: give the faster device the difference as a positive delay (the assistant writes `+180 ms` or whatever the tones say). Positive values hold a device back; a negative value marks it as the earliest device in the route.
 
 ### Why is my application not in the process list?
 
@@ -289,13 +290,13 @@ A program only shows up while it holds an active audio session, so start playbac
 
 ### Where are the settings stored?
 
-In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds and the configured range), `device-volumes.json` (device → percent), `primary-volumes.json` (executable → the program's primary volume, in percent), `source-volumes.json` (executable → level percent, which may be above 100), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
+In plain JSON files in the application data directory: `route-memory.json` (executable → device list), `device-delays.json` (device → milliseconds), `device-volumes.json` (device → percent), `primary-volumes.json` (executable → the program's primary volume, in percent), `source-volumes.json` (executable → level percent, which may be above 100), `app-settings.json` (whether the close button hides the window to the tray) and `install-state.json` (the version that last ran, which is how the app tells an update from a fresh install). Theme and language are browser-side preferences of the window itself, kept in its local storage. The one thing outside those files is the optional startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which is also what the "Start with Windows" switch reads back. Remembered routes are keyed by executable name, so they apply to the program wherever it is launched from.
 
 ### Can the delay calibrate itself automatically?
 
-Not the part that matters, and it is worth saying exactly why. Everything this app controls is already measured and shown: for each device you can see the pipeline the engine is holding for it plus the latency that endpoint reports for its own stream, live, as you change the delay. That is the half that used to be guesswork.
+Close enough that you rarely have to do it by hand. **Settings → Delay compensation → Calibrate…** plays three short tones on each device in turn and times when you actually hear them: hold the button while a tone sounds, release when it stops, and the presses that do not line up with a tone are dropped rather than averaged in. Because only the *difference* between two devices is ever used, everything the measurements share — your own reaction time above all — cancels, and the device that turned out slowest becomes the reference the others are held back against. Applying writes the numbers into the same delay settings the rest of the interface edits, so you can still nudge them afterwards.
 
-The other half is what a codec or a Bluetooth link adds after the audio leaves Windows, and a program cannot observe that from user mode — the only way to measure it is to play a tone out of each device and record the room with a **microphone**, then line the recordings up. This app does not ask for your microphone and does not guess at what it cannot hear, so the delay you set stays yours to place by ear. The numbers on screen are what make that quick rather than blind.
+What it cannot produce is an absolute figure for one device on its own, and that is not a gap: an absolute number would have to contain the very reaction time that cancels out of a difference. It also measures with the speakers playing into the room, so whatever you can hear — the Bluetooth codec, the endpoint pipeline, the hardware's own buffering — is in the number.
 
 ### Can it give me more channels than a virtual-cable mixer?
 
@@ -343,6 +344,7 @@ No. The routing mechanism is built on Windows Core Audio, so the app is Windows-
 - Remembered routes are matched on executable name, not on a path or a PID.
 - Delay compensation can only *add* latency. The earliest device of the group is the alignment reference and cannot be pulled earlier — that is why routing is applied in delay order.
 - A mirrored copy is buffered for stability (about 100 ms of pipeline latency) so that all mirrors play the same sample at the same moment. Alignment between mirrored devices is exact; the offset to the primary device, which Windows plays natively, is inherent to capturing and re-rendering the stream.
+- Calibration times your own presses against the tones each device plays, so it measures the room you are actually listening in and is only as good as your timing. A delay is held inside ±10 s: a value beyond that is refused rather than silently clamped, because that width is what the engine's buffers are sized for.
 - Volume can only attenuate, so the loudest device in the group is the reference and cannot be pushed below the level the application produced on it.
 - Delay and volume act on mirrored copies only, so neither does anything in a single-device route; the values are kept for when you add a second device.
 - Routes for system-critical processes are refused rather than half-applied.
