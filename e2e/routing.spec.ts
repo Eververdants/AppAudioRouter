@@ -242,22 +242,20 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
   expect((await callsFor(page, 'apply_route'))[0]?.args.deviceIds).toEqual(['speakers', 'tv']);
 });
 
-test('the board draws the primary the delay order will produce', async ({ page }) => {
+test("stepping a copy's delay never moves the primary seat", async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
   await addDevice(page, 'TV');
   await addDevice(page, 'Speakers');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
 
-  // Stepping the copy earlier than the primary takes the primary's seat on the
-  // spot, before the hub is pressed: the route goes out in delay order, so the
-  // board would be lying if it kept the word on whoever was picked first. The
-  // strip moves with the role — the device the system plays directly has no
-  // copy's controls to offer.
+  // The delay is the copy's compensation, not a vote on the seat: stepping it
+  // earlier than the primary holds the sound back, and the seat stays where
+  // the user put it. The strip stays on the copy — the role did not change.
   await tuneButton(page, 'Speakers').click();
   await tunerStrip(page).getByRole('button', { name: '10 ms earlier' }).click();
-  await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
-  await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
+  await expect(deviceRowShell(page, 'TV')).toContainText('Main');
+  await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
 });
 
 test('picking the same app again throws the picks away and sends nothing', async ({ page }) => {

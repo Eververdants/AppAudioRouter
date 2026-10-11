@@ -5,7 +5,6 @@ import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
-import { orderByDelay } from '@/lib/delay';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import { alreadyApplied } from '@/lib/stage';
 import { feedLiveness, useRouterStore } from '@/stores/routerStore';
@@ -115,7 +114,6 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
-  const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const feeds = useRouterStore((s) => s.feeds);
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
   const selectProcess = useRouterStore((s) => s.selectProcess);
@@ -184,7 +182,8 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
 
   // Changes staged on the board that have not landed: the one thing this page
   // cannot show, because the page reports what is happening and those are not.
-  const staged = orderByDelay(selectedDeviceIds, deviceDelays);
+  // The plan's own order — the same one the apply will land.
+  const staged = selectedDeviceIds;
   const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routesByPid);
 
   /** The word a chip wears, which for a feed is its own three-state reading. */

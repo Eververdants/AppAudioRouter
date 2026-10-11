@@ -9,7 +9,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useElementHeight } from '@/hooks/useElementHeight';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
-import { DELAY_MAX_MS, clampDelay, formatDelaySigned, formatStep, orderByDelay } from '@/lib/delay';
+import { DELAY_MAX_MS, clampDelay, formatDelaySigned, formatStep } from '@/lib/delay';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_ROUTE, SPRING_TAP } from '@/lib/motion';
 import { programEntryOf } from '@/lib/routes';
 import {
@@ -184,7 +184,11 @@ export function NodeStage() {
   const pid = selectedPids[0];
   const session = sessions.find((s) => s.pid === pid);
   const name = session?.display_name ?? session?.exe_name;
-  const drawn = orderByDelay(selectedDeviceIds, deviceDelays);
+  // The plan draws in its own order: the first device the user staged is the
+  // primary, and the apply lands exactly this order — preview and fact are the
+  // same sequence, so a delay value can never push another device onto the
+  // seat behind the user's back.
+  const drawn = selectedDeviceIds;
   const answered = alreadyApplied(drawn, selectedPids, routesByPid);
   const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
   const sounding = pid !== undefined && soundingPids[pid] === true;
@@ -409,8 +413,6 @@ export function NodeStage() {
 
   const lit = (key: string): boolean =>
     hoverKey === 'hub' && !key.startsWith('feeder:') ? true : hoverKey === key;
-
-  const primaryDelay = primaryDeviceId !== undefined ? (deviceDelays[primaryDeviceId] ?? 0) : 0;
 
   /**
    * Add or remove one device row.
@@ -714,7 +716,6 @@ export function NodeStage() {
                 index={0}
                 top={rowContentY(0) - ROW_H / 2}
                 isPrimary
-                canPromote={false}
                 delay={0}
                 badgeIsButton={badgeIsButton}
                 removable={false}
@@ -756,7 +757,6 @@ export function NodeStage() {
           >
             {copyDeviceIds.map((deviceId, offset) => {
               const delay = deviceDelays[deviceId] ?? 0;
-              const canPromote = drawn.length > 1 && delay <= primaryDelay;
               return (
                 <DeviceRow
                   key={deviceId}
@@ -765,7 +765,6 @@ export function NodeStage() {
                   index={offset + 1}
                   top={rowContentY(offset) - ROW_H / 2}
                   isPrimary={false}
-                  canPromote={canPromote}
                   delay={delay}
                   badgeIsButton={badgeIsButton}
                   removable
@@ -911,18 +910,6 @@ export function NodeStage() {
                     {devices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
                     {devices.map((d) => {
                       const picked = d.id === primaryDeviceId;
-                      // The devices that would stay if this one took the seat:
-                      // the plan minus the picked device when it is on the plan,
-                      // otherwise minus the primary it would replace — exactly the
-                      // membership `setPrimaryDevice` lands on.
-                      const kept = drawn.includes(d.id)
-                        ? drawn.filter((id) => id !== d.id)
-                        : drawn.slice(1);
-                      const minOther =
-                        kept.length > 0
-                          ? Math.min(...kept.map((id) => deviceDelays[id] ?? 0))
-                          : Number.POSITIVE_INFINITY;
-                      const blocked = !picked && (deviceDelays[d.id] ?? 0) > minOther;
                       return (
                         <motion.button
                           key={d.id}
@@ -931,17 +918,11 @@ export function NodeStage() {
                           variants={PICKER_ITEM_VARIANTS}
                           transformTemplate={MAIN_THREAD_TRANSFORM}
                           aria-current={picked ? 'true' : undefined}
-                          disabled={blocked}
-                          title={blocked ? t('stage.promoteBlockedTitle') : undefined}
                           onClick={() => {
                             setPrimaryDevice(d.id);
                             setPrimaryPickerOpen(false);
                           }}
-                          className={`pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] ${
-                            blocked
-                              ? 'cursor-not-allowed text-text-muted opacity-60'
-                              : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                          }`}
+                          className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary outline-none hover:bg-surface-hover hover:text-text-primary"
                         >
                           <span
                             className={`flex h-3 w-3 flex-none items-center justify-center text-[10px] ${
@@ -952,14 +933,6 @@ export function NodeStage() {
                             ✓
                           </span>
                           <span className="min-w-0 flex-1 truncate">{d.name}</span>
-                          {/* A row that cannot take the seat says why on the row
-                            itself: its compensation is the reason, so the number
-                            is shown rather than hidden behind a tooltip. */}
-                          {blocked && (
-                            <span className="flex-none font-mono text-[10px] tabular-nums text-text-muted">
-                              {formatDelaySigned(deviceDelays[d.id] ?? 0)} ms
-                            </span>
-                          )}
                         </motion.button>
                       );
                     })}
@@ -1133,7 +1106,6 @@ function DeviceRow({
   index,
   top,
   isPrimary,
-  canPromote,
   delay,
   badgeIsButton,
   removable,
@@ -1150,7 +1122,6 @@ function DeviceRow({
   index: number;
   top: number;
   isPrimary: boolean;
-  canPromote: boolean;
   delay: number;
   badgeIsButton: boolean;
   removable: boolean;
@@ -1254,7 +1225,7 @@ function DeviceRow({
                 <span className="hidden group-hover/copy:inline">{t('stage.changePrimary')}</span>
               </button>
             )
-          ) : canPromote ? (
+          ) : (
             // The role word itself is the switch: it reads "Copy" until the
             // pointer or the keyboard arrives, then it offers the move. The
             // accessible name is the action, so a screen reader hears the
@@ -1272,13 +1243,6 @@ function DeviceRow({
               <span className="group-hover/copy:hidden">{roleWord}</span>
               <span className="hidden group-hover/copy:inline">{t('stage.promote')}</span>
             </button>
-          ) : (
-            <span
-              title={t('stage.promoteBlockedTitle')}
-              className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.mirror}`}
-            >
-              {roleWord}
-            </span>
           )}
           {!isPrimary && delay !== 0 && (
             <span className="font-mono text-[9.5px] tabular-nums text-text-muted">

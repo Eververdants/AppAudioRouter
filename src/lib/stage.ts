@@ -33,9 +33,9 @@ export type BoardRole = 'primary' | 'mirror' | 'feed';
  * remembered route starts in. Asking there — lighting an apply affordance,
  * showing a sentence — would be asking someone to confirm what they can hear.
  *
- * Both sides are read in the order the route goes out in (`orderByDelay`), the
- * order the board draws and the store keeps live routes in, so the comparison
- * is like with like.
+ * Both sides are read in the order the route goes out in — the plan's own
+ * order, which is what the board draws and the store keeps live routes in — so
+ * the comparison is like with like.
  */
 export function alreadyApplied(
   staged: string[],

@@ -21,7 +21,6 @@ import {
   DELAY_STEP_STORAGE_KEY,
   clampDelay,
   clampStep,
-  orderByDelay,
   readDelayStep,
 } from '@/lib/delay';
 import { rgbaToDataUrl } from '@/lib/icons';
@@ -72,11 +71,10 @@ interface RouterState {
   sessions: AudioSession[];
   /** Processes targeted by the current selection (Ctrl+click to multi-select). */
   selectedPids: number[];
-  /** Devices targeted by the current selection — the plan's membership, in the
-   * order the user built it. The route itself applies in delay order (see
-   * `orderByDelay`), and that is the order the stage draws; among devices whose
-   * delays tie this array's order is what stands, which is exactly the freedom
-   * `promoteDevice` spends. */
+  /** Devices targeted by the current selection — the plan, in the order the
+   * user built it. That order is the order the stage draws and the order the
+   * route applies in: the first device is the one Windows plays natively, and
+   * the delay values are the copies' compensation, never a vote on the seat. */
   selectedDeviceIds: string[];
   /**
    * Whether `selectedDeviceIds` is still the app's own guess (the process's
@@ -244,24 +242,22 @@ interface RouterState {
    * verb. It never *replaces* anything, which is the point: the picker used to
    * go through `toggleDeviceSelection`, whose `replacesGuess` rule quietly
    * swapped the single-device guess out, so "add a second output" could leave
-   * the output you had already picked gone. Where the new device lands after the
-   * apply is still the delay order's to decide — a device compensated earlier
-   * than the rest becomes the one Windows plays directly, exactly as it would
-   * have as a row. */
+   * the output you had already picked gone. The appended device joins as a
+   * copy; who sits first is the plan order's to say, and the seat only moves
+   * when the user asks for it. */
   appendDeviceTarget: (deviceId: string) => void;
   /** Make `deviceId` the seat the system plays directly. A device already in
    * the plan is moved to the front (its role swaps with the old primary and the
    * plan keeps every member); one that is not replaces the primary, leaving the
-   * copies the plan already had. A request the delay order cannot honour — the
-   * device's compensation is larger than the rest, and software delay only holds
-   * sound back — is refused rather than reordered into an order the apply would
-   * not produce. A plan edit and nothing else, so it writes no log, exactly like
-   * `promoteDevice`: the role words on the board are the feedback. */
+   * copies the plan already had. A device already carrying a compensation may
+   * take the seat — the values are the copies' business, and recalibrating
+   * after the move is the wizard's job. A plan edit and nothing else, so it
+   * writes no log, exactly like `promoteDevice`: the role words on the board
+   * are the feedback. */
   setPrimaryDevice: (deviceId: string) => void;
   /** Move one staged device to the front of the plan — the seat the system
    * plays directly. A reorder of the plan and nothing else: membership belongs
-   * to the disc toggle, no route moves until Apply, and the stage offers the
-   * seat only where the apply's delay order would let the move stand. */
+   * to the disc toggle, and no route moves until Apply. */
   promoteDevice: (deviceId: string) => void;
   toggleAutoRemember: () => void;
   /** Read the close-to-tray preference and the startup registry entry. */
@@ -1036,34 +1032,22 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   setPrimaryDevice: (deviceId) => {
-    const { selectedDeviceIds, deviceDelays, devices } = get();
+    const { selectedDeviceIds, devices } = get();
     if (!selectedDeviceIds.includes(deviceId) && !devices.some((d) => d.id === deviceId)) return;
-    // The seat belongs to whichever device the apply's own delay order puts
-    // first — that is the card the board wears as the primary. So promoting a
-    // device that already holds it is not a change, and the comparison has to
-    // be made against the ordered plan rather than the raw one: with delays set,
-    // those two disagree by design.
-    const order = orderByDelay(selectedDeviceIds, deviceDelays);
-    if (order[0] === deviceId) return;
+    // The seat is the plan's first entry: the board draws the plan in its own
+    // order and the apply lands exactly that order, so promoting a device that
+    // already holds it is not a change.
+    if (selectedDeviceIds[0] === deviceId) return;
     // Who stays when the picked device takes the seat:
     // - already on the plan: everyone but itself (roles swap, membership kept);
-    // - from outside: everyone but **the device currently holding the seat** —
-    //   the same membership the board's picker offers, so a row the picker lets
-    //   you press is never a row this refuses. Taking the plan's first element
-    //   instead would drop a different device whenever the delay order and the
-    //   plan's own order disagree.
+    // - from outside: everyone but the device currently holding the seat — the
+    //   same membership the board's picker offers, so a row the picker lets you
+    //   press is never a row this refuses. A device already carrying a delay
+    //   compensation may take the seat: the values are the copies' business,
+    //   and recalibrating after the move is the wizard's job.
     const kept = selectedDeviceIds.includes(deviceId)
       ? selectedDeviceIds.filter((id) => id !== deviceId)
-      : selectedDeviceIds.filter((id) => id !== order[0]);
-    // Software delay can only hold sound back, so a device whose compensation is
-    // larger than every remaining device's could never be the one Windows plays
-    // directly: the request cannot be honoured, and the plan is left alone
-    // rather than reordered into an order the apply would not produce.
-    const minOther =
-      kept.length > 0
-        ? Math.min(...kept.map((id) => deviceDelays[id] ?? 0))
-        : Number.POSITIVE_INFINITY;
-    if ((deviceDelays[deviceId] ?? 0) > minOther) return;
+      : selectedDeviceIds.slice(1);
     set({ selectedDeviceIds: [deviceId, ...kept], deviceSelectionPrefilled: false });
   },
 
@@ -1114,7 +1098,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       rememberedRoutes,
       routedPids,
       devices,
-      deviceDelays,
       sessions,
     } = get();
     if (!autoRemember || rememberedRoutes.length === 0) return;
@@ -1129,10 +1112,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
     const results = await Promise.allSettled(
       targets.map(async (target) => {
-        // Delay order, exactly as a manual route applies it: the earliest device
-        // is the one the OS plays natively and the reference every copy is held
-        // back from. Not re-remembered — it came out of the memory.
-        const ordered = orderByDelay(target.deviceIds, deviceDelays);
+        // The snapshot holds the order the user last landed, primary first —
+        // it replays as is. Not re-remembered — it came out of the memory.
+        const ordered = [...target.deviceIds];
         const generation = await api.applyRoute(target.pid, target.exeName, ordered, false);
         return { target, ordered, generation };
       }),
@@ -1551,10 +1533,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.someProcessesGone', { n: gone }), 'info');
     }
 
-    // Apply in delay order so the earliest device is the one the OS plays
-    // natively; the selection is reordered along with it, which is what the
-    // badges on the stage show.
-    const ordered = orderByDelay(selectedDeviceIds, get().deviceDelays);
+    // Apply in the plan's own order: the first device the user staged is the
+    // one Windows plays natively, and the board previews exactly this order.
+    // Delay values are the copies' compensation, not a vote on the seat —
+    // reordering here would seat a device the user never picked (with
+    // calibrated values the baseline sits at 0 and would always win it).
+    const ordered = [...selectedDeviceIds];
     const deviceNames = ordered.map((id) => get().devices.find((d) => d.id === id)?.name ?? id);
     const primary = deviceNames[0];
     const extra = ordered.length - 1;
@@ -1728,10 +1712,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           }
           continue;
         }
-        // Ordered by delay like every other path that starts an engine: the
-        // earliest device has to become the one Windows plays, or a delay the
-        // user set on the old primary is silently not applied at all.
-        const ordered = orderByDelay(previous, get().deviceDelays);
+        // The snapshot holds the order the user last landed, primary first —
+        // it replays as is, the same promise the restore makes.
+        const ordered = [...previous];
         // `remember` mirrors what the apply did, because that is what puts the
         // memory back: with it false the old device list would never be written
         // and the memory would keep naming the route being undone. The apply

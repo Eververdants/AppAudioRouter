@@ -354,25 +354,23 @@ describe('process and device selection', () => {
     expect(state().selectedDeviceIds).toEqual(['headphones', 'tv']);
   });
 
-  it('is a no-op when the delay order already plays the picked device first', () => {
+  it("is a no-op when the picked device already holds the plan's first seat", () => {
     installBackend();
     reset({
       devices: [SPEAKERS, TV],
       sessions: [MUSIC],
-      // The plan names the speakers first, but the TV's delay is endless, so the
-      // apply's own order puts the speakers first anyway. Asking for the
-      // speakers is asking for what is already true.
+      // The plan's first entry is the seat, whatever the delay values say.
       selectedDeviceIds: ['tv', 'speakers'],
       deviceDelays: { tv: 100, speakers: 0 },
       deviceSelectionPrefilled: false,
     });
 
-    state().setPrimaryDevice('speakers');
+    state().setPrimaryDevice('tv');
 
     expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
   });
 
-  it('refuses a device the delay order could never seat first', () => {
+  it('seats a device that carries a larger compensation than the rest', () => {
     installBackend();
     reset({
       devices: [SPEAKERS, TV, HEADPHONES],
@@ -382,16 +380,16 @@ describe('process and device selection', () => {
       deviceSelectionPrefilled: false,
     });
 
-    // Software delay can only hold sound back, so a device compensated later
-    // than everything it would lead cannot be the one Windows plays directly;
-    // the plan is left alone rather than reordered into an order the apply
-    // would not produce.
+    // The delay values are the copies' compensation, not a vote on the seat:
+    // a move the user asks for lands as asked, and recalibrating after it is
+    // the wizard's job. From outside the plan it replaces the seat holder and
+    // keeps the copies; from inside, roles swap and membership is kept.
     state().setPrimaryDevice('headphones');
-    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+    expect(state().selectedDeviceIds).toEqual(['headphones', 'tv']);
 
-    // ...and the same rule applies inside the plan.
+    // ...and the same freedom inside the plan.
     state().setPrimaryDevice('tv');
-    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+    expect(state().selectedDeviceIds).toEqual(['tv', 'headphones']);
   });
 
   it('adds a first device when nothing is staged', () => {
@@ -403,16 +401,14 @@ describe('process and device selection', () => {
     expect(state().selectedDeviceIds).toEqual(['tv']);
   });
 
-  it("drops the device actually holding the seat, not the plan array's first entry", () => {
+  it('replaces the plan member actually holding the seat', () => {
     installBackend();
     reset({
       devices: [SPEAKERS, TV, HEADPHONES],
       sessions: [MUSIC],
-      // The plan names the TV first, but its delay is endless, so the speakers
-      // hold the seat. Picking an outside device replaces the device Windows is
-      // playing — the speakers — not whichever entry the array happens to start
-      // with, or the board's picker (which reads the same ordered plan) and this
-      // store would disagree about whether the request is even allowed.
+      // The plan's first entry holds the seat — the TV here — so picking an
+      // outside device replaces the TV, not some other entry, and the copies
+      // the plan already had stay exactly as they were.
       selectedDeviceIds: ['tv', 'speakers'],
       deviceDelays: { tv: 100, speakers: 0, headphones: 50 },
       deviceSelectionPrefilled: false,
@@ -420,7 +416,7 @@ describe('process and device selection', () => {
 
     state().setPrimaryDevice('headphones');
 
-    expect(state().selectedDeviceIds).toEqual(['headphones', 'tv']);
+    expect(state().selectedDeviceIds).toEqual(['headphones', 'speakers']);
   });
 
   it('keeps the shared targets when a process is added to the selection', () => {
@@ -466,14 +462,15 @@ describe('process and device selection', () => {
 });
 
 describe('applyRoute', () => {
-  it('routes in delay order, remembers it, and offers the way back', async () => {
+  it('routes in the plan order, remembers it, and offers the way back', async () => {
     const backend = installBackend();
     reset({
       devices: [SPEAKERS, TV],
       sessions: [MUSIC],
       selectedPids: [1001],
       selectedDeviceIds: ['speakers', 'tv'],
-      // The TV is 30 ms early, so it becomes the device the OS plays natively.
+      // A delay on the TV does not move the seat: the plan's first device is
+      // the one the OS plays natively, whatever the copies are compensated by.
       deviceDelays: { tv: -30 },
       autoRemember: true,
     });
@@ -484,17 +481,17 @@ describe('applyRoute', () => {
     expect(apply?.args).toMatchObject({
       pid: 1001,
       exeName: 'music.exe',
-      deviceIds: ['tv', 'speakers'],
+      deviceIds: ['speakers', 'tv'],
       remember: true,
     });
-    expect(state().routedPids[1001]).toEqual(['tv', 'speakers']);
+    expect(state().routedPids[1001]).toEqual(['speakers', 'tv']);
     expect(state().engineGenerations[1001]).toBe(1);
     expect(state().rememberedRoutes).toEqual([
-      { exeName: 'music.exe', deviceIds: ['tv', 'speakers'] },
+      { exeName: 'music.exe', deviceIds: ['speakers', 'tv'] },
     ]);
     expect(state().undoSnapshot).toMatchObject({
       remembered: true,
-      deviceName: 'TV',
+      deviceName: 'Speakers',
       deviceCount: 2,
       entries: [{ pid: 1001, exeName: 'music.exe', previous: null }],
     });
