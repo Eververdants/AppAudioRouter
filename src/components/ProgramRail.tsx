@@ -160,40 +160,55 @@ export function ProgramRail() {
         </div>
       </div>
 
-      {sessions.length > 0 && (
-        <div className="relative flex-none px-3 pb-2">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            aria-hidden="true"
-            className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-text-muted"
+      {/* The search box folds itself away when there is nothing to search:
+          height and opacity together, so the rows below slide up into the room
+          it gives back instead of the list jumping under a popped-in field. */}
+      <AnimatePresence initial={false}>
+        {sessions.length > 0 && (
+          <motion.div
+            key="rail-search"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={SPRING_GLIDE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+            className="flex-none overflow-hidden"
           >
-            <circle cx="11" cy="11" r="7" />
-            <line x1="20" y1="20" x2="16.5" y2="16.5" />
-          </svg>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              // Escape clears and returns the focus to nowhere in particular,
-              // matching how search boxes behave everywhere else.
-              if (e.key === 'Escape') {
-                setQuery('');
-                e.currentTarget.blur();
-              }
-            }}
-            placeholder={t('rail.search')}
-            aria-label={t('rail.search')}
-            className="w-full rounded-full border border-transparent bg-transparent py-2 pl-8 pr-3 text-[12px] text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-line focus:bg-surface"
-          />
-        </div>
-      )}
+            <div className="relative px-3 pb-2">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                aria-hidden="true"
+                className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-text-muted"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <line x1="20" y1="20" x2="16.5" y2="16.5" />
+              </svg>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Escape clears and returns the focus to nowhere in particular,
+                  // matching how search boxes behave everywhere else.
+                  if (e.key === 'Escape') {
+                    setQuery('');
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder={t('rail.search')}
+                aria-label={t('rail.search')}
+                className="w-full rounded-full border border-transparent bg-transparent py-2 pl-8 pr-3 text-[12px] text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-line focus:bg-surface"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <motion.div
         initial={{ opacity: 0 }}

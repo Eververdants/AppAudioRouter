@@ -277,18 +277,32 @@ export default function App() {
                   { id: 'activity', label: t('tabs.activity') },
                 ]}
               />
-              {tab === 'router' ? (
-                <>
-                  <NodeStage />
-                  {/* Every live route at once, each with its own way out —
-                      stop only; starting belongs to the hub. */}
-                  <RoutedCapsule />
-                </>
-              ) : tab === 'briefing' ? (
-                <BriefingPage onOpenBoard={() => setTab('router')} />
-              ) : (
-                <LogPanel />
-              )}
+              {/*
+                  The tab's content arrives on the same entrance-only spring the
+                  top-level views and the settings sections ride: keyed by the
+                  tab so a switch replays it, and no exit — the outgoing view
+                  unmounts at once, which keeps the swap stuck-free. */}
+              <motion.div
+                key={tab}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={SPRING_GLIDE}
+                transformTemplate={MAIN_THREAD_TRANSFORM}
+                className="flex min-h-0 flex-1 flex-col"
+              >
+                {tab === 'router' ? (
+                  <>
+                    <NodeStage />
+                    {/* Every live route at once, each with its own way out —
+                        stop only; starting belongs to the hub. */}
+                    <RoutedCapsule />
+                  </>
+                ) : tab === 'briefing' ? (
+                  <BriefingPage onOpenBoard={() => setTab('router')} />
+                ) : (
+                  <LogPanel />
+                )}
+              </motion.div>
             </main>
           </motion.div>
         ) : (

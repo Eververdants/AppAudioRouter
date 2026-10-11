@@ -686,9 +686,15 @@ export function NodeStage() {
           )}
 
           {/* The level dial rides under the hub, exactly where the ring stage
-              kept it: multi-device routes only, program-scoped. */}
+              kept it: multi-device routes only, program-scoped. It rises the
+              few pixels it sits below the hub on the way in — an arrival, not
+              a pop. */}
           {session !== undefined && drawn.length > 1 && (
-            <div
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={SPRING_GLIDE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
               className="absolute flex justify-center"
               style={{ left: HUB_X - 40, top: hubY + HUB_H + 12, width: HUB_W + 80 }}
             >
@@ -696,7 +702,7 @@ export function NodeStage() {
                 exeName={session.exe_name}
                 displayName={session.display_name ?? undefined}
               />
-            </div>
+            </motion.div>
           )}
 
           {/* The primary device, alone in the first panel: 01 is the endpoint

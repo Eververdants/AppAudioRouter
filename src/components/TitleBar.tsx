@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import appIcon from '@/assets/app-icon.png';
+import { FADE, MAIN_THREAD_TRANSFORM } from '@/lib/motion';
 import { useRouterStore } from '@/stores/routerStore';
 import {
   closeWindow,
@@ -158,12 +160,23 @@ export function TitleBar({
       <div className="flex items-center">
         {/* Reference information, like the version beside it: read, not acted
             on. Worth saying only when something is routed — "0 routes" is not
-            a status, it is the absence of one. */}
-        {routedCount > 0 && (
-          <span className="mr-1 font-mono text-[10px] tabular-nums text-text-muted">
-            {t('titleBar.status', { n: routedCount, m: soundingCount })}
-          </span>
-        )}
+            a status, it is the absence of one. It arrives on a small drop and
+            leaves the same way, so the caption never snaps. */}
+        <AnimatePresence initial={false}>
+          {routedCount > 0 && (
+            <motion.span
+              key="routed-count"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={FADE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
+              className="mr-1 font-mono text-[10px] tabular-nums text-text-muted"
+            >
+              {t('titleBar.status', { n: routedCount, m: soundingCount })}
+            </motion.span>
+          )}
+        </AnimatePresence>
         {!hideSettings && (
           <button
             type="button"

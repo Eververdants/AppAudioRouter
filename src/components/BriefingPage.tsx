@@ -57,13 +57,20 @@ function Connector() {
   );
 }
 
-/** One destination chip: a role dot, the device's name, and the role in words. */
+/** One destination chip: a role dot, the device's name, and the role in words.
+ *  It fades where it stands and travels to its new place when a sibling joins
+ *  or leaves — the same reading the rail's rows carry. */
 function Chip({ destination, roleWord }: { destination: Destination; roleWord: string }) {
   // A feed that is not moving is still a destination, but the chip says so:
   // dimming it is the page's way of holding it apart from the ones that are.
   const held = destination.feedState !== undefined && destination.feedState !== 'live';
   return (
-    <span
+    <motion.span
+      layout
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={FADE}
       className={`inline-flex items-center gap-1.5 rounded-full border border-line bg-surface py-0.5 pl-2 pr-2.5 ${
         held ? 'opacity-70' : ''
       }`}
@@ -83,7 +90,7 @@ function Chip({ destination, roleWord }: { destination: Destination; roleWord: s
       >
         {roleWord}
       </span>
-    </span>
+    </motion.span>
   );
 }
 
@@ -291,13 +298,15 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
                   </div>
                   <Connector />
                   <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                    {card.destinations.map((destination) => (
-                      <Chip
-                        key={destination.key}
-                        destination={destination}
-                        roleWord={roleWordOf(destination)}
-                      />
-                    ))}
+                    <AnimatePresence initial={false}>
+                      {card.destinations.map((destination) => (
+                        <Chip
+                          key={destination.key}
+                          destination={destination}
+                          roleWord={roleWordOf(destination)}
+                        />
+                      ))}
+                    </AnimatePresence>
                   </div>
                   {!card.sounding && (
                     <span className="flex-none text-[10px] text-text-muted">
@@ -310,17 +319,20 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
           </div>
         )}
 
-        {pending && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={FADE}
-            transformTemplate={MAIN_THREAD_TRANSFORM}
-            className="rounded-ctl border border-accent/40 bg-accent-muted px-3.5 py-2.5 text-[11.5px] leading-relaxed text-accent"
-          >
-            {t('briefingPage.staged')}
-          </motion.p>
-        )}
+        <AnimatePresence initial={false}>
+          {pending && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={FADE}
+              transformTemplate={MAIN_THREAD_TRANSFORM}
+              className="rounded-ctl border border-accent/40 bg-accent-muted px-3.5 py-2.5 text-[11.5px] leading-relaxed text-accent"
+            >
+              {t('briefingPage.staged')}
+            </motion.p>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
