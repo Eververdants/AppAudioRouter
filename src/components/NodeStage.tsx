@@ -508,7 +508,7 @@ export function NodeStage() {
                 // brightens the line: gating the flow on it made the animation
                 // unreachable in the steady state it describes, because a wire
                 // you are not hovering over was a still line even while playing.
-                className={`nwire${wire.live ? 'stage-flow' : 'stage-draw'}${lit(wire.key) ? 'lit' : ''}`}
+                className={`nwire ${wire.live ? 'stage-flow' : 'stage-draw'}${lit(wire.key) ? ' lit' : ''}`}
               />
             ))}
           </svg>
