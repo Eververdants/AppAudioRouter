@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
@@ -279,6 +279,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const captureDevices = useRouterStore((s) => s.captureDevices);
 
   const [section, setSection] = useState<SettingsSection>('appearance');
+  // The section that is already on the paper when the page opens lands in
+  // place; only a *change* of section plays the arrival. A ref rather than
+  // state: it is read on the section's own mount, so it has to be a value that
+  // flips after the first render without causing one of its own.
+  const firstSection = useRef(true);
+  useEffect(() => {
+    firstSection.current = false;
+  }, []);
 
   // Only ever disables one button, but it walks the whole session list, and
   // this page re-renders for every store field it reads — several of which
@@ -418,272 +426,275 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
         </div>
       </nav>
 
-      {/* The chosen section, on the paper. One entrance-only cross-fade keyed by
-          the section, so a change of section reads as a new page arriving. */}
+      {/* The chosen section, on the paper. One entrance-only arrival keyed by
+          the section, so a change of section reads as a new page arriving — and
+          no exit: the outgoing section unmounts at once, the way the top-level
+          view swap does. ⚠️ Do not wrap this in `AnimatePresence mode="wait"`:
+          the theme/language rule is a `layoutId` element, and while one animates
+          inside the outgoing section the exit never reports complete, so
+          `mode="wait"` holds the next section back forever (choosing a theme or
+          language and then changing section left the paper blank). */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-2xl px-8 py-8">
           <h1 className="mb-1 text-[17px] font-semibold tracking-tight text-text-primary">
             {sectionLabel(section)}
           </h1>
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={section}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={SPRING_GLIDE}
-              transformTemplate={MAIN_THREAD_TRANSFORM}
-            >
-              {section === 'appearance' && (
-                <AppearanceSection
-                  theme={theme}
-                  setTheme={setTheme}
-                  language={language}
-                  setLanguage={setLanguage}
-                />
-              )}
+          <motion.div
+            key={section}
+            initial={firstSection.current ? false : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={SPRING_GLIDE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+          >
+            {section === 'appearance' && (
+              <AppearanceSection
+                theme={theme}
+                setTheme={setTheme}
+                language={language}
+                setLanguage={setLanguage}
+              />
+            )}
 
-              {section === 'routing' && (
-                <>
-                  <Row title={t('settings.autoRemember')} desc={t('settings.autoRememberDesc')}>
-                    <Switch
-                      checked={autoRemember}
-                      onChange={toggleAutoRemember}
-                      label={t('settings.autoRemember')}
-                    />
-                  </Row>
-                  {rememberedRoutes.length > 0 && (
-                    <Block title={t('settings.rememberedRoutes')}>
-                      <div className="flex flex-wrap gap-1.5">
-                        <AnimatePresence initial={false}>
-                          {rememberedRoutes.map((entry) => (
-                            <RememberedChip
-                              key={entry.exeName}
-                              entry={entry}
-                              devices={devices}
-                              onForget={forgetRememberedRoute}
-                            />
-                          ))}
-                        </AnimatePresence>
-                      </div>
-                    </Block>
-                  )}
-                  <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
-                    {/* Every per-app assignment on the machine, both data flows,
+            {section === 'routing' && (
+              <>
+                <Row title={t('settings.autoRemember')} desc={t('settings.autoRememberDesc')}>
+                  <Switch
+                    checked={autoRemember}
+                    onChange={toggleAutoRemember}
+                    label={t('settings.autoRemember')}
+                  />
+                </Row>
+                {rememberedRoutes.length > 0 && (
+                  <Block title={t('settings.rememberedRoutes')}>
+                    <div className="flex flex-wrap gap-1.5">
+                      <AnimatePresence initial={false}>
+                        {rememberedRoutes.map((entry) => (
+                          <RememberedChip
+                            key={entry.exeName}
+                            entry={entry}
+                            devices={devices}
+                            onForget={forgetRememberedRoute}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </Block>
+                )}
+                <Row title={t('settings.resetEndpoints')} desc={t('settings.resetEndpointsDesc')}>
+                  {/* Every per-app assignment on the machine, both data flows,
                         in one press — and it reaches programs that are not on the
                         board. The same action asks first in the process list's
                         header for the same reason, so it asks here too. */}
-                    <ConfirmButton
-                      label={t('settings.resetEndpointsAction')}
-                      confirmLabel={t('settings.resetEndpointsConfirm')}
-                      onConfirm={() => void resetPinnedEndpoints()}
-                    />
-                  </Row>
-                  <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
-                    <ConfirmButton
-                      label={t('settings.stopAllRoutesAction')}
-                      confirmLabel={t('settings.stopAllRoutesConfirm')}
-                      onConfirm={() => void stopAllRoutes()}
-                      disabled={routedCount === 0}
-                    />
-                  </Row>
-                  {/* Sending one program's audio into another's input runs through
+                  <ConfirmButton
+                    label={t('settings.resetEndpointsAction')}
+                    confirmLabel={t('settings.resetEndpointsConfirm')}
+                    onConfirm={() => void resetPinnedEndpoints()}
+                  />
+                </Row>
+                <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
+                  <ConfirmButton
+                    label={t('settings.stopAllRoutesAction')}
+                    confirmLabel={t('settings.stopAllRoutesConfirm')}
+                    onConfirm={() => void stopAllRoutes()}
+                    disabled={routedCount === 0}
+                  />
+                </Row>
+                {/* Sending one program's audio into another's input runs through
                       a loopback pair: the source plays to the pair's playback
                       side, the target records from its recording side. The app
                       ships no driver, so the pair is picked here; without one,
                       feeds are remembered and shown on the board, but silent. */}
-                  <Block title={t('settings.feedCarrier')} desc={t('settings.feedCarrierDesc')}>
-                    <div className="flex flex-col gap-2">
-                      <label className="flex items-center gap-3">
-                        <span className="w-[130px] flex-none text-[11px] text-text-muted">
-                          {t('settings.feedCarrierRender')}
-                        </span>
-                        <Select
-                          ariaLabel={t('settings.feedCarrierRender')}
-                          title={t('settings.feedCarrierRenderHint')}
-                          value={feedCarrier.render ?? ''}
-                          options={carrierOptions}
-                          onChange={(next) =>
-                            void setFeedCarrier(next === '' ? null : next, feedCarrier.capture)
-                          }
-                        />
-                      </label>
-                      <label className="flex items-center gap-3">
-                        <span className="w-[130px] flex-none text-[11px] text-text-muted">
-                          {t('settings.feedCarrierCapture')}
-                        </span>
-                        <Select
-                          ariaLabel={t('settings.feedCarrierCapture')}
-                          title={t('settings.feedCarrierCaptureHint')}
-                          value={feedCarrier.capture ?? ''}
-                          options={captureOptions}
-                          onChange={(next) =>
-                            void setFeedCarrier(feedCarrier.render, next === '' ? null : next)
-                          }
-                        />
-                      </label>
-                    </div>
-                    {/* The known loopback drivers announce themselves: pairing is
+                <Block title={t('settings.feedCarrier')} desc={t('settings.feedCarrierDesc')}>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-3">
+                      <span className="w-[130px] flex-none text-[11px] text-text-muted">
+                        {t('settings.feedCarrierRender')}
+                      </span>
+                      <Select
+                        ariaLabel={t('settings.feedCarrierRender')}
+                        title={t('settings.feedCarrierRenderHint')}
+                        value={feedCarrier.render ?? ''}
+                        options={carrierOptions}
+                        onChange={(next) =>
+                          void setFeedCarrier(next === '' ? null : next, feedCarrier.capture)
+                        }
+                      />
+                    </label>
+                    <label className="flex items-center gap-3">
+                      <span className="w-[130px] flex-none text-[11px] text-text-muted">
+                        {t('settings.feedCarrierCapture')}
+                      </span>
+                      <Select
+                        ariaLabel={t('settings.feedCarrierCapture')}
+                        title={t('settings.feedCarrierCaptureHint')}
+                        value={feedCarrier.capture ?? ''}
+                        options={captureOptions}
+                        onChange={(next) =>
+                          void setFeedCarrier(feedCarrier.render, next === '' ? null : next)
+                        }
+                      />
+                    </label>
+                  </div>
+                  {/* The known loopback drivers announce themselves: pairing is
                         one click when one is here, and the free one is one click
                         away when none is. The button below hands a driver key to
                         the backend — the URL itself never crosses from the
                         frontend. */}
-                    {carrierMatch && !matchesCarrier(carrierMatch, feedCarrier) && (
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-text-secondary">
-                          {t('settings.feedCarrierDetected', {
-                            driver: carrierMatch.driver.display,
-                          })}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)
-                          }
-                          className="pressable shrink-0 rounded-ctl bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
-                        >
-                          {t('settings.feedCarrierApply')}
-                        </button>
-                      </div>
-                    )}
-                    {carrierMatch && matchesCarrier(carrierMatch, feedCarrier) && (
-                      <div className="mt-3 text-[11px] text-text-muted">
-                        {t('settings.feedCarrierPaired', { driver: carrierMatch.driver.display })}
-                      </div>
-                    )}
-                    {!carrierMatch && !feedCarrier.render && !feedCarrier.capture && (
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-                          {t('settings.feedCarrierMissing')}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => void openCarrierDownload('vb-cable')}
-                          className={ROW_BUTTON_CLASS}
-                        >
-                          {t('settings.feedCarrierDownload')}
-                        </button>
-                      </div>
-                    )}
-                  </Block>
-                </>
-              )}
-
-              {section === 'background' && (
-                <>
-                  <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
-                    <Switch
-                      checked={closeToTray}
-                      onChange={() => void toggleCloseToTray()}
-                      label={t('settings.closeToTray')}
-                    />
-                  </Row>
-                  <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
-                    <Switch
-                      checked={autostart}
-                      onChange={() => void toggleAutostart()}
-                      label={t('settings.autostart')}
-                    />
-                  </Row>
-                </>
-              )}
-
-              {section === 'delays' && (
-                <>
-                  <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
-                    <SegmentedControl
-                      layoutId="settings-delay-range"
-                      ariaLabel={t('settings.delayRange')}
-                      value={String(delayRangeMs)}
-                      onChange={(value) => void setDelayRange(Number(value))}
-                      options={DELAY_RANGE_OPTIONS.map((ms) => ({
-                        value: String(ms),
-                        label: `±${rangeSeconds(ms)}s`,
-                      }))}
-                    />
-                  </Row>
-                  <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
-                    <SegmentedControl
-                      layoutId="settings-delay-step"
-                      ariaLabel={t('settings.delayStep')}
-                      value={String(delayStepMs)}
-                      onChange={(value) => void setDelayStep(Number(value))}
-                      options={DELAY_STEP_OPTIONS.map((ms) => ({
-                        value: String(ms),
-                        label: formatStep(ms),
-                      }))}
-                    />
-                  </Row>
-                  <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
-                    {t('settings.delayNote')}
-                  </p>
-                  <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
-                    {t('settings.calibrationNote')}
-                  </p>
-                  {devices.length === 0 ? (
-                    <p className="py-6 text-center text-[11px] text-text-muted">
-                      {t('settings.noDevices')}
-                    </p>
-                  ) : (
-                    devices.map((device) => (
-                      <DelayRow
-                        key={device.id}
-                        deviceId={device.id}
-                        name={device.name}
-                        rangeMs={delayRangeMs}
-                      />
-                    ))
+                  {carrierMatch && !matchesCarrier(carrierMatch, feedCarrier) && (
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <span className="text-[11px] text-text-secondary">
+                        {t('settings.feedCarrierDetected', {
+                          driver: carrierMatch.driver.display,
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void setFeedCarrier(carrierMatch.renderId, carrierMatch.captureId)
+                        }
+                        className="pressable shrink-0 rounded-ctl bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+                      >
+                        {t('settings.feedCarrierApply')}
+                      </button>
+                    </div>
                   )}
-                </>
-              )}
+                  {carrierMatch && matchesCarrier(carrierMatch, feedCarrier) && (
+                    <div className="mt-3 text-[11px] text-text-muted">
+                      {t('settings.feedCarrierPaired', { driver: carrierMatch.driver.display })}
+                    </div>
+                  )}
+                  {!carrierMatch && !feedCarrier.render && !feedCarrier.capture && (
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                        {t('settings.feedCarrierMissing')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void openCarrierDownload('vb-cable')}
+                        className={ROW_BUTTON_CLASS}
+                      >
+                        {t('settings.feedCarrierDownload')}
+                      </button>
+                    </div>
+                  )}
+                </Block>
+              </>
+            )}
 
-              {section === 'levels' && (
-                <>
-                  {/* One click and no confirmation: evening the levels out is the
+            {section === 'background' && (
+              <>
+                <Row title={t('settings.closeToTray')} desc={t('settings.closeToTrayDesc')}>
+                  <Switch
+                    checked={closeToTray}
+                    onChange={() => void toggleCloseToTray()}
+                    label={t('settings.closeToTray')}
+                  />
+                </Row>
+                <Row title={t('settings.autostart')} desc={t('settings.autostartDesc')}>
+                  <Switch
+                    checked={autostart}
+                    onChange={() => void toggleAutostart()}
+                    label={t('settings.autostart')}
+                  />
+                </Row>
+              </>
+            )}
+
+            {section === 'delays' && (
+              <>
+                <Row title={t('settings.delayRange')} desc={t('settings.delayRangeDesc')}>
+                  <SegmentedControl
+                    layoutId="settings-delay-range"
+                    ariaLabel={t('settings.delayRange')}
+                    value={String(delayRangeMs)}
+                    onChange={(value) => void setDelayRange(Number(value))}
+                    options={DELAY_RANGE_OPTIONS.map((ms) => ({
+                      value: String(ms),
+                      label: `±${rangeSeconds(ms)}s`,
+                    }))}
+                  />
+                </Row>
+                <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
+                  <SegmentedControl
+                    layoutId="settings-delay-step"
+                    ariaLabel={t('settings.delayStep')}
+                    value={String(delayStepMs)}
+                    onChange={(value) => void setDelayStep(Number(value))}
+                    options={DELAY_STEP_OPTIONS.map((ms) => ({
+                      value: String(ms),
+                      label: formatStep(ms),
+                    }))}
+                  />
+                </Row>
+                <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+                  {t('settings.delayNote')}
+                </p>
+                <p className="border-b border-line py-3 text-[11px] leading-relaxed text-text-muted">
+                  {t('settings.calibrationNote')}
+                </p>
+                {devices.length === 0 ? (
+                  <p className="py-6 text-center text-[11px] text-text-muted">
+                    {t('settings.noDevices')}
+                  </p>
+                ) : (
+                  devices.map((device) => (
+                    <DelayRow
+                      key={device.id}
+                      deviceId={device.id}
+                      name={device.name}
+                      rangeMs={delayRangeMs}
+                    />
+                  ))
+                )}
+              </>
+            )}
+
+            {section === 'levels' && (
+              <>
+                {/* One click and no confirmation: evening the levels out is the
                       feature, and what it covered is reported in the log rather
                       than in a question asked before it runs. */}
-                  <Row
-                    title={t('settings.sourceLevelsAlign')}
-                    desc={t('settings.sourceLevelsAlignDesc')}
+                <Row
+                  title={t('settings.sourceLevelsAlign')}
+                  desc={t('settings.sourceLevelsAlignDesc')}
+                >
+                  <button
+                    type="button"
+                    onClick={() => void alignSourceLevels()}
+                    disabled={duplicated.length === 0}
+                    className={ROW_BUTTON_CLASS}
                   >
-                    <button
-                      type="button"
-                      onClick={() => void alignSourceLevels()}
-                      disabled={duplicated.length === 0}
-                      className={ROW_BUTTON_CLASS}
-                    >
-                      {t('settings.sourceLevelsAlignAction')}
-                    </button>
-                  </Row>
-                  {/* The levels themselves live on the board, as the ring each
+                    {t('settings.sourceLevelsAlignAction')}
+                  </button>
+                </Row>
+                {/* The levels themselves live on the board, as the ring each
                       duplicated program's source node wears — a value in the
                       context it acts in, not a second list here saying the same
                       thing twice. */}
-                  <p className="py-3 text-[11px] leading-relaxed text-text-muted">
-                    {t('settings.sourceLevelsNote')}
-                  </p>
-                </>
-              )}
+                <p className="py-3 text-[11px] leading-relaxed text-text-muted">
+                  {t('settings.sourceLevelsNote')}
+                </p>
+              </>
+            )}
 
-              {section === 'about' && (
-                <div className="py-3">
-                  <div className="mb-1 flex items-center justify-between gap-4">
-                    <span className="text-[13px] font-medium text-text-primary">
-                      App Audio Router
-                    </span>
-                    {/* The version is a fact, not an achievement: set in the same
+            {section === 'about' && (
+              <div className="py-3">
+                <div className="mb-1 flex items-center justify-between gap-4">
+                  <span className="text-[13px] font-medium text-text-primary">
+                    App Audio Router
+                  </span>
+                  {/* The version is a fact, not an achievement: set in the same
                         monospaced muted type as every other number in the app. */}
-                    <span className="font-mono text-[10px] tabular-nums text-text-muted">
-                      v{__APP_VERSION__}
-                    </span>
-                  </div>
-                  <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-                    {t('settings.aboutDesc')}
-                  </p>
+                  <span className="font-mono text-[10px] tabular-nums text-text-muted">
+                    v{__APP_VERSION__}
+                  </span>
                 </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
+                <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                  {t('settings.aboutDesc')}
+                </p>
+              </div>
+            )}
+          </motion.div>
         </div>
       </div>
     </div>

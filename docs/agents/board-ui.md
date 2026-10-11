@@ -200,9 +200,13 @@
 
 布局是**一条分区导航 + 右侧内容**：左侧 190px 的 rail（返回、六个分区、版本号），一条竖细线，右边是当前分区的行。
 分区：外观 / 路由 / 后台运行 / 延迟补偿 / 程序电平 / 关于。选中分区由一根 `layoutId="settings-section-rule"` 的
-**左侧竖规**标记（不是胶囊）；内容区用 `AnimatePresence mode="wait"` 做一次换页入场，曲线取 **`SPRING_GLIDE`**
-（有位移的视图切换，所以不是 `FADE`）。
+**左侧竖规**标记（不是胶囊）；内容区按 `section` 挂 `key` 的 `motion.div` 做一次**只入场**的换页（曲线取 **`SPRING_GLIDE`**，
+有位移的视图切换，所以不是 `FADE`），旧分区立即卸载——和顶层视图切换同一条法子（[App.tsx](../../src/App.tsx) 的注释）。
 
+- ⚠️ **内容区不要套 `AnimatePresence mode="wait"`**（2026-10-11 修掉的一处空白）。外观分区里的主题/语言 `SegmentedControl`
+  用 `layoutId` 画那根滑动的下划线（AGENTS.md 动效规范里的"下划线迁移"）；当一个 `layoutId` 元素正在**退场中的分区内部**
+  动画时，framer-motion 的退场永远不上报完成，`mode="wait"` 会因此把下一个分区一直挡在门外——先切主题/语言、再换分区，
+  右侧就一片空白。只入场既保住"换页"的观感，也不给退场留卡住的机会。首屏那个分区用 `firstSection` ref 落在原地、不播入场。
 - ⚠️ **改版前的单列长滚动是错的**（外观、路由、延迟、关于全挤在同一条滚动里），别再合并回去。
 - **载体下拉是自研的 `ui/Select.tsx`，不许换回原生 `<select>`**：原生菜单不可样式化、不可动效。它是完整的 combobox
   （Enter/Space/↓ 打开、方向键与 Home/End 移动、Enter 选中、Escape 关自己）。它**只在菜单展开时**挂 `data-owns-escape`，
