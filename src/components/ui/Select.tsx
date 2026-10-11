@@ -168,8 +168,10 @@ export function Select({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onTriggerKeyDown}
-        className={`flex h-8 w-full min-w-0 items-center gap-2 rounded-ctl border bg-surface px-2.5 text-left text-[12px] outline-none transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.99] focus-visible:border-accent ${
-          open ? 'border-accent/60' : 'border-line-strong hover:border-line-strong hover:bg-surface-hover'
+        className={`flex h-8 w-full min-w-0 items-center gap-2 rounded-ctl border bg-surface px-2.5 text-left text-[12px] outline-none transition-[background-color,border-color,color,transform] duration-150 focus-visible:border-accent active:scale-[0.99] ${
+          open
+            ? 'border-accent/60'
+            : 'border-line-strong hover:border-line-strong hover:bg-surface-hover'
         } ${disabled ? 'cursor-not-allowed opacity-45' : ''}`}
       >
         <span

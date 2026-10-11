@@ -155,9 +155,7 @@ function peekBodyHeight(availableBody: number): number {
   // The most whole rows whose centre still fits, which is the row the panel ends
   // halfway through: the cut edge lands on a row's own middle, so exactly half
   // of that row shows.
-  const rowsThatFit = Math.floor(
-    (availableBody - GROUP_PAD - ROW_H / 2) / (ROW_H + ROW_GAP),
-  );
+  const rowsThatFit = Math.floor((availableBody - GROUP_PAD - ROW_H / 2) / (ROW_H + ROW_GAP));
   return Math.min(availableBody, rowContentY(Math.max(0, rowsThatFit)));
 }
 
@@ -279,7 +277,11 @@ export function hubInPort(height: number): { x: number; y: number } {
 }
 
 /** The in-pin of a destination row: its own left edge, on the panel's border. */
-export function rowInPort(panelY: number, index: number, scrollTop: number): { x: number; y: number } {
+export function rowInPort(
+  panelY: number,
+  index: number,
+  scrollTop: number,
+): { x: number; y: number } {
   return { x: ROW_X, y: rowPortY(panelY, index, scrollTop) };
 }
 

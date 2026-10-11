@@ -274,37 +274,37 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
                   transformTemplate={MAIN_THREAD_TRANSFORM}
                   className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
                 >
-                <div className="flex w-[168px] flex-none items-center gap-2">
-                  <Ring tone="main" size={14} live={card.sounding && liveness} />
-                  <ProcessIcon exeName={card.exeName} name={card.name} size={18} />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      selectProcess(card.pid);
-                      onOpenBoard();
-                    }}
-                    title={t('briefingPage.openBoard', { name: card.name })}
-                    aria-label={t('briefingPage.openBoard', { name: card.name })}
-                    className="pressable min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
-                  >
-                    {card.name}
-                  </button>
-                </div>
-                <Connector />
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                  {card.destinations.map((destination) => (
-                    <Chip
-                      key={destination.key}
-                      destination={destination}
-                      roleWord={roleWordOf(destination)}
-                    />
-                  ))}
-                </div>
-                {!card.sounding && (
-                  <span className="flex-none text-[10px] text-text-muted">
-                    {t('briefingPage.quiet')}
-                  </span>
-                )}
+                  <div className="flex w-[168px] flex-none items-center gap-2">
+                    <Ring tone="main" size={14} live={card.sounding && liveness} />
+                    <ProcessIcon exeName={card.exeName} name={card.name} size={18} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        selectProcess(card.pid);
+                        onOpenBoard();
+                      }}
+                      title={t('briefingPage.openBoard', { name: card.name })}
+                      aria-label={t('briefingPage.openBoard', { name: card.name })}
+                      className="pressable min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
+                    >
+                      {card.name}
+                    </button>
+                  </div>
+                  <Connector />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                    {card.destinations.map((destination) => (
+                      <Chip
+                        key={destination.key}
+                        destination={destination}
+                        roleWord={roleWordOf(destination)}
+                      />
+                    ))}
+                  </div>
+                  {!card.sounding && (
+                    <span className="flex-none text-[10px] text-text-muted">
+                      {t('briefingPage.quiet')}
+                    </span>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
