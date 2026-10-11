@@ -14,8 +14,7 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-    TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 
 use crate::audio::process_meta;
@@ -103,12 +102,16 @@ pub fn enumerate_sessions() -> Result<Vec<AudioSession>, AudioError> {
 /// filter would look like a working one.
 fn exclude_own_processes(sessions: &mut Vec<AudioSession>) {
     let tree = own_process_tree();
-    let own_exe = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()));
+    let own_exe = std::env::current_exe().ok().and_then(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_string())
+    });
     sessions.retain(|session| {
         if tree.contains(&session.pid) {
-            debug!("leaving this app's own process {} out of the list", session.pid);
+            debug!(
+                "leaving this app's own process {} out of the list",
+                session.pid
+            );
             return false;
         }
         // `read_session` never leaves the name empty — it falls back to
