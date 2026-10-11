@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '@/components/ui/Spinner';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
-import { LATENCY_TARGET_MS } from '@/lib/delay';
+import { LATENCY_TARGET_MS, orderByDelay } from '@/lib/delay';
 import { calibrationCancel, calibrationStart } from '@/lib/invoke';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
 import type { AudioDevice } from '@/lib/types';
@@ -62,6 +62,12 @@ export function DelayCalibration({
 }) {
   const { t } = useTranslation();
   const setDeviceDelayValue = useRouterStore((s) => s.setDeviceDelayValue);
+  // Read for the "one step left" hint: after the values land, a live route
+  // whose primary seat moves under them waits for the board to land it.
+  const routedPids = useRouterStore((s) => s.routedPids);
+  const deviceDelays = useRouterStore((s) => s.deviceDelays);
+  const sessions = useRouterStore((s) => s.sessions);
+  const allDevices = useRouterStore((s) => s.devices);
 
   const [step, setStep] = useState<Step>('select');
   const [primaryId, setPrimaryId] = useState<string | null>(null);
@@ -261,12 +267,13 @@ export function DelayCalibration({
     if (!computed) return;
     setApplying(true);
     try {
-      // The baseline last: it ends at 0, which is the state the whole group's
-      // arithmetic reads, and each copy's value lands before it.
-      const entries = Object.entries(computed.values).sort(([a], [b]) =>
-        a === computed.baselineId ? 1 : b === computed.baselineId ? -1 : 0,
-      );
-      for (const [deviceId, value] of entries) {
+      // Write and nothing else: the calibration is the settings page touching
+      // what belongs to each device, and a live route it leaves alone. When
+      // the new delays move a route's primary seat, the board shows it (the
+      // role words preview the delay order and the hub asks to land it) —
+      // reordering a running route from here would swap the primary output
+      // behind the user's back, which reads as the app misbehaving.
+      for (const [deviceId, value] of Object.entries(computed.values)) {
         await setDeviceDelayValue(deviceId, value);
       }
       setApplied(true);
@@ -274,6 +281,30 @@ export function DelayCalibration({
       setApplying(false);
     }
   }, [computed, setDeviceDelayValue]);
+
+  /**
+   * Live multi-device routes whose primary seat moves under the values just
+   * written — the ones waiting for the board to land the new order. Empty
+   * until the apply has run; recomputed from the store, which holds the
+   * freshly written delays.
+   */
+  const pendingLands = (() => {
+    if (!applied || !computed) return [];
+    const out: { process: string; device: string }[] = [];
+    for (const [pidKey, ids] of Object.entries(routedPids)) {
+      if (ids.length < 2) continue;
+      if (!ids.some((id) => computed.values[id] !== undefined)) continue;
+      const ordered = orderByDelay(ids, deviceDelays);
+      const current = ids[0];
+      const primary = ordered[0];
+      if (primary === undefined || current === undefined || primary === current) continue;
+      out.push({
+        process: sessions.find((s) => s.pid === Number(pidKey))?.exe_name ?? `PID ${pidKey}`,
+        device: allDevices.find((d) => d.id === primary)?.name ?? primary,
+      });
+    }
+    return out;
+  })();
 
   const device = queue[queueIndex];
   const toggleCopy = (id: string) => {
@@ -474,6 +505,14 @@ export function DelayCalibration({
                 </div>
               ))}
             </div>
+            {pendingLands.map(({ process, device }) => (
+              <p
+                key={process}
+                className="mt-2 rounded-seg border border-line px-3 py-2 text-[11px] leading-relaxed text-text-secondary"
+              >
+                {t('calibration.replayHint', { process, device })}
+              </p>
+            ))}
             <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
               {t('calibration.finetune')}
             </p>

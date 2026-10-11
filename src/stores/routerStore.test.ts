@@ -919,6 +919,25 @@ describe('settings and log', () => {
     expect(state().deviceDelays.tv).toBe(10_000);
   });
 
+  it('writes calibrated delays without touching the live route', async () => {
+    // The calibration is the settings page adjusting what each device owns; a
+    // running route is the board's to land. When the new delays move the
+    // primary seat, the board previews it and the hub asks — writing the
+    // values must never reorder the route behind the user's back.
+    const backend = installBackend({
+      devices: [SPEAKERS, TV, HEADPHONES],
+      routes: { 1001: ['speakers', 'headphones'] },
+    });
+    reset({ sessions: [MUSIC], routedPids: { 1001: ['speakers', 'headphones'] } });
+
+    await state().setDeviceDelayValue('headphones', 0);
+    await state().setDeviceDelayValue('speakers', 120);
+
+    expect(backend.calls.some((c) => c.cmd === 'apply_route')).toBe(false);
+    expect(state().routedPids[1001]).toEqual(['speakers', 'headphones']);
+    expect(state().deviceDelays.speakers).toBe(120);
+  });
+
   it('persists the auto-remember switch', () => {
     installBackend();
     reset({ autoRemember: true });
