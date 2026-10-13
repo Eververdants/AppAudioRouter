@@ -17,6 +17,17 @@
 //! Playback is the same shape as a mirror's render loop (event-driven shared
 //! client, buffer topped up towards a fixed padding target) so the conversion
 //! path and the pacing jitter a burst experiences match what a real copy would.
+//!
+//! The run is parameterized (`reps`, `lead_ms`, `tail_ms`) because the wizard
+//! interleaves devices: instead of one long per-device sequence it drives one
+//! short burst per call, rotating through the devices round by round. That
+//! rotation keeps whatever drifts in the user's reaction time over a session
+//! (warming up, tiring) common to every device, instead of biasing whichever
+//! one happened to be measured first. Between calls the frontend draws a fresh
+//! random lead, so the pace stays unpredictable across the whole session; the
+//! short tail between calls is safe because the pump paces its writes at the
+//! fixed padding target — by the time a schedule ends, the burst is already
+//! audible and only padding-depth silence remains in the buffer.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -39,9 +50,26 @@ use super::AudioError;
 /// How long one burst sounds, in milliseconds. Long enough to press and hold
 /// comfortably, short enough that three of them with pauses stay quick.
 pub const TONE_BURST_MS: usize = 800;
-/// Bursts per device. Three presses average out the reaction jitter; the
-/// frontend discards a press whose hold duration does not match the burst.
-pub const TONE_REPS: usize = 3;
+/// Bursts per run when the caller does not choose. Three presses average out
+/// the reaction jitter; the frontend discards a press whose hold duration does
+/// not match the burst.
+pub const TONE_REPS_DEFAULT: usize = 3;
+/// Upper bound on caller-supplied bursts: the wizard's round-robin re-enters
+/// this command once per burst, so one call must never turn into a marathon.
+pub const TONE_REPS_MAX: usize = 6;
+/// Silence before the first burst, and after each one. The tail lets a burst
+/// finish audibly before the schedule ends. The wizard's round-robin passes a
+/// shorter tail per call and randomizes the lead itself (see the module doc);
+/// these defaults describe a standalone single-device sequence.
+pub const LEAD_MS_DEFAULT: usize = 500;
+pub const TAIL_MS_DEFAULT: usize = 900;
+/// Hard bounds for caller-supplied lead and tail: short enough to keep the
+/// pace snappy and the gaps obviously audible, long enough that a burst is
+/// never clipped and the rhythm cannot be guessed from a constant.
+const LEAD_MS_MIN: usize = 100;
+const LEAD_MS_MAX: usize = 2_000;
+const TAIL_MS_MIN: usize = 100;
+const TAIL_MS_MAX: usize = 2_000;
 /// Pitch of the burst: comfortably audible on every consumer device.
 const TONE_HZ: f32 = 880.0;
 /// Peak amplitude of the burst: clearly audible without startle, and quiet
@@ -49,10 +77,6 @@ const TONE_HZ: f32 = 880.0;
 const TONE_AMPLITUDE: f32 = 0.3;
 /// Cosine ramp at each end of the burst, so it never clicks.
 const TONE_FADE_MS: usize = 20;
-/// Silence before the first burst and after each one. The tail lets the last
-/// burst finish audibly before the next gap begins.
-const LEAD_MS: usize = 500;
-const TAIL_MS: usize = 900;
 /// Gap between bursts, drawn per rep from this span: a fixed rhythm invites
 /// anticipating the burst, and an anticipated press biases the measurement.
 const GAP_MIN_MS: usize = 500;
@@ -145,23 +169,34 @@ impl GapRng {
     }
 }
 
-/// Play `TONE_REPS` bursts on `device_id`, bracketing each with events.
+/// Play `reps` bursts on `device_id`, bracketing each with events.
 ///
-/// Returns when the sequence is done, or an error when the device could not be
+/// `lead_ms` is the silence before the first burst, `tail_ms` the silence
+/// after each one; caller-supplied values are clamped to sane bounds. Returns
+/// when the sequence is done, or an error when the device could not be
 /// opened, fails mid-stream, or the run was cancelled.
 pub fn play_test_tone(
     device_id: &str,
+    reps: usize,
+    lead_ms: usize,
+    tail_ms: usize,
     app: &AppHandle,
     cancel: &AtomicBool,
 ) -> Result<(), AudioError> {
+    let reps = reps.clamp(1, TONE_REPS_MAX);
+    let lead_ms = lead_ms.clamp(LEAD_MS_MIN, LEAD_MS_MAX);
+    let tail_ms = tail_ms.clamp(TAIL_MS_MIN, TAIL_MS_MAX);
     let com_owned = crate::audio::init_com()?;
-    let result = play_test_tone_inner(device_id, app, cancel);
+    let result = play_test_tone_inner(device_id, reps, lead_ms, tail_ms, app, cancel);
     crate::audio::uninit_com(com_owned);
     result
 }
 
 fn play_test_tone_inner(
     device_id: &str,
+    reps: usize,
+    lead_ms: usize,
+    tail_ms: usize,
     app: &AppHandle,
     cancel: &AtomicBool,
 ) -> Result<(), AudioError> {
@@ -226,7 +261,7 @@ fn play_test_tone_inner(
             .map_err(|e| com_err("GetBufferSize", e))?
     } as usize;
 
-    let schedule = build_schedule(sample_rate);
+    let schedule = build_schedule(sample_rate, reps, lead_ms, tail_ms);
     // One burst is all the audio this run plays — every rep is the same burst.
     let burst = render_tone_frames(
         burst_frames(&schedule),
@@ -262,7 +297,7 @@ fn play_test_tone_inner(
 
 /// The whole run as one segment list, in frames: settle, then per rep a gap,
 /// a burst, and a tail that lets the burst finish audibly.
-fn build_schedule(sample_rate: u32) -> Vec<Segment> {
+fn build_schedule(sample_rate: u32, reps: usize, lead_ms: usize, tail_ms: usize) -> Vec<Segment> {
     let frames = |ms: usize| ms * sample_rate as usize / 1000;
     let mut rng = GapRng(
         std::time::SystemTime::now()
@@ -270,11 +305,11 @@ fn build_schedule(sample_rate: u32) -> Vec<Segment> {
             .map(|d| d.subsec_nanos() as u64 | 1)
             .unwrap_or(0x9E37_79B9_7F4A_7C15),
     );
-    let mut segments = vec![Segment::Silence(frames(LEAD_MS))];
-    for _ in 0..TONE_REPS {
+    let mut segments = vec![Segment::Silence(frames(lead_ms))];
+    for _ in 0..reps {
         segments.push(Segment::Silence(frames(rng.next())));
         segments.push(Segment::Tone(frames(TONE_BURST_MS)));
-        segments.push(Segment::Silence(frames(TAIL_MS)));
+        segments.push(Segment::Silence(frames(tail_ms)));
     }
     segments
 }

@@ -698,21 +698,31 @@ pub fn get_device_delays(delays: State<'_, Arc<DelayConfig>>) -> Vec<(String, i3
     delays.all()
 }
 
-/// Play the delay-wizard's test tone on one device: three short bursts with
+/// Play the delay-wizard's test tone on one device: `reps` short bursts with
 /// pauses between them, each burst bracketed by a `calibration-tone` event
 /// pair (`start` when its first frame is written, `end` when its last one is).
 ///
+/// The wizard's round-robin drives one burst per call (`reps = 1`), drawing a
+/// fresh random `lead_ms` each time so the pace stays unpredictable across the
+/// whole session, and a short `tail_ms` between calls; the defaults describe a
+/// standalone single-device sequence. Values are clamped inside the player.
+///
 /// Resolves when the whole sequence has played, so the frontend treats the
-/// command's promise as "this device is measured" and the events as the
-/// timeline itself. Only one run exists at a time; `calibration_cancel` ends
-/// the current one within a backstop interval.
+/// command's promise as "this burst is done" and the events as the timeline
+/// itself. Only one run exists at a time; `calibration_cancel` ends the
+/// current one within a backstop interval.
 #[tauri::command]
 pub async fn calibration_start(
     device_id: String,
+    reps: Option<usize>,
+    lead_ms: Option<usize>,
+    tail_ms: Option<usize>,
     app: AppHandle,
     state: State<'_, audio::calibration::CalibrationState>,
 ) -> Result<(), String> {
-    info!("cmd: calibration_start device={device_id}");
+    info!(
+        "cmd: calibration_start device={device_id} reps={reps:?} lead={lead_ms:?} tail={tail_ms:?}"
+    );
     audio::routing::validate_device_id(&device_id).map_err(|e| e.to_string())?;
     if !state.begin() {
         return Err("a calibration run is already in progress".to_string());
@@ -721,7 +731,14 @@ pub async fn calibration_start(
     tokio::task::spawn_blocking(move || {
         // The guard hands the busy flag back on every exit, panics included.
         let _guard = guard;
-        audio::calibration::play_test_tone(&device_id, &app, &cancel)
+        audio::calibration::play_test_tone(
+            &device_id,
+            reps.unwrap_or(audio::calibration::TONE_REPS_DEFAULT),
+            lead_ms.unwrap_or(audio::calibration::LEAD_MS_DEFAULT),
+            tail_ms.unwrap_or(audio::calibration::TAIL_MS_DEFAULT),
+            &app,
+            &cancel,
+        )
     })
     .await
     .map_err(|e| format!("calibration worker failed: {e}"))?
