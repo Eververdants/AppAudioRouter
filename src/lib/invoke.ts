@@ -96,10 +96,21 @@ export async function setDeviceDelay(deviceId: string, delayMs: number): Promise
   await invoke('set_device_delay', { deviceId, delayMs });
 }
 
-/** Play the delay wizard's test tone on one device: three short bursts, each
- * bracketed by `calibration-tone` events. Resolves when the sequence is done. */
-export async function calibrationStart(deviceId: string): Promise<void> {
-  await invoke('calibration_start', { deviceId });
+/** Play the delay wizard's test tone on one device: `reps` short bursts, each
+ * bracketed by `calibration-tone` events. The wizard's round-robin passes one
+ * burst per call, a fresh random `leadMs` each time so the pace stays
+ * unpredictable, and a short `tailMs` between calls; omitted values fall back
+ * to the backend defaults. Resolves when the sequence is done. */
+export async function calibrationStart(
+  deviceId: string,
+  opts?: { reps?: number; leadMs?: number; tailMs?: number },
+): Promise<void> {
+  await invoke('calibration_start', {
+    deviceId,
+    reps: opts?.reps,
+    leadMs: opts?.leadMs,
+    tailMs: opts?.tailMs,
+  });
 }
 
 /** Ask the running calibration to stop; its start command rejects shortly after. */
