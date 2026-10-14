@@ -145,5 +145,36 @@ export function feedRow(page: Page, pid: number) {
  */
 export async function addDevice(page: Page, name: string): Promise<void> {
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
-  await page.getByRole('menuitem', { name, exact: true }).click();
+  // Scoped to the add menu: the change-primary menu can still be mid-exit when
+  // this opens, and both list devices by their plain names.
+  await page
+    .getByRole('menu', { name: 'Add destination' })
+    .getByRole('menuitem', { name, exact: true })
+    .click();
+}
+
+/**
+ * Hand the primary seat to another device, through the primary row's own
+ * picker.
+ *
+ * The primary row's name opens the change-primary picker (the row is not a
+ * toggle — that gesture left with the old board), and the menu item takes the
+ * seat: a device from outside the plan replaces the seat holder, so this is
+ * also how "play through that one instead" is said about a staged guess.
+ */
+export async function changePrimary(page: Page, from: string, to: string): Promise<void> {
+  await page
+    .locator('main')
+    .getByRole('button', { name: `Change the main device, currently ${from}` })
+    .click();
+  await page
+    .getByRole('menu', { name: 'Change' })
+    .getByRole('menuitem', { name: to, exact: true })
+    .click();
+  // The row's own label is the postcondition: the seat now names the device
+  // that took it, so a swallowed press fails here instead of corrupting the
+  // next gesture.
+  await expect(
+    page.locator('main').getByRole('button', { name: `Change the main device, currently ${to}` }),
+  ).toBeVisible();
 }

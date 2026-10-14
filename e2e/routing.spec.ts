@@ -3,6 +3,7 @@ import {
   addDevice,
   appRow,
   callsFor,
+  changePrimary,
   deviceRow,
   deviceRowShell,
   emit,
@@ -37,9 +38,11 @@ test('shows the apps the backend reports, and the devices a plan reaches', async
   await expect(deviceRow(page, 'Speakers')).toHaveCount(0);
 
   // Picking a programme stages the device it already plays through, and *that*
-  // is what puts a device card on the board.
+  // is what puts a device card on the board. The staged device sits in the
+  // primary row, whose name opens the change-primary picker instead of
+  // toggling anything — the row is where the seat is changed, not switched off.
   await appRow(page, 'music.exe').click();
-  await expect(deviceRow(page, 'Speakers')).toBeVisible();
+  await expect(deviceRowShell(page, 'Speakers')).toBeVisible();
 
   // The device the plan does not reach is not a card yet; the dashed card is
   // how it joins.
@@ -106,27 +109,31 @@ test('the card that carries the route is the one that lights up', async ({ page 
   await openApp(page);
 
   await appRow(page, 'music.exe').click();
-  await addDevice(page, 'TV');
+  // "Play through the TV instead" is said through the primary row's picker:
+  // a device from outside the plan takes the seat and the staged guess — the
+  // app's own guess, nothing the user asked for — leaves the plan with it.
+  await changePrimary(page, 'Speakers', 'TV');
+  await expect(hub(page)).toHaveAttribute('aria-label', /through TV/);
+
   await hub(page).click();
 
   // The route's first device is the one Windows plays itself, and the card
   // names it. The device the route does not reach is not on the board at all —
   // the board draws the plan, not an inventory of hardware.
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
-  await expect(deviceRow(page, 'TV')).toHaveAttribute('aria-pressed', 'true');
   await expect(deviceRow(page, 'Speakers')).toHaveCount(0);
 });
 
-test('the first click on another device replaces the staged guess', async ({ page }) => {
+test('naming another device as main replaces the staged guess', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
   // The board staged "Speakers" on its own — that is the app's guess about
-  // where the programme plays, not something the user asked for. Choosing the
-  // TV must mean "play through the TV instead", never "play through both": a
-  // second copy of the audio appearing on a device nobody picked is the one
-  // mistake this screen exists to prevent.
-  await addDevice(page, 'TV');
+  // where the programme plays, not something the user asked for. Handing the
+  // main seat to the TV must mean "play through the TV instead", never "play
+  // through both": a second copy of the audio appearing on a device nobody
+  // picked is the one mistake this screen exists to prevent.
+  await changePrimary(page, 'Speakers', 'TV');
   await expect(hub(page)).toHaveAttribute('aria-label', /TV/);
   await expect(hub(page)).not.toHaveAttribute('aria-label', /Speakers/);
 
@@ -142,11 +149,12 @@ test('a second device makes a copy, and the copy is the one with its own delay',
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The first pick replaced the guess; from here on adding another device piles
-  // on. Two devices means one of them is a copy this app duplicates to — and a
-  // copy is the only thing here a delay can hold back or a gain can attenuate,
-  // which is why the controls appear with it and nowhere else.
-  await addDevice(page, 'TV');
+  // Naming the TV as main replaced the guess; from here on adding another
+  // device piles on. Two devices means one of them is a copy this app
+  // duplicates to — and a copy is the only thing here a delay can hold back or
+  // a gain can attenuate, which is why the controls appear with it and nowhere
+  // else.
+  await changePrimary(page, 'Speakers', 'TV');
   await addDevice(page, 'Speakers');
 
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
@@ -179,11 +187,11 @@ test('the primary tunes the volume of the programme; the copy keeps its own two'
   // on, so the strip's device panel is not reachable at all.
   await expect(tuneButton(page, 'Speakers')).toHaveCount(0);
 
-  // A second device starts an engine: the primary (the TV) carries the
-  // programme's session volume, the copy carries its delay and its share —
-  // and only the copy has a delay, because nothing of ours sits on the
-  // primary's path to hold back.
-  await addDevice(page, 'TV');
+  // A second device starts an engine: the primary (the TV, named through the
+  // primary row's picker) carries the programme's session volume, the copy
+  // carries its delay and its share — and only the copy has a delay, because
+  // nothing of ours sits on the primary's path to hold back.
+  await changePrimary(page, 'Speakers', 'TV');
   await addDevice(page, 'Speakers');
 
   await tuneButton(page, 'TV').click();
@@ -221,10 +229,11 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The first pick replaced the guess with the TV; the second added Speakers
-  // as the copy. With no delays set every device ties, so the plan's own order
-  // decides who plays directly — the TV, for being there first.
-  await addDevice(page, 'TV');
+  // The TV took the seat through the primary row's picker, replacing the
+  // guess; the second pick added Speakers as the copy. With no delays set
+  // every device ties, so the plan's own order decides who plays directly —
+  // the TV, for being there first.
+  await changePrimary(page, 'Speakers', 'TV');
   await addDevice(page, 'Speakers');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
@@ -245,7 +254,7 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
 test("stepping a copy's delay never moves the primary seat", async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
-  await addDevice(page, 'TV');
+  await changePrimary(page, 'Speakers', 'TV');
   await addDevice(page, 'Speakers');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
 
@@ -264,6 +273,11 @@ test('picking the same app again throws the picks away and sends nothing', async
 
   await addDevice(page, 'TV');
   await expect(hub(page)).toHaveAttribute('aria-label', /TV/);
+  // And the add menu only ever appends: the staged guess keeps the seat it
+  // was staged in, and the TV joins the plan's tail as a copy. Naming another
+  // device as main is the picker the primary row carries, not this one.
+  await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
+  await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
 
   // Re-reading the programme's own route back into the stage is the whole of
   // "undo my picks": selecting a programme prefills the plan from reality, so
@@ -278,11 +292,14 @@ test('a route may never be left with nowhere to play', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The only device in the plan cannot be switched off: a programme whose sound
-  // goes nowhere is not a state this app offers, and there is no way back from
-  // it that does not involve the system default anyway.
-  await deviceRow(page, 'Speakers').click();
-  await expect(deviceRow(page, 'Speakers')).toHaveAttribute('aria-pressed', 'true');
+  // The only device in the plan is the primary row: it carries no ✕ at all,
+  // and its name opens the change-primary picker instead of toggling the
+  // device out — a programme whose sound goes nowhere is not a state this app
+  // offers, and there is no way back from it that does not involve the system
+  // default anyway.
+  await expect(deviceRowShell(page, 'Speakers').getByRole('button', { name: '✕' })).toHaveCount(0);
+  // The plan still holds the one device the app staged.
+  await expect(hub(page)).toHaveAttribute('aria-label', /through Speakers/);
 });
 
 test('a routed app can be sent back to the system default from the toast', async ({ page }) => {
@@ -308,7 +325,7 @@ test('the routed capsule expands to every routed programme and opens its board',
   await appRow(page, 'music.exe').click();
   await hub(page).click();
   await appRow(page, 'game.exe').click();
-  await addDevice(page, 'TV');
+  await changePrimary(page, 'Speakers', 'TV');
   await hub(page).click();
 
   // The capsule counts what is live right now, and expands to one row per
@@ -396,7 +413,7 @@ test('the activity tab shows what the app did, behind an underlined rule', async
   await expect(page.getByText('Routed music.exe to Speakers')).toBeVisible();
 
   await page.getByRole('tab', { name: 'Routing' }).click();
-  await expect(deviceRow(page, 'Speakers')).toBeVisible();
+  await expect(deviceRowShell(page, 'Speakers')).toBeVisible();
 });
 
 test('search narrows the app list', async ({ page }) => {
@@ -483,7 +500,7 @@ test('the rail says where every routed programme plays; the stage draws the one 
   await appRow(page, 'music.exe').click();
   await hub(page).click();
   await appRow(page, 'game.exe').click();
-  await addDevice(page, 'TV');
+  await changePrimary(page, 'Speakers', 'TV');
   await hub(page).click();
 
   // Both programmes are named where they play in the list — that is the answer

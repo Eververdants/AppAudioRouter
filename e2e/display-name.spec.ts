@@ -62,7 +62,12 @@ test.describe('display names', () => {
     ]);
     await emit(page, 'audio-changed', { devices: false, sessions: true });
 
-    await expect(hub(page)).toContainText('Now Playing: X');
+    await expect(hub(page)).toContainText('Now Playing:');
+    // The hub's name slot is a fixed stage that clips nothing, so a title
+    // longer than its budget is capped in data: the visible word truncates
+    // where the budget runs out, while the accessible name keeps the whole
+    // title. The retitle is still a swap on stage — both layers moved.
+    await expect(hub(page)).toHaveAttribute('aria-label', /Now Playing: X/);
     // The refresh behind the notification only logs when the list — pid and
     // exe, deliberately not the display name — actually differs.
     await page.getByRole('tab', { name: 'Activity' }).click();

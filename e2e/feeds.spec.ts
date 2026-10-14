@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { addDevice, appRow, callsFor, feedRow, hub, openApp } from './fixtures';
+import { appRow, callsFor, changePrimary, feedRow, hub, openApp } from './fixtures';
 
 /**
  * Sending one programme's audio into another's input — the "programme to
@@ -68,7 +68,9 @@ test('a device route and a feed sit on the same board', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  await addDevice(page, 'TV');
+  // Naming the TV as main replaces the staged guess, so the plan the hub lands
+  // is the device the user named — not that device plus the guess.
+  await changePrimary(page, 'Speakers', 'TV');
   await addFeedTarget(page, 'game.exe');
   await hub(page).click();
 
