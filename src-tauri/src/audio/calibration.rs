@@ -106,10 +106,26 @@ pub struct CalibrationState {
 
 impl CalibrationState {
     /// Marks the run as started; returns `false` when one is already running.
+    ///
+    /// The cancel flag is cleared here rather than when a run ends: the worker
+    /// only ever reads the flag, so a clear at exit would race a cancel that
+    /// arrived a breath before the worker's last check. `begin` runs only when
+    /// no worker holds the guard, so no live run can observe the reset.
     pub fn begin(&self) -> bool {
-        self.busy
+        if self
+            .busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
+            .is_err()
+        {
+            return false;
+        }
+        // A fresh run must not inherit the previous run's cancel request. The
+        // flag is never cleared on the way out, so without this every run after
+        // the first cancel would fail at once — and the wizard reads
+        // "calibration cancelled" as its own doing, leaving the measure screen
+        // standing with neither a burst nor an error to explain it.
+        self.cancel.store(false, Ordering::SeqCst);
+        true
     }
 
     /// A cloneable handle pair for the worker thread, so the guard and the
@@ -481,4 +497,43 @@ fn render_tone_frames(total_frames: usize, sample_rate: u32, channels: usize) ->
         }
     }
     samples
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wizard cancels freely — Escape, the cancel button, unmount — and
+    /// then measures again from the same screen. A cancel request that outlived
+    /// its run would fail every later run at the pump's first check, which the
+    /// frontend reads as its own doing and swallows: the wizard would sit on
+    /// the measure screen with no burst and no error until the app restarted.
+    #[test]
+    fn a_new_run_does_not_inherit_the_previous_cancel() {
+        let state = CalibrationState::default();
+        assert!(state.begin(), "the first run is admitted");
+        let (_guard, cancel) = state.worker_tokens();
+        state.cancel();
+        assert!(
+            cancel.load(Ordering::SeqCst),
+            "the running run is cancellable"
+        );
+        drop(_guard);
+
+        assert!(
+            state.begin(),
+            "the run is over, so the next one is admitted"
+        );
+        let (_guard, cancel) = state.worker_tokens();
+        assert!(
+            !cancel.load(Ordering::SeqCst),
+            "the fresh run must not start pre-cancelled"
+        );
+
+        // A second begin while one runs is refused, and must not disturb the
+        // running run's cancel flag.
+        assert!(!state.begin());
+        state.cancel();
+        assert!(cancel.load(Ordering::SeqCst));
+    }
 }
