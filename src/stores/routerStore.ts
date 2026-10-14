@@ -810,6 +810,24 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // A physically-routed device may have been unplugged. Drop it from the
       // selection and from any route that referenced it; a route left pointing
       // at a gone device is silently unroutable and confuses the badges.
+      //
+      // A route whose *every* target vanished also ends here. A multi-device
+      // route's engine notices and stops itself through `reconcile`; a
+      // single-device route has no engine, so nothing else would release its
+      // per-app assignment — one left booked as a live route is skipped by the
+      // settings reset, skipped by the stale sweep while the program lives, and
+      // keeps outranking the system default with nothing on the board to stop.
+      // Released directly rather than through the stop action, so the unplug
+      // does not erase the memory a returning device should restore from.
+      const enginelessEnded: number[] = [];
+      if (devices.length > 0) {
+        const generations = get().engineGenerations;
+        for (const [pid, ids] of Object.entries(get().routedPids)) {
+          if (ids.every((id) => !liveIds.has(id)) && (generations[Number(pid)] ?? 0) === 0) {
+            enginelessEnded.push(Number(pid));
+          }
+        }
+      }
       set((s) => {
         const selectedDeviceIds = s.selectedDeviceIds.filter((id) => liveIds.has(id));
         const routedPids: Record<number, string[]> = {};
@@ -822,6 +840,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { devices, selectedDeviceIds, routedPids, engineGenerations };
       });
+      for (const pid of enginelessEnded) {
+        api.stopRoute(pid).catch(() => {
+          /* best effort — a failed release leaves the pin for a later path */
+        });
+      }
       // The device list is one of the three inputs a restore needs, and at boot
       // it is just as likely to be the last of them to arrive.
       queueAssignmentWork(() => get().restoreRememberedRoutes());

@@ -788,6 +788,70 @@ describe('hotplug', () => {
     expect(state().routedPids[1001]).toEqual(['speakers']);
   });
 
+  it('releases a single-device route whose every device was unplugged', async () => {
+    // A single-device route has no engine, so nothing else stops it: left
+    // alone, its per-app assignment outlives the badge — skipped by the reset
+    // (still booked as a live route) and by the stale sweep (the program is
+    // still alive) — and the program keeps ignoring the user's device switches
+    // with no route on the board to stop.
+    const backend = installBackend({ devices: [TV] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      routedPids: { 1001: ['speakers'] },
+      engineGenerations: { 1001: 0 },
+    });
+
+    await state().refreshDevices(true);
+
+    expect(state().routedPids[1001]).toBeUndefined();
+    const stopped = backend.calls.filter((c) => c.cmd === 'stop_route');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0]?.args.pid).toBe(1001);
+  });
+
+  it('releases nothing when the whole device list comes back empty', async () => {
+    // An empty list is how a list that has not arrived yet reads, not proof
+    // that everything was unplugged: no endpoint may be released and no
+    // restore may run against no hardware. The "every device of this route is
+    // gone" release only speaks when there is a list to name devices with.
+    const backend = installBackend({ devices: [] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      routedPids: { 1001: ['speakers'] },
+      engineGenerations: { 1001: 0 },
+      rememberedRoutes: [{ exeName: 'music.exe', deviceIds: ['speakers'] }],
+      autoRemember: true,
+    });
+
+    await state().refreshDevices(true);
+    // The restore rides the assignment queue behind the refresh; let it land.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(backend.calls.some((c) => c.cmd === 'stop_route')).toBe(false);
+    expect(backend.calls.some((c) => c.cmd === 'apply_route')).toBe(false);
+    expect(state().devices).toEqual([]);
+  });
+
+  it("leaves an engine route's end to the engine, not to the device refresh", async () => {
+    // A multi-device route's engine notices its devices are gone and stops
+    // through `reconcile` — a refresh that also stopped it would race that
+    // path with a second release. The refresh only drops the badge.
+    const backend = installBackend({ devices: [TV] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      routedPids: { 1001: ['speakers', 'headphones'] },
+      engineGenerations: { 1001: 5 },
+    });
+
+    await state().refreshDevices(true);
+
+    expect(state().routedPids[1001]).toBeUndefined();
+    expect(backend.calls.filter((c) => c.cmd === 'stop_route')).toHaveLength(0);
+  });
+
   it('stays quiet when a notification changes nothing', async () => {
     installBackend();
     reset({ devices: [SPEAKERS, TV], sessions: [MUSIC] });
