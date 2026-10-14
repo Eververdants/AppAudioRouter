@@ -374,7 +374,14 @@ export function DelayCalibration({
       // other device clamped at 0 or above), so the delay order cannot
       // preview or land a different seat than the wizard assigned.
       for (const [deviceId, value] of Object.entries(computed.values)) {
-        await setDeviceDelayValue(deviceId, value);
+        // The store never rejects — a refused value rolls back and logs — so
+        // the boolean is the only failure signal here. Stop on the first one
+        // and keep the results screen up to say so, instead of closing as if
+        // every device had taken its number.
+        if (!(await setDeviceDelayValue(deviceId, value))) {
+          setApplyFailed(true);
+          return;
+        }
       }
       onClose();
     } catch {

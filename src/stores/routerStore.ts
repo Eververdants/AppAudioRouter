@@ -319,7 +319,7 @@ interface RouterState {
   /** Bring every routed program that is playing up to the loudest one's level,
    * in one action, and re-read the values that wrote. */
   alignSourceLevels: () => Promise<void>;
-  setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<void>;
+  setDeviceDelayValue: (deviceId: string, delayMs: number) => Promise<boolean>;
   setDelayStep: (stepMs: number) => void;
   handleDuplicationStopped: (event: DuplicationStoppedEvent) => void;
   /** One process began or stopped rendering audio. Display state for the
@@ -2189,7 +2189,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   setDeviceDelayValue: async (deviceId, delayMs) => {
     const current = get().deviceDelays[deviceId] ?? 0;
     const next = clampDelay(delayMs);
-    if (current === next) return;
+    // Nothing to change is a success, not a refusal: the calibration's apply
+    // walks every measured device and treats a falsy answer as a failure.
+    if (current === next) return true;
     const device = get().devices.find((d) => d.id === deviceId);
     set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: next } }));
     try {
@@ -2203,6 +2205,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // value moved. Without this the figure would sit at what the device was
       // playing at before the change, which is the one thing it exists to show.
       await get().reconcileActiveDuplications();
+      return true;
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
       // keeps matching what the engine actually applies and persists.
@@ -2216,6 +2219,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         return { deviceDelays };
       });
       get().addLog(i18next.t('log.delaySetFailed', { error: String(e) }), 'error');
+      return false;
     }
   },
 

@@ -980,6 +980,36 @@ describe('settings and log', () => {
     expect(state().deviceDelays.tv).toBe(10_000);
   });
 
+  it('answers the calibration walk in booleans: accepted true, refused false', async () => {
+    // The calibration's apply walks every measured device and stops at the
+    // first `false`, keeping the results screen up to say so — the boolean is
+    // the only failure signal that walk has.
+    const backend = installBackend({ fail: (cmd) => cmd === 'set_device_delay' });
+    reset({ devices: [SPEAKERS, TV], deviceDelays: {} });
+
+    // A refusal rolls the optimistic write back and answers false.
+    await expect(state().setDeviceDelayValue('tv', 30)).resolves.toBe(false);
+    expect(state().deviceDelays.tv).toBeUndefined();
+    expect(lastLog()?.level).toBe('error');
+
+    // The retry the results screen offers is just another call: once the
+    // backend takes the value the same request answers true.
+    backend.fail = () => false;
+    await expect(state().setDeviceDelayValue('tv', 30)).resolves.toBe(true);
+    expect(state().deviceDelays.tv).toBe(30);
+    expect(backend.calls.filter((c) => c.cmd === 'set_device_delay')).toHaveLength(2);
+  });
+
+  it('answers true without asking the backend when the value does not change', async () => {
+    // Same value is a success, not a refusal: a falsy answer would stop the
+    // calibration's apply walk dead over nothing.
+    const backend = installBackend();
+    reset({ devices: [SPEAKERS, TV], deviceDelays: { tv: 40 } });
+
+    await expect(state().setDeviceDelayValue('tv', 40)).resolves.toBe(true);
+    expect(backend.calls.some((c) => c.cmd === 'set_device_delay')).toBe(false);
+  });
+
   it('writes calibrated delays without touching the live route', async () => {
     // The calibration is the settings page adjusting what each device owns; a
     // running route is the board's to land. When the new delays move the
