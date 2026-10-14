@@ -924,10 +924,11 @@ export function NodeStage() {
           </AnimatePresence>
 
           {/* The change-primary picker: the way to hand the primary seat to
-              another device without touching the copies. A device whose delay
-              compensation is larger than the rest is offered disabled — the
-              system plays the main device directly, and software delay can only
-              hold sound back, so it could never take that seat. */}
+              another device without touching the copies. Every row is
+              selectable — a device already carrying a delay compensation may
+              take the seat too (the values are the copies' alignment figures,
+              not a gate on who sits first); recalibrating after the move is
+              the wizard's job. */}
           <AnimatePresence>
             {primaryPickerOpen && (
               <motion.div
