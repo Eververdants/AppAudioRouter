@@ -131,11 +131,14 @@ function tauriBridge(initial: BridgeState): void {
         delete state.routes[String(payload.pid)];
         return { released: true, pinned_device: null };
       case 'get_active_duplications':
+        // Parallel arrays, same order as the real engine reports them: the
+        // primary has no stream of ours to ask, so its entry is `null` — the
+        // same "not measured" the real backend sends for it.
         return Object.entries(state.routes).map(([pid, deviceIds]) => ({
           pid: Number(pid),
           generation: 1,
           deviceIds,
-          latencyMs: (deviceIds as string[]).map(() => 20),
+          latencyMs: (deviceIds as string[]).map((_, index) => (index === 0 ? null : 20)),
         }));
       case 'get_remembered_routes':
         return state.remembered;

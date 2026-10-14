@@ -93,11 +93,14 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         delete backend.routes[args.pid as number];
         return { released: true, pinned_device: null };
       case 'get_active_duplications':
+        // The real contract is a parallel array matching deviceIds, and the
+        // primary (index 0) reports `null` — Windows plays it itself, there is
+        // no stream of ours to measure. Same shape the e2e bridge fakes.
         return Object.entries(backend.routes).map(([pid, deviceIds]) => ({
           pid: Number(pid),
           generation: 1,
           deviceIds,
-          latencyMs: deviceIds.map(() => 20),
+          latencyMs: deviceIds.map((_, index) => (index === 0 ? null : 20)),
         }));
       case 'get_remembered_routes':
         return backend.remembered;
