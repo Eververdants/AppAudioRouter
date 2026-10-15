@@ -664,6 +664,27 @@ fn source_quiet(shared: &EngineShared) -> bool {
     )
 }
 
+/// How deep this mirror's pipeline is, in milliseconds: how long audio keeps
+/// playing after the source last produced any.
+fn mirror_pipeline_ms(shared: &EngineShared, mirror: &MirrorChannel) -> u64 {
+    target_frames(shared, mirror) as u64 * 1_000 / shared.sample_rate.max(1) as u64
+}
+
+/// Whether this mirror may park: the source has been quiet for the idle window
+/// *plus* this mirror's own pipeline depth. A mirror holding a large delay
+/// compensation is still playing audio captured seconds ago, so parking on the
+/// plain source threshold would cut up to a device buffer of that tail — the
+/// park must only ever drop silence.
+fn mirror_quiet(shared: &EngineShared, mirror: &MirrorChannel) -> bool {
+    should_park(
+        shared.started.elapsed().as_millis() as u64,
+        shared
+            .last_audio_ms
+            .load(Ordering::Relaxed)
+            .saturating_add(mirror_pipeline_ms(shared, mirror)),
+    )
+}
+
 /// Whether `now_ms - last_audio_ms` has reached the idle threshold. `last` is
 /// zero before the first packet, which is what makes an engine that has never
 /// heard anything go idle too.
@@ -1924,7 +1945,7 @@ fn pump_render(
         // is the only way to stop it signalling this thread every period. The
         // pipeline is empty, so the device is playing the silence that was
         // written into it, and stopping is silent too.
-        if mirror.buffered_bytes() == 0 && source_quiet(shared) {
+        if mirror.buffered_bytes() == 0 && mirror_quiet(shared, mirror) {
             park_mirror(shared, mirror, session)?;
             if shared.shutdown.load(Ordering::Relaxed) {
                 return Ok(());
@@ -2432,6 +2453,29 @@ mod tests {
         // Saturating subtraction, not wrapping: a stale read must not look like
         // the longest possible silence.
         assert!(!should_park(5, 10));
+    }
+
+    #[test]
+    fn a_delayed_mirror_parks_only_after_its_own_tail_played_out() {
+        // 2 s of compensation puts the pipeline 2.1 s deep, so the source
+        // being quiet for the plain idle window is not enough — the device is
+        // still playing audio captured before the silence, and the park would
+        // cut it.
+        let shared = engine(&[2_000], 0, true);
+        let mirror = &shared.mirrors[0];
+        assert_eq!(mirror_pipeline_ms(&shared, mirror), 2_100);
+        let last_audio = 0;
+        assert!(!should_park(
+            SOURCE_IDLE_MS + 2_000,
+            last_audio + mirror_pipeline_ms(&shared, mirror)
+        ));
+        assert!(should_park(
+            SOURCE_IDLE_MS + 2_100,
+            last_audio + mirror_pipeline_ms(&shared, mirror)
+        ));
+        // A base-latency mirror parks on (approximately) the plain window.
+        let plain = engine(&[0], 0, true);
+        assert_eq!(mirror_pipeline_ms(&plain, &plain.mirrors[0]), 100);
     }
 
     #[test]
