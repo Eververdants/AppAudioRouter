@@ -528,15 +528,11 @@ pub async fn reset_pinned_endpoints(
     };
     let pids: Vec<u32> = sessions
         .iter()
+        .filter(|session| !routed.contains(&session.pid) && !live_routes.contains(&session.pid))
+        // The enumeration already read every one of these names; asking the
+        // process again would be an OpenProcess per session for the same answer.
+        .filter(|session| !routed_exes.contains(&session.exe_name.to_ascii_lowercase()))
         .map(|session| session.pid)
-        .filter(|pid| !routed.contains(pid) && !live_routes.contains(pid))
-        .filter(|pid| {
-            audio::sessions::get_process_exe_name(*pid)
-                .map(|name| !routed_exes.contains(&name.to_ascii_lowercase()))
-                // A process whose name cannot be read has nothing in common
-                // with a routed executable that is known of.
-                .unwrap_or(true)
-        })
         .collect();
 
     let names: HashMap<u32, String> = sessions
