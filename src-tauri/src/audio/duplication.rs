@@ -1088,6 +1088,10 @@ impl DuplicationManager {
             // The engine never started, so no thread will unregister it; drop
             // the entry here or `active_routes` would report it forever.
             self.unregister(pid, generation);
+            // The predecessor this start evicted skipped its own level cleanup
+            // on the promise that this engine publishes under the same key — a
+            // promise the thread that never ran cannot keep.
+            shared.levels.forget(&shared.exe_name, pid);
             // And give the loudness back: the thread that owns an engine's
             // teardown is the only thing that would have, and it never ran, so
             // the program would stay quiet on every path — with the volume
