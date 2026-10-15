@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use log::{debug, info, warn};
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::audio;
 use crate::audio::duplication::{ActiveRoute, DuplicationManager};
@@ -181,7 +181,6 @@ pub async fn apply_route(
     device_ids: Vec<String>,
     remember: bool,
     config: State<'_, RouteConfig>,
-    duplications: State<'_, DuplicationManager>,
     pins: State<'_, PinnedRoutes>,
     app: AppHandle,
 ) -> Result<u64, String> {
@@ -207,53 +206,62 @@ pub async fn apply_route(
 
     // Mirrors: software duplication to every further device. The engine reads
     // each device's configured delay and volume itself.
-    duplications.stop(pid);
-    let generation = if device_ids.len() > 1 {
-        match duplications.start(
-            pid,
-            &exe_name,
-            &device_ids[0],
-            device_ids[1..].to_vec(),
-            &app,
-        ) {
-            Ok(generation) => generation,
-            Err(e) => {
-                // The mirrors are what failed, but the primary write above has
-                // already landed and its pin is booked. Left standing, the
-                // program keeps playing on the chosen device while the board
-                // shows no route to stop — the dead end `mark_abandoned` exists
-                // to close. Undo this command's own steps before reporting.
-                warn!("starting the duplication engine for PID {pid} failed: {e}");
-                match audio::routing::release_process_default_devices_flow(
-                    vec![pid],
-                    audio::Role::All,
-                    false,
-                )
-                .await
-                {
-                    Ok(outcomes)
-                        if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
-                    {
-                        pins.forget(pid);
-                        // The render slot is free again, so the feeds this
-                        // program was holding back go back on, exactly as a
-                        // stop would hand them over.
-                        resume_suspended_feeds(&exe_name, &pins).await;
-                    }
-                    _ => {
-                        // The release did not take, so the assignment is still
-                        // ours — but no live route answers for it any more.
-                        // Do what a stop does in this spot: fall back to the
-                        // default device, or admit the pin is beyond this
-                        // run's reach so the settings reset can still find it.
-                        pin_to_default_or_abandon(pid, &pins).await;
-                    }
-                }
-                return Err(e.to_string());
+    //
+    // The teardown and the start are blocking walks of every device and every
+    // session — the session volume the old engine hands back and the new one
+    // claims — and AudioSrv answers them slowly while, say, a Bluetooth
+    // endpoint reconnects. Off the runtime's worker, or every command behind
+    // this one waits out those seconds with it.
+    let started = {
+        let engine_app = app.clone();
+        let exe = exe_name.clone();
+        let primary = device_ids[0].clone();
+        let mirrors = device_ids[1..].to_vec();
+        tokio::task::spawn_blocking(move || {
+            let duplications = engine_app.state::<DuplicationManager>();
+            duplications.stop(pid);
+            if mirrors.is_empty() {
+                return Ok(0);
             }
+            duplications.start(pid, &exe, &primary, mirrors, &engine_app)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    };
+    let generation = match started {
+        Ok(generation) => generation,
+        Err(e) => {
+            // The mirrors are what failed, but the primary write above has
+            // already landed and its pin is booked. Left standing, the
+            // program keeps playing on the chosen device while the board
+            // shows no route to stop — the dead end `mark_abandoned` exists
+            // to close. Undo this command's own steps before reporting.
+            warn!("starting the duplication engine for PID {pid} failed: {e}");
+            match audio::routing::release_process_default_devices_flow(
+                vec![pid],
+                audio::Role::All,
+                false,
+            )
+            .await
+            {
+                Ok(outcomes) if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) => {
+                    pins.forget(pid);
+                    // The render slot is free again, so the feeds this
+                    // program was holding back go back on, exactly as a
+                    // stop would hand them over.
+                    resume_suspended_feeds(&exe_name, &pins).await;
+                }
+                _ => {
+                    // The release did not take, so the assignment is still
+                    // ours — but no live route answers for it any more.
+                    // Do what a stop does in this spot: fall back to the
+                    // default device, or admit the pin is beyond this
+                    // run's reach so the settings reset can still find it.
+                    pin_to_default_or_abandon(pid, &pins).await;
+                }
+            }
+            return Err(e.to_string());
         }
-    } else {
-        0
     };
 
     if remember {
@@ -294,6 +302,7 @@ pub async fn stop_route(
     pid: u32,
     duplications: State<'_, DuplicationManager>,
     pins: State<'_, PinnedRoutes>,
+    app: AppHandle,
 ) -> Result<StopOutcome, String> {
     info!("cmd: stop_route pid={pid}");
     // The engine comes down first, before the lookup below can hold this command
@@ -315,7 +324,12 @@ pub async fn stop_route(
         }
         None => false,
     };
-    duplications.stop(pid);
+    // Handing the program's session volume back is a blocking walk of every
+    // device and every session, and AudioSrv is slow about it while an endpoint
+    // reconnects — off the runtime's worker, the way `apply_route` does it.
+    tokio::task::spawn_blocking(move || app.state::<DuplicationManager>().stop(pid))
+        .await
+        .map_err(|e| e.to_string())?;
 
     if sibling_routed {
         // The assignment Windows persists is stored per executable, and a
@@ -819,17 +833,28 @@ pub fn get_source_volumes(sources: State<'_, Arc<SourceVolumeConfig>>) -> Vec<(S
 /// [`config::PRIMARY_VOLUME_MIN_PERCENT`] because at 0 the capture is true
 /// silence and no gain could restore the copies. Stopping the route hands the
 /// program's previous loudness back.
+///
+/// Async, unlike the other volume commands: writing the value onto the live
+/// sessions is a full device and session enumeration per engine, and a sync
+/// command would run that on the WebView2 main thread — freezing the window for
+/// as long as AudioSrv takes, which on a reconnecting Bluetooth endpoint is
+/// seconds.
 #[tauri::command]
-pub fn set_primary_volume(
+pub async fn set_primary_volume(
     exe_name: String,
     percent: u32,
-    primaries: State<'_, Arc<PrimaryVolumeConfig>>,
-    duplications: State<'_, DuplicationManager>,
+    app: AppHandle,
 ) -> Result<(), String> {
     info!("cmd: set_primary_volume exe={exe_name} volume={percent}%");
-    primaries.set(&exe_name, percent)?;
-    duplications.update_primary_volume(&exe_name, percent);
-    Ok(())
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        app.state::<Arc<PrimaryVolumeConfig>>()
+            .set(&exe_name, percent)?;
+        app.state::<DuplicationManager>()
+            .update_primary_volume(&exe_name, percent);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Every stored primary volume as `(exe_name, percent)` pairs.
