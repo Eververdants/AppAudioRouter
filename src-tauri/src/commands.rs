@@ -169,8 +169,8 @@ pub async fn get_default_device() -> Result<audio::AudioDevice, String> {
 ///
 /// Each device's configured delay is measured against the app's audio, so the
 /// engine also needs the primary device's value: the earliest device of the
-/// group is the reference the copies are held back from. The frontend orders
-/// the list by delay, which normally puts the earliest device first.
+/// group is the reference the copies are held back from. The order the list
+/// arrives in is the user's, not the delays' — its head is the primary.
 // Tauri commands carry their State params in the signature, so the argument
 // count is fixed by the framework.
 #[allow(clippy::too_many_arguments)]
