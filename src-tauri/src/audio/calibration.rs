@@ -92,6 +92,9 @@ const STREAM_BUFFER_DURATION: i64 = 2_000_000;
 /// period while the stream is running; the timeout only bounds how long a
 /// cancelled run can linger between writes.
 const WAIT_BACKSTOP_MS: u32 = 250;
+/// `WAVEFORMATEX.wFormatTag` values the burst's own format has to be read against.
+const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
+const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 
 /// Shared state for the tone player, managed by Tauri.
 ///
@@ -208,6 +211,40 @@ pub fn play_test_tone(
     result
 }
 
+/// The mix format's channel count, and whether the burst's float32 frames can
+/// be written into it as they stand.
+///
+/// The channel count cannot be had from `nBlockAlign / 4`: that is the frame
+/// size of a 32-bit format, and a device handing back 16-bit stereo would read
+/// as mono. The encoding matters for the same reason — a mix format is float32
+/// in practice but may come back as extensible integer PCM, and float32 bytes
+/// written into a PCM buffer are noise, not a tone.
+fn mix_layout(format: &[u8]) -> (usize, bool) {
+    /// Offset of `SubFormat` inside a `WAVEFORMATEXTENSIBLE`, and the first four
+    /// bytes of `KSDATAFORMAT_SUBTYPE_IEEE_FLOAT` as laid out in memory (the
+    /// GUID's first field is little-endian).
+    const SUBFORMAT_OFFSET: usize = 24;
+    const FLOAT_SUBTYPE: [u8; 4] = [0x03, 0x00, 0x00, 0x00];
+    /// `WAVEFORMATEX` (18 bytes) plus the 22 bytes the extensible form appends.
+    const EXTENSIBLE_LEN: usize = 40;
+
+    if format.len() < core::mem::size_of::<WAVEFORMATEX>() {
+        return (0, false);
+    }
+    // SAFETY: the length was checked above, and WAVEFORMATEX is packed, so
+    // reading it from an unaligned byte slice is sound.
+    let wfx = unsafe { &*(format.as_ptr() as *const WAVEFORMATEX) };
+    let float = match wfx.wFormatTag {
+        WAVE_FORMAT_IEEE_FLOAT => wfx.wBitsPerSample == 32,
+        WAVE_FORMAT_EXTENSIBLE if format.len() >= EXTENSIBLE_LEN => {
+            format[SUBFORMAT_OFFSET..SUBFORMAT_OFFSET + 4] == FLOAT_SUBTYPE
+                && wfx.wBitsPerSample == 32
+        }
+        _ => false,
+    };
+    (wfx.nChannels as usize, float)
+}
+
 fn play_test_tone_inner(
     device_id: &str,
     reps: usize,
@@ -218,7 +255,8 @@ fn play_test_tone_inner(
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
-    let (format, block_align, sample_rate) = default_mix_format()?;
+    let (mix_format, _, sample_rate) = default_mix_format()?;
+    let (channels, native_float) = mix_layout(&mix_format);
 
     let enumerator: IMMDeviceEnumerator = unsafe {
         // SAFETY: MMDeviceEnumerator is the registered coclass.
@@ -243,10 +281,25 @@ fn play_test_tone_inner(
         CreateEventW(None, false, false, None).map_err(|e| com_err("CreateEventW", e))?
     };
     let event_guard = EventHandle(event);
-    // SAFETY: format is a complete WAVEFORMATEX(EXTENSIBLE) copied from the
-    // default device's mix format; auto-convert adapts it to this device, the
-    // same path a mirror's render client takes.
-    let format = unsafe { &*(format.as_ptr() as *const WAVEFORMATEX) };
+    // The stream is described by the default device's own mix format whenever
+    // that format can carry the burst; auto-convert adapts it to this device,
+    // the same path a mirror's render client takes. A device that mixes in
+    // integer PCM gets an equivalent float32 stream instead, which the
+    // auto-convert flag above already asks the engine to adapt — the burst is
+    // generated as float32 and cannot be written into a PCM buffer as it is.
+    let float32_format = WAVEFORMATEX {
+        wFormatTag: WAVE_FORMAT_IEEE_FLOAT,
+        nChannels: channels as u16,
+        nSamplesPerSec: sample_rate,
+        nAvgBytesPerSec: sample_rate * channels as u32 * 4,
+        nBlockAlign: (channels * 4) as u16,
+        wBitsPerSample: 32,
+        cbSize: 0,
+    };
+    // SAFETY: mix_format is a complete WAVEFORMATEX(EXTENSIBLE) copied from the
+    // default device's mix format; the 18-byte prefix is valid for either shape.
+    let mix = unsafe { &*(mix_format.as_ptr() as *const WAVEFORMATEX) };
+    let format = if native_float { mix } else { &float32_format };
     // SAFETY: shared-mode event-driven render; periodicity must be 0.
     unsafe {
         client
@@ -279,11 +332,7 @@ fn play_test_tone_inner(
 
     let schedule = build_schedule(sample_rate, reps, lead_ms, tail_ms);
     // One burst is all the audio this run plays — every rep is the same burst.
-    let burst = render_tone_frames(
-        burst_frames(&schedule),
-        sample_rate,
-        block_align / 4, // float32 channels
-    );
+    let burst = render_tone_frames(burst_frames(&schedule), sample_rate, channels);
 
     // SAFETY: Start on a fully initialized client.
     unsafe {
@@ -296,7 +345,7 @@ fn play_test_tone_inner(
         &render,
         &schedule,
         &burst,
-        block_align,
+        channels,
         sample_rate,
         buffer_frames,
         event_guard.0,
@@ -360,7 +409,7 @@ fn pump(
     render: &IAudioRenderClient,
     schedule: &[Segment],
     burst: &[f32],
-    block_align: usize,
+    channels: usize,
     sample_rate: u32,
     buffer_frames: usize,
     event: HANDLE,
@@ -369,7 +418,6 @@ fn pump(
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
-    let channels = block_align / 4;
     // The buffer level the pump keeps: the write-ahead every burst sits behind,
     // common to every device this player runs against.
     let target =
@@ -535,5 +583,66 @@ mod tests {
         assert!(!state.begin());
         state.cancel();
         assert!(cancel.load(Ordering::SeqCst));
+    }
+
+    /// A `WAVEFORMATEX` as the raw bytes `default_mix_format` hands over.
+    fn wave_format(tag: u16, channels: u16, bits: u16, rate: u32) -> Vec<u8> {
+        let align = channels * (bits / 8);
+        let wfx = WAVEFORMATEX {
+            wFormatTag: tag,
+            nChannels: channels,
+            nSamplesPerSec: rate,
+            nAvgBytesPerSec: rate * align as u32,
+            nBlockAlign: align,
+            wBitsPerSample: bits,
+            cbSize: 0,
+        };
+        // SAFETY: WAVEFORMATEX is packed and holds no padding or ownership.
+        unsafe {
+            core::slice::from_raw_parts(
+                &wfx as *const WAVEFORMATEX as *const u8,
+                core::mem::size_of::<WAVEFORMATEX>(),
+            )
+        }
+        .to_vec()
+    }
+
+    /// The extensible form, whose `SubFormat` at offset 24 says float or PCM.
+    fn extensible(subformat: u32, channels: u16, bits: u16, rate: u32) -> Vec<u8> {
+        let mut bytes = wave_format(WAVE_FORMAT_EXTENSIBLE, channels, bits, rate);
+        bytes.resize(40, 0);
+        bytes[16..18].copy_from_slice(&22u16.to_le_bytes());
+        bytes[24..28].copy_from_slice(&subformat.to_le_bytes());
+        bytes
+    }
+
+    /// The burst's channel count and encoding both come out of the mix format,
+    /// and a device that mixes in integer PCM is rare but real. Read off
+    /// `nBlockAlign / 4`, 16-bit stereo — a four-byte frame — names one channel
+    /// instead of two, and float32 bytes written into a PCM buffer are noise
+    /// rather than a tone.
+    #[test]
+    fn the_mix_format_decides_the_channel_count_and_whether_float32_fits() {
+        const PCM: u16 = 0x0001;
+        const IEEE_FLOAT: u32 = 3;
+        const SUBTYPE_PCM: u32 = 1;
+
+        assert_eq!(mix_layout(&wave_format(PCM, 2, 16, 48_000)), (2, false));
+        assert_eq!(mix_layout(&wave_format(PCM, 2, 32, 48_000)), (2, false));
+        assert_eq!(
+            mix_layout(&wave_format(WAVE_FORMAT_IEEE_FLOAT, 2, 32, 48_000)),
+            (2, true),
+            "the everyday mix format is written as it comes"
+        );
+        assert_eq!(
+            mix_layout(&extensible(IEEE_FLOAT, 6, 32, 48_000)),
+            (6, true)
+        );
+        assert_eq!(
+            mix_layout(&extensible(SUBTYPE_PCM, 2, 16, 48_000)),
+            (2, false)
+        );
+        // A format too short to read at all is not float32, whatever it claims.
+        assert_eq!(mix_layout(&[0u8; 4]), (0, false));
     }
 }
