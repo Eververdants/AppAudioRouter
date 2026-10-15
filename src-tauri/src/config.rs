@@ -1080,7 +1080,7 @@ mod tests {
         map.clamp_to_range();
         // 250 clamps to the unset neutral, which is never stored: left alone it
         // would be the group's reference that no UI ever produced.
-        assert!(map.volumes.get("loud").is_none());
+        assert!(!map.volumes.contains_key("loud"));
         // 0 is mute — a legitimate stored value.
         assert_eq!(map.volumes.get("muted"), Some(&0));
         assert_eq!(map.volumes.get("fine"), Some(&40));
