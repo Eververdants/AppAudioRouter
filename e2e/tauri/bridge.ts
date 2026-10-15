@@ -84,6 +84,8 @@ function tauriBridge(initial: BridgeState): void {
   const state = {
     ...initial,
     routes: {} as Record<string, string[]>,
+    /** Per-route engine generation, as `apply_route` handed it out. */
+    routeGenerations: {} as Record<string, number>,
     calls: [] as { cmd: string; args: Record<string, unknown> }[],
     generation: 0,
     failing: [] as string[],
@@ -123,23 +125,38 @@ function tauriBridge(initial: BridgeState): void {
         return (
           state.devices.find((d: BridgeDevice) => d.id === state.defaultDeviceId) ?? state.devices[0]
         );
-      case 'apply_route':
-        state.routes[String(payload.pid)] = [...(payload.deviceIds as string[])];
+      case 'apply_route': {
+        const pid = String(payload.pid);
+        const deviceIds = [...(payload.deviceIds as string[])];
+        state.routes[pid] = deviceIds;
+        // The real command starts an engine only when there are copies; a
+        // single-device route is just the per-app endpoint and reports 0.
+        if (deviceIds.length <= 1) {
+          delete state.routeGenerations[pid];
+          return 0;
+        }
         state.generation += 1;
+        state.routeGenerations[pid] = state.generation;
         return state.generation;
+      }
       case 'stop_route':
         delete state.routes[String(payload.pid)];
+        delete state.routeGenerations[String(payload.pid)];
         return { released: true, pinned_device: null };
       case 'get_active_duplications':
-        // Parallel arrays, same order as the real engine reports them: the
-        // primary has no stream of ours to ask, so its entry is `null` — the
-        // same "not measured" the real backend sends for it.
-        return Object.entries(state.routes).map(([pid, deviceIds]) => ({
-          pid: Number(pid),
-          generation: 1,
-          deviceIds,
-          latencyMs: (deviceIds as string[]).map((_, index) => (index === 0 ? null : 20)),
-        }));
+        // The real command lists *engines*, so single-device routes — which
+        // have none — never appear here. Parallel arrays, same order as the
+        // real engine reports them: the primary has no stream of ours to ask,
+        // so its entry is `null` — the same "not measured" the real backend
+        // sends for it.
+        return Object.entries(state.routes)
+          .filter(([, deviceIds]) => deviceIds.length > 1)
+          .map(([pid, deviceIds]) => ({
+            pid: Number(pid),
+            generation: state.routeGenerations[pid] ?? 0,
+            deviceIds,
+            latencyMs: deviceIds.map((_, index) => (index === 0 ? null : 20)),
+          }));
       case 'get_remembered_routes':
         return state.remembered;
       case 'list_capture_devices':
