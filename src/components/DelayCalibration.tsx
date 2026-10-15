@@ -417,7 +417,12 @@ export function DelayCalibration({
         </h2>
 
         {step === 'select' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={FADE}>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+          >
             <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
               {t('calibration.intro')}
             </p>
@@ -460,7 +465,12 @@ export function DelayCalibration({
         )}
 
         {step === 'measure' && currentDevice !== null && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={FADE}>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+          >
             <p className="mt-2 text-[12px] text-text-secondary">
               {extending
                 ? t('calibration.extensionRound', { r: round })
@@ -538,7 +548,12 @@ export function DelayCalibration({
         )}
 
         {step === 'result' && computed !== null && baselineId !== null && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={FADE}>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+          >
             <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
               {t('calibration.baselineNote', { name: deviceName(baselineId) })}
             </p>

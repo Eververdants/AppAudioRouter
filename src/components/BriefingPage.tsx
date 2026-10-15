@@ -71,6 +71,7 @@ function Chip({ destination, roleWord }: { destination: Destination; roleWord: s
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={FADE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
       className={`inline-flex items-center gap-1.5 rounded-full border border-line bg-surface py-0.5 pl-2 pr-2.5 ${
         held ? 'opacity-70' : ''
       }`}
