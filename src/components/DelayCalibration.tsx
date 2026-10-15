@@ -326,8 +326,11 @@ export function DelayCalibration({
   useEffect(() => {
     // The settings page stands down for Escape while this wizard is open (the
     // two sides change together); this listener is the only one that acts.
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
+    // Capture phase, and the key is consumed: the toast's undo offer lives one
+    // bubble-phase listener away, and a bubble-phase `stopPropagation` on the
+    // same node cannot keep the key from it — only arriving first can.
+    window.addEventListener('keydown', handleEscape, true);
+    return () => window.removeEventListener('keydown', handleEscape, true);
   }, [handleEscape]);
 
   /**
