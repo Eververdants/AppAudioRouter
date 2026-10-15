@@ -36,6 +36,8 @@ interface Backend {
   defaultDeviceId: string | null;
   /** pid -> ordered device ids, as the (fake) engine is running them. */
   routes: Record<number, string[]>;
+  /** pid -> engine generation, as `apply_route` handed it out. */
+  routeGenerations: Record<number, number>;
   remembered: [string, string[]][];
   delays: [string, number][];
   volumes: [string, number][];
@@ -55,6 +57,7 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
     sessions: [MUSIC, GAME],
     defaultDeviceId: 'speakers',
     routes: {},
+    routeGenerations: {},
     remembered: [],
     delays: [],
     volumes: [],
@@ -85,23 +88,36 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         return backend.devices.find((d) => d.id === backend.defaultDeviceId) ?? backend.devices[0];
       case 'apply_route': {
         const pid = args.pid as number;
-        backend.routes[pid] = [...(args.deviceIds as string[])];
+        const deviceIds = [...(args.deviceIds as string[])];
+        backend.routes[pid] = deviceIds;
+        // The real command starts an engine only when there are copies; a
+        // single-device route is just the per-app endpoint and reports 0.
+        if (deviceIds.length <= 1) {
+          delete backend.routeGenerations[pid];
+          return 0;
+        }
         backend.generation += 1;
+        backend.routeGenerations[pid] = backend.generation;
         return backend.generation;
       }
       case 'stop_route':
         delete backend.routes[args.pid as number];
+        delete backend.routeGenerations[args.pid as number];
         return { released: true, pinned_device: null };
       case 'get_active_duplications':
-        // The real contract is a parallel array matching deviceIds, and the
-        // primary (index 0) reports `null` — Windows plays it itself, there is
-        // no stream of ours to measure. Same shape the e2e bridge fakes.
-        return Object.entries(backend.routes).map(([pid, deviceIds]) => ({
-          pid: Number(pid),
-          generation: 1,
-          deviceIds,
-          latencyMs: deviceIds.map((_, index) => (index === 0 ? null : 20)),
-        }));
+        // The real command lists *engines*, so single-device routes — which
+        // have none — never appear here. The real contract is a parallel array
+        // matching deviceIds, and the primary (index 0) reports `null` —
+        // Windows plays it itself, there is no stream of ours to measure. Same
+        // shape the e2e bridge fakes.
+        return Object.entries(backend.routes)
+          .filter(([, deviceIds]) => deviceIds.length > 1)
+          .map(([pid, deviceIds]) => ({
+            pid: Number(pid),
+            generation: backend.routeGenerations[Number(pid)] ?? 0,
+            deviceIds,
+            latencyMs: deviceIds.map((_, index) => (index === 0 ? null : 20)),
+          }));
       case 'get_remembered_routes':
         return backend.remembered;
       case 'list_capture_devices':
@@ -581,6 +597,33 @@ describe('applyRoute', () => {
     expect(lastLog()?.level).toBe('error');
     expect(state().routedPids).toEqual({});
   });
+
+  it('lands on the sibling that already holds the program’s route', async () => {
+    // The assignment and the engine are the executable's, kept under whichever
+    // pid landed them. Routing a sibling instead would leave the old engine
+    // running beside the new one — two captures of one tree — and the undo
+    // offer would name a pid whose stop finds nothing to stop.
+    const SIBLING: AudioSession = { pid: 1005, exe_name: 'music.exe' };
+    const backend = installBackend({ sessions: [MUSIC, SIBLING] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, SIBLING],
+      selectedPids: [MUSIC.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+      routedPids: { [SIBLING.pid]: ['tv'] },
+    });
+
+    await state().applyRoute();
+
+    const apply = backend.calls.find((call) => call.cmd === 'apply_route');
+    expect(apply?.args).toMatchObject({ pid: SIBLING.pid, exeName: 'music.exe' });
+    expect(state().routedPids[MUSIC.pid]).toBeUndefined();
+    expect(state().routedPids[SIBLING.pid]).toEqual(['speakers', 'tv']);
+    expect(state().undoSnapshot?.entries[0]).toMatchObject({
+      pid: SIBLING.pid,
+      previous: ['tv'],
+    });
+  });
 });
 
 describe('stopRoute', () => {
@@ -959,6 +1002,28 @@ describe('remembered routes', () => {
     // refresh would fight the user.
     expect(backend.calls.filter((c) => c.cmd === 'apply_route')).toHaveLength(1);
     expect(state().routedPids[FRESH_MUSIC.pid]).toBeUndefined();
+  });
+
+  it('does not restore onto a program a sibling process already routes', async () => {
+    // Fresh pids: the decided set is module-level. The route lives under the
+    // older sibling; the lowest pid of the program must read that as "already
+    // routed" rather than restore a second engine over the same audio.
+    const OWNER: AudioSession = { pid: 7101, exe_name: 'sibling-music.exe' };
+    const YOUNGER: AudioSession = { pid: 7100, exe_name: 'sibling-music.exe' };
+    const backend = installBackend({ sessions: [OWNER, YOUNGER] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [OWNER, YOUNGER],
+      routedPids: { [OWNER.pid]: ['tv'] },
+      rememberedRoutes: [{ exeName: 'sibling-music.exe', deviceIds: ['speakers'] }],
+      autoRemember: true,
+    });
+
+    await state().restoreRememberedRoutes();
+
+    expect(backend.calls.some((c) => c.cmd === 'apply_route')).toBe(false);
+    expect(state().routedPids[YOUNGER.pid]).toBeUndefined();
+    expect(state().routedPids[OWNER.pid]).toEqual(['tv']);
   });
 });
 

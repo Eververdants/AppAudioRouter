@@ -751,7 +751,11 @@ function pickRestorable(
   for (const session of sessions) {
     if (firstPidByExe.get(session.exe_name.toLowerCase()) !== session.pid) continue;
     if (autoRestoreDecided.has(session.pid)) continue;
-    if (routedPids[session.pid] !== undefined) continue;
+    // The program is routed when *any* of its processes holds the route — the
+    // assignment is per executable — so a sibling-owned route also means there
+    // is nothing to restore, and writing one here would run a second engine
+    // over the same audio.
+    if (programEntryOf(sessions, routedPids, session.pid) !== undefined) continue;
     const deviceIds = rememberedFor(remembered, session.exe_name)?.filter((id) =>
       liveDeviceIds.has(id),
     );
@@ -1392,7 +1396,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // A source routed to a device has its one per-app render slot taken; the
       // backend would only record the rule as suspended, and the board already
       // shows that. Stopping the route resumes the feed on the backend side.
-      if ((routedPids[sourcePid]?.length ?? 0) > 0) continue;
+      // The slot is the executable's, so a route held by any sibling process
+      // of the source takes it just the same.
+      if (programEntryOf(sessions, routedPids, sourcePid) !== undefined) continue;
       for (const targetExe of entry.targetExe) {
         const targetPid = pidByExe.get(targetExe.toLowerCase());
         if (targetPid === undefined || targetPid === sourcePid) continue;
@@ -1542,7 +1548,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.selectProcessAndDevice'), 'error');
       return;
     }
-    const targets = oneProcessPerExe(sessions, selectedPids);
+    // A program that already holds a route keeps it under the pid that owns
+    // it, even when the selection names a sibling: landing on the sibling
+    // would leave the owner's engine running next to the new one, and two
+    // engines capturing one process tree is the comb filter `oneProcessPerExe`
+    // exists to prevent. The undo snapshot reads the owner's route with it.
+    const routedNow = get().routedPids;
+    const targets = oneProcessPerExe(sessions, selectedPids).map((target) => {
+      const owner = programEntryOf(sessions, routedNow, target.pid);
+      return owner === undefined || owner === target.pid ? target : { ...target, pid: owner };
+    });
     if (targets.length === 0) {
       set({ applying: false });
       get().addLog(i18next.t('log.processGone'), 'error');
