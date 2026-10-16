@@ -1009,20 +1009,64 @@ describe('hotplug', () => {
     // (still booked as a live route) and by the stale sweep (the program is
     // still alive) — and the program keeps ignoring the user's device switches
     // with no route on the board to stop.
-    const backend = installBackend({ devices: [TV] });
+    //
+    // Landed through the real seam: the release guard reads the generation
+    // `applyRoute` recorded, and the backend reports 0 for a route that starts
+    // no engine. Writing `engineGenerations: { 1001: 0 }` by hand here would
+    // pass even if the two sides disagreed about what a single-device route
+    // reports, which is the one thing this guard depends on.
+    const backend = installBackend({ devices: [SPEAKERS, TV] });
     reset({
       devices: [SPEAKERS, TV],
       sessions: [MUSIC],
-      routedPids: { 1001: ['speakers'] },
-      engineGenerations: { 1001: 0 },
+      selectedPids: [MUSIC.pid],
+      selectedDeviceIds: [SPEAKERS.id],
+      defaultDeviceId: TV.id,
+    });
+
+    await state().applyRoute();
+    expect(state().routedPids[MUSIC.pid]).toEqual([SPEAKERS.id]);
+    expect(state().engineGenerations[MUSIC.pid]).toBe(0);
+
+    backend.devices = [TV];
+    await state().refreshDevices(true);
+    // The restore rides the assignment queue behind the refresh; let it land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state().routedPids[MUSIC.pid]).toBeUndefined();
+    const stopped = backend.calls.filter((c) => c.cmd === 'stop_route');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0]?.args.pid).toBe(MUSIC.pid);
+  });
+
+  it('releases the route the program holds while the board looks at a sibling', async () => {
+    // The badge, the plan and the release are three different things: the
+    // selection is drawn per process, while the assignment is the program's and
+    // is booked under its lowest pid. A refresh that read the selection to
+    // decide what to release would `stop_route` a process holding nothing — the
+    // one bug shape this list keeps tripping over.
+    const OWNER: AudioSession = { pid: 6601, exe_name: 'browser.exe' };
+    const SHOWN: AudioSession = { pid: 6602, exe_name: 'browser.exe' };
+    const backend = installBackend({ devices: [SPEAKERS] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [OWNER, SHOWN],
+      selectedPids: [SHOWN.pid],
+      selectedDeviceIds: [SPEAKERS.id],
+      // The one entry a route of this program has: the owner's, and engineless,
+      // so the release below is the only path that can take it.
+      routedPids: { [OWNER.pid]: ['tv'] },
+      defaultDeviceId: SPEAKERS.id,
     });
 
     await state().refreshDevices(true);
+    // The restore rides the assignment queue behind the refresh; let it land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(state().routedPids[1001]).toBeUndefined();
     const stopped = backend.calls.filter((c) => c.cmd === 'stop_route');
     expect(stopped).toHaveLength(1);
-    expect(stopped[0]?.args.pid).toBe(1001);
+    expect(stopped[0]?.args.pid).toBe(OWNER.pid);
+    expect(state().routedPids[OWNER.pid]).toBeUndefined();
   });
 
   it('releases nothing when the whole device list comes back empty', async () => {
