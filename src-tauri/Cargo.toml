@@ -10,9 +10,12 @@ edition = "2021"
 tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
-# These requirements are kept in step with the JS packages in package.json:
-# the Tauri CLI refuses to build when the crate and the npm package for the
-# same component disagree on the minor version.
+# The `tauri` crate is kept on the same minor as `@tauri-apps/api` /
+# `@tauri-apps/cli` in package.json — a compatibility convention (the JS API and
+# the core are released together and their IPC assumes matching versions), not a
+# build gate: the CLI's only version check compares `@tauri-apps/cli` to its own
+# bundled native binding and never reads the crate, so nothing catches a crate/npm
+# mismatch automatically. Bump them together by hand.
 # `devtools` is deliberately absent: debug builds enable the inspector through
 # `debug_assertions`, while release builds must ship with it disabled.
 tauri = { version = "2.11", features = ["tray-icon"] }
