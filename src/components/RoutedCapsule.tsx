@@ -69,12 +69,7 @@ export function RoutedCapsule() {
     for (const session of s.sessions) {
       const ids = s.routedPids[session.pid];
       if (ids === undefined || ids.length === 0) continue;
-      const exe = session.exe_name.toLowerCase();
-      if (
-        s.sessions.some((x) => x.exe_name.toLowerCase() === exe && s.soundingPids[x.pid] === true)
-      ) {
-        return true;
-      }
+      if (s.soundingExes[session.exe_name.toLowerCase()] === true) return true;
     }
     return false;
   });
@@ -225,9 +220,7 @@ function CapsuleRow({
   const selectProcess = useRouterStore((s) => s.selectProcess);
   const stopRoute = useRouterStore((s) => s.stopRoute);
   const exeKey = row.exeName.toLowerCase();
-  const sounding = useRouterStore((s) =>
-    s.sessions.some((x) => x.exe_name.toLowerCase() === exeKey && s.soundingPids[x.pid] === true),
-  );
+  const sounding = useRouterStore((s) => s.soundingExes[exeKey] === true);
   const first = row.devices[0] ?? '';
   return (
     <div

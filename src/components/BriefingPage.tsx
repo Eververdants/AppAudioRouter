@@ -296,9 +296,7 @@ function BriefingCard({
   const { t } = useTranslation();
   const selectProcess = useRouterStore((s) => s.selectProcess);
   const exeKey = card.exeName.toLowerCase();
-  const sounding = useRouterStore((s) =>
-    s.sessions.some((x) => x.exe_name.toLowerCase() === exeKey && s.soundingPids[x.pid] === true),
-  );
+  const sounding = useRouterStore((s) => s.soundingExes[exeKey] === true);
 
   /** The word a chip wears, which for a feed is its own three-state reading. */
   const roleWordOf = (destination: Destination): string => {

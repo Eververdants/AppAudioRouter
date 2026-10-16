@@ -91,16 +91,14 @@ export function TitleBar({
   // processes is making sound, and the one making it is often a sibling of the
   // process holding the route (a browser's renderer, not its main process).
   const soundingCount = useRouterStore((s) => {
-    const soundingExes = new Set<string>();
-    for (const session of s.sessions) {
-      if (s.soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
-    }
     let count = 0;
     for (const raw of Object.keys(s.routedPids)) {
       const pid = Number(raw);
       if ((s.routedPids[pid]?.length ?? 0) === 0) continue;
       const session = s.sessions.find((x) => x.pid === pid);
-      if (session !== undefined && soundingExes.has(session.exe_name.toLowerCase())) count += 1;
+      if (session !== undefined && s.soundingExes[session.exe_name.toLowerCase()] === true) {
+        count += 1;
+      }
     }
     return count;
   });

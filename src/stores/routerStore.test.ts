@@ -227,6 +227,7 @@ function reset(overrides: Partial<StoreState> = {}): void {
     deviceVolumes: {},
     sourceVolumes: {},
     soundingPids: {},
+    soundingExes: {},
     rememberedRoutes: [],
     rememberedFeeds: [],
     feeds: {},
@@ -937,6 +938,26 @@ describe('engine events', () => {
 });
 
 describe('session activity', () => {
+  it('folds who is sounding into the programs the lists read', async () => {
+    // Every row that draws one line per program asks by executable name — the
+    // fold is what keeps that one lookup instead of a walk of the session list
+    // on each store write. Both places that record sound have to fold it, or
+    // the lists read a program as quiet while its process is playing.
+    const SIBLING: AudioSession = { pid: 1003, exe_name: 'music.exe', playing: true };
+    installBackend({ sessions: [MUSIC, SIBLING] });
+    reset({ devices: [SPEAKERS], sessions: [] });
+
+    await state().refreshSessions();
+    expect(state().soundingExes['music.exe']).toBe(true);
+
+    // The event path folds from the same list: a flip off for the only sounding
+    // process of a program takes the program's own answer with it.
+    state().handleSessionActivity({ pid: SIBLING.pid, active: false });
+    expect(state().soundingExes['music.exe']).toBeUndefined();
+    state().handleSessionActivity({ pid: MUSIC.pid, active: true });
+    expect(state().soundingExes['music.exe']).toBe(true);
+  });
+
   it('tracks the transitions the backend forwards', () => {
     installBackend();
     reset({ soundingPids: {} });

@@ -129,6 +129,14 @@ interface RouterState {
    */
   soundingPids: Record<number, boolean>;
   /**
+   * Which programs are rendering audio right now, keyed by lower-cased
+   * executable name — `soundingPids` folded per program, so a list that draws
+   * one row per program asks one key instead of walking the session list on
+   * every store write. Derived, not a second ledger: both tables come out of
+   * the same pass at the two places sound is recorded.
+   */
+  soundingExes: Record<string, true>;
+  /**
    * The level this app applies to each program's audio on its way to the routed
    * devices, in percent, keyed by executable name — the same ownership rule the
    * routing assignments use, since one program can hold several sessions and the
@@ -807,6 +815,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   sourceVolumes: {},
   iconByExe: {},
   soundingPids: {},
+  soundingExes: {},
   autoRemember: readAutoRemember(),
   rememberedRoutes: [],
   rememberedFeeds: [],
@@ -929,6 +938,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         for (const session of sessions) {
           if (session.playing === true) soundingPids[session.pid] = true;
         }
+        const soundingExes = foldSounding(sessions, soundingPids);
         // Feeds pin an endpoint on each end, so both ends have to be live for
         // the wire to stay on the board — rebuilt from the memory, same as the
         // badges above are rebuilt from the engine list.
@@ -940,6 +950,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
           engineGenerations,
           soundingPids,
+          soundingExes,
           feeds,
         };
       });
@@ -2436,7 +2447,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const soundingPids = { ...s.soundingPids };
       if (active) soundingPids[pid] = true;
       else delete soundingPids[pid];
-      return { soundingPids };
+      return { soundingPids, soundingExes: foldSounding(s.sessions, soundingPids) };
     });
   },
 
