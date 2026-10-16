@@ -77,7 +77,6 @@
     "changePrimaryTitle": "Swap the main device: pick the one Windows plays directly; the others stay copies",
     "changePrimaryAria": "Change the main device, currently {{name}}",
     "pickPrimary": "Main output device",
-    "promoteBlockedTitle": "Its delay compensation is larger than the Main device's, and the system plays that one directly — software delay can only hold sound back, so this device can only align as a copy",
     "applyHint": "Click to apply",
     "applyAriaOne": "Play {{process}} through {{device}} instead",
     "applyAriaMany": "Play {{n}} apps through {{device}} instead",
