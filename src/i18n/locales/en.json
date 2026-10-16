@@ -311,6 +311,8 @@
     "staleAssignmentReleased": "Released the output device {{processes}} was left fixed to by an earlier route",
     "pinnedEndpointsReset": "Released the fixed output device of {{n}} program(s)",
     "pinnedEndpointsRemaining": "Could not release {{processes}}; a program must be playing sound to be released",
+    "pinnedEndpointsRemainingOnDevice": "{{process}} (still fixed to {{device}})",
+    "pinnedEndpointsRemainingNoDevice": "{{process}} (the audio service would not say which device)",
     "pinnedEndpointsResetFailed": "Failed to reset per-app output: {{error}}",
     "stopRouteFailed": "Failed to stop routing: {{error}}",
     "duplicationFailed": "Duplication failed for PID {{pid}}: {{error}}",

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import type { AudioDevice, AudioSession } from '@/lib/types';
+import type { AudioDevice, AudioSession, ResetOutcome, StopOutcome } from '@/lib/types';
 import { feedLiveness, useRouterStore } from './routerStore';
 
 /**
@@ -49,6 +49,13 @@ interface Backend {
   generation: number;
   /** Return true to make a command fail, the way a real backend would. */
   fail: (cmd: string, args: Record<string, unknown>) => boolean;
+  /** pid -> what `stop_route` answers for it; anything unstated is a clean
+   *  release. Which of its two failures a stop was is the backend's to say —
+   *  the UI reading its own route list for the answer is the bug these tests
+   *  need to be able to tell apart. */
+  stopOutcomes: Record<number, Partial<StopOutcome>>;
+  /** What `reset_pinned_endpoints` answers. */
+  resetOutcome: ResetOutcome;
 }
 
 function installBackend(overrides: Partial<Backend> = {}): Backend {
@@ -66,6 +73,8 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
     calls: [],
     generation: 0,
     fail: () => false,
+    stopOutcomes: {},
+    resetOutcome: { released: 0, still_pinned: [], still_pinned_devices: [] },
     ...overrides,
   };
 
@@ -100,10 +109,17 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         backend.routeGenerations[pid] = backend.generation;
         return backend.generation;
       }
-      case 'stop_route':
-        delete backend.routes[args.pid as number];
-        delete backend.routeGenerations[args.pid as number];
-        return { released: true, pinned_device: null };
+      case 'stop_route': {
+        const pid = args.pid as number;
+        delete backend.routes[pid];
+        delete backend.routeGenerations[pid];
+        return {
+          released: true,
+          pinned_device: null,
+          sibling_held: false,
+          ...backend.stopOutcomes[pid],
+        };
+      }
       case 'get_active_duplications':
         // The real command lists *engines*, so single-device routes — which
         // have none — never appear here. The real contract is a parallel array
@@ -170,7 +186,7 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
       case 'release_stale_routes':
         return [];
       case 'reset_pinned_endpoints':
-        return { released: 0, still_pinned: [] };
+        return backend.resetOutcome;
       case 'get_close_to_tray':
       case 'get_autostart':
       case 'is_silent_launch':
@@ -669,6 +685,138 @@ describe('stopRoute', () => {
     await state().stopRoute(1001);
 
     expect(backend.calls.some((c) => c.cmd === 'stop_route')).toBe(false);
+  });
+
+  it('takes the whole program off the selection when a sibling holds the route', async () => {
+    // The ✕ the rail passes is the route's holder, but the board can be looking
+    // at any process of that program. Filtering the selection by the holder's
+    // pid alone left the sibling selected with the stopped plan still drawn
+    // under it — a route the board no longer offers any way to stop, since the
+    // row it belonged to has just gone unrouted.
+    const SIBLING: AudioSession = { pid: 1006, exe_name: 'music.exe' };
+    const backend = installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, SIBLING, GAME],
+      selectedPids: [SIBLING.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+      routedPids: { [MUSIC.pid]: ['speakers', 'tv'] },
+    });
+
+    await state().stopRoute(MUSIC.pid);
+
+    expect(state().selectedPids).toEqual([]);
+    expect(state().selectedDeviceIds).toEqual([]);
+    expect(state().routedPids).toEqual({});
+    expect(backend.calls.filter((c) => c.cmd === 'stop_route')).toHaveLength(1);
+  });
+
+  it('leaves the rest of the selection alone when a program stops', async () => {
+    // A batch stays a batch: stopping one program takes that program's
+    // processes out — the sibling above included — and nothing else's.
+    const SIBLING: AudioSession = { pid: 1007, exe_name: 'music.exe' };
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, SIBLING, GAME],
+      selectedPids: [SIBLING.pid, GAME.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+      routedPids: { [MUSIC.pid]: ['speakers', 'tv'], [GAME.pid]: ['tv'] },
+    });
+
+    await state().stopRoute(MUSIC.pid);
+
+    expect(state().selectedPids).toEqual([GAME.pid]);
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+    expect(state().routedPids).toEqual({ [GAME.pid]: ['tv'] });
+  });
+
+  it('names the device when the audio service refused the release', async () => {
+    // Which of its two failures a stop was is the backend's to say. Reading the
+    // route list for the answer — the old guess — turned a *refused* release
+    // into the sibling line whenever a dead sibling's entry was still standing
+    // under the same exe: the device stayed booked and the user was never told.
+    const DEAD_SIBLING: AudioSession = { pid: 1011, exe_name: 'music.exe' };
+    installBackend({
+      stopOutcomes: {
+        [MUSIC.pid]: { released: false, pinned_device: 'tv', sibling_held: false },
+      },
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, DEAD_SIBLING],
+      // The sibling's route is the stale entry: this program's own stop is not
+      // held by anything that is still playing.
+      routedPids: { [MUSIC.pid]: ['tv'], [DEAD_SIBLING.pid]: ['tv'] },
+    });
+
+    await state().stopRoute(MUSIC.pid);
+
+    expect(lastLog()?.level).toBe('error');
+    expect(lastLog()?.message).toContain('TV');
+  });
+
+  it('says the way out is the sibling route when the backend says so', async () => {
+    // The other half of the same field: a held assignment is not a stuck
+    // endpoint, and pointing at the settings reset here would send the user to
+    // a button that cannot help them.
+    const SIBLING: AudioSession = { pid: 1012, exe_name: 'music.exe' };
+    installBackend({
+      stopOutcomes: {
+        [MUSIC.pid]: { released: false, pinned_device: 'tv', sibling_held: true },
+      },
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, SIBLING],
+      routedPids: { [MUSIC.pid]: ['tv'], [SIBLING.pid]: ['speakers', 'tv'] },
+    });
+
+    await state().stopRoute(MUSIC.pid);
+
+    expect(lastLog()?.level).toBe('info');
+    expect(lastLog()?.message).toContain('another process');
+  });
+
+  it('says the device could not be read when there is no name to give', async () => {
+    installBackend({
+      stopOutcomes: {
+        [MUSIC.pid]: { released: false, pinned_device: null, sibling_held: false },
+      },
+    });
+    reset({ devices: [SPEAKERS], sessions: [MUSIC], routedPids: { [MUSIC.pid]: ['speakers'] } });
+
+    await state().stopRoute(MUSIC.pid);
+
+    expect(lastLog()?.level).toBe('error');
+    expect(lastLog()?.message).toContain('music.exe');
+  });
+});
+
+describe('reset of left-behind assignments', () => {
+  it('names the device each program stays fixed to', async () => {
+    // The two arrays are parallel by contract: the names come in one list and
+    // the endpoints in the other, and a log that mixed them up would blame the
+    // wrong device for the wrong program.
+    installBackend({
+      resetOutcome: {
+        released: 1,
+        still_pinned: ['music.exe', 'game.exe'],
+        still_pinned_devices: ['tv', null],
+      },
+    });
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+
+    await state().resetPinnedEndpoints();
+
+    const message = state()
+      .logs.filter((entry) => entry.level === 'error')
+      .map((entry) => entry.message)
+      .join(' / ');
+    expect(message).toContain('music.exe (still fixed to TV)');
+    // The second program has no device to name — the service would not answer
+    // for it — and that has to be said rather than quietly left out.
+    expect(message).toContain('game.exe (the audio service would not say which device)');
   });
 });
 

@@ -91,9 +91,9 @@ describe('invoke wrappers', () => {
         case 'get_startup_notice':
           return { kind: 'upgrade', previous_version: '2.0.0' };
         case 'stop_route':
-          return { released: true, pinned_device: null };
+          return { released: true, pinned_device: null, sibling_held: false };
         case 'reset_pinned_endpoints':
-          return { released: 3, still_pinned: ['game.exe'] };
+          return { released: 3, still_pinned: ['game.exe'], still_pinned_devices: ['tv'] };
         case 'release_stale_routes':
           return ['old.exe'];
         case 'is_silent_launch':
@@ -111,10 +111,15 @@ describe('invoke wrappers', () => {
       kind: 'upgrade',
       previous_version: '2.0.0',
     });
-    await expect(api.stopRoute(1)).resolves.toEqual({ released: true, pinned_device: null });
+    await expect(api.stopRoute(1)).resolves.toEqual({
+      released: true,
+      pinned_device: null,
+      sibling_held: false,
+    });
     await expect(api.resetPinnedEndpoints()).resolves.toEqual({
       released: 3,
       still_pinned: ['game.exe'],
+      still_pinned_devices: ['tv'],
     });
     await expect(api.releaseStaleRoutes()).resolves.toEqual(['old.exe']);
     await expect(api.isSilentLaunch()).resolves.toBe(false);

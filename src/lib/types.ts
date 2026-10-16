@@ -182,11 +182,18 @@ export interface DuplicationStoppedEvent {
  *
  * `released` is false when the program is still fixed to an endpoint: Windows
  * applies that fixed endpoint before the system default, so the program ignores
- * later device switches until the assignment is cleared. */
+ * later device switches until the assignment is cleared. The backend says which
+ * of its two reasons it had — the UI must not read `routedPids` to guess one of
+ * them: a refused release still has the sibling's stale entry on the list, and
+ * reporting that as "another process is routed" would swallow a real failure. */
 export interface StopOutcome {
   released: boolean;
   /** Endpoint the program is still pinned to; `null` when it was unreadable. */
   pinned_device: string | null;
+  /** True when the assignment stays because another process of the same
+   * executable still routes the program — it goes back when that route stops,
+   * so this is not a stuck endpoint. Only meaningful when `released` is false. */
+  sibling_held: boolean;
 }
 
 /** Result of clearing the per-app output assignments no live route uses. */
@@ -195,6 +202,10 @@ export interface ResetOutcome {
   released: number;
   /** Executable names the audio service would not let go. */
   still_pinned: string[];
+  /** One entry per `still_pinned`, same order and length: the endpoint Windows
+   * still holds for it, or `null` when the service would not answer for that
+   * program at all, so no device can be named. */
+  still_pinned_devices: (string | null)[];
 }
 
 /** One mirror device of a live route could not be opened, or errored out later.

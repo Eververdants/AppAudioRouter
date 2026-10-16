@@ -1822,23 +1822,35 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // route — and the event guards below compare against it either way.
         const engineGenerations = { ...s.engineGenerations };
         delete engineGenerations[pid];
-        const wasOnlySelection = s.selectedPids.length === 1 && s.selectedPids[0] === pid;
+        // A route belongs to a program and is held by one of its processes, but
+        // the selection is drawn per process: the row that was pressed can be a
+        // sibling of the holder. Every process of this executable then leaves
+        // the selection with the route — leaving one behind would keep the
+        // board showing a plan for a route that has just stopped.
+        const stoppedExe = session?.exe_name.toLowerCase();
+        const selectedPids = s.selectedPids.filter(
+          (p) =>
+            p !== pid &&
+            (stoppedExe === undefined ||
+              s.sessions.find((x) => x.pid === p)?.exe_name.toLowerCase() !== stoppedExe),
+        );
         return {
           routedPids,
           engineGenerations,
-          selectedPids: s.selectedPids.filter((p) => p !== pid),
-          selectedDeviceIds: wasOnlySelection ? [] : s.selectedDeviceIds,
+          selectedPids,
+          selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
         };
       });
       const outcome = await api.stopRoute(pid);
       if (outcome.released) {
         get().addLog(i18next.t('log.routeStopped', { process }), 'info');
-      } else if (programEntryOf(get().sessions, get().routedPids, pid) !== undefined) {
+      } else if (outcome.sibling_held) {
         // The backend kept the assignment because another process of the same
         // program still holds a live route — the way out is stopping that
-        // route, not the settings reset the pinned wording points at. The
-        // optimistic clear above removed this pid's own entry, so what
-        // `programEntryOf` finds here is the sibling's.
+        // route, not the settings reset the pinned wording points at. Which of
+        // its two failures this was is the backend's to say: the route list
+        // still carries a dead sibling's entry, so reading it here would dress
+        // a refused release up as a sibling route and swallow the device name.
         get().addLog(i18next.t('log.routeStoppedSibling', { process }), 'info');
       } else {
         // The program plays on the current default again, but Windows still
@@ -1900,9 +1912,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       if (result.status === 'rejected') {
         failed.push(pid);
         get().addLog(i18next.t('log.stopRouteFailed', { error: String(result.reason) }), 'error');
-      } else if (!result.value.released) {
+      } else if (!result.value.released && !result.value.sibling_held) {
         // Stopped, but the program keeps a fixed output device: one line for the
-        // whole batch is enough, the single-stop case names the device.
+        // whole batch is enough, the single-stop case names the device. A stop
+        // held by a sibling is not that: the sibling is in this same batch, and
+        // whichever of the two lands last is the one that releases it — or says
+        // so here.
         stillPinned.push(names.get(pid) ?? `PID ${pid}`);
       }
     });
@@ -1921,7 +1936,22 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         const generation = generationSnapshot[pid];
         if (generation !== undefined) engineGenerations[pid] = generation;
       }
-      const selectedPids = s.selectedPids.filter((p) => !pids.includes(p) || failed.includes(p));
+      const stoppedExes = new Set<string>();
+      for (const pid of pids) {
+        if (failed.includes(pid)) continue;
+        const name = names.get(pid);
+        if (name !== undefined) stoppedExes.add(name.toLowerCase());
+      }
+      const selectedPids = s.selectedPids.filter((p) => {
+        // A route is the program's but the selection is drawn per process, so
+        // a sibling of one of these leaves the selection with it — standing
+        // alone it would keep a stopped plan on the board with no route left
+        // under it to stop.
+        if (failed.includes(p)) return true;
+        if (pids.includes(p)) return false;
+        const name = names.get(p);
+        return name === undefined || !stoppedExes.has(name.toLowerCase());
+      });
       return {
         routedPids,
         selectedPids,
@@ -1949,10 +1979,22 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const outcome = await api.resetPinnedEndpoints();
       get().addLog(i18next.t('log.pinnedEndpointsReset', { n: outcome.released }), 'info');
       if (outcome.still_pinned.length > 0) {
+        // The service says which endpoint each program stays fixed to, or that
+        // it would not answer at all: a user reading this has to be able to
+        // tell "still booked on the TV" from "nothing could be read".
+        const devices = get().devices;
+        const named = outcome.still_pinned.map((exeName, index) => {
+          const device = outcome.still_pinned_devices[index];
+          if (device === undefined || device === null) {
+            return i18next.t('log.pinnedEndpointsRemainingNoDevice', { process: exeName });
+          }
+          return i18next.t('log.pinnedEndpointsRemainingOnDevice', {
+            process: exeName,
+            device: deviceName(device, devices),
+          });
+        });
         get().addLog(
-          i18next.t('log.pinnedEndpointsRemaining', {
-            processes: outcome.still_pinned.join(', '),
-          }),
+          i18next.t('log.pinnedEndpointsRemaining', { processes: named.join(', ') }),
           'error',
         );
       }

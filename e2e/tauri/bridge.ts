@@ -142,7 +142,7 @@ function tauriBridge(initial: BridgeState): void {
       case 'stop_route':
         delete state.routes[String(payload.pid)];
         delete state.routeGenerations[String(payload.pid)];
-        return { released: true, pinned_device: null };
+        return { released: true, pinned_device: null, sibling_held: false };
       case 'get_active_duplications':
         // The real command lists *engines*, so single-device routes — which
         // have none — never appear here. Parallel arrays, same order as the
@@ -251,7 +251,9 @@ function tauriBridge(initial: BridgeState): void {
       case 'release_stale_routes':
         return [];
       case 'reset_pinned_endpoints':
-        return { released: 0, still_pinned: [] };
+        // Nothing is left pinned in the scripted graph: every stop above
+        // releases, and there is no boot-time residue to sweep.
+        return { released: 0, still_pinned: [], still_pinned_devices: [] };
       case 'get_close_to_tray':
       case 'get_autostart':
       case 'is_silent_launch':

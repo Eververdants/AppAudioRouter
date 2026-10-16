@@ -311,6 +311,8 @@
     "staleAssignmentReleased": "已清除 {{processes}} 被此前路由固定的输出设备",
     "pinnedEndpointsReset": "已清除 {{n}} 个程序的固定输出设备",
     "pinnedEndpointsRemaining": "无法清除 {{processes}}：程序需正在播放声音才能被清除",
+    "pinnedEndpointsRemainingOnDevice": "{{process}}（仍固定在 {{device}} 上）",
+    "pinnedEndpointsRemainingNoDevice": "{{process}}（音频服务没有说明是哪台设备）",
     "pinnedEndpointsResetFailed": "重置每应用音频输出失败：{{error}}",
     "stopRouteFailed": "停止路由失败：{{error}}",
     "duplicationFailed": "进程 {{pid}} 复制路由失败：{{error}}",
