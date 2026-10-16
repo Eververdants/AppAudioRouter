@@ -6,6 +6,7 @@ import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { LATENCY_TARGET_MS } from '@/lib/delay';
 import { calibrationCancel, calibrationStart } from '@/lib/invoke';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
+import { isEditableTarget } from '@/lib/productionGuards';
 import type { AudioDevice } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
@@ -316,6 +317,12 @@ export function DelayCalibration({
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Escape belongs to the control holding the focus first — the wizard has
+      // no field of its own, but focus can sit in one of the page's underneath
+      // (a delay stepper's field, a control that owns the key via
+      // `data-owns-escape`), and the capture phase below arrives before any of
+      // them: standing down here is what leaves that press theirs.
+      if (isEditableTarget(e.target)) return;
       e.stopPropagation();
       cancelRun();
       onClose();
