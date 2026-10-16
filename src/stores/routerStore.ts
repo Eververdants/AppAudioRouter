@@ -17,12 +17,7 @@ import type {
   UndoSnapshot,
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
-import {
-  DELAY_STEP_STORAGE_KEY,
-  clampDelay,
-  clampStep,
-  readDelayStep,
-} from '@/lib/delay';
+import { DELAY_STEP_STORAGE_KEY, clampDelay, clampStep, readDelayStep } from '@/lib/delay';
 import { rgbaToDataUrl } from '@/lib/icons';
 import * as api from '@/lib/invoke';
 import { programEntryOf } from '@/lib/routes';
@@ -1156,14 +1151,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   restoreRememberedRoutes: async () => {
-    const {
-      autoRemember,
-      applying,
-      rememberedRoutes,
-      routedPids,
-      devices,
-      sessions,
-    } = get();
+    const { autoRemember, applying, rememberedRoutes, routedPids, devices, sessions } = get();
     if (!autoRemember || rememberedRoutes.length === 0) return;
     // A route the user is applying right now already owns these processes.
     // Nothing is claimed here, so the next pass picks them up again.

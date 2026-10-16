@@ -48,7 +48,9 @@ export function ProcessIcon({
     <span aria-hidden="true" className="relative flex-none" style={{ width: size, height: size }}>
       <motion.span
         key={swapKey}
-        initial={swapKey === 0 ? false : { y: rise, scale: 0.92, opacity: 0, filter: 'blur(2.5px)' }}
+        initial={
+          swapKey === 0 ? false : { y: rise, scale: 0.92, opacity: 0, filter: 'blur(2.5px)' }
+        }
         animate={{
           y: swapKey === 0 ? 0 : [rise, -rise * 0.25, 0],
           scale: swapKey === 0 ? 1 : [0.92, 1.04, 1],

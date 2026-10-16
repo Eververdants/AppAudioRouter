@@ -581,9 +581,7 @@ export function DelayCalibration({
                       : 'text-text-secondary hover:text-accent'
                   }`}
                 >
-                  <span className="min-w-0 flex-1 truncate text-xs">
-                    {deviceName(id)}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs">{deviceName(id)}</span>
                   <span className="flex-none text-[10.5px] text-text-muted">
                     {id === baselineId ? t('calibration.rolePrimary') : t('calibration.roleCopy')}
                   </span>
@@ -671,7 +669,9 @@ function PickRow({
       }`}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {picked && <span className="flex-none text-[10px] text-accent">{t('calibration.picked')}</span>}
+      {picked && (
+        <span className="flex-none text-[10px] text-accent">{t('calibration.picked')}</span>
+      )}
     </button>
   );
 }

@@ -37,10 +37,7 @@ const CHAR_SWAP_STAGGER_BUDGET = 0.14;
 const CHAR_SWAP_ENTER_LEAD = 0.05;
 
 /** Enter/exit transitions for character `i` of `n` in a hub name swap. */
-export function charSwapTransitions(
-  i: number,
-  n: number,
-): { enter: Transition; exit: Transition } {
+export function charSwapTransitions(i: number, n: number): { enter: Transition; exit: Transition } {
   const stagger = Math.min(CHAR_SWAP_STAGGER_MAX, CHAR_SWAP_STAGGER_BUDGET / Math.max(n - 1, 1));
   return {
     exit: { delay: i * stagger, duration: 0.24, times: [0, 0.32, 1], ease: ['easeIn', 'easeOut'] },

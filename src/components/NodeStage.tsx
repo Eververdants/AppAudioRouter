@@ -601,11 +601,7 @@ export function NodeStage() {
               >
                 <span className="pin pin-out" aria-hidden="true" />
                 <span className="flex w-full items-center gap-2">
-                  <Ring
-                    tone="idle"
-                    size={12}
-                    live={soundingFeeders.has(feeder.pid) && liveness}
-                  />
+                  <Ring tone="idle" size={12} live={soundingFeeders.has(feeder.pid) && liveness} />
                   <ProcessIcon exeName={feeder.exe_name} name={feederName} size={16} />
                   <span className="truncate text-[11.5px] font-semibold text-text-primary">
                     {feederName}
