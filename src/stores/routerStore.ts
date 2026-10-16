@@ -1335,8 +1335,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     if (!(feeds[sourcePid] ?? []).includes(targetPid)) return;
     const source = sessions.find((s) => s.pid === sourcePid);
     const target = sessions.find((s) => s.pid === targetPid);
-    const previousFeeds = { ...feeds };
-    const previousMemory = get().rememberedFeeds;
     set((s) => {
       const nextFeeds = { ...s.feeds };
       const remaining = (nextFeeds[sourcePid] ?? []).filter((pid) => pid !== targetPid);
@@ -1367,12 +1365,23 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         get().addLog(i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }), 'error');
       }
     } catch (e) {
-      // The backend kept the rule: put the wire and the memory back rather than
-      // showing a board that disagrees with the audio service.
-      set({
-        feeds: previousFeeds,
-        rememberedFeeds: previousMemory,
-        feedUndo: null,
+      // The backend kept the rule: put this one wire and this one memory entry
+      // back rather than showing a board that disagrees with the audio service.
+      // Functional, and scoped to `sourcePid → targetPid`, so a *different* feed
+      // the user moved while this removal was in flight keeps its own outcome
+      // instead of being reverted by a whole-map snapshot.
+      set((s) => {
+        const nextFeeds = { ...s.feeds };
+        const existing = nextFeeds[sourcePid] ?? [];
+        if (!existing.includes(targetPid)) nextFeeds[sourcePid] = [...existing, targetPid];
+        return {
+          feeds: nextFeeds,
+          rememberedFeeds:
+            source !== undefined && target !== undefined
+              ? rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, true)
+              : s.rememberedFeeds,
+          feedUndo: null,
+        };
       });
       get().addLog(i18next.t('log.feedRemoveFailed', { error: String(e) }), 'error');
     }
