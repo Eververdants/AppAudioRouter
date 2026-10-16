@@ -303,6 +303,7 @@
     "deviceSwitched": "Output changed to {{device}}",
     "deviceSwitchedProcess": "Output of {{process}} changed to {{device}}",
     "routeStoppedStillPinned": "Stopped routing {{process}}, but Windows still has it fixed to {{device}} — switching devices will not move it until you reset per-app output in the settings",
+    "routeStoppedSibling": "Stopped this route of {{process}}, but another process of the same program is still routed — the output device stays with that route; stop it to hand the device back",
     "routeStoppedUnreleased": "Stopped routing {{process}}; the output device it was fixed to could not be released",
     "stoppedAllStillPinned": "Stopped routing, but {{n}} program(s) are still fixed to an output device ({{processes}}) — reset per-app output in the settings",
     "routeUndone": "Undid the last route ({{n}} processes)",

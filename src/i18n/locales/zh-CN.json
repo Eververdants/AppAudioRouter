@@ -303,6 +303,7 @@
     "deviceSwitched": "输出已改为 {{device}}",
     "deviceSwitchedProcess": "{{process}} 的输出已改为 {{device}}",
     "routeStoppedStillPinned": "已停止 {{process}} 的路由，但 Windows 仍把它固定在 {{device}}——在设置中重置每应用音频输出之前，手动切换设备不会影响它",
+    "routeStoppedSibling": "已停止 {{process}} 的这条路由，但同一程序的另一个进程仍在路由上——输出设备跟着那条路由走，停止它才会交还设备",
     "routeStoppedUnreleased": "已停止 {{process}} 的路由，但没能清除它被固定的输出设备",
     "stoppedAllStillPinned": "已停止路由，但仍有 {{n}} 个程序被固定在输出设备上（{{processes}}）——可在设置中重置每应用音频输出",
     "routeUndone": "已撤销上一次路由（{{n}} 个进程）",

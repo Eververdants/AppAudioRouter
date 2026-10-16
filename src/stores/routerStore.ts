@@ -1833,6 +1833,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const outcome = await api.stopRoute(pid);
       if (outcome.released) {
         get().addLog(i18next.t('log.routeStopped', { process }), 'info');
+      } else if (programEntryOf(get().sessions, get().routedPids, pid) !== undefined) {
+        // The backend kept the assignment because another process of the same
+        // program still holds a live route — the way out is stopping that
+        // route, not the settings reset the pinned wording points at. The
+        // optimistic clear above removed this pid's own entry, so what
+        // `programEntryOf` finds here is the sibling's.
+        get().addLog(i18next.t('log.routeStoppedSibling', { process }), 'info');
       } else {
         // The program plays on the current default again, but Windows still
         // holds a fixed output device for it, and that has to be said out loud:
