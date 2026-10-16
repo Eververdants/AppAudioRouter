@@ -521,6 +521,9 @@ pub struct PinnedRoute {
     pub device_id: String,
     /// Whether a route of ours — as opposed to a handed-back program — owns it.
     pub kind: PinKind,
+    /// The process's creation time when the entry was written — the same
+    /// pid-recycling witness a [`FeedPin`] carries; 0 when it could not be read.
+    pub creation_time: u64,
 }
 
 /// One feed endpoint this run pinned. Which of the two halves it is comes from
@@ -528,7 +531,9 @@ pub struct PinnedRoute {
 /// it receives one program's sound and feeds another's.
 #[derive(Debug, Clone)]
 pub struct FeedPin {
+    /// Executable the pin speaks for, so a removal can find the memory rule.
     pub exe_name: String,
+    /// Endpoint the flow was pinned to.
     pub device_id: String,
     /// The process's creation time when this pin was written. The pid is the
     /// only handle the release paths get, and the kernel hands pids to new
@@ -575,6 +580,7 @@ pub struct PinnedRoutes {
 }
 
 impl PinnedRoutes {
+    /// An empty book; entries arrive as assignments are written.
     pub fn new() -> Self {
         Self::default()
     }
@@ -609,6 +615,7 @@ impl PinnedRoutes {
     }
 
     fn insert(&self, pid: u32, exe_name: &str, device_id: &str, kind: PinKind) {
+        let creation_time = super::process_creation_time(pid).unwrap_or(0);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.insert(
             pid,
@@ -616,6 +623,7 @@ impl PinnedRoutes {
                 exe_name: exe_name.to_string(),
                 device_id: device_id.to_string(),
                 kind,
+                creation_time,
             },
         );
     }
@@ -668,11 +676,18 @@ impl PinnedRoutes {
     /// program's output. An entry that is not a route is not an answer either:
     /// nothing is being mirrored, and no later `stop_route` will ever resume
     /// what is recorded as waiting for it.
+    ///
+    /// The entry must also still speak for the process it was written for: a
+    /// route whose program exited stays on the book until a sweep reaches it,
+    /// and the kernel recycles pids — answering "routed" for a stranger would
+    /// suspend every feed set up through that process, with nothing left that
+    /// would ever resume it. The bookkeeping itself is left standing either
+    /// way; only the answer changes.
     pub fn is_routed(&self, pid: u32) -> bool {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner
-            .get(&pid)
-            .is_some_and(|route| route.kind == PinKind::Route)
+        inner.get(&pid).is_some_and(|route| {
+            route.kind == PinKind::Route && super::process_is_running(pid, route.creation_time)
+        })
     }
 
     /// Take the pinned PIDs and a copy of the entries, for a sweep that will
@@ -1213,23 +1228,31 @@ mod tests {
     #[test]
     fn a_handed_back_program_is_not_a_live_route() {
         let pins = PinnedRoutes::new();
-        pins.mark(1, "game.exe", "device-a");
+        // `is_routed` also asks whether the entry's process still lives, so the
+        // route entry needs a pid that really does: the test process itself.
+        let live = std::process::id();
+        pins.mark(live, "game.exe", "device-a");
         pins.mark_returned(2, "browser.exe", "device-b");
         pins.mark(3, "quiet.exe", "device-c");
         pins.mark_abandoned(3);
 
-        assert_eq!(pins.routed_pids(), vec![1]);
-        assert!(pins.is_routed(1));
+        assert_eq!(pins.routed_pids(), vec![live]);
+        assert!(pins.is_routed(live));
         // Both ways an entry can stop being a route answer `no` here, and both
         // still ride the shutdown release.
         assert!(!pins.is_routed(2));
         assert!(!pins.is_routed(3));
+        // A route entry whose pid no process answers any more is not a live
+        // route either — the pid-recycled stranger a feed must not be suspended
+        // for. Its bookkeeping still rides the shutdown release.
+        pins.mark(u32::MAX, "gone.exe", "device-d");
+        assert!(!pins.is_routed(u32::MAX));
 
-        pins.forget(1);
-        assert!(pins.routed_pids().is_empty());
+        pins.forget(live);
+        assert_eq!(pins.routed_pids(), vec![u32::MAX]);
         let mut released = pins.take_all();
         released.sort();
-        assert_eq!(released, vec![2, 3]);
+        assert_eq!(released, vec![2, 3, u32::MAX]);
     }
 
     /// A chain — `A` into `B`, `B` into `C` — writes `B` on both flows, and
