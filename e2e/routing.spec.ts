@@ -242,8 +242,13 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
 
   // The copy's own role word is the switch: one press trades the seats in the
   // plan, the role words cross-fade on the spot, and the hub is what moves the
-  // hardware.
-  await deviceRowShell(page, 'Speakers').getByRole('button', { name: 'Make primary' }).click();
+  // hardware. The offer reaches the keyboard too — a row read by the tab order
+  // says what pressing it would do, the same words the pointer gets.
+  const promote = deviceRowShell(page, 'Speakers').getByRole('button', { name: 'Make primary' });
+  await promote.focus();
+  await expect(deviceRowShell(page, 'Speakers').getByText('Make primary')).toBeVisible();
+  await expect(deviceRowShell(page, 'Speakers').getByText('Copy', { exact: true })).toBeHidden();
+  await promote.click();
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
   await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
   await expect(hub(page)).toHaveAttribute('aria-label', /Speakers \+ TV/);
@@ -416,6 +421,45 @@ test('the activity tab shows what the app did, behind an underlined rule', async
 
   await page.getByRole('tab', { name: 'Routing' }).click();
   await expect(deviceRowShell(page, 'Speakers')).toBeVisible();
+});
+
+test('the tab row is one tab stop, and the arrows walk it', async ({ page }) => {
+  await openApp(page);
+
+  const routing = page.getByRole('tab', { name: 'Routing' });
+  const status = page.getByRole('tab', { name: 'Status' });
+  // `role=tablist` promises the arrows and one tab stop for the row: the tabs
+  // nobody is on are out of the tab order, and the row carries them itself.
+  await expect(routing).toHaveAttribute('tabindex', '0');
+  await expect(status).toHaveAttribute('tabindex', '-1');
+
+  await routing.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(status).toBeFocused();
+  // The view under the row is the tab's panel, and it says whose it is.
+  await expect(page.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', /-briefing$/);
+
+  await page.keyboard.press('ArrowLeft');
+  await expect(routing).toBeFocused();
+});
+
+test('the board’s picker answers the arrow keys', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+  await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
+
+  // A `role=menu` is walked with the arrows, one stop for the whole list: the
+  // device row steps down into the programme inputs and back, and Home/End
+  // jump to the ends of the menu rather than out of it.
+  const device = page.getByRole('menuitem', { name: 'TV', exact: true });
+  const input = page.getByRole('menuitem', { name: "game.exe's input" });
+  await device.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(input).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(device).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(input).toBeFocused();
 });
 
 test('search narrows the app list', async ({ page }) => {

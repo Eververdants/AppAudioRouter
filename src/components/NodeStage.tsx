@@ -866,6 +866,7 @@ export function NodeStage() {
                 exit="closed"
                 variants={PICKER_VARIANTS}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
+                onKeyDown={walkPickerMenu}
                 className="cc absolute z-30 w-[230px] overflow-hidden rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
                   left: Math.min(GROUP_X - 40, BOARD_W - 250),
@@ -962,6 +963,7 @@ export function NodeStage() {
                 exit="closed"
                 variants={PICKER_VARIANTS}
                 transformTemplate={MAIN_THREAD_TRANSFORM}
+                onKeyDown={walkPickerMenu}
                 className="cc absolute z-30 w-[230px] overflow-hidden rounded-card border border-line-strong bg-surface p-1.5"
                 style={{
                   left: Math.min(GROUP_X - 40, BOARD_W - 250),
@@ -986,7 +988,7 @@ export function NodeStage() {
                             setPrimaryDevice(d.id);
                             setPrimaryPickerOpen(false);
                           }}
-                          className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary outline-none hover:bg-surface-hover hover:text-text-primary"
+                          className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
                         >
                           <span
                             className={`flex h-3 w-3 flex-none items-center justify-center text-[10px] ${
@@ -1283,10 +1285,14 @@ function DeviceRow({
                   event.stopPropagation();
                   onPrimaryPick();
                 }}
-                className="pressable text-[10px] font-semibold text-type-primary underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+                className="pressable group/role text-[10px] font-semibold text-type-primary underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
               >
-                <span className="group-hover/copy:hidden">{roleWord}</span>
-                <span className="hidden group-hover/copy:inline">{t('stage.changePrimary')}</span>
+                <span className="group-hover/copy:hidden group-focus-visible/role:hidden">
+                  {roleWord}
+                </span>
+                <span className="hidden group-hover/copy:inline group-focus-visible/role:inline">
+                  {t('stage.changePrimary')}
+                </span>
               </button>
             )
           ) : (
@@ -1302,10 +1308,14 @@ function DeviceRow({
                 event.stopPropagation();
                 onPromote();
               }}
-              className="pressable text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+              className="pressable group/role text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
             >
-              <span className="group-hover/copy:hidden">{roleWord}</span>
-              <span className="hidden group-hover/copy:inline">{t('stage.promote')}</span>
+              <span className="group-hover/copy:hidden group-focus-visible/role:hidden">
+                {roleWord}
+              </span>
+              <span className="hidden group-hover/copy:inline group-focus-visible/role:inline">
+                {t('stage.promote')}
+              </span>
             </button>
           )}
           {!isPrimary && delay !== 0 && (
@@ -1531,6 +1541,31 @@ function FeedRow({
       </button>
     </motion.div>
   );
+}
+
+/**
+ * The arrows a `role=menu` promises.
+ *
+ * The rows are real buttons, so `Tab` already reaches every one of them — but a
+ * device list walked one Tab press per device is not walked, and the board's own
+ * `Select` (settings) answers the arrows. Focus moves rather than a highlight,
+ * so the browser scrolls the row into view by itself.
+ */
+function walkPickerMenu(event: React.KeyboardEvent<HTMLDivElement>): void {
+  const rows = Array.from(
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  );
+  if (rows.length === 0) return;
+  const current = rows.findIndex((row) => row === document.activeElement);
+  let next: number | null = null;
+  if (event.key === 'ArrowDown') next = current < 0 ? 0 : (current + 1) % rows.length;
+  else if (event.key === 'ArrowUp')
+    next = current < 0 ? rows.length - 1 : (current - 1 + rows.length) % rows.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = rows.length - 1;
+  if (next === null) return;
+  event.preventDefault();
+  rows[next]?.focus();
 }
 
 /** One section of the add-destination picker. */

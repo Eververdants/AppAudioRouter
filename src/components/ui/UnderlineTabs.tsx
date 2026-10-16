@@ -7,6 +7,17 @@ export interface TabItem {
   label: string;
 }
 
+/** The id of one tab's button. The panel it shows points back at it, so the two
+ *  sides of the association are spelled the same way in both files. */
+export function tabButtonId(layoutId: string, tabId: string): string {
+  return `tab-${layoutId}-${tabId}`;
+}
+
+/** The id of the panel one tab shows, named by the tab that owns it. */
+export function tabPanelId(layoutId: string, tabId: string): string {
+  return `tab-panel-${layoutId}-${tabId}`;
+}
+
 /**
  * Underline tabs — the app's one piece of view navigation.
  *
@@ -33,10 +44,35 @@ export function UnderlineTabs({
   layoutId: string;
   ariaLabel: string;
 }) {
+  const step = (event: React.KeyboardEvent<HTMLDivElement>, delta: number): void => {
+    const index = tabs.findIndex((tab) => tab.id === active);
+    const next = tabs[(index + delta + tabs.length) % tabs.length];
+    if (next === undefined) return;
+    event.preventDefault();
+    onChange(next.id);
+    // The tab row is one tab stop, so the keyboard has to be carried to the tab
+    // that now answers: `aria-selected` alone would leave the focus ring on the
+    // word the arrows just moved away from.
+    document.getElementById(tabButtonId(layoutId, next.id))?.focus();
+  };
+
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
+      onKeyDown={(event) => {
+        // `role=tablist` promises the arrows: a tab row is walked left and
+        // right, not with Tab, which belongs to the controls inside the view.
+        if (event.key === 'ArrowRight') step(event, 1);
+        else if (event.key === 'ArrowLeft') step(event, -1);
+        else if (event.key === 'Home' || event.key === 'End') {
+          const edge = event.key === 'Home' ? tabs[0] : tabs[tabs.length - 1];
+          if (edge === undefined) return;
+          event.preventDefault();
+          onChange(edge.id);
+          document.getElementById(tabButtonId(layoutId, edge.id))?.focus();
+        }
+      }}
       className="flex h-11 flex-none items-stretch gap-6 border-b border-line pl-5"
     >
       {tabs.map((tab) => {
@@ -44,9 +80,14 @@ export function UnderlineTabs({
         return (
           <button
             key={tab.id}
+            id={tabButtonId(layoutId, tab.id)}
             type="button"
             role="tab"
             aria-selected={selected}
+            aria-controls={tabPanelId(layoutId, tab.id)}
+            // One tab stop for the row: the arrows move between the tabs, so Tab
+            // can leave for the view the selected tab is showing.
+            tabIndex={selected ? 0 : -1}
             onClick={() => onChange(tab.id)}
             className="group/tab relative flex flex-col justify-end outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           >

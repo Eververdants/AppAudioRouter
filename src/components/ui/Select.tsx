@@ -50,6 +50,7 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
 
@@ -83,6 +84,22 @@ export function Select({
     // not leave the keyboard pointing at nothing.
     triggerRef.current?.focus();
   };
+
+  // The highlight travels while the focus stays on the trigger, so nothing
+  // scrolls after it: past a handful of devices the row a keyboard user is
+  // aiming at sits below the fold and never becomes reachable.
+  useEffect(() => {
+    if (!open) return;
+    const row = menuRef.current?.querySelector(`[data-row-index="${activeIndex}"]`);
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [open, activeIndex]);
+
+  // Options come and go with the device list while the menu can be open. A
+  // highlight past the end would point `aria-activedescendant` at a row that is
+  // not there and leave `Enter` choosing nothing, so it follows the list down.
+  useEffect(() => {
+    setActiveIndex((index) => (index < options.length ? index : Math.max(0, options.length - 1)));
+  }, [options.length]);
 
   // Escape and outside-pointerdown follow the menu's visibility, exactly as the
   // stage's pickers do it — a standing listener would swallow the key for the
@@ -144,7 +161,8 @@ export function Select({
     }
   };
 
-  const activeId = open ? `${listId}-option-${activeIndex}` : undefined;
+  const activeId =
+    open && options[activeIndex] !== undefined ? `${listId}-option-${activeIndex}` : undefined;
 
   return (
     <div
@@ -211,6 +229,7 @@ export function Select({
         {open && (
           <motion.div
             key="select-menu"
+            ref={menuRef}
             id={listId}
             role="listbox"
             aria-label={ariaLabel}
@@ -231,6 +250,7 @@ export function Select({
                 <button
                   key={option.value}
                   id={`${listId}-option-${index}`}
+                  data-row-index={index}
                   type="button"
                   role="option"
                   aria-selected={picked}

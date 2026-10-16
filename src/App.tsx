@@ -11,7 +11,7 @@ import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { StartupWizard } from '@/components/StartupWizard';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
-import { UnderlineTabs } from '@/components/ui/UnderlineTabs';
+import { tabButtonId, tabPanelId, UnderlineTabs } from '@/components/ui/UnderlineTabs';
 import { useBackendEvent } from '@/hooks/useBackendEvent';
 import { useRouterStore } from '@/stores/routerStore';
 import type {
@@ -284,6 +284,9 @@ export default function App() {
                   unmounts at once, which keeps the swap stuck-free. */}
               <motion.div
                 key={tab}
+                role="tabpanel"
+                id={tabPanelId('work-tab-rule', tab)}
+                aria-labelledby={tabButtonId('work-tab-rule', tab)}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={SPRING_GLIDE}
