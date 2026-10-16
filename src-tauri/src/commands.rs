@@ -827,6 +827,12 @@ pub fn get_source_volumes(sources: State<'_, Arc<SourceVolumeConfig>>) -> Vec<(S
 /// command would run that on the WebView2 main thread — freezing the window for
 /// as long as AudioSrv takes, which on a reconnecting Bluetooth endpoint is
 /// seconds.
+///
+/// Being async costs the main thread's serialisation, so two clicks can run
+/// here at once. Both halves of the write therefore take the *same* number: the
+/// one the config settled on, read back inside the lock's critical section —
+/// never the caller's own `percent`, which a later click may already have
+/// replaced.
 #[tauri::command]
 pub async fn set_primary_volume(
     exe_name: String,
@@ -835,10 +841,16 @@ pub async fn set_primary_volume(
 ) -> Result<(), String> {
     info!("cmd: set_primary_volume exe={exe_name} volume={percent}%");
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-        app.state::<Arc<PrimaryVolumeConfig>>()
-            .set(&exe_name, percent)?;
+        let primaries = app.state::<Arc<PrimaryVolumeConfig>>();
+        primaries.set(&exe_name, percent)?;
+        // Read back, so overlapping calls converge on the last committed value
+        // instead of each pushing its own: the file and the live sessions then
+        // cannot land on different numbers, whichever order the two writes
+        // reached the lock in. A click that a later one superseded restates the
+        // settled value and changes nothing.
+        let settled = primaries.get(&exe_name);
         app.state::<DuplicationManager>()
-            .update_primary_volume(&exe_name, percent);
+            .update_primary_volume(&exe_name, settled);
         Ok(())
     })
     .await

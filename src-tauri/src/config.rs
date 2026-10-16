@@ -1146,4 +1146,40 @@ mod tests {
         let map: SettingsMap = serde_json::from_str(r#"{"close_to_tray":true}"#).unwrap();
         assert!(map.close_to_tray);
     }
+
+    #[test]
+    fn a_primary_volume_reads_back_the_number_the_program_plays_at() {
+        // `set_primary_volume` reads this number back and hands it to the live
+        // sessions instead of the percent its caller asked for: two clicks can
+        // run there at once, and the lock — not the click order — decides which
+        // write lands last. Every branch has to read back as the loudness that
+        // actually took effect.
+        let mut map = PrimaryVolumeMap::default();
+        map.store("game.exe", 90).unwrap();
+        assert_eq!(map.volume("game.exe"), 90);
+        map.store("game.exe", PRIMARY_VOLUME_MIN_PERCENT).unwrap();
+        assert_eq!(map.volume("game.exe"), PRIMARY_VOLUME_MIN_PERCENT);
+        // The neutral value is stored *by removal*, so a read-back that trusted
+        // the entry alone would hand the sessions a 0 and leave the program
+        // muted on every path — the opposite of what a click on 100 means.
+        map.store("game.exe", SOURCE_VOLUME_NEUTRAL).unwrap();
+        assert!(map.volumes.is_empty());
+        assert_eq!(map.volume("game.exe"), SOURCE_VOLUME_NEUTRAL);
+    }
+
+    #[test]
+    fn a_primary_volume_below_the_floor_is_refused_and_leaves_the_last_one() {
+        // The floor exists because a session volume of 0 makes the captured
+        // stream true silence. A refused write must leave the settled value
+        // standing untouched: it is the number overlapping callers converge on,
+        // and a half-applied one would be worse than either.
+        let mut map = PrimaryVolumeMap::default();
+        map.store("game.exe", 85).unwrap();
+        assert!(map
+            .store("game.exe", PRIMARY_VOLUME_MIN_PERCENT - 1)
+            .is_err());
+        assert_eq!(map.volume("game.exe"), 85);
+        assert!(map.store("game.exe", SOURCE_VOLUME_NEUTRAL + 1).is_err());
+        assert_eq!(map.volume("game.exe"), 85);
+    }
 }
