@@ -105,26 +105,6 @@ pub async fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Set the default audio device for a process.
-#[tauri::command]
-pub async fn set_route(
-    device_id: String,
-    pid: u32,
-    role: String,
-    pins: State<'_, PinnedRoutes>,
-) -> Result<(), String> {
-    info!("cmd: set_route device={device_id} pid={pid} role={role}");
-
-    let role = parse_role(&role);
-
-    audio::routing::set_process_default_device(&device_id, pid, role)
-        .await
-        .map_err(|e| e.to_string())?;
-    // Same bookkeeping as `apply_route`: the assignment outlives this app.
-    pins.mark(pid, &exe_name_of(pid), &device_id);
-    Ok(())
-}
-
 /// The executable name of `pid`, or an empty string when it cannot be read.
 ///
 /// The name is bookkeeping for the assignments the audio service persists per
