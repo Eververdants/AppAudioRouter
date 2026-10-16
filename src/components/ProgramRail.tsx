@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { AudioSession } from '@/lib/types';
@@ -36,10 +36,6 @@ export function ProgramRail() {
   // and offers the way out.
   const routesByPid = useProgramRoutes();
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
-  const soundingPids = useRouterStore((s) => s.soundingPids);
-  const selectProcess = useRouterStore((s) => s.selectProcess);
-  const toggleProcessSelection = useRouterStore((s) => s.toggleProcessSelection);
-  const stopRoute = useRouterStore((s) => s.stopRoute);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
 
@@ -268,176 +264,22 @@ export function ProgramRail() {
             its new place rather than being redrawn there. */}
         <AnimatePresence initial={false}>
           {visibleSessions.map((session) => {
-            const targets = routesByPid[session.pid] ?? [];
             const isSelected = selectedPids.includes(session.pid);
-            const isSubject = selectedPids[0] === session.pid;
-            const joined = isSelected && !isSubject;
-            const through = playsThrough(session.pid);
-            // The ring reports the same fact it reports everywhere else — this
-            // programme is making sound — so an unrouted programme pulses too;
-            // its tone, not its pulse, is what says whether its audio has a
-            // route. `useLiveness` is the loop's only other gate.
-            const sounding = soundingPids[session.pid] === true && liveness;
-            // The window names the program something a person can read; the exe
-            // is the identity this app remembers and routes by, so it stays on
-            // the record line whenever the display name differs from it.
-            const name = session.display_name ?? session.exe_name;
-            const exeDiffers =
-              session.display_name !== undefined &&
-              session.display_name !== null &&
-              session.display_name.toLowerCase() !== session.exe_name.toLowerCase();
-
             return (
-              <motion.div
+              <RailRow
                 key={session.pid}
-                layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={FADE}
-                transformTemplate={MAIN_THREAD_TRANSFORM}
-                className={`group/row relative ${
-                  // The row carrying the selection pane sits below every other
-                  // row. Rows paint in document order, so a pane travelling
-                  // downwards would otherwise start out *over* the row being
-                  // left — its icon and name spend the first frames of the
-                  // slide buried under the moving pane, which reads as the
-                  // icon flickering. Under them the pane slips beneath instead.
-                  isSubject ? 'z-0' : 'z-10'
-                } mb-1 flex items-center rounded-ctl px-2 py-1.5 transition-colors ${
-                  isSelected ? '' : 'hover:bg-surface-hover'
-                }`}
-              >
-                {/* The selection is one object that moves, not a class that is
-                    switched on: picking another programme slides the pane off
-                    one row and onto the next, which is the only cue that says
-                    "the stage switched to this one" without words. The rows
-                    added to the batch get a quieter wash — several programmes
-                    are going to be changed at once, and only one of them is the
-                    one being shown. Both are rounded rectangles rather than
-                    capsules, with an accent rule at the leading edge: a pill
-                    swallows the row's own shape, and the list is a list of rows. */}
-                {isSubject ? (
-                  <motion.span
-                    layoutId="rail-selection"
-                    transition={SPRING_GLIDE}
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 rounded-ctl bg-surface"
-                  >
-                    <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
-                  </motion.span>
-                ) : joined ? (
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 rounded-ctl bg-accent/[0.07]"
-                  />
-                ) : null}
-
-                <div className="relative flex min-w-0 flex-1 items-center gap-2">
-                  <Ring
-                    size={14}
-                    tone={targets.length > 0 ? 'main' : 'idle'}
-                    live={sounding}
-                    className="transition-transform group-hover/row:scale-110"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      // Ctrl+click adds to the batch the same way the + on the row
-                      // does; either gesture is fine, both are explicit. Nothing
-                      // here depends on the user knowing a modifier exists.
-                      if (event.ctrlKey || event.metaKey) {
-                        toggleProcessSelection(session.pid);
-                      } else {
-                        selectProcess(session.pid);
-                      }
-                    }}
-                    className="pressable flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                  >
-                    {/* The executable's own icon, in a slot that is its size
-                      whether the pixels have arrived or not. */}
-                    <ProcessIcon exeName={session.exe_name} name={name} size={16} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-medium text-text-primary">
-                        {name}
-                      </span>
-                      {/* PID, the exe it really is when the window names it
-                        differently, and — only once something has actually been
-                        routed — where its sound goes. */}
-                      <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
-                        {exeDiffers && (
-                          <>
-                            {session.exe_name}
-                            <span aria-hidden="true" className="opacity-50">
-                              {' · '}
-                            </span>
-                          </>
-                        )}
-                        {t('rail.pid', { pid: session.pid })}
-                        {targets.length > 0 && through !== null && (
-                          <>
-                            <span aria-hidden="true" className="opacity-50">
-                              {' · '}
-                            </span>
-                            <span className="font-sans">{through}</span>
-                            {targets.length > 1 && (
-                              <span className="text-accent"> +{targets.length - 1}</span>
-                            )}
-                          </>
-                        )}
-                      </span>
-                    </span>
-                  </button>
-
-                  {/* Include this one in the change. Replacing Ctrl+click with a
-                    control someone can see is the whole point: a batch of five
-                    programmes is not something a user should discover they made. */}
-                  {!isSubject && (
-                    <MiniToggle
-                      pressed={joined}
-                      label={t('rail.alsoHint')}
-                      onClick={() => toggleProcessSelection(session.pid)}
-                    />
-                  )}
-
-                  {targets.length > 0 && (
-                    <span className="flex flex-none scale-75 items-center opacity-0 transition duration-200 group-focus-within/row:scale-100 group-focus-within/row:opacity-100 group-hover/row:scale-100 group-hover/row:opacity-100">
-                      {/* Stopping sends the programme's sound back to the system
-                        default — harmless, but baffling when it happens under an
-                        accidental click, so it asks first. */}
-                      <ConfirmButton
-                        variant="icon"
-                        label={t('rail.stopRoute')}
-                        confirmLabel={t('rail.stopRouteConfirm')}
-                        onConfirm={() => {
-                          // The route is the program's, held under whichever
-                          // process it was applied to. Stop that one: `stopRoute`
-                          // of a sibling pid finds no entry and returns, leaving
-                          // the route running under the process it names.
-                          const owner =
-                            programEntryOf(sessions, routedPids, session.pid) ?? session.pid;
-                          void stopRoute(owner);
-                        }}
-                        icon={
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 10 10"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            aria-hidden="true"
-                          >
-                            <line x1="1" y1="1" x2="9" y2="9" />
-                            <line x1="9" y1="1" x2="1" y2="9" />
-                          </svg>
-                        }
-                      />
-                    </span>
-                  )}
-                </div>
-              </motion.div>
+                session={session}
+                targets={routesByPid[session.pid] ?? NO_TARGETS}
+                through={playsThrough(session.pid)}
+                isSelected={isSelected}
+                isSubject={selectedPids[0] === session.pid}
+                // The route is the program's, held under whichever process it
+                // was applied to. Stop that one: `stopRoute` of a sibling pid
+                // finds no entry and returns, leaving the route running under
+                // the process it names.
+                stopOwner={programEntryOf(sessions, routedPids, session.pid) ?? session.pid}
+                liveness={liveness}
+              />
             );
           })}
         </AnimatePresence>
@@ -445,6 +287,200 @@ export function ProgramRail() {
     </div>
   );
 }
+
+/** The shared empty route list: a fresh `[]` per row per render would be a new
+ *  prop every time and defeat the row's memo. */
+const NO_TARGETS: string[] = [];
+
+/**
+ * One programme row, remembered: a play/pause flip anywhere in the system
+ * rebuilds the store's sounding table, and without this the whole list —
+ * every row re-measuring itself for its layout travel — repainted for each
+ * one. The row subscribes to its own pid's voice instead, so only the row
+ * whose ring actually changed re-renders.
+ */
+const RailRow = memo(function RailRow({
+  session,
+  targets,
+  through,
+  isSelected,
+  isSubject,
+  stopOwner,
+  liveness,
+}: {
+  session: AudioSession;
+  targets: string[];
+  through: string | null;
+  isSelected: boolean;
+  isSubject: boolean;
+  stopOwner: number;
+  liveness: boolean;
+}) {
+  const { t } = useTranslation();
+  const selectProcess = useRouterStore((s) => s.selectProcess);
+  const toggleProcessSelection = useRouterStore((s) => s.toggleProcessSelection);
+  const stopRoute = useRouterStore((s) => s.stopRoute);
+  const joined = isSelected && !isSubject;
+  // The ring reports the same fact it reports everywhere else — this
+  // programme is making sound — so an unrouted programme pulses too;
+  // its tone, not its pulse, is what says whether its audio has a
+  // route. `useLiveness` is the loop's only other gate.
+  const sounding = useRouterStore((s) => s.soundingPids[session.pid] === true) && liveness;
+  // The window names the program something a person can read; the exe
+  // is the identity this app remembers and routes by, so it stays on
+  // the record line whenever the display name differs from it.
+  const name = session.display_name ?? session.exe_name;
+  const exeDiffers =
+    session.display_name !== undefined &&
+    session.display_name !== null &&
+    session.display_name.toLowerCase() !== session.exe_name.toLowerCase();
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={FADE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
+      className={`group/row relative ${
+        // The row carrying the selection pane sits below every other
+        // row. Rows paint in document order, so a pane travelling
+        // downwards would otherwise start out *over* the row being
+        // left — its icon and name spend the first frames of the
+        // slide buried under the moving pane, which reads as the
+        // icon flickering. Under them the pane slips beneath instead.
+        isSubject ? 'z-0' : 'z-10'
+      } mb-1 flex items-center rounded-ctl px-2 py-1.5 transition-colors ${
+        isSelected ? '' : 'hover:bg-surface-hover'
+      }`}
+    >
+      {/* The selection is one object that moves, not a class that is
+          switched on: picking another programme slides the pane off
+          one row and onto the next, which is the only cue that says
+          "the stage switched to this one" without words. The rows
+          added to the batch get a quieter wash — several programmes
+          are going to be changed at once, and only one of them is the
+          one being shown. Both are rounded rectangles rather than
+          capsules, with an accent rule at the leading edge: a pill
+          swallows the row's own shape, and the list is a list of rows. */}
+      {isSubject ? (
+        <motion.span
+          layoutId="rail-selection"
+          transition={SPRING_GLIDE}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-ctl bg-surface"
+        >
+          <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
+        </motion.span>
+      ) : joined ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-ctl bg-accent/[0.07]"
+        />
+      ) : null}
+
+      <div className="relative flex min-w-0 flex-1 items-center gap-2">
+        <Ring
+          size={14}
+          tone={targets.length > 0 ? 'main' : 'idle'}
+          live={sounding}
+          className="transition-transform group-hover/row:scale-110"
+        />
+
+        <button
+          type="button"
+          onClick={(event) => {
+            // Ctrl+click adds to the batch the same way the + on the row
+            // does; either gesture is fine, both are explicit. Nothing
+            // here depends on the user knowing a modifier exists.
+            if (event.ctrlKey || event.metaKey) {
+              toggleProcessSelection(session.pid);
+            } else {
+              selectProcess(session.pid);
+            }
+          }}
+          className="pressable flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          {/* The executable's own icon, in a slot that is its size
+            whether the pixels have arrived or not. */}
+          <ProcessIcon exeName={session.exe_name} name={name} size={16} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12.5px] font-medium text-text-primary">
+              {name}
+            </span>
+            {/* PID, the exe it really is when the window names it
+              differently, and — only once something has actually been
+              routed — where its sound goes. */}
+            <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
+              {exeDiffers && (
+                <>
+                  {session.exe_name}
+                  <span aria-hidden="true" className="opacity-50">
+                    {' · '}
+                  </span>
+                </>
+              )}
+              {t('rail.pid', { pid: session.pid })}
+              {targets.length > 0 && through !== null && (
+                <>
+                  <span aria-hidden="true" className="opacity-50">
+                    {' · '}
+                  </span>
+                  <span className="font-sans">{through}</span>
+                  {targets.length > 1 && (
+                    <span className="text-accent"> +{targets.length - 1}</span>
+                  )}
+                </>
+              )}
+            </span>
+          </span>
+        </button>
+
+        {/* Include this one in the change. Replacing Ctrl+click with a
+          control someone can see is the whole point: a batch of five
+          programmes is not something a user should discover they made. */}
+        {!isSubject && (
+          <MiniToggle
+            pressed={joined}
+            label={t('rail.alsoHint')}
+            onClick={() => toggleProcessSelection(session.pid)}
+          />
+        )}
+
+        {targets.length > 0 && (
+          <span className="flex flex-none scale-75 items-center opacity-0 transition duration-200 group-focus-within/row:scale-100 group-focus-within/row:opacity-100 group-hover/row:scale-100 group-hover/row:opacity-100">
+            {/* Stopping sends the programme's sound back to the system
+              default — harmless, but baffling when it happens under an
+              accidental click, so it asks first. */}
+            <ConfirmButton
+              variant="icon"
+              label={t('rail.stopRoute')}
+              confirmLabel={t('rail.stopRouteConfirm')}
+              onConfirm={() => {
+                void stopRoute(stopOwner);
+              }}
+              icon={
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  aria-hidden="true"
+                >
+                  <line x1="1" y1="1" x2="9" y2="9" />
+                  <line x1="9" y1="1" x2="1" y2="9" />
+                </svg>
+              }
+            />
+          </span>
+        )}
+      </div>
+    </motion.div>
+  );
+});
 
 /** The small circle that adds a programme to the batch being changed. */
 function MiniToggle({
