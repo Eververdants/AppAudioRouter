@@ -960,13 +960,49 @@ describe('session activity', () => {
 
   it('tracks the transitions the backend forwards', () => {
     installBackend();
-    reset({ soundingPids: {} });
+    reset({ sessions: [MUSIC], soundingPids: {} });
 
     state().handleSessionActivity({ pid: 1001, active: true });
     expect(state().soundingPids[1001]).toBe(true);
 
     state().handleSessionActivity({ pid: 1001, active: false });
     expect(state().soundingPids[1001]).toBeUndefined();
+  });
+
+  it('records a transition for nobody the list can name', () => {
+    // A transition that outruns the re-enumeration bringing its process has no
+    // executable to be folded under. Recording it anyway is the half-state
+    // where one table says a thing is playing and every per-program reader —
+    // the rail, the board, the capsule, the status page, the title bar — says
+    // it is not, which reads as the route having failed.
+    installBackend({ sessions: [MUSIC] });
+    reset({ sessions: [MUSIC] });
+
+    state().handleSessionActivity({ pid: 2002, active: true });
+    expect(state().soundingPids[2002]).toBeUndefined();
+    expect(state().soundingExes).toEqual({});
+
+    // The list does know this one, so both tables answer in the same pass.
+    state().handleSessionActivity({ pid: MUSIC.pid, active: true });
+    expect(state().soundingPids[MUSIC.pid]).toBe(true);
+    expect(state().soundingExes['music.exe']).toBe(true);
+
+    state().handleSessionActivity({ pid: MUSIC.pid, active: false });
+    expect(state().soundingPids[MUSIC.pid]).toBeUndefined();
+    expect(state().soundingExes['music.exe']).toBeUndefined();
+  });
+
+  it('names a process and its program in the pass that brings the list', async () => {
+    const RENDERER: AudioSession = { pid: 2002, exe_name: 'chrome.exe', playing: true };
+    installBackend({ sessions: [MUSIC, RENDERER] });
+    reset({ sessions: [MUSIC] });
+
+    state().handleSessionActivity({ pid: RENDERER.pid, active: true });
+    expect(state().soundingExes['chrome.exe']).toBeUndefined();
+
+    await state().refreshSessions();
+    expect(state().soundingPids[RENDERER.pid]).toBe(true);
+    expect(state().soundingExes['chrome.exe']).toBe(true);
   });
 
   it('reseeds from the session list, so a process that left it stops sounding', async () => {

@@ -119,7 +119,10 @@ interface RouterState {
    * is the authority, so a process that left it stops sounding even if no
    * transition was observed — and kept current between refreshes by
    * `session-activity` events, which arrive the moment a session flips state
-   * rather than when the next re-enumeration happens to run. This is display
+   * rather than when the next re-enumeration happens to run. A transition for
+   * a process the list has not reported is not recorded: it has no executable
+   * for `soundingExes` to be folded under, so keeping it would let one table
+   * say "playing" while every per-program reader said "quiet". This is display
    * state only: nothing in the routing logic reads it.
    */
   soundingPids: Record<number, boolean>;
@@ -643,6 +646,10 @@ function deriveFeeds(
  * program is sounding when any of its processes is, and the one making the
  * sound is often a sibling of the one holding the route. Keyed lower-cased,
  * like every other executable key in this store.
+ *
+ * Walking the list covers every reading it is given: both places that record
+ * sound only record one for a process the list has, so no reading can be left
+ * out of the fold and the two tables always report the same fact.
  */
 function foldSounding(
   sessions: AudioSession[],
@@ -2436,6 +2443,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   handleSessionActivity: ({ pid, active }) => {
     set((s) => {
+      // Every reading this keeps has to be nameable by the fold, or the two
+      // tables answer the same question differently: a process the list has
+      // not reported yet has no executable to fold under, so recording it here
+      // is a reading nothing keyed by program can see. Its arrival is the
+      // re-enumeration's own job — that pass carries the `playing` flag, and
+      // with it both tables.
+      if (!s.sessions.some((session) => session.pid === pid)) return {};
       const soundingPids = { ...s.soundingPids };
       if (active) soundingPids[pid] = true;
       else delete soundingPids[pid];
