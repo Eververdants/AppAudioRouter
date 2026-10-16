@@ -319,6 +319,7 @@ function BriefingCard({
       exit={{ opacity: 0, y: -4 }}
       transition={SPRING_GLIDE}
       transformTemplate={MAIN_THREAD_TRANSFORM}
+      data-briefing-card={exeKey}
       className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
     >
       <div className="flex w-[168px] flex-none items-center gap-2">

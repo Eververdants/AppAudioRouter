@@ -510,6 +510,14 @@ test('a spoke flows only while its programme is sounding', async ({ page }) => {
   // response to the cursor.
   await expect(wire).toHaveClass(/stage-flow/);
 
+  // The cursor's brightening is a second class of its own, and `.nwire.lit` is
+  // what the stylesheet matches — so the token has to arrive separated. A
+  // template that loses the space reads `nwire stage-flowlit`: the flow still
+  // runs, the hover does nothing, and every other assertion here still passes.
+  await hub(page).hover();
+  await expect(wire).toHaveClass(/(?:^|\s)lit(?:\s|$)/);
+  await expect(page.locator('main svg path.nwire.lit')).toHaveCount(1);
+
   // And when it stops, the flow is unmounted rather than left running.
   await emit(page, 'session-activity', { pid: 1001, active: false });
   await expect(wire).not.toHaveAttribute('data-live');
@@ -519,27 +527,85 @@ test('a spoke flows only while its programme is sounding', async ({ page }) => {
 test('a resting window unmounts the pulsing ring rather than pausing it', async ({ page }) => {
   await openApp(page);
 
+  // A route first, because two of the three places a ring is worn only exist
+  // once the programme has one: the capsule counts routed programmes, and the
+  // status page lists them.
+  await appRow(page, 'music.exe').click();
+  await hub(page).click();
+
   // The row's ring is the interface's other standing loop, and it reports the
   // same fact the wire does: this programme is rendering audio right now. The
   // loop is a CSS animation on a `con-ring-live` class, so reading the class is
   // reading the loop — a paused one would leave it on.
   await emit(page, 'session-activity', { pid: 1001, active: true });
-  const ring = railRow(page, 1001).locator('.con-ring');
-  await expect(ring).toHaveClass(/con-ring-live/);
+  const railRing = railRow(page, 1001).locator('.con-ring');
+  const pillRing = routedCapsule(page).locator('.con-ring');
+  await expect(railRing).toHaveClass(/con-ring-live/);
+  await expect(pillRing).toHaveClass(/con-ring-live/);
 
-  // The window loses the OS focus, so nobody can see it.
+  // The capsule's own list row wears one too, on the far side of a click —
+  // a mount the board never passes a gate to.
+  await routedCapsule(page).click();
+  const panelRing = routedRow(page, 1001).locator('.con-ring');
+  await expect(panelRing).toHaveClass(/con-ring-live/);
+  await expect(page.locator('main [data-wire="1001:speakers"]')).toHaveClass(/stage-flow/);
+
+  // The window loses the OS focus, so nobody can see it. Counted across the
+  // page rather than row by row: a gate left behind at any one of these mounts
+  // would go on repainting a window nobody is looking at.
   await setWindowFocused(page, false);
-  await expect(railRow(page, 1001).locator('.con-ring-live')).toHaveCount(0);
-  // The ring itself is still drawn: what left is the loop, not the report.
-  await expect(ring).toHaveCount(1);
+  await expect(page.locator('.con-ring-live')).toHaveCount(0);
+  await expect(page.locator('main .stage-flow')).toHaveCount(0);
+  // The rings themselves are still drawn: what left is the loop, not the report.
+  await expect(railRing).toHaveCount(1);
+  await expect(pillRing).toHaveCount(1);
+  await expect(panelRing).toHaveCount(1);
 
   // And the gate is a gate, not a one-way switch — back in view, back pulsing.
   await setWindowFocused(page, true);
-  await expect(ring).toHaveClass(/con-ring-live/);
+  await expect(railRing).toHaveClass(/con-ring-live/);
+  await expect(pillRing).toHaveClass(/con-ring-live/);
+  await expect(panelRing).toHaveClass(/con-ring-live/);
+
+  await routedCapsule(page).click();
+
+  // The status page is the third mount, and the one that can be forgotten: it
+  // is a separate component, reading the same fact through its own selector.
+  await page.getByRole('tab', { name: 'Status' }).click();
+  const cardRing = page.locator('[data-briefing-card="music.exe"] .con-ring');
+  await expect(cardRing).toHaveClass(/con-ring-live/);
+  await setWindowFocused(page, false);
+  await expect(page.locator('.con-ring-live')).toHaveCount(0);
+  await expect(cardRing).toHaveCount(1);
+  await setWindowFocused(page, true);
+  await expect(cardRing).toHaveClass(/con-ring-live/);
 
   // A programme that stops rendering takes the loop with it.
   await emit(page, 'session-activity', { pid: 1001, active: false });
-  await expect(ring).not.toHaveClass(/con-ring-live/);
+  await expect(railRing).not.toHaveClass(/con-ring-live/);
+});
+
+test('a programme still sounds when a sibling process makes the sound', async ({ page }) => {
+  // Every reader asks per program: the process rendering audio is often not the
+  // one the list showed first, and one row saying 未在播放 while the status page
+  // pulses the same program reads as the route having failed.
+  await openApp(page, {
+    sessions: [
+      { pid: 1001, exe_name: 'music.exe' },
+      { pid: 1003, exe_name: 'music.exe' },
+    ],
+  });
+
+  await emit(page, 'session-activity', { pid: 1003, active: true });
+  await expect(railRow(page, 1003).locator('.con-ring')).toHaveClass(/con-ring-live/);
+  await expect(railRow(page, 1001).locator('.con-ring')).toHaveClass(/con-ring-live/);
+
+  // The board's hub reads the same answer for the process it was given.
+  await railRow(page, 1001)
+    .getByRole('button', { name: /music\.exe/ })
+    .click();
+  await expect(hub(page).locator('.con-ring')).toHaveClass(/con-ring-live/);
+  await expect(hub(page)).toContainText('Playing');
 });
 
 test('a plan that is not the route has nothing flowing through it', async ({ page }) => {

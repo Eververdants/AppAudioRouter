@@ -298,10 +298,10 @@ const NO_TARGETS: string[] = [];
 
 /**
  * One programme row, remembered: a play/pause flip anywhere in the system
- * rebuilds the store's sounding table, and without this the whole list —
+ * rebuilds the store's sounding tables, and without this the whole list —
  * every row re-measuring itself for its layout travel — repainted for each
- * one. The row subscribes to its own pid's voice instead, so only the row
- * whose ring actually changed re-renders.
+ * one. The row subscribes to its own programme's voice instead, as one boolean,
+ * so a flip repaints only the rows of the programme that moved.
  */
 const RailRow = memo(function RailRow({
   session,
@@ -325,11 +325,14 @@ const RailRow = memo(function RailRow({
   const toggleProcessSelection = useRouterStore((s) => s.toggleProcessSelection);
   const stopRoute = useRouterStore((s) => s.stopRoute);
   const joined = isSelected && !isSubject;
+  const exeKey = session.exe_name.toLowerCase();
   // The ring reports the same fact it reports everywhere else — this
   // programme is making sound — so an unrouted programme pulses too;
   // its tone, not its pulse, is what says whether its audio has a
-  // route. `useLiveness` is the loop's only other gate.
-  const sounding = useRouterStore((s) => s.soundingPids[session.pid] === true) && liveness;
+  // route. Read per programme, because the process rendering the sound is
+  // often a sibling of the one this row shows. `useLiveness` is the loop's
+  // only other gate.
+  const sounding = useRouterStore((s) => s.soundingExes[exeKey] === true) && liveness;
   // The window names the program something a person can read; the exe
   // is the identity this app remembers and routes by, so it stays on
   // the record line whenever the display name differs from it.

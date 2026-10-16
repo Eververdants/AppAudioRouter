@@ -146,15 +146,6 @@ export function NodeStage() {
   // program carries the same route as the one holding it, so selecting one
   // reports the program as answered instead of proposing what is already on.
   const routesByPid = useProgramRoutes();
-  // Sounding, subscribed per pid rather than as the whole table: any program
-  // in the system flipping play/pause rebuilds `soundingPids`, and the board
-  // owes a repaint only to the programme it draws (its feeders are covered by
-  // their own selector below). The hub's pid is read inside the selector so
-  // the snapshot stays a primitive — a stable false costs no re-render.
-  const sounding = useRouterStore((s) => {
-    const hubPid = s.selectedPids[0];
-    return hubPid !== undefined && s.soundingPids[hubPid] === true;
-  });
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const deviceLatencyMs = useRouterStore((s) => s.deviceLatencyMs);
   const feeds = useRouterStore((s) => s.feeds);
@@ -217,6 +208,14 @@ export function NodeStage() {
   // holds it here, both adjustments reading pre-update state), so a
   // not-yet-loaded icon dissolves as a letter instead of a blank.
   const exe = session?.exe_name ?? '';
+  // Sounding, subscribed per programme rather than as the whole table: any
+  // program in the system flipping play/pause rebuilds the fold, and the board
+  // owes a repaint only to the programme it draws (its feeders are covered by
+  // their own selector below). The snapshot is one primitive, so a stable false
+  // costs no re-render — and it is the programme's answer, not this one
+  // process's, because the sound is usually made by a sibling.
+  const hubExeKey = exe.toLowerCase();
+  const sounding = useRouterStore((s) => s.soundingExes[hubExeKey] === true);
   const [iconSwap, setIconSwap] = useState<{
     exe: string;
     prev: { exeName: string; name: string } | null;
@@ -261,14 +260,18 @@ export function NodeStage() {
       .filter((s) => s !== undefined);
   }, [feeds, sessions, pid]);
 
-  /** Which of the hub's feeders are sounding, as a joined pid list: a string
-   *  snapshot, so only a flip inside this subset re-renders the board. */
-  const feederPids = useMemo(() => feeders.map((feeder) => feeder.pid), [feeders]);
+  /** Which of the hub's feeders are sounding, as their executable names joined:
+   *  a string snapshot, so only a flip inside this subset re-renders the board.
+   *  Read per programme like the hub's own ring is. */
+  const feederExeKeys = useMemo(
+    () => feeders.map((feeder) => feeder.exe_name.toLowerCase()),
+    [feeders],
+  );
   const soundingFeederKey = useRouterStore((s) =>
-    feederPids.filter((feederPid) => s.soundingPids[feederPid] === true).join(','),
+    feederExeKeys.filter((feederExeKey) => s.soundingExes[feederExeKey] === true).join(','),
   );
   const soundingFeeders = useMemo(
-    () => new Set(soundingFeederKey === '' ? [] : soundingFeederKey.split(',').map(Number)),
+    () => new Set(soundingFeederKey === '' ? [] : soundingFeederKey.split(',')),
     [soundingFeederKey],
   );
 
@@ -460,7 +463,7 @@ export function NodeStage() {
       // not configured delivers nothing — the row reads 挂起 / 未接通, and a
       // moving wire would say the opposite of the row it hangs from.
       live:
-        soundingFeeders.has(feeder.pid) &&
+        soundingFeeders.has(feeder.exe_name.toLowerCase()) &&
         liveness &&
         feedLiveness(feeder.pid, feedCarrier, routedPids, sessions) === 'live',
     });
@@ -575,6 +578,7 @@ export function NodeStage() {
               a time, and this is the door between them. */}
           {feeders.map((feeder, index) => {
             const feederName = feeder.display_name ?? feeder.exe_name;
+            const feederSounding = soundingFeeders.has(feeder.exe_name.toLowerCase());
             return (
               <motion.button
                 key={feeder.pid}
@@ -601,7 +605,7 @@ export function NodeStage() {
               >
                 <span className="pin pin-out" aria-hidden="true" />
                 <span className="flex w-full items-center gap-2">
-                  <Ring tone="idle" size={12} live={soundingFeeders.has(feeder.pid) && liveness} />
+                  <Ring tone="idle" size={12} live={feederSounding && liveness} />
                   <ProcessIcon exeName={feeder.exe_name} name={feederName} size={16} />
                   <span className="truncate text-[11.5px] font-semibold text-text-primary">
                     {feederName}
