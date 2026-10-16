@@ -835,9 +835,9 @@ impl DuplicationManager {
     /// Called on app exit: the route ends with the process, and a session
     /// volume left behind would keep the program quietly playing everywhere —
     /// the volume mixer remembers the value for its next launch.
-    /// The loudness every running engine still owes, as `(pid, percent)`, after
-    /// taking each engine's promise.
     ///
+    /// Returns the loudness every running engine still owes, as `(pid, percent)`,
+    /// after taking each engine's promise.
     /// Quitting collects these on the way out and hands the writes to the exit
     /// worker, which cannot hold a `DuplicationManager` — and taking them is what
     /// keeps an engine's own teardown from writing the same value a second time.
@@ -1087,11 +1087,15 @@ impl DuplicationManager {
         {
             // The engine never started, so no thread will unregister it; drop
             // the entry here or `active_routes` would report it forever.
-            self.unregister(pid, generation);
+            let outcome = self.unregister(pid, generation);
             // The predecessor this start evicted skipped its own level cleanup
             // on the promise that this engine publishes under the same key — a
-            // promise the thread that never ran cannot keep.
-            shared.levels.forget(&shared.exe_name, pid);
+            // promise the thread that never ran cannot keep. Unless a successor
+            // already holds the seat: it publishes under that same key, and
+            // forgetting here would drop the reading it just wrote.
+            if !matches!(outcome, UnregisterOutcome::Replaced) {
+                shared.levels.forget(&shared.exe_name, pid);
+            }
             // And give the loudness back: the thread that owns an engine's
             // teardown is the only thing that would have, and it never ran, so
             // the program would stay quiet on every path — with the volume
