@@ -163,7 +163,9 @@ pub struct AudioDevice {
 pub struct AudioSession {
     /// Process ID.
     pub pid: u32,
-    /// Executable name (e.g. `chrome.exe`).
+    /// Executable name (e.g. `chrome.exe`). This literal spelling is the key
+    /// every downstream comparison and persisted map uses — pass it verbatim,
+    /// never a re-cased variant like the frontend's `toLowerCase()` keys.
     pub exe_name: String,
     /// How the process names itself to a person: its best window's title, or
     /// the executable's version-resource description when it has no window.

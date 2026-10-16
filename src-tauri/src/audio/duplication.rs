@@ -522,6 +522,8 @@ struct EngineShared {
     pid: u32,
     /// Executable this engine duplicates. The per-program level is keyed by it
     /// rather than by `pid`, because one program can hold several sessions.
+    /// Must be the verbatim `AudioSession.exe_name` spelling — the `==`
+    /// matches here and the exact map keys in `config.rs` depend on it.
     exe_name: String,
     generation: u64,
     /// Process creation time as a FILETIME (u64), used to detect PID reuse.
@@ -2062,10 +2064,11 @@ fn pump_render(
 /// again.
 ///
 /// This only ever drops silence. The caller parks once the pipeline is empty
-/// and the source has been quiet for `SOURCE_IDLE_MS`, and a Silent packet is
-/// never pushed into a ring to begin with, so nothing audible is discarded; the
-/// silence the endpoint still holds makes the stop inaudible as well, and the
-/// restart resumes from silence rather than from a click.
+/// and the source has been quiet for `SOURCE_IDLE_MS` plus this mirror's own
+/// pipeline depth (see `mirror_quiet`), and a Silent packet is never pushed
+/// into a ring to begin with, so nothing audible is discarded; the silence the
+/// endpoint still holds makes the stop inaudible as well, and the restart
+/// resumes from silence rather than from a click.
 fn park_mirror(
     shared: &EngineShared,
     mirror: &MirrorChannel,
