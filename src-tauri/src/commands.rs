@@ -335,6 +335,13 @@ pub async fn stop_route(
         tokio::task::spawn_blocking(move || app.state::<DuplicationManager>().stop(pid)).await
     {
         warn!("the duplication teardown for PID {pid} did not finish: {e}");
+        // A JoinError almost always means the closure never ran (the blocking
+        // pool was gone), so the engine above is still pumping mirrors. `stop`
+        // only takes the engine down and signals its threads, and is idempotent
+        // — if a partial teardown already removed it this finds nothing — so
+        // take it down here rather than leave a running engine behind the
+        // endpoint release below. This is a worker thread, not the UI loop.
+        duplications.stop(pid);
     }
 
     if sibling_routed {
@@ -609,6 +616,9 @@ pub async fn reset_pinned_endpoints(
 /// new process that is itself being routed right now already owns that
 /// assignment, so it is left alone.
 ///
+/// A route that ends this way frees its executable's render slot exactly as a
+/// stop would, so the feeds that were waiting on it are resumed here too.
+///
 /// Returns the executable names that were released, for the log.
 #[tauri::command]
 pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<String>, String> {
@@ -647,6 +657,9 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
     }
 
     let mut released: Vec<String> = Vec::new();
+    // Executables whose *route* entry went back: freeing the render slot is the
+    // same moment a stop frees it, so the feeds waiting on it resume here too.
+    let mut routes_ended: Vec<String> = Vec::new();
     for (pid, exe_name, _device) in pinned {
         if live_pids.contains(&pid) {
             // Still the process we pinned; its route is live.
@@ -683,6 +696,9 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         {
             pins.forget(pid);
             info!("released the assignment {exe_name} was left on by an earlier route");
+            if ours.contains(&pid) && !routes_ended.contains(&exe_name) {
+                routes_ended.push(exe_name.clone());
+            }
             // Several stale PIDs can share one executable; the log wants the
             // name once, not once per PID.
             if !released.contains(&exe_name) {
@@ -691,11 +707,16 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         }
     }
     // Feed pins whose program is gone are bookkeeping with nothing to hold: the
-    // endpoints they name died with the process. The rule itself stays in the
+    // endpoints they named died with the process. The rule itself stays in the
     // feed memory — it is the user's, not the process's — so the sweep drops
     // only the pin. Alive-but-sessionless programs keep theirs: the process
     // table decides, not the render-session walk above.
     pins.forget_dead_feed_pins();
+    // After the dead pins are off the book, so nothing here re-points a
+    // process that has stopped needing it.
+    for exe in &routes_ended {
+        resume_suspended_feeds(exe, &pins).await;
+    }
     Ok(released)
 }
 
