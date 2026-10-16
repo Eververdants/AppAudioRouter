@@ -636,15 +636,37 @@ function deriveFeeds(
 }
 
 /**
+ * The programs that are making sound, folded from the processes that are: a
+ * program is sounding when any of its processes is, and the one making the
+ * sound is often a sibling of the one holding the route. Keyed lower-cased,
+ * like every other executable key in this store.
+ */
+function foldSounding(
+  sessions: AudioSession[],
+  soundingPids: Record<number, boolean>,
+): Record<string, true> {
+  const soundingExes: Record<string, true> = {};
+  for (const session of sessions) {
+    if (soundingPids[session.pid] === true) soundingExes[session.exe_name.toLowerCase()] = true;
+  }
+  return soundingExes;
+}
+
+/**
  * The feed memory with `sourceExe` pointing at `targetExe` (added) or without
  * it (removed). Matched case-insensitively, like the route memory; the first
  * spelling seen is the one kept.
+ *
+ * `atIndex` puts the target where it stood before it was taken out: this memory
+ * is what the live feed map is rebuilt from, and the map's order is the board's
+ * numbering, so a rollback that appended would renumber the user's other feeds.
  */
 function rememberFeedTargets(
   entries: RememberedFeedEntry[],
   sourceExe: string,
   targetExe: string,
   added: boolean,
+  atIndex?: number,
 ): RememberedFeedEntry[] {
   const key = sourceExe.toLowerCase();
   const existing = entries.find((entry) => entry.sourceExe.toLowerCase() === key);
@@ -660,11 +682,15 @@ function rememberFeedTargets(
     (name) => name.toLowerCase() === targetExe.toLowerCase(),
   );
   if (already) return entries;
+  const targets = [...(existing?.targetExe ?? [])];
+  // A negative position is `findIndex`'s way of saying the rule was never
+  // remembered, which is where a new one belongs: at the end.
+  targets.splice(atIndex !== undefined && atIndex >= 0 ? atIndex : targets.length, 0, targetExe);
   return [
     ...others,
     {
       sourceExe: existing?.sourceExe ?? sourceExe,
-      targetExe: [...(existing?.targetExe ?? []), targetExe],
+      targetExe: targets,
     },
   ];
 }
@@ -1261,27 +1287,40 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   addFeed: async (sourcePid, targetPid) => {
     const { sessions, feeds } = get();
     if (sourcePid === targetPid) return;
-    if ((feeds[sourcePid] ?? []).includes(targetPid)) return;
     const source = sessions.find((s) => s.pid === sourcePid);
     const target = sessions.find((s) => s.pid === targetPid);
     if (source === undefined || target === undefined) return;
+    // A feed belongs to the program, and the live map is rebuilt from the memory
+    // on each program's lowest pid (`deriveFeeds`). The board can be looking at
+    // a sibling process, so an add kept under that pid would give one rule two
+    // addresses in one run: the ✕ addressed by the sibling finds nothing in the
+    // map and does nothing, and the next refresh moves the wire to the lowest
+    // pid anyway. Pin, remember and undo all use the address the refresh uses.
+    const pidByExe = lowestPidByExe(sessions);
+    const canonicalSource = pidByExe.get(source.exe_name.toLowerCase()) ?? sourcePid;
+    const canonicalTarget = pidByExe.get(target.exe_name.toLowerCase()) ?? targetPid;
+    if (canonicalSource === canonicalTarget) return;
+    if ((feeds[canonicalSource] ?? []).includes(canonicalTarget)) return;
     // Optimistic, like every other immediate change: the board shows the wire
     // now, the backend records the rule and pins whatever endpoints it can.
     set((s) => ({
-      feeds: { ...s.feeds, [sourcePid]: [...(s.feeds[sourcePid] ?? []), targetPid] },
+      feeds: {
+        ...s.feeds,
+        [canonicalSource]: [...(s.feeds[canonicalSource] ?? []), canonicalTarget],
+      },
       rememberedFeeds: rememberFeedTargets(
         s.rememberedFeeds,
         source.exe_name,
         target.exe_name,
         true,
       ),
-      feedUndo: { sourcePid, targetPid, added: true },
+      feedUndo: { sourcePid: canonicalSource, targetPid: canonicalTarget, added: true },
     }));
     try {
       const outcome = await api.setFeedTarget(
-        sourcePid,
+        canonicalSource,
         source.exe_name,
-        targetPid,
+        canonicalTarget,
         target.exe_name,
       );
       if (outcome.delivered) {
@@ -1289,7 +1328,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // to deliver here: claimed like the restore's own attempts, or the
         // next session refresh would pin the same endpoints again and log it
         // as a restoration of a feed the user added minutes ago.
-        feedRestoreDecided.add(`${sourcePid}|${target.exe_name.toLowerCase()}`);
+        feedRestoreDecided.add(`${canonicalSource}|${target.exe_name.toLowerCase()}`);
         get().addLog(
           i18next.t('log.feedSet', { source: source.exe_name, target: target.exe_name }),
           'success',
@@ -1312,9 +1351,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // the UI never shows a wire the audio service does not know about.
       set((s) => {
         const nextFeeds = { ...s.feeds };
-        const remaining = (nextFeeds[sourcePid] ?? []).filter((pid) => pid !== targetPid);
-        if (remaining.length === 0) delete nextFeeds[sourcePid];
-        else nextFeeds[sourcePid] = remaining;
+        const remaining = (nextFeeds[canonicalSource] ?? []).filter(
+          (pid) => pid !== canonicalTarget,
+        );
+        if (remaining.length === 0) delete nextFeeds[canonicalSource];
+        else nextFeeds[canonicalSource] = remaining;
         return {
           feeds: nextFeeds,
           rememberedFeeds: rememberFeedTargets(
@@ -1331,26 +1372,47 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   removeFeed: async (sourcePid, targetPid) => {
-    const { sessions, feeds } = get();
-    if (!(feeds[sourcePid] ?? []).includes(targetPid)) return;
+    const { sessions, feeds, rememberedFeeds } = get();
     const source = sessions.find((s) => s.pid === sourcePid);
     const target = sessions.find((s) => s.pid === targetPid);
+    // The same address `addFeed` and `deriveFeeds` use: the row can be reached
+    // from a sibling process's board, and the wire it shows lives under the
+    // program's lowest pid. A session that has just left the list keeps the pid
+    // it was called with — that is still the wire's address.
+    const pidByExe = lowestPidByExe(sessions);
+    const sourceExe = source?.exe_name.toLowerCase();
+    const targetExe = target?.exe_name.toLowerCase();
+    const canonicalSource =
+      (sourceExe === undefined ? undefined : pidByExe.get(sourceExe)) ?? sourcePid;
+    const canonicalTarget =
+      (targetExe === undefined ? undefined : pidByExe.get(targetExe)) ?? targetPid;
+    if (!(feeds[canonicalSource] ?? []).includes(canonicalTarget)) return;
+    // Where this wire sat among its source's other wires, in the board and in
+    // the memory the board is rebuilt from: a rollback that appended would
+    // renumber every feed the user still has standing.
+    const wireIndex = (feeds[canonicalSource] ?? []).indexOf(canonicalTarget);
+    const memoryIndex =
+      source === undefined || target === undefined
+        ? undefined
+        : rememberedFeeds
+            .find((entry) => entry.sourceExe.toLowerCase() === source.exe_name.toLowerCase())
+            ?.targetExe.findIndex((name) => name.toLowerCase() === target.exe_name.toLowerCase());
     set((s) => {
       const nextFeeds = { ...s.feeds };
-      const remaining = (nextFeeds[sourcePid] ?? []).filter((pid) => pid !== targetPid);
-      if (remaining.length === 0) delete nextFeeds[sourcePid];
-      else nextFeeds[sourcePid] = remaining;
+      const remaining = (nextFeeds[canonicalSource] ?? []).filter((pid) => pid !== canonicalTarget);
+      if (remaining.length === 0) delete nextFeeds[canonicalSource];
+      else nextFeeds[canonicalSource] = remaining;
       return {
         feeds: nextFeeds,
         rememberedFeeds:
           source !== undefined && target !== undefined
             ? rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, false)
             : s.rememberedFeeds,
-        feedUndo: { sourcePid, targetPid, added: false },
+        feedUndo: { sourcePid: canonicalSource, targetPid: canonicalTarget, added: false },
       };
     });
     try {
-      const stuck = await api.removeFeedTarget(sourcePid, targetPid);
+      const stuck = await api.removeFeedTarget(canonicalSource, canonicalTarget);
       if (source !== undefined && target !== undefined) {
         get().addLog(
           i18next.t('log.feedRemoved', { source: source.exe_name, target: target.exe_name }),
@@ -1367,18 +1429,28 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       // The backend kept the rule: put this one wire and this one memory entry
       // back rather than showing a board that disagrees with the audio service.
-      // Functional, and scoped to `sourcePid → targetPid`, so a *different* feed
-      // the user moved while this removal was in flight keeps its own outcome
-      // instead of being reverted by a whole-map snapshot.
+      // Functional, and scoped to this one wire, so a *different* feed the user
+      // moved while this removal was in flight keeps its own outcome instead of
+      // being reverted by a whole-map snapshot.
       set((s) => {
         const nextFeeds = { ...s.feeds };
-        const existing = nextFeeds[sourcePid] ?? [];
-        if (!existing.includes(targetPid)) nextFeeds[sourcePid] = [...existing, targetPid];
+        const existing = nextFeeds[canonicalSource] ?? [];
+        if (!existing.includes(canonicalTarget)) {
+          const restored = [...existing];
+          restored.splice(wireIndex, 0, canonicalTarget);
+          nextFeeds[canonicalSource] = restored;
+        }
         return {
           feeds: nextFeeds,
           rememberedFeeds:
             source !== undefined && target !== undefined
-              ? rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, true)
+              ? rememberFeedTargets(
+                  s.rememberedFeeds,
+                  source.exe_name,
+                  target.exe_name,
+                  true,
+                  memoryIndex,
+                )
               : s.rememberedFeeds,
           feedUndo: null,
         };

@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test';
-import { appRow, callsFor, changePrimary, feedRow, hub, openApp } from './fixtures';
+import {
+  appRow,
+  callsFor,
+  changePrimary,
+  feedRow,
+  hub,
+  openApp,
+  railRow,
+  resetCalls,
+} from './fixtures';
 
 /**
  * Sending one programme's audio into another's input — the "programme to
@@ -62,6 +71,34 @@ test('a feed with no carrier configured is recorded and says why it is silent', 
   // Honest: the card says the rule has nothing to carry it yet, rather than
   // showing a wire that moves no sound.
   await expect(feedRow(page, 1002)).toContainText('No carrier');
+});
+
+test('the wire a sibling process shows is its programme’s own, and its ✕ cuts it', async ({
+  page,
+}) => {
+  await openApp(page, {
+    sessions: [
+      { pid: 1001, exe_name: 'music.exe' },
+      { pid: 1003, exe_name: 'music.exe' },
+      { pid: 1002, exe_name: 'game.exe' },
+    ],
+    feeds: [['music.exe', 'game.exe']],
+  });
+
+  // A feed is the program's, addressed at its lowest pid; the board is being
+  // looked at through a sibling process of that program. The amber row is the
+  // same wire — so its ✕ has to address the wire, not the process on screen,
+  // which is the press that used to do nothing at all.
+  await railRow(page, 1003).locator('button').first().click();
+  await expect(feedRow(page, 1002)).toBeVisible();
+  await resetCalls(page);
+
+  await feedRow(page, 1002).getByRole('button').click();
+
+  const removed = await callsFor(page, 'remove_feed_target');
+  expect(removed).toHaveLength(1);
+  expect(removed[0]?.args).toMatchObject({ sourcePid: 1001, targetPid: 1002 });
+  await expect(feedRow(page, 1002)).toHaveCount(0);
 });
 
 test('a device route and a feed sit on the same board', async ({ page }) => {

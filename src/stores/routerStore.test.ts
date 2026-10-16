@@ -1387,6 +1387,71 @@ describe('feeds', () => {
     expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
   });
 
+  it('keeps one wire when a sibling process adds or removes it', async () => {
+    // The live feed map is the program's, rebuilt on its lowest pid, and the
+    // board can be looking at any process of it. An add kept under the sibling
+    // gave one rule two addresses: the ✕ pressed from that board looked in the
+    // sibling's slot, found nothing, and did nothing at all.
+    const BROWSER_MAIN: AudioSession = { pid: 6301, exe_name: 'sibling-browser.exe' };
+    const BROWSER_TAB: AudioSession = { pid: 6302, exe_name: 'sibling-browser.exe' };
+    const RECEIVER: AudioSession = { pid: 6303, exe_name: 'receiver.exe' };
+    const backend = installBackend({ sessions: [BROWSER_MAIN, BROWSER_TAB, RECEIVER] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [BROWSER_TAB, RECEIVER, BROWSER_MAIN],
+      feedCarrier: backend.carrier,
+    });
+
+    await state().addFeed(BROWSER_TAB.pid, RECEIVER.pid);
+
+    expect(state().feeds[BROWSER_MAIN.pid]).toEqual([RECEIVER.pid]);
+    expect(state().feeds[BROWSER_TAB.pid]).toBeUndefined();
+    expect(backend.calls.find((call) => call.cmd === 'set_feed_target')?.args).toMatchObject({
+      sourcePid: BROWSER_MAIN.pid,
+      targetPid: RECEIVER.pid,
+    });
+
+    // Same for the way out: pressed from the tab's board, it finds the wire.
+    await state().removeFeed(BROWSER_TAB.pid, RECEIVER.pid);
+
+    expect(state().feeds[BROWSER_MAIN.pid]).toBeUndefined();
+    expect(backend.calls.some((call) => call.cmd === 'remove_feed_target')).toBe(true);
+  });
+
+  it('puts a refused removal back where the wire stood, not at the end', async () => {
+    // The amber rows are numbered in this array's order, and the array is
+    // rebuilt from the memory on every refresh. Appending the wire back after a
+    // refused removal therefore renumbered the feeds the user still had
+    // standing — on the board at once, and on the next refresh through the
+    // memory as well.
+    const SENDER: AudioSession = { pid: 6501, exe_name: 'sender.exe' };
+    const ONE: AudioSession = { pid: 6502, exe_name: 'one.exe' };
+    const TWO: AudioSession = { pid: 6503, exe_name: 'two.exe' };
+    const THREE: AudioSession = { pid: 6504, exe_name: 'three.exe' };
+    installBackend({
+      sessions: [SENDER, ONE, TWO, THREE],
+      fail: (cmd, args) => cmd === 'remove_feed_target' && args.targetPid === TWO.pid,
+    });
+    reset({
+      devices: [SPEAKERS],
+      sessions: [SENDER, ONE, TWO, THREE],
+      feeds: { [SENDER.pid]: [ONE.pid, TWO.pid, THREE.pid] },
+      rememberedFeeds: [
+        { sourceExe: 'sender.exe', targetExe: ['one.exe', 'two.exe', 'three.exe'] },
+      ],
+    });
+
+    await state().removeFeed(SENDER.pid, TWO.pid);
+
+    expect(state().feeds[SENDER.pid]).toEqual([ONE.pid, TWO.pid, THREE.pid]);
+    expect(state().rememberedFeeds[0]?.targetExe).toEqual(['one.exe', 'two.exe', 'three.exe']);
+
+    // And it stays put through the refresh that rebuilds the board from the
+    // memory: the order the user set is the order the next frame draws.
+    await state().refreshSessions();
+    expect(state().feeds[SENDER.pid]).toEqual([ONE.pid, TWO.pid, THREE.pid]);
+  });
+
   it('reads a sibling session’s route as holding the render slot', () => {
     // The per-app endpoint the audio service keeps is one per executable: a
     // route held by one process of the program occupies the slot for every
