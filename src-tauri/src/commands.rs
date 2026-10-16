@@ -28,6 +28,14 @@ pub struct StopOutcome {
     /// Endpoint the program is still pinned to, when the release did not take.
     /// The UI warns about this instead of claiming the route is fully undone.
     pub pinned_device: Option<String>,
+    /// True when `released` is false because a sibling process of the same
+    /// executable still routes the program: the assignment is owned by that live
+    /// route and will go back when the sibling stops, not stuck. The stop path
+    /// also yields `released: false` when Windows refused to clear the pin (and
+    /// the program was left on the default); `sibling_held` is false there. The
+    /// UI must not infer which it got — reporting a refused release as a sibling
+    /// route would drop the device name and hide a real failure.
+    pub sibling_held: bool,
 }
 
 /// What a sweep of left-over assignments found.
@@ -37,6 +45,12 @@ pub struct ResetOutcome {
     pub released: usize,
     /// Executable names still carrying an assignment the service would not drop.
     pub still_pinned: Vec<String>,
+    /// One entry per `still_pinned`, same order and length: the endpoint id
+    /// Windows still holds for it, or `null` when the audio service would not
+    /// answer for that process so no device can be named. A stop reports this as
+    /// `pinned_device`; the reset owed the same "which device stays fixed" answer
+    /// and did not have it.
+    pub still_pinned_devices: Vec<Option<String>>,
 }
 
 /// What one run of the level alignment did.
@@ -343,6 +357,7 @@ pub async fn stop_route(
         return Ok(StopOutcome {
             released: false,
             pinned_device: pinned,
+            sibling_held: true,
         });
     }
 
@@ -365,6 +380,7 @@ pub async fn stop_route(
             Ok(StopOutcome {
                 released: true,
                 pinned_device: None,
+                sibling_held: false,
             })
         }
         Ok(_) => {
@@ -398,6 +414,7 @@ async fn pin_to_default(pid: u32, device_id: &str, pins: &PinnedRoutes) -> StopO
             StopOutcome {
                 released: false,
                 pinned_device: Some(device_id.to_string()),
+                sibling_held: false,
             }
         }
         Err(e) => {
@@ -412,6 +429,7 @@ async fn pin_to_default(pid: u32, device_id: &str, pins: &PinnedRoutes) -> StopO
             StopOutcome {
                 released: false,
                 pinned_device: None,
+                sibling_held: false,
             }
         }
     }
@@ -434,6 +452,7 @@ async fn pin_to_default_or_abandon(pid: u32, pins: &PinnedRoutes) -> StopOutcome
             StopOutcome {
                 released: false,
                 pinned_device: None,
+                sibling_held: false,
             }
         }
     }
@@ -538,6 +557,7 @@ pub async fn reset_pinned_endpoints(
 
     let mut released = 0;
     let mut still_pinned = Vec::new();
+    let mut still_pinned_devices: Vec<Option<String>> = Vec::new();
     for (pid, outcome) in outcomes {
         match outcome {
             ReleaseOutcome::Released => {
@@ -550,12 +570,22 @@ pub async fn reset_pinned_endpoints(
                 pins.forget_feed_capture(pid);
                 released += 1;
             }
-            _ => still_pinned.push(
-                names
-                    .get(&pid)
-                    .cloned()
-                    .unwrap_or_else(|| format!("PID {pid}")),
-            ),
+            other => {
+                // Keep the device it is still fixed to when the service told us,
+                // and `None` when it would not answer — both are refusals, but
+                // only one can name the endpoint to the user.
+                let device = match other {
+                    ReleaseOutcome::StillPinned(device) => Some(device),
+                    _ => None,
+                };
+                still_pinned.push(
+                    names
+                        .get(&pid)
+                        .cloned()
+                        .unwrap_or_else(|| format!("PID {pid}")),
+                );
+                still_pinned_devices.push(device);
+            }
         }
     }
     info!(
@@ -565,6 +595,7 @@ pub async fn reset_pinned_endpoints(
     Ok(ResetOutcome {
         released,
         still_pinned,
+        still_pinned_devices,
     })
 }
 
