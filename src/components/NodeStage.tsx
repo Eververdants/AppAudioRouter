@@ -146,7 +146,15 @@ export function NodeStage() {
   // program carries the same route as the one holding it, so selecting one
   // reports the program as answered instead of proposing what is already on.
   const routesByPid = useProgramRoutes();
-  const soundingPids = useRouterStore((s) => s.soundingPids);
+  // Sounding, subscribed per pid rather than as the whole table: any program
+  // in the system flipping play/pause rebuilds `soundingPids`, and the board
+  // owes a repaint only to the programme it draws (its feeders are covered by
+  // their own selector below). The hub's pid is read inside the selector so
+  // the snapshot stays a primitive — a stable false costs no re-render.
+  const sounding = useRouterStore((s) => {
+    const hubPid = s.selectedPids[0];
+    return hubPid !== undefined && s.soundingPids[hubPid] === true;
+  });
   const deviceDelays = useRouterStore((s) => s.deviceDelays);
   const deviceLatencyMs = useRouterStore((s) => s.deviceLatencyMs);
   const feeds = useRouterStore((s) => s.feeds);
@@ -228,7 +236,6 @@ export function NodeStage() {
   const drawn = selectedDeviceIds;
   const answered = alreadyApplied(drawn, selectedPids, routesByPid);
   const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
-  const sounding = pid !== undefined && soundingPids[pid] === true;
   const hasPlan = drawn.length > 0;
 
   const primaryDeviceId = drawn[0];
@@ -253,6 +260,17 @@ export function NodeStage() {
       .map(([sourcePid]) => sessions.find((s) => s.pid === Number(sourcePid)))
       .filter((s) => s !== undefined);
   }, [feeds, sessions, pid]);
+
+  /** Which of the hub's feeders are sounding, as a joined pid list: a string
+   *  snapshot, so only a flip inside this subset re-renders the board. */
+  const feederPids = useMemo(() => feeders.map((feeder) => feeder.pid), [feeders]);
+  const soundingFeederKey = useRouterStore((s) =>
+    feederPids.filter((feederPid) => s.soundingPids[feederPid] === true).join(','),
+  );
+  const soundingFeeders = useMemo(
+    () => new Set(soundingFeederKey === '' ? [] : soundingFeederKey.split(',').map(Number)),
+    [soundingFeederKey],
+  );
 
   /** Programmes the hub feeds, as sessions in feed order. */
   const feedTargets = useMemo(() => {
@@ -442,7 +460,7 @@ export function NodeStage() {
       // not configured delivers nothing — the row reads 挂起 / 未接通, and a
       // moving wire would say the opposite of the row it hangs from.
       live:
-        soundingPids[feeder.pid] === true &&
+        soundingFeeders.has(feeder.pid) &&
         liveness &&
         feedLiveness(feeder.pid, feedCarrier, routedPids, sessions) === 'live',
     });
@@ -584,7 +602,7 @@ export function NodeStage() {
                   <Ring
                     tone="idle"
                     size={12}
-                    live={soundingPids[feeder.pid] === true && liveness}
+                    live={soundingFeeders.has(feeder.pid) && liveness}
                   />
                   <ProcessIcon exeName={feeder.exe_name} name={feederName} size={16} />
                   <span className="truncate text-[11.5px] font-semibold text-text-primary">

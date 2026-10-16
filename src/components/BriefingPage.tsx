@@ -24,7 +24,6 @@ interface Card {
   pid: number;
   name: string;
   exeName: string;
-  sounding: boolean;
   destinations: Destination[];
 }
 
@@ -118,13 +117,11 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
   const sessions = useRouterStore((s) => s.sessions);
   const routedPids = useRouterStore((s) => s.routedPids);
   const routesByPid = useProgramRoutes();
-  const soundingPids = useRouterStore((s) => s.soundingPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const feeds = useRouterStore((s) => s.feeds);
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
-  const selectProcess = useRouterStore((s) => s.selectProcess);
 
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -136,13 +133,6 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
     defaultDeviceId !== null ? (nameById.get(defaultDeviceId) ?? defaultDeviceId) : null;
 
   const { cards, following } = useMemo(() => {
-    // Sounding is a fact about the program: its audio comes out of a sibling
-    // process while the route is held by another one.
-    const soundingExes = new Set<string>();
-    for (const session of sessions) {
-      if (soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
-    }
-
     // The route table is keyed by the process that holds the route — one per
     // executable, written to the lowest pid — so reading it by the session's own
     // pid is what keeps this page at **one row per program**: a browser's dozen
@@ -180,33 +170,18 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
         pid: session.pid,
         name: session.display_name ?? session.exe_name,
         exeName: session.exe_name,
-        sounding: soundingExes.has(key),
         destinations,
       });
     }
     const allExes = new Set(sessions.map((session) => session.exe_name.toLowerCase()));
     return { cards, following: allExes.size - redirectedExes.size };
-  }, [sessions, routedPids, feeds, soundingPids, nameById, feedCarrier]);
+  }, [sessions, routedPids, feeds, nameById, feedCarrier]);
 
   // Changes staged on the board that have not landed: the one thing this page
   // cannot show, because the page reports what is happening and those are not.
   // The plan's own order — the same one the apply will land.
   const staged = selectedDeviceIds;
   const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routesByPid);
-
-  /** The word a chip wears, which for a feed is its own three-state reading. */
-  const roleWordOf = (destination: Destination): string => {
-    if (destination.role === 'primary') return t('briefingPage.rolePrimary');
-    if (destination.role === 'copy') return t('briefingPage.roleCopy');
-    switch (destination.feedState) {
-      case 'suspended':
-        return t('briefingPage.roleFeedHeld');
-      case 'no-carrier':
-        return t('briefingPage.roleFeedNoCarrier');
-      default:
-        return t('briefingPage.roleFeed');
-    }
-  };
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -272,49 +247,12 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
           <div className="flex flex-col gap-2.5">
             <AnimatePresence initial={false}>
               {cards.map((card) => (
-                <motion.div
+                <BriefingCard
                   key={card.pid}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={SPRING_GLIDE}
-                  transformTemplate={MAIN_THREAD_TRANSFORM}
-                  className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
-                >
-                  <div className="flex w-[168px] flex-none items-center gap-2">
-                    <Ring tone="main" size={14} live={card.sounding && liveness} />
-                    <ProcessIcon exeName={card.exeName} name={card.name} size={18} />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        selectProcess(card.pid);
-                        onOpenBoard();
-                      }}
-                      title={t('briefingPage.openBoard', { name: card.name })}
-                      aria-label={t('briefingPage.openBoard', { name: card.name })}
-                      className="pressable min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
-                    >
-                      {card.name}
-                    </button>
-                  </div>
-                  <Connector />
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                    <AnimatePresence initial={false}>
-                      {card.destinations.map((destination) => (
-                        <Chip
-                          key={destination.key}
-                          destination={destination}
-                          roleWord={roleWordOf(destination)}
-                        />
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                  {!card.sounding && (
-                    <span className="flex-none text-[10px] text-text-muted">
-                      {t('briefingPage.quiet')}
-                    </span>
-                  )}
-                </motion.div>
+                  card={card}
+                  liveness={liveness}
+                  onOpenBoard={onOpenBoard}
+                />
               ))}
             </AnimatePresence>
           </div>
@@ -336,5 +274,86 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+/**
+ * One program's row on the page. Its ring and its "quiet" word subscribe to
+ * its own program's voice — per executable, the way the page has always read
+ * it, sibling processes included — so a play/pause flip elsewhere in the
+ * system repaints one row at most, never the whole page (chips included,
+ * each of which re-measures itself for its layout travel).
+ */
+function BriefingCard({
+  card,
+  liveness,
+  onOpenBoard,
+}: {
+  card: Card;
+  liveness: boolean;
+  onOpenBoard: () => void;
+}) {
+  const { t } = useTranslation();
+  const selectProcess = useRouterStore((s) => s.selectProcess);
+  const exeKey = card.exeName.toLowerCase();
+  const sounding = useRouterStore((s) =>
+    s.sessions.some((x) => x.exe_name.toLowerCase() === exeKey && s.soundingPids[x.pid] === true),
+  );
+
+  /** The word a chip wears, which for a feed is its own three-state reading. */
+  const roleWordOf = (destination: Destination): string => {
+    if (destination.role === 'primary') return t('briefingPage.rolePrimary');
+    if (destination.role === 'copy') return t('briefingPage.roleCopy');
+    switch (destination.feedState) {
+      case 'suspended':
+        return t('briefingPage.roleFeedHeld');
+      case 'no-carrier':
+        return t('briefingPage.roleFeedNoCarrier');
+      default:
+        return t('briefingPage.roleFeed');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      transition={SPRING_GLIDE}
+      transformTemplate={MAIN_THREAD_TRANSFORM}
+      className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3"
+    >
+      <div className="flex w-[168px] flex-none items-center gap-2">
+        <Ring tone="main" size={14} live={sounding && liveness} />
+        <ProcessIcon exeName={card.exeName} name={card.name} size={18} />
+        <button
+          type="button"
+          onClick={() => {
+            selectProcess(card.pid);
+            onOpenBoard();
+          }}
+          title={t('briefingPage.openBoard', { name: card.name })}
+          aria-label={t('briefingPage.openBoard', { name: card.name })}
+          className="pressable min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
+        >
+          {card.name}
+        </button>
+      </div>
+      <Connector />
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <AnimatePresence initial={false}>
+          {card.destinations.map((destination) => (
+            <Chip
+              key={destination.key}
+              destination={destination}
+              roleWord={roleWordOf(destination)}
+            />
+          ))}
+        </AnimatePresence>
+      </div>
+      {!sounding && (
+        <span className="flex-none text-[10px] text-text-muted">{t('briefingPage.quiet')}</span>
+      )}
+    </motion.div>
   );
 }

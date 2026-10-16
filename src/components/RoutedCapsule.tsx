@@ -19,7 +19,6 @@ interface RoutedRow {
   exeName: string;
   /** The device names the route reaches, in the order the route plays them. */
   devices: string[];
-  sounding: boolean;
 }
 
 /** The way back for one row: the same ✕ the rail's routed rows carry. */
@@ -60,23 +59,34 @@ export function RoutedCapsule() {
   const devices = useRouterStore((s) => s.devices);
   const sessions = useRouterStore((s) => s.sessions);
   const routedPids = useRouterStore((s) => s.routedPids);
-  const soundingPids = useRouterStore((s) => s.soundingPids);
-  const selectProcess = useRouterStore((s) => s.selectProcess);
-  const stopRoute = useRouterStore((s) => s.stopRoute);
+  // The pill's own ring, as one boolean: subscribing to the whole sounding
+  // table would re-render the capsule — pill and open panel alike — every
+  // time any unrelated process in the system flips play/pause. A primitive
+  // snapshot only re-renders when the answer actually changes. Sounding is
+  // read per program: the process making the sound is often a sibling of the
+  // one holding the route.
+  const anySounding = useRouterStore((s) => {
+    for (const session of s.sessions) {
+      const ids = s.routedPids[session.pid];
+      if (ids === undefined || ids.length === 0) continue;
+      const exe = session.exe_name.toLowerCase();
+      if (
+        s.sessions.some((x) => x.exe_name.toLowerCase() === exe && s.soundingPids[x.pid] === true)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Walk the session list, not the route table: a programme on its way out can
   // still carry a route for a breath, and a row without a name or an icon has
-  // nothing to show for it. The Status page walks the list the same way.
-  //
-  // Sounding is read per program: the row is the program's, and the process
-  // making its sound may be a sibling of the one holding the route.
-  const soundingExes = new Set<string>();
-  for (const session of sessions) {
-    if (soundingPids[session.pid] === true) soundingExes.add(session.exe_name.toLowerCase());
-  }
+  // nothing to show for it. The Status page walks the list the same way. Each
+  // row reads its own sounding state where it is rendered (`CapsuleRow`), for
+  // the same reason the pill reads its as a boolean above.
   const rows: RoutedRow[] = [];
   for (const session of sessions) {
     const ids = routedPids[session.pid];
@@ -86,7 +96,6 @@ export function RoutedCapsule() {
       name: session.display_name ?? session.exe_name,
       exeName: session.exe_name,
       devices: ids.map((id) => devices.find((d) => d.id === id)?.name ?? id),
-      sounding: soundingExes.has(session.exe_name.toLowerCase()),
     });
   }
 
@@ -126,8 +135,6 @@ export function RoutedCapsule() {
 
   if (rows.length === 0) return null;
 
-  const anySounding = rows.some((row) => row.sounding);
-
   return (
     // Anchored above the band the tuning strip takes when a row is being
     // tuned. The strip no longer stands there, but it still takes that band
@@ -162,44 +169,14 @@ export function RoutedCapsule() {
                 {t('routed.title')}
               </div>
               <div className="flex flex-col">
-                {rows.map((row) => {
-                  const first = row.devices[0] ?? '';
-                  return (
-                    <div
-                      key={row.pid}
-                      data-routed-row={row.pid}
-                      className="flex items-center gap-2 rounded-seg px-2 py-1.5 transition-colors hover:bg-surface-hover"
-                    >
-                      <Ring tone="main" size={12} live={row.sounding && liveness} />
-                      <ProcessIcon exeName={row.exeName} name={row.name} size={16} />
-                      {/* The name is the door, not a lever: it opens that
-                          programme's own board, where its levers already live.
-                          Every number keeps exactly one place to be changed. */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          selectProcess(row.pid);
-                          setOpen(false);
-                        }}
-                        title={t('routed.tune', { name: row.name })}
-                        aria-label={t('routed.tune', { name: row.name })}
-                        className="pressable min-w-0 flex-1 truncate text-left text-[12px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
-                      >
-                        {row.name}
-                      </button>
-                      <span className="max-w-[92px] flex-none truncate text-[10px] text-text-muted">
-                        {row.devices.length === 1 ? first : `${first} +${row.devices.length - 1}`}
-                      </span>
-                      <ConfirmButton
-                        variant="icon"
-                        label={t('rail.stopRoute')}
-                        confirmLabel={t('rail.stopRouteConfirm')}
-                        onConfirm={() => void stopRoute(row.pid)}
-                        icon={STOP_GLYPH}
-                      />
-                    </div>
-                  );
-                })}
+                {rows.map((row) => (
+                  <CapsuleRow
+                    key={row.pid}
+                    row={row}
+                    liveness={liveness}
+                    onNavigate={() => setOpen(false)}
+                  />
+                ))}
               </div>
             </motion.div>
           )}
@@ -226,6 +203,64 @@ export function RoutedCapsule() {
           </motion.button>
         </Tooltip>
       </div>
+    </div>
+  );
+}
+
+/**
+ * One row of the open panel. Its ring subscribes to its own program's voice —
+ * per executable, the way the pill reads — so a sibling process starting or
+ * stopping anywhere else in the system repaints nothing here.
+ */
+function CapsuleRow({
+  row,
+  liveness,
+  onNavigate,
+}: {
+  row: RoutedRow;
+  liveness: boolean;
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  const selectProcess = useRouterStore((s) => s.selectProcess);
+  const stopRoute = useRouterStore((s) => s.stopRoute);
+  const exeKey = row.exeName.toLowerCase();
+  const sounding = useRouterStore((s) =>
+    s.sessions.some((x) => x.exe_name.toLowerCase() === exeKey && s.soundingPids[x.pid] === true),
+  );
+  const first = row.devices[0] ?? '';
+  return (
+    <div
+      data-routed-row={row.pid}
+      className="flex items-center gap-2 rounded-seg px-2 py-1.5 transition-colors hover:bg-surface-hover"
+    >
+      <Ring tone="main" size={12} live={sounding && liveness} />
+      <ProcessIcon exeName={row.exeName} name={row.name} size={16} />
+      {/* The name is the door, not a lever: it opens that
+          programme's own board, where its levers already live.
+          Every number keeps exactly one place to be changed. */}
+      <button
+        type="button"
+        onClick={() => {
+          selectProcess(row.pid);
+          onNavigate();
+        }}
+        title={t('routed.tune', { name: row.name })}
+        aria-label={t('routed.tune', { name: row.name })}
+        className="pressable min-w-0 flex-1 truncate text-left text-[12px] font-semibold text-text-primary outline-none hover:text-accent focus-visible:text-accent"
+      >
+        {row.name}
+      </button>
+      <span className="max-w-[92px] flex-none truncate text-[10px] text-text-muted">
+        {row.devices.length === 1 ? first : `${first} +${row.devices.length - 1}`}
+      </span>
+      <ConfirmButton
+        variant="icon"
+        label={t('rail.stopRoute')}
+        confirmLabel={t('rail.stopRouteConfirm')}
+        onConfirm={() => void stopRoute(row.pid)}
+        icon={STOP_GLYPH}
+      />
     </div>
   );
 }
