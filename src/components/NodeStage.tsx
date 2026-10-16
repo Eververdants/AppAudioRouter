@@ -1572,9 +1572,9 @@ function StripRow({
   upLabel: string;
 }) {
   return (
-    <div className="item rounded-seg" title={title}>
+    <div className="rounded-seg" title={title}>
       <span className="text-[10.5px] text-text-secondary">{label}</span>
-      <span className="stp flex items-center gap-1 rounded-seg border border-line-strong px-1 py-0.5">
+      <span className="flex items-center gap-1 rounded-seg border border-line-strong px-1 py-0.5">
         <button
           type="button"
           aria-label={downLabel}
@@ -1652,10 +1652,10 @@ function Inspector({
     const volume = primaryVolumes[exeName ?? ''] ?? 100;
     body = (
       <>
-        <div className="who flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
           <Ring tone="main" size={14} />
           <span>
-            <span className="nm block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
+            <span className="block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
             <span className="text-[9.5px] text-text-muted">{t('stage.main')}</span>
           </span>
         </div>
@@ -1683,10 +1683,10 @@ function Inspector({
     const latency = deviceLatencyMs[deviceId];
     body = (
       <>
-        <div className="who flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
           <Ring tone="copy" size={14} />
           <span>
-            <span className="nm block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
+            <span className="block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
             <span className="text-[9.5px] text-text-muted">{t('stage.copy')}</span>
           </span>
         </div>
