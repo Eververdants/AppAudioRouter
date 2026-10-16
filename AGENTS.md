@@ -9,7 +9,7 @@
 
 Windows 平台「每应用音频路由」工具。Tauri v2 + React + TypeScript + TailwindCSS + Motion。
 
-核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（Ctrl+多选）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度），**把一个程序的输出送进另一个程序的输入（2.3.0 起）**，自动记忆路由与送入规则、两张列表随 Core Audio 变化实时更新、托盘常驻与开机自启、单实例（再次启动只唤出已有窗口）。
+核心能力：枚举有音频会话的进程、枚举渲染设备、将**一个或多个（行末圆形开关并入，Ctrl+点击同义）进程**路由到一台或多台设备（多设备时第一台为主设备，其余通过进程回环复制，支持同步启动、按设备延迟补偿以对齐蓝牙、按设备音量以平衡响度），**把一个程序的输出送进另一个程序的输入（2.3.0 起）**，自动记忆路由与送入规则、两张列表随 Core Audio 变化实时更新、托盘常驻与开机自启、单实例（再次启动只唤出已有窗口）。
 
 **硬性约束：无任何第三方 exe 依赖。** 所有音频操作由 Rust 直接调用 Windows Core Audio API。「送入程序」因此**不自带虚拟声卡**：它经回环驱动提供的一对端点（播放侧 + 录音侧）转接，端点对在设置页里由用户指定；未配置时送入规则照记，但保持静默并在看板上说明原因。
 
@@ -48,7 +48,7 @@ AppAudioRouter/
 ├── src-tauri/                # Rust 后端
 │   ├── tauri.conf.json       # Tauri 配置 + capabilities（能力文件只有 main.json 一份）
 │   └── src/
-│       ├── main.rs             # 入口：注册命令 + 关闭拦截（托盘常驻）+ 显示看门狗 + 退出前交还端点分配
+│       ├── main.rs             # 入口：注册命令 + 关闭拦截（托盘常驻）+ 显示看门狗 + 退出前交还端点分配与主输出音量
 │       ├── commands.rs         # Tauri 命令（invoke handler）
 │       ├── tray.rs             # 托盘图标 + 菜单（菜单标签由前端下发以跟随语言）
 │       ├── autostart.rs        # 开机自启：HKCU\...\Run，启动带 --hidden
@@ -64,6 +64,7 @@ AppAudioRouter/
 │           ├── process_meta.rs  # 窗口标题 / FileDescription / 图标提取（按路径缓存命中，miss 不缓存）
 │           ├── routing.rs       # 每应用端点槽 25/26 读写 + PinnedRoutes（渲染/捕获两本账）
 │           ├── duplication.rs   # 进程回环 → 多设备复制引擎（源静默后停放）+ 每源电平估计与增益
+│           ├── calibration.rs   # 校准向导的短音播放器（一次一声、按设备混音格式出包 → calibration-tone 事件）
 │           ├── levels.rs        # 每源电平表（只回 1 秒内的读数）
 │           └── notifications.rs # COM 通知线程 → audio-changed / session-activity 事件
 ├── src/                      # React 19 前端
@@ -73,6 +74,7 @@ AppAudioRouter/
 │   │   ├── RoutedCapsule.tsx       # 「已路由 n」胶囊：所有路由的管理面（只有停止，没有开始）
 │   │   ├── BriefingPage.tsx        # 「现状」页（路由与活动记录之间）：每个程序一行 chip 的去向图
 │   │   ├── SourceLevelDial.tsx     # hub 卡下的每程序电平环（仅多设备路由挂载）
+│   │   ├── DelayCalibration.tsx    # 延迟校准向导（设置页「延迟补偿」区进入：轮流出声、按住计时、结果屏可改基准）
 │   │   ├── Toast.tsx               # 瞬态提示：路由与送入的撤销入口（全项目唯一）
 │   │   ├── SettingsPage.tsx        # 设置独立页面（左分区导航 + 右内容）
 │   │   ├── LogPanel.tsx            # 活动记录（下划线标签页第三页）
@@ -82,11 +84,12 @@ AppAudioRouter/
 │   │   ├── ui/                     # Ring（同心圆，全项目一枚）/ ProcessIcon / Switch / UnderlineTabs /
 │   │                               #   SegmentedControl / Select（自研下拉，带 data-owns-escape）/ ScrubReadout /
 │   │                               #   StepButton / Tooltip / ConfirmButton / DelayStepper / Spinner
-│   ├── hooks/                # useTheme / useLanguage / useDelayValue / useLiveness（声流闸门）/ useBackendEvent
+│   ├── hooks/                # useTheme / useLanguage / useDelayValue / useLiveness（声流闸门）/ useBackendEvent /
+│   │                         #   useProgramRoutes（把程序的账摊到它名下所有进程）/ useElementHeight（井的唯一高度）
 │   ├── stores/routerStore.ts # Zustand store
 │   ├── i18n/                 # en.json + zh-CN.json（键集合有对称测试保护）
-│   ├── lib/                  # invoke / delay / stage（看板几何）/ motion（共享动效曲线）/ icons /
-│   │                         #   carrierDetect（回环驱动探测）/ productionGuards / types / window
+│   ├── lib/                  # invoke / delay / routes（程序级归属查询）/ stage（看板几何）/ motion（共享动效曲线）/
+│   │                         #   icons / carrierDetect（回环驱动探测）/ productionGuards / types / window
 │   └── styles/index.css      # Tailwind 入口 + CSS variables（色板唯一事实来源）
 ├── docs/agents/              # 专题规范（state / background / theme / board-ui / acceptance，按需读）
 ├── docs/images/              # README 截图
@@ -149,7 +152,7 @@ AppAudioRouter/
 **端点分配**（[background.md](docs/agents/background.md)）
 - 写端点的路径必须三步闭环：**写 → 登记 `PinnedRoutes` → 停止时归还**；四条归还路径（停止 / 退出 / 清扫 / 重置）缺一不可。
 - 槽 27 `ClearAll...` **禁止使用**；清除后必须读回校验，Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
-- 系统关键进程只在 `set_process_default_device` 入口拦截，别开第二条 COM 写入路径。
+- 系统关键进程只在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的入口）被拦住，别开第二条 COM 写入路径。
 
 **刷新与引擎**（[background.md](docs/agents/background.md)）
 - **全项目没有轮询定时器**：列表靠 `audio-changed`（COM 回调）；对齐是一次性动作；延迟读数靠 `reconcileActiveDuplications()` 在事件点重建——**每条新起引擎的路径都要跟一次**。
@@ -159,7 +162,10 @@ AppAudioRouter/
 **音量与延迟**（[state.md](docs/agents/state.md)）
 - 两个音量轴不许混：**设备份额**（副本响度，只能衰减）≠ **主输出音量**（会话音量 5–100，停止/退出时归还原值）。禁止绕过 `update_primary_volume` 写会话音量、给未路由的程序调会话音量、拿会话音量做设备间平衡。
 - 控件按角色出现，结构说了算：主输出没有延迟行、单设备路由没有任何控件，「变淡地画」也算违规；`lib/engineRole.ts` 已删，别搬回来。
-- 成对字面量改一处必须改另一处：`SOURCE_LEVEL_MAX`(TS) ↔ `SOURCE_VOLUME_MAX`(Rust)、`PRIMARY_VOLUME_MIN` 前后端。
+- 成对字面量改一处必须改另一处（两边没有任何东西绑住，全部**以代码为准**，别照本条去猜位置）：
+  `SOURCE_LEVEL_MAX`(TS) ↔ `SOURCE_VOLUME_MAX`(Rust, 400)、`PRIMARY_VOLUME_MIN`(TS) ↔ `PRIMARY_VOLUME_MIN_PERCENT`(Rust, 5)、
+  `PRIMARY_VOLUME_MAX`(TS) ↔ `SOURCE_VOLUME_NEUTRAL`(Rust, 100)、`DELAY_MAX_MS`(TS `lib/delay.ts`) ↔ `config::DELAY_MAX_MS`(Rust, 10000)、
+  `LATENCY_TARGET_MS`(TS `lib/delay.ts`) ↔ `duplication.rs` 同名常量（100）。
 
 **记忆与撤销**（[state.md](docs/agents/state.md)）
 - 撤销是一个快照不是栈；记忆跟着撤销走（重路由用原 `remember` 标志，`stopRoute` 清记忆）。
@@ -175,7 +181,18 @@ AppAudioRouter/
 
 ## CI/CD
 
-- **触发**：push to `main` / tag `v*`；`pnpm install --frozen-lockfile` → `pnpm tauri build`（MSI）→ 上传 artifact → tag 时创建 GitHub Release。环境：`windows-latest`, Rust stable, Node LTS。
+两条流水线，职责不同（以 `.github/workflows/` 里的 `ci.yml` / `release.yml` 为准）：
+
+- **CI（`ci.yml`）：任意 push + 所有 PR 都跑**，四份作业，Node 钉 `20`、pnpm 钉 `10`：
+  `frontend-check`（ubuntu：`pnpm install --frozen-lockfile` → `pnpm fmt:check` → `tsc --noEmit` → `pnpm build`）、
+  `unit-test`（ubuntu：`pnpm test`）、`e2e-test`（ubuntu：装 chromium 后 `pnpm test:e2e`，失败时上传 playwright 报告）、
+  `rust-check`（windows：`cargo fmt -- --check` → `cargo check` → `cargo clippy -- -D warnings` → `cargo test`）。
+  ⚠️ **CI 的 clippy 没带 `--all-targets`**：测试目标只被 `cargo test` 编译、不被 clippy 把关，所以测试代码里的 lint 只有本地跑
+  `cargo clippy --all-targets -- -D warnings` 才看得见（第二轮就是用它发现过 `config.rs` 的问题）。
+  ⚠️ `pnpm fmt:check` 是**第一道门**，格式化没跑就等于 CI 红。
+- **发布（`release.yml`）：只在 tag `v*` 上跑**，先 `cargo audit`（ubuntu，钉版本），audit 过了才由 `tauri-action` 在
+  windows-latest 上 `pnpm tauri build` 出安装包（**MSI 与 NSIS 两种**），并建 **draft** release（`releaseDraft: true`，
+  所以要人工去 Release 页面确认发布），release 正文是写死在 workflow 里的，改了功能口径记得同步它。
 - **版本号有三处字面量**：`package.json`、`tauri.conf.json`、`src-tauri/Cargo.toml`（锁文件跟着走）。UI 显示的版本来自 `vite.config.ts` 注入的 `__APP_VERSION__`——取自 `package.json`，所以前端没有第二处要改；两份 README 里的版本徽章/速查表也算，发版时一起看。
 
 ---
@@ -187,7 +204,7 @@ AppAudioRouter/
 - 禁止在前端拼接 shell 命令
 - Rust 端 COM 调用必须校验输入（device_id 格式、pid 范围）
 - 每应用端点分配的清除只走槽 25 的 null HSTRING（单进程）；槽 27 的 `ClearAll...` 会连用户手设的一起清，禁止使用
-- 系统关键进程的路由必须在 `audio::routing::set_persisted_default`（两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
+- 系统关键进程的路由必须在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；槽 25 的 `set_persisted_default` 只是裸调用，从它旁边另起一路就等于绕过这道拒绝；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
 - 前端永不传 URL：`open_carrier_download` 只收驱动 key，URL 映射固定在 Rust 侧（`commands.rs` 的 `CARRIER_PAGES`），页面经 `ShellExecuteW` 的 open 动词交给浏览器关联
@@ -204,7 +221,11 @@ pnpm install
 pnpm tauri dev
 
 # 类型检查
-pnpm tsc --noEmit
+pnpm typecheck          # 即 tsc --noEmit
+
+# 格式化（prettier，含 tailwind 类排序）
+pnpm fmt                # 写
+pnpm fmt:check          # CI 里那道门
 
 # 构建
 pnpm tauri build
@@ -212,7 +233,8 @@ pnpm tauri build
 # 单测（Vitest）
 pnpm test
 
-# E2E（Playwright，假 Tauri IPC；跑之前先起 `pnpm dev --port 1420`）
+# E2E（Playwright，假 Tauri IPC）
+# playwright.config.ts 的 webServer 会自己起 `pnpm dev --port 1420`（本地复用已在跑的），不用手动开
 pnpm test:e2e
 
 # 重拍 README 的两张截图（按需要手动跑，平时会被 skip）
@@ -223,9 +245,15 @@ CAPTURE_SCREENSHOTS=1 pnpm exec playwright test e2e/screenshots.spec.ts
 # Rust 检查
 cd src-tauri && cargo check
 
+# Rust 单测
+cd src-tauri && cargo test
+
 # Rust 格式化
 cd src-tauri && cargo fmt -- --check
 
-# Rust lint
+# Rust lint（CI 跑的是这一条）
 cd src-tauri && cargo clippy -- -D warnings
+
+# 本地把关测试代码（CI 的 clippy 不带 --all-targets，见「CI/CD」）
+cd src-tauri && cargo clippy --all-targets -- -D warnings
 ```
