@@ -651,13 +651,34 @@ impl PinnedRoutes {
     /// The assignment Windows keeps is stored per executable, so while one
     /// live route holds it, no other process of the same program may release
     /// it — the release would reach the route's primary endpoint all the same.
+    ///
+    /// "Live" carries the same witness [`is_routed`] uses: a route whose process
+    /// exited stays on the book until a sweep reaches it, and an answer built on
+    /// that entry would keep `stop_route` from ever handing the assignment back
+    /// and a suspended feed from ever resuming. The other direction — a live
+    /// sibling read as dead — is what would take a running route's endpoint away,
+    /// so the judgement is the process's own exit code and creation time rather
+    /// than the presence of an entry, and only entries naming this executable are
+    /// asked: one `OpenProcess` per sibling, not one per page of the book.
     pub fn exe_routed_elsewhere(&self, pid: u32, exe_name: &str) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.iter().any(|(other, route)| {
-            *other != pid
-                && route.kind == PinKind::Route
-                && route.exe_name.eq_ignore_ascii_case(exe_name)
-        })
+        // Snapshot the candidates under the lock and judge them outside of it:
+        // `process_is_running` opens a process, and no other path in this crate
+        // does system calls while a route book is held.
+        let candidates: Vec<(u32, u64)> = {
+            let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner
+                .iter()
+                .filter(|(other, route)| {
+                    **other != pid
+                        && route.kind == PinKind::Route
+                        && route.exe_name.eq_ignore_ascii_case(exe_name)
+                })
+                .map(|(other, route)| (*other, route.creation_time))
+                .collect()
+        };
+        candidates
+            .iter()
+            .any(|(other, created)| super::process_is_running(*other, *created))
     }
 
     /// The PIDs a live route of ours owns, whose assignments must be left alone.
@@ -684,9 +705,16 @@ impl PinnedRoutes {
     /// would ever resume it. The bookkeeping itself is left standing either
     /// way; only the answer changes.
     pub fn is_routed(&self, pid: u32) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.get(&pid).is_some_and(|route| {
-            route.kind == PinKind::Route && super::process_is_running(pid, route.creation_time)
+        // Same shape as `exe_routed_elsewhere`: snapshot under the lock,
+        // open the process outside of it.
+        let entry = {
+            let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner
+                .get(&pid)
+                .map(|route| (route.kind, route.creation_time))
+        };
+        entry.is_some_and(|(kind, created)| {
+            kind == PinKind::Route && super::process_is_running(pid, created)
         })
     }
 
@@ -1253,6 +1281,30 @@ mod tests {
         let mut released = pins.take_all();
         released.sort();
         assert_eq!(released, vec![2, 3, u32::MAX]);
+    }
+
+    /// A route that died with its process stops holding the executable's
+    /// assignment: the sibling question is what keeps `stop_route` from releasing
+    /// a live route's endpoint and what makes a feed decide to wait, and an entry
+    /// that outlives its process would have both wait for nothing.
+    #[test]
+    fn a_dead_sibling_does_not_hold_the_programs_assignment() {
+        let pins = PinnedRoutes::new();
+        let live = std::process::id();
+        pins.mark(live, "browser.exe", "device-a");
+        // A live route of the same executable holds it, whatever the spelling
+        // the two callers happen to have.
+        assert!(pins.exe_routed_elsewhere(999_999, "browser.exe"));
+        assert!(pins.exe_routed_elsewhere(999_999, "BROWSER.EXE"));
+        // The entry's own process is not a sibling of itself.
+        assert!(!pins.exe_routed_elsewhere(live, "browser.exe"));
+
+        // A dead one answers no, while its bookkeeping still rides the sweep and
+        // the shutdown release.
+        pins.mark(u32::MAX, "game.exe", "device-b");
+        assert!(!pins.exe_routed_elsewhere(1234, "game.exe"));
+        assert!(pins.routed_pids().contains(&u32::MAX));
+        assert!(pins.take_all().contains(&u32::MAX));
     }
 
     /// A chain — `A` into `B`, `B` into `C` — writes `B` on both flows, and
