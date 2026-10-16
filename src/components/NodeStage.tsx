@@ -49,6 +49,7 @@ import {
   rowInPort,
   rowVisible,
 } from '@/lib/stage';
+import { PRIMARY_VOLUME_MAX, PRIMARY_VOLUME_MIN } from '@/lib/types';
 import type { AudioSession } from '@/lib/types';
 import { feedLiveness, useRouterStore } from '@/stores/routerStore';
 
@@ -1644,10 +1645,14 @@ function Inspector({
           label={t('stage.stripPrimaryVolume')}
           title={t('primaryVolume.hint')}
           value={`${volume}%`}
-          onDown={() => void setPrimaryVolume(exeName ?? '', Math.max(5, volume - 5))}
-          onUp={() => void setPrimaryVolume(exeName ?? '', Math.min(100, volume + 5))}
-          canDown={volume > 5}
-          canUp={volume < 100}
+          onDown={() =>
+            void setPrimaryVolume(exeName ?? '', Math.max(PRIMARY_VOLUME_MIN, volume - 5))
+          }
+          onUp={() =>
+            void setPrimaryVolume(exeName ?? '', Math.min(PRIMARY_VOLUME_MAX, volume + 5))
+          }
+          canDown={volume > PRIMARY_VOLUME_MIN}
+          canUp={volume < PRIMARY_VOLUME_MAX}
           downLabel={t('primaryVolume.stepDown', { step: '5%' })}
           upLabel={t('primaryVolume.stepUp', { step: '5%' })}
         />

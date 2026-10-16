@@ -93,6 +93,20 @@ export type DeviceDelay = [deviceId: string, delayMs: number];
  */
 export type SourceVolume = [exeName: string, percent: number];
 
+/**
+ * Bounds of the **primary volume** axis (a program's session volume, percent),
+ * the range `set_primary_volume` accepts and the primary-volume stepper clamps
+ * to. Not the source-level axis (0–400) and not the device-share axis (0–100):
+ * this one floor is 5, because a session volume of 0 is true silence no mirror
+ * gain can undo.
+ *
+ * `PRIMARY_VOLUME_MIN` mirrors Rust's `config::PRIMARY_VOLUME_MIN_PERCENT` and
+ * `PRIMARY_VOLUME_MAX` its `SOURCE_VOLUME_NEUTRAL` ceiling — the two sides are
+ * literals with nothing binding them, so change one, change the other.
+ */
+export const PRIMARY_VOLUME_MIN = 5;
+export const PRIMARY_VOLUME_MAX = 100;
+
 /** What one run of the level alignment did. */
 export interface AlignOutcome {
   /** Programs whose level was set, as `(exe_name, percent)`. */
