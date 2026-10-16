@@ -270,7 +270,9 @@ fn wide(s: &str) -> Vec<u16> {
 /// One executable's icon as raw pixels.
 #[derive(Debug, Clone, Serialize)]
 pub struct IconImage {
+    /// Width of the decoded image, in pixels.
     pub width: u32,
+    /// Height of the decoded image, in pixels.
     pub height: u32,
     /// Base64 of the RGBA rows, top-down, four bytes per pixel. Base64 rather
     /// than raw bytes so the payload rides through JSON as one string instead

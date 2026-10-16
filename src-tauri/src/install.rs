@@ -77,6 +77,8 @@ pub struct InstallProbe {
 }
 
 impl InstallProbe {
+    /// The probe for `identifier`, with both evidence directories taken from
+    /// the environment — the app does not exist yet to ask.
     pub fn new(identifier: &str) -> Self {
         // Derived from the environment rather than from Tauri's path API: this
         // runs before the app exists, which is the whole point.
@@ -167,6 +169,7 @@ pub struct StartupNoticeState {
 }
 
 impl StartupNoticeState {
+    /// Decide this launch's notice straight from the probe, with no override.
     pub fn new(identifier: &str, current_version: &str) -> Self {
         let probe = InstallProbe::new(identifier);
         let notice = probe.notice(current_version);
