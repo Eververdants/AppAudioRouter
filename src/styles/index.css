@@ -363,12 +363,15 @@ input[type='number']::-webkit-inner-spin-button {
 
 /* The flow on a wire that carries sound: the one place this interface moves of
    its own accord, and it moves because something is playing, not as decoration.
-   A keyframe rather than Motion because the compositor can run this without
-   JavaScript touching it once mounted — and because `useLiveness` decides
-   whether the element exists at all, so a resting stage (window hidden, focus
-   elsewhere, reduced motion, program silent) paints nothing. One period is one
-   dash: 12 px at 24 px a second, slow enough to read as current. The media
-   query is a second fence behind the hook, not the only one. */
+   A keyframe rather than Motion so a standing loop costs no JavaScript per
+   frame — but it is *not* compositor work either: `stroke-dashoffset` is not
+   a compositable property, so every frame repaints this strip of SVG on the
+   main thread. The strip is thin and short, which is what keeps that cheap,
+   and `useLiveness` decides whether the element exists at all, so a resting
+   stage (window hidden, focus elsewhere, reduced motion, program silent)
+   paints nothing. One period is one dash: 12 px at 24 px a second, slow
+   enough to read as current. The media query is a second fence behind the
+   hook, not the only one. */
 @keyframes stage-flow {
   to {
     stroke-dashoffset: -12;
