@@ -501,15 +501,19 @@ impl MirrorChannel {
         }
     }
 
-    /// Take at most `max_frames` frames of audio for one render cycle.
-    fn pop(&self, max_frames: usize, block_align: usize) -> Vec<u8> {
+    /// Take at most `max_frames` frames of audio for one render cycle into
+    /// `out`, the render thread's own scratch buffer — the cycle runs about a
+    /// hundred times a second, and a fresh allocation each time is one the
+    /// audio thread does not need to make.
+    fn pop(&self, max_frames: usize, block_align: usize, out: &mut Vec<u8>) {
+        out.clear();
         if max_frames == 0 || !self.enabled.load(Ordering::Relaxed) {
-            return Vec::new();
+            return;
         }
         let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
         let take = ring.len().min(max_frames * block_align);
         let aligned = take - take % block_align;
-        ring.drain(..aligned).collect()
+        out.extend(ring.drain(..aligned));
     }
 }
 
@@ -1942,6 +1946,10 @@ fn pump_render(
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
+    // Reused across cycles so the render thread allocates nothing per period;
+    // local to this thread and cleared on every pop, so a park in between
+    // cannot carry stale frames into the next device buffer.
+    let mut chunk: Vec<u8> = Vec::new();
     loop {
         // SAFETY: valid event handle owned by this thread.
         let wait = unsafe { WaitForSingleObject(session.event, RENDER_WAIT_MS) };
@@ -1989,7 +1997,7 @@ fn pump_render(
         let free = session.buffer_frames.saturating_sub(padding);
         let allowed = target.saturating_sub(padding).min(free);
         if allowed > 0 {
-            let mut chunk = mirror.pop(allowed, shared.block_align);
+            mirror.pop(allowed, shared.block_align, &mut chunk);
             if chunk.is_empty() {
                 // The pipeline ran dry (fast clock or a silent source); keep
                 // the engine fed with silence until data returns. This must run
@@ -2490,11 +2498,14 @@ mod tests {
     fn push_and_pop_stay_frame_aligned() {
         let ch = channel(100_000);
         let frame = 8usize;
+        let mut out = Vec::new();
         ch.push(&vec![0u8; 100 * frame], frame);
         assert_eq!(ch.buffered_bytes(), 100 * frame);
-        assert_eq!(ch.pop(30, frame).len(), 30 * frame);
+        ch.pop(30, frame, &mut out);
+        assert_eq!(out.len(), 30 * frame);
         // Asking for more than buffered returns exactly what is left.
-        assert_eq!(ch.pop(999, frame).len(), 70 * frame);
+        ch.pop(999, frame, &mut out);
+        assert_eq!(out.len(), 70 * frame);
     }
 
     #[test]
@@ -2516,7 +2527,8 @@ mod tests {
         }
         ch.push(&data, frame);
         ch.drop_oldest(4, frame);
-        let out = ch.pop(999, frame);
+        let mut out = Vec::new();
+        ch.pop(999, frame, &mut out);
         assert_eq!(out.len(), 6 * frame);
         assert_eq!(out[0], 4);
         assert_eq!(out[out.len() - frame], 9);
@@ -2532,7 +2544,8 @@ mod tests {
         }
         ch.push(&data, frame);
         ch.prepend_silence(4, frame);
-        let out = ch.pop(999, frame);
+        let mut out = Vec::new();
+        ch.pop(999, frame, &mut out);
         assert_eq!(out.len(), 14 * frame);
         assert!(out[..4 * frame].iter().all(|&b| b == 0));
         // The original data follows the silence, in order.
@@ -2548,7 +2561,8 @@ mod tests {
         // Only 10 frames of headroom remain; the request is clamped to it.
         ch.prepend_silence(100, frame);
         assert_eq!(ch.buffered_bytes(), 40 * frame);
-        let out = ch.pop(999, frame);
+        let mut out = Vec::new();
+        ch.pop(999, frame, &mut out);
         assert!(out[..10 * frame].iter().all(|&b| b == 0));
         assert_eq!(out[10 * frame], 1);
     }
@@ -2567,7 +2581,9 @@ mod tests {
         ch.enabled.store(false, Ordering::Relaxed);
         ch.push(&[0u8; 80], 8);
         assert_eq!(ch.buffered_bytes(), 0);
-        assert!(ch.pop(10, 8).is_empty());
+        let mut out = Vec::new();
+        ch.pop(10, 8, &mut out);
+        assert!(out.is_empty());
     }
 
     #[test]
