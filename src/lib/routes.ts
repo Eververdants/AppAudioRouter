@@ -38,6 +38,34 @@ export function programEntryOf<T>(
 }
 
 /**
+ * The process holding each program's entry, for a whole list at once: the same
+ * answer `programEntryOf` gives per process, folded in two passes so a list
+ * that draws one row per process does not re-scan the sessions — and every
+ * other program's entries — for what its neighbour already knows.
+ *
+ * Every process of a program maps to that program's holder, so a row can name
+ * the entry to address without knowing which of its siblings landed it.
+ */
+export function programOwners<T>(
+  sessions: AudioSession[],
+  map: Record<number, T[]>,
+): Record<number, number> {
+  const holderByExe = new Map<string, number>();
+  for (const session of sessions) {
+    if ((map[session.pid]?.length ?? 0) === 0) continue;
+    const key = session.exe_name.toLowerCase();
+    const known = holderByExe.get(key);
+    // The lowest pid, like the address every write to these maps uses.
+    if (known === undefined || session.pid < known) holderByExe.set(key, session.pid);
+  }
+  const owners: Record<number, number> = {};
+  for (const session of sessions) {
+    owners[session.pid] = holderByExe.get(session.exe_name.toLowerCase()) ?? session.pid;
+  }
+  return owners;
+}
+
+/**
  * The route of the program each process belongs to, keyed by process id.
  *
  * `routedPids` holds one entry per routed program, under the pid it was applied

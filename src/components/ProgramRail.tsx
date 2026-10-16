@@ -8,7 +8,7 @@ import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
-import { programEntryOf } from '@/lib/routes';
+import { programOwners } from '@/lib/routes';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -35,6 +35,10 @@ export function ProgramRail() {
   // whose route lives on another process still says where its sound goes —
   // and offers the way out.
   const routesByPid = useProgramRoutes();
+  // Which process holds each program's route, folded once for the whole list:
+  // a row's ✕ has to address the holder, and the row can be any process of the
+  // program.
+  const ownerByPid = useMemo(() => programOwners(sessions, routedPids), [sessions, routedPids]);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
@@ -277,7 +281,7 @@ export function ProgramRail() {
                 // was applied to. Stop that one: `stopRoute` of a sibling pid
                 // finds no entry and returns, leaving the route running under
                 // the process it names.
-                stopOwner={programEntryOf(sessions, routedPids, session.pid) ?? session.pid}
+                stopOwner={ownerByPid[session.pid] ?? session.pid}
                 liveness={liveness}
               />
             );
@@ -338,6 +342,7 @@ const RailRow = memo(function RailRow({
   return (
     <motion.div
       layout
+      data-rail-row={session.pid}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
