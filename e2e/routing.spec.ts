@@ -9,11 +9,13 @@ import {
   emit,
   hub,
   openApp,
+  railRow,
   routedCapsule,
   routedPanel,
   routedRow,
   setFailing,
   setSessions,
+  setWindowFocused,
   stopAllRail,
   tuneButton,
   tunerStrip,
@@ -468,6 +470,32 @@ test('a spoke flows only while its programme is sounding', async ({ page }) => {
   await emit(page, 'session-activity', { pid: 1001, active: false });
   await expect(wire).not.toHaveAttribute('data-live');
   await expect(wire).not.toHaveClass(/stage-flow/);
+});
+
+test('a resting window unmounts the pulsing ring rather than pausing it', async ({ page }) => {
+  await openApp(page);
+
+  // The row's ring is the interface's other standing loop, and it reports the
+  // same fact the wire does: this programme is rendering audio right now. The
+  // loop is a CSS animation on a `con-ring-live` class, so reading the class is
+  // reading the loop — a paused one would leave it on.
+  await emit(page, 'session-activity', { pid: 1001, active: true });
+  const ring = railRow(page, 1001).locator('.con-ring');
+  await expect(ring).toHaveClass(/con-ring-live/);
+
+  // The window loses the OS focus, so nobody can see it.
+  await setWindowFocused(page, false);
+  await expect(railRow(page, 1001).locator('.con-ring-live')).toHaveCount(0);
+  // The ring itself is still drawn: what left is the loop, not the report.
+  await expect(ring).toHaveCount(1);
+
+  // And the gate is a gate, not a one-way switch — back in view, back pulsing.
+  await setWindowFocused(page, true);
+  await expect(ring).toHaveClass(/con-ring-live/);
+
+  // A programme that stops rendering takes the loop with it.
+  await emit(page, 'session-activity', { pid: 1001, active: false });
+  await expect(ring).not.toHaveClass(/con-ring-live/);
 });
 
 test('a plan that is not the route has nothing flowing through it', async ({ page }) => {

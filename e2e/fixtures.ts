@@ -1,5 +1,11 @@
 import { expect, type Page } from '@playwright/test';
-import { DEFAULT_STATE, installBridge, type BridgeSession, type BridgeState } from './tauri/bridge';
+import {
+  DEFAULT_STATE,
+  installBridge,
+  type BridgeDevice,
+  type BridgeSession,
+  type BridgeState,
+} from './tauri/bridge';
 
 /**
  * The handful of things a spec needs around the app: load it against a scripted
@@ -35,8 +41,24 @@ export async function setSessions(page: Page, sessions: BridgeSession[]): Promis
   await page.evaluate((next) => window.__AAR__?.setSessions(next), sessions);
 }
 
+export async function setDevices(page: Page, devices: BridgeDevice[]): Promise<void> {
+  await page.evaluate((next) => window.__AAR__?.setDevices(next), devices);
+}
+
 export async function setFailing(page: Page, commands: string[]): Promise<void> {
   await page.evaluate((next) => window.__AAR__?.setFailing(next), commands);
+}
+
+/**
+ * Take the window out of the OS focus — or hand it back — the way the shell
+ * would, event included.
+ *
+ * The sound-flow gate is the app's only reason to stop painting, and it reads
+ * the focus from the document, which the bridge holds open for parallel
+ * workers. This is the one door through which a spec can close it.
+ */
+export async function setWindowFocused(page: Page, focused: boolean): Promise<void> {
+  await page.evaluate((next) => window.__AAR__?.setFocused(next), focused);
 }
 
 export async function resetCalls(page: Page): Promise<void> {
@@ -70,6 +92,17 @@ export function deviceRowShell(page: Page, name: string) {
 /** One row of the app list. */
 export function appRow(page: Page, exeName: string) {
   return page.locator('aside button').filter({ hasText: exeName });
+}
+
+/**
+ * One whole row of the app list, by process.
+ *
+ * `appRow` is the name button a click needs; the ring the row wears sits
+ * beside it, and two processes of one executable share a name — so anything
+ * reading a row's own state addresses it by pid.
+ */
+export function railRow(page: Page, pid: number) {
+  return page.locator(`aside [data-rail-row="${pid}"]`);
 }
 
 /**

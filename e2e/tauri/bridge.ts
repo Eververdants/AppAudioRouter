@@ -63,6 +63,9 @@ export interface BridgeHandle {
   setSessions: (sessions: BridgeSession[]) => void;
   setDevices: (devices: BridgeDevice[]) => void;
   setFailing: (commands: FailingCommands) => void;
+  /** Say whether the window holds the OS focus, the way the shell would, and
+   *  hand the app the matching event. */
+  setFocused: (focused: boolean) => void;
   /** Forget the recorded calls, so a later assertion sees only new ones. */
   resetCalls: () => void;
 }
@@ -70,6 +73,10 @@ export interface BridgeHandle {
 declare global {
   interface Window {
     __AAR__?: BridgeHandle & { state: BridgeState & Record<string, unknown> };
+    /** The shell's answer to `document.hasFocus()`, pinned so a spec does not
+     *  depend on which parallel worker happened to hold focus. `setFocused`
+     *  moves it for the specs that are about the gate itself. */
+    __AAR_WINDOW_FOCUSED__?: boolean;
   }
 }
 
@@ -322,6 +329,13 @@ function tauriBridge(initial: BridgeState): void {
     setSessions: (sessions: BridgeSession[]) => {
       state.sessions = sessions;
     },
+    setFocused: (focused: boolean) => {
+      // The app's liveness gate re-reads `document.hasFocus()` when the shell
+      // says the window gained or lost focus, so this is the window's own
+      // blur — not a stub of the hook.
+      window.__AAR_WINDOW_FOCUSED__ = focused;
+      window.dispatchEvent(new Event(focused ? 'focus' : 'blur'));
+    },
     setDevices: (devices: BridgeDevice[]) => {
       state.devices = devices;
     },
@@ -342,7 +356,10 @@ export async function installBridge(page: Page, state: BridgeState): Promise<voi
   // here the focus half is pinned so the flow tests only depend on the events
   // they themselves emit.
   await page.addInitScript(() => {
-    Object.defineProperty(document, 'hasFocus', { value: () => true });
+    window.__AAR_WINDOW_FOCUSED__ = true;
+    Object.defineProperty(document, 'hasFocus', {
+      value: () => window.__AAR_WINDOW_FOCUSED__ !== false,
+    });
   });
   await page.addInitScript(tauriBridge, state);
 }
