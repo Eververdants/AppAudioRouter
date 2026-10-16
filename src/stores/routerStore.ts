@@ -2196,8 +2196,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.primaryVolumeSet', { process: exeName, n: percent }), 'info');
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
-      // keeps matching the session volume the engines actually apply.
+      // keeps matching the session volume the engines actually apply. Only while
+      // this is still the number on screen: the step buttons fire without
+      // waiting, so a later click can have restated this program's value while
+      // this write was in flight, and that one stands.
       set((s) => {
+        if ((s.primaryVolumes[exeName] ?? 100) !== percent) return {};
         const primaryVolumes = { ...s.primaryVolumes };
         if (current === 100) {
           delete primaryVolumes[exeName];

@@ -1650,6 +1650,13 @@ function Inspector({
   let body: React.ReactNode;
   if (isPrimary) {
     const volume = primaryVolumes[exeName ?? ''] ?? 100;
+    // The strip keeps painting for as long as its exit animation runs, and by
+    // then the program it tunes may have left the session list. Writing through
+    // an empty key would land in the user's config as a rule no process matches.
+    const stepPrimary = (percent: number) => {
+      if (exeName === undefined) return;
+      void setPrimaryVolume(exeName, percent);
+    };
     body = (
       <>
         <div className="flex items-center gap-2.5">
@@ -1663,12 +1670,8 @@ function Inspector({
           label={t('stage.stripPrimaryVolume')}
           title={t('primaryVolume.hint')}
           value={`${volume}%`}
-          onDown={() =>
-            void setPrimaryVolume(exeName ?? '', Math.max(PRIMARY_VOLUME_MIN, volume - 5))
-          }
-          onUp={() =>
-            void setPrimaryVolume(exeName ?? '', Math.min(PRIMARY_VOLUME_MAX, volume + 5))
-          }
+          onDown={() => stepPrimary(Math.max(PRIMARY_VOLUME_MIN, volume - 5))}
+          onUp={() => stepPrimary(Math.min(PRIMARY_VOLUME_MAX, volume + 5))}
           canDown={volume > PRIMARY_VOLUME_MIN}
           canUp={volume < PRIMARY_VOLUME_MAX}
           downLabel={t('primaryVolume.stepDown', { step: '5%' })}

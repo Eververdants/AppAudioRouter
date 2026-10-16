@@ -1557,3 +1557,86 @@ describe('missing icons', () => {
     }
   });
 });
+
+describe('stop of every route', () => {
+  it('takes a stopped program’s siblings out of the selection too', async () => {
+    // The batch clears the route table, but the selection is drawn per process:
+    // a sibling of one of those programs left standing keeps a stopped plan on
+    // the board with no route under it left to stop.
+    const SIBLING: AudioSession = { pid: 1013, exe_name: 'music.exe' };
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, SIBLING, GAME],
+      selectedPids: [SIBLING.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+      routedPids: { [MUSIC.pid]: ['speakers', 'tv'] },
+    });
+
+    await state().stopAllRoutes();
+
+    expect(state().routedPids).toEqual({});
+    expect(state().selectedPids).toEqual([]);
+    expect(state().selectedDeviceIds).toEqual([]);
+  });
+
+  it('keeps the selection of a program it was not routing', async () => {
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, GAME],
+      selectedPids: [GAME.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+      routedPids: { [MUSIC.pid]: ['speakers', 'tv'] },
+    });
+
+    await state().stopAllRoutes();
+
+    expect(state().selectedPids).toEqual([GAME.pid]);
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+  });
+
+  it('does not report a batch as pinned when a sibling in it holds the device', async () => {
+    // Every route in the batch is being stopped, so an assignment one stop hands
+    // to a sibling of the same program is not left behind: the sibling's own
+    // stop is the one that releases it — or says so in this same batch.
+    const SIBLING: AudioSession = { pid: 1014, exe_name: 'music.exe' };
+    installBackend({
+      stopOutcomes: { [MUSIC.pid]: { released: false, pinned_device: 'tv', sibling_held: true } },
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, SIBLING],
+      routedPids: { [MUSIC.pid]: ['tv'], [SIBLING.pid]: ['tv'] },
+    });
+
+    await state().stopAllRoutes();
+
+    expect(state().logs.filter((entry) => entry.level === 'error')).toHaveLength(0);
+  });
+});
+
+describe('primary volume', () => {
+  it('leaves a newer number standing when an older click is refused', async () => {
+    // The step buttons fire without waiting on the write, so two can be in the
+    // air at once. Rolling the *older* rejection back over the newer value would
+    // leave the UI naming a loudness the engines are not applying.
+    installBackend({ fail: (cmd, args) => cmd === 'set_primary_volume' && args.percent === 60 });
+    reset({ devices: [SPEAKERS], sessions: [MUSIC] });
+
+    const older = state().setPrimaryVolume('music.exe', 60);
+    await state().setPrimaryVolume('music.exe', 55);
+    await older;
+
+    expect(state().primaryVolumes['music.exe']).toBe(55);
+  });
+
+  it('restores the previous number when the only write is refused', async () => {
+    installBackend({ fail: (cmd) => cmd === 'set_primary_volume' });
+    reset({ devices: [SPEAKERS], sessions: [MUSIC], primaryVolumes: { 'music.exe': 80 } });
+
+    await state().setPrimaryVolume('music.exe', 70);
+
+    expect(state().primaryVolumes['music.exe']).toBe(80);
+  });
+});
