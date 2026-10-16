@@ -39,7 +39,8 @@
   hub 的 `aria-label`（`stage.applyAria*`）与 `alreadyApplied`（`lib/stage.ts`，有单测）读的是同一份顺序。
 - ⚠️ **hub 不许自称计划是事实**：待生效时它是一枚按钮（带「点按生效」胶囊与 accent 描边），
   已经是事实时它 `disabled`、退回一块普通面板——"你正在看着答案，不该再问你一遍"。
-  程序自己的摘要（从哪几台出声、送入几个）常驻在底部**调音条**里，与它是不是按钮无关。
+  程序自己的摘要**不在看板上常驻**：去向与送入数由 hub 卡自己带着（状态词 + `stage.feedCount`），
+  全图的去向归「现状」页；调音条只在点了某一行编号时存在（见「编号与调音条」）。
 
 ## 看板几何（`lib/stage.ts`）
 
@@ -47,7 +48,7 @@
 `GROUP_PAD(6)` / `GROUP_HEADER_H(24)` / `PANEL_BORDER(1)` / `ROW_X` / `ROW_W` / `ROW_H(52)` / `ROW_GAP(6)` /
 `MINI_W(120)` / `FEEDER_X(12)` / `PIN_D(11)` 是**唯一的**尺寸来源，由 `panelColumn()`、`panelBodyHeight()`、
 `primaryPanelHeight()`、`rowContentY()`、`rowPortY()`、`rowInPort()`、`rowVisible()`、
-`feederY()`、`hubOutPort()`、`hubInPort()`、`feederOutPort()`、`nodePath()` 算出位置与线两端。
+`feederY()`、`hubOutPort()`、`hubInPort()`、`feederOutPort()`、`nodePath()`、`boardCentre()` 算出位置与线两端。
 组件用 `style` 从这些常量取宽高与坐标，**不要**改成 Tailwind 的 `w-[…]`：尺寸在两处各写一份，线迟早会离开卡片。
 
 ⚠️ **尺寸唯一的度量是井的高度**：`BOARD_H` 只在第一帧（井还没报高度时）顶一下，此后板子**正好等于井的高度**

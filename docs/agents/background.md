@@ -8,7 +8,7 @@
 
 ### 托盘（`tray.rs`）
 
-- 托盘图标**常驻**：左键开关窗口，右键菜单只有「显示/隐藏」和「退出」。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口；退出都会经过 `RunEvent::ExitRequested`，在那里交还本进程写过的端点分配（见下面「每应用端点分配的生命周期」）。
+- 托盘图标**常驻**：左键开关窗口，右键菜单只有「显示/隐藏」和「退出」。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口；退出都会经过 `RunEvent::ExitRequested`，在那里交还本进程写过的端点分配**并归还它认领过的主输出音量**（见下面「每应用端点分配的生命周期」）。
 - 菜单标签是**原生控件**，读不到 i18next → 由前端在挂载和语言切换时调 `set_tray_labels(t('tray.show'), t('tray.quit'))` 下发。不要指望 Rust 侧自己翻译，也不要用 `set_menu()` 换整个菜单（换完托盘的事件路由就不再认那些条目）。
 - `close_to_tray` 存在 `app_data_dir/app-settings.json`，**默认 false**：发版不该悄悄改掉老用户按 X 的语义。为 true 时 `main.rs` 的 `WindowEvent::CloseRequested` 里 `api.prevent_close()` + `hide()`。
 - 这个判断在 **Rust**，所以设置必须在后端。**只有 Rust 需要知道的设置才进 `app-settings.json`**——主题/语言/步进仍然走 localStorage，别顺手搬过去。
@@ -53,14 +53,16 @@
   ⚠️ **两道网不是等价的**：文件名那道只对**宿主进程**成立（WebView2 子进程叫 `msedgewebview2.exe`），
   所以快照失败、进程树退化成"只有自己这一个 pid"时，子进程仍可能冒出来——`own_process_tree` 为此**必须 warn**，
   一个不出声的半残过滤看起来和好的没有区别。退化的下限是"不崩、不空集"，不是"过滤仍然完整"。
-  这条过滤在 `list_sessions`、`reset_pinned_endpoints`、`release_stale_routes` 这三个调用 `enumerate_sessions` 的命令上一起生效——
-  有意的：这些入口本就不该看到本应用。（`align_source_levels` 不走它，它读的是 `levels` 与已路由的 exe 名。）
+  这条过滤挂在 `enumerate_sessions` 的**尾部、无条件生效**（`fill_display_names` 之后），所以三个调用它的命令
+  （`list_sessions`、`reset_pinned_endpoints`、`release_stale_routes`）都看不见本应用——有意的：这些入口本就不该看到本应用。
+  `align_source_levels` 根本不枚举会话（它读 `levels` 与已路由的 exe 名），与这条过滤无关；
+  自有 pid 也从不进 `pins`，所以把它做成无条件对清扫与重置都没有副作用。
 
 ## 引擎的唤醒成本（2.2 起）
 
 一条路由常驻就是一个引擎常驻，而引擎的成本**不在 CPU 百分比里**——它落在调度唤醒次数上。任务管理器把一个每 10 ms 醒一次的线程显示成几乎没有占用，风扇曲线却看得见，因为它一直进不了包 C-state。所以这个模块里每一处等待都要能说出自己是被什么唤醒的：
 
-- **事件驱动的渲染客户端只被「喂」驱动**：客户端只要处于 `Start` 状态，就每个音频周期被信号一次，**与有没有东西可播无关**。所以「永远写满缓冲、静音也用 `AUDCLNT_BUFFERFLAGS_SILENT` 写」的写法会让设备流永不空闲，每路镜像稳定约 100 次/秒，长期不变。修法是**源静默后停放**：捕获侧为每个非静音包盖时间戳（`note_audio`），某路镜像缓冲排空且源静默超过 `SOURCE_IDLE_MS`（1.5 s）就 `Stop()` 掉它的客户端（`park_mirror`），下一个包直接唤醒该线程并 `Start()` 回来。停放只会丢掉静音：`SILENT` 包从不入环，且停放那一刻设备里存的也是静音，所以两个方向都听不见。**不要退回「一直写静音」**——那正是风扇投诉的来源。
+- **事件驱动的渲染客户端只被「喂」驱动**：客户端只要处于 `Start` 状态，就每个音频周期被信号一次，**与有没有东西可播无关**。所以「永远写满缓冲、静音也用 `AUDCLNT_BUFFERFLAGS_SILENT` 写」的写法会让设备流永不空闲，每路镜像稳定约 100 次/秒，长期不变。修法是**源静默后停放**：捕获侧为每个非静音包盖时间戳（`note_audio`），某路镜像缓冲排空、且源静默超过 `SOURCE_IDLE_MS`（1.5 s）**再加上这一路自己的管线深度**（`mirror_quiet` / `mirror_pipeline_ms`——带着大延迟补偿的镜像还在播几秒前抓到的音频，按裸阈值停放会切掉这段尾音），就 `Stop()` 掉它的客户端（`park_mirror`），下一个包直接唤醒该线程并 `Start()` 回来。停放只会丢掉静音：`SILENT` 包从不入环，且停放那一刻设备里存的也是静音，所以两个方向都听不见。**不要退回「一直写静音」**——那正是风扇投诉的来源。
 - **唤醒必须显式，超时只能是兜底**：渲染线程用 `std::thread::park_timeout` 等，捕获侧用 `MirrorChannel::wake()`（`Thread::unpark`）唤醒；「先查条件、再停放」加上 token 语义保证了不会丢唤醒，`PARK_POLL` / `GATE_POLL` 的 250 ms 是「万一没醒」的上限而不是机制本身。**新增任何停放点都要在被唤醒那一侧接上 `wake()`**：`open_gate_when_ready`、`DuplicationManager::stop`、`capture_session` 退出前各有一处，缺一处就是让捕获线程陪着等完整个兜底超时。`Thread::unpark` 只对 `park_timeout` 有效，**对 `WaitForSingleObject` 无效**，两者不能混用。
 - **唤醒计数是仪表**：`MirrorChannel.wakeups` / `EngineShared.capture_wakeups` 只在引擎退出时汇总成一行 `info!`，没有任何音频路径读它。改循环节奏时用它对照前后，比看任务管理器可靠。
 - **空闲引擎唯一还在做的事就是存活性检查**，所以它不能每次都多开一对句柄：`process_alive` 复用已打开的句柄读创建时间（`creation_time_of`）。同理，不要为了「以后可能有用」在每个周期里加系统调用。
@@ -74,14 +76,14 @@
 - **任何写端点的路径都必须登记 `PinnedRoutes`**：`mark` = 活路由（重置/清扫要放过它），`mark_returned` = 停止时 Windows 拒绝释放、于是把它指回当前默认设备的（重置**必须**能清掉它，否则用户只剩"重启应用"这一条路）。登记是唯一能把"我们钉的""用户自己钉的""已经不算路由的"三者分开的东西。
 - 归属判定**按可执行文件、不按单个 pid**：分配是按 exe 存的，而一个程序可以有多个带会话的进程（浏览器就是），清扫时挑中的 pid 未必是我们路由的那个。清理前要问"这个 exe 是否还有属于我们的活路由"，问"这个 pid 是不是我们的"会漏。
 - 清除后必须**读回校验**（`release_default_endpoints` 已这么做），并把结果回给前端；Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
-- 四条归还路径缺一不可，各自覆盖一种"分配比路由活得久"的情形：停止路由（`stop_route`）、退出应用（`main.rs` 的 `RunEvent::ExitRequested` → `release_pinned_blocking`，独立线程 + 有界等待，绝不能让音频服务卡住退出）、程序在路由期间退出后下次出声（`release_stale_routes`；音频服务按 pid 寻址，所以只能借它新的进程去释放）、设置页「重置每应用音频输出」（`reset_pinned_endpoints`，清旧版本留下的，跳过仍在路由的 pid）。
+- 四条归还路径缺一不可，各自覆盖一种"分配比路由活得久"的情形：停止路由（`stop_route`）、退出应用（`main.rs` 的 `RunEvent::ExitRequested` → `release_pinned_routes`，它把 `PinnedRoutes::take_all` 交给 `audio::routing::exit_cleanup`，独立线程 + 有界等待，绝不能让音频服务卡住退出；同一趟里先归还各引擎认领的会话音量），程序在路由期间退出后下次出声（`release_stale_routes`；音频服务按 pid 寻址，所以只能借它新的进程去释放）、设置页「重置每应用音频输出」（`reset_pinned_endpoints`，清旧版本留下的，跳过仍在路由的 pid）。
 - 新增任何"改变某程序输出"的代码路径，都要把这一套接上：写 → 登记 → 停止时归还。少一步就是把用户锁在错误的设备上，而且界面上没有任何东西能解释为什么。
-- 系统关键进程在 `set_persisted_default`（渲染与捕获两条写入流共用）被 `routing_refusal` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径
+- 系统关键进程在 `set_process_default_endpoint_flow`（`set_process_default_device` 与 `set_process_default_capture_device` 两条写入流共用的那个入口）被 `routing_refusal` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径。槽 25 那层（`set_persisted_default`）只是裸调用，**不带任何校验**，从它旁边另起一条写入路就等于把这条红线删了。
 - ⚠️ **读不出进程名的 pid 一律拒绝**（`None` 不是「不在名单上」）：`csrss`/`lsass`/`audiodg` 对本应用不可见的原因，正是它们受保护。名字先用 `QueryFullProcessImageNameW` 再退回 `GetProcessImageFileNameA`——后者 260 字节的缓冲区对长路径返回 0，而「返回 0」当年就是放行系统进程的那个答案。代价是比本应用权限更高的程序无法被路由，提示语要说清是哪一种，别把它们都叫成系统进程。
 
 ## 启动提示（`install.rs`，2.1.1 起）
 
-首次启动和升级后的首次启动各要说一句话：**全新安装进全屏向导**（`StartupWizard`，四步：欢迎 → 看板怎么读 → 送入载体 → 后台习惯；载体一步复用 `lib/carrierDetect.ts` 的探测，完成/跳过/`Escape` 都走同一条 ack），**装过 2.1.0** 则在弹窗里直接提供「重置每应用音频输出」。升级是警告不是导览，所以升级永远走小弹窗、不走向导。2.1.0 是唯一会把固定端点留在 Windows 里的版本（见上一节；2.1.1 起四条归还路径闭环，从那以后升上来的机器无事可清、**不再弹这个窗**），而应用分不出「2.1.0 留下的」和「用户在音量合成器里手设的」——所以既不静默清理，也不装作没事，而是问一次。
+首次启动和升级后的首次启动各要说一句话：**全新安装进全屏向导**（`StartupWizard`，四步：欢迎 → 看板怎么读 → 送入载体 → 后台习惯；载体一步复用 `lib/carrierDetect.ts` 的探测，完成/跳过/`Escape` 都走同一条 ack），**装过 2.1.0** 则在弹窗里直接提供「重置每应用音频输出」。升级是警告不是导览，所以升级永远走小弹窗、不走向导。2.1.0 是唯一会把固定端点留在 Windows 里的版本（它就是引入这条 per-app 记录的版本，更早的版本压根没有它可留；见上一节与 `install.rs` 的 `LEFTOVER_VERSION`——升级提示只认这一个版本号。2.1.1 起四条归还路径闭环，从那以后升上来的机器无事可清、**不再弹这个窗**），而应用分不出「2.1.0 留下的」和「用户在音量合成器里手设的」——所以既不静默清理，也不装作没事，而是问一次。
 
 - ⚠️ **判定必须在建窗口之前完成**（`main.rs` 里 `tauri::Builder` 之前），依据是本应用自己的两个目录：`%APPDATA%\<identifier>`（配置文件，只有存过东西才存在）和 `%LOCALAPPDATA%\<identifier>\EBWebView`（WebView2 档案，任何版本跑过一次就有）。挪进 `setup()` 就晚了：这一次启动自己会建出 EBWebView，全新安装会被认成升级。
 - 目录取自环境变量而不是 `app.path()`，因为判定时机在 App 存在之前；`identifier` 从 `generate_context!().config()` 读，别手抄字面量（会和 `tauri.conf.json` 漂移）。
