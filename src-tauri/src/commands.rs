@@ -206,7 +206,12 @@ pub async fn apply_route(
             duplications.start(pid, &exe, &primary, mirrors, &engine_app)
         })
         .await
-        .map_err(|e| e.to_string())?
+        // A thread that panicked mid-start counts as a failed start, not as a
+        // reason to answer before the rollback below: the primary endpoint is
+        // already written and its pin already booked, so returning here would
+        // leave the program playing on that device with no live route for the
+        // board to stop — the very dead end `mark_abandoned` exists to close.
+        .unwrap_or_else(|e| Err(audio::AudioError::Api(e.to_string())))
     };
     let generation = match started {
         Ok(generation) => generation,
@@ -307,9 +312,16 @@ pub async fn stop_route(
     // Handing the program's session volume back is a blocking walk of every
     // device and every session, and AudioSrv is slow about it while an endpoint
     // reconnects — off the runtime's worker, the way `apply_route` does it.
-    tokio::task::spawn_blocking(move || app.state::<DuplicationManager>().stop(pid))
-        .await
-        .map_err(|e| e.to_string())?;
+    //
+    // A teardown thread that panics is reported and then walked past: the
+    // endpoint is still ours until the release below hands it back, and answering
+    // early would strand the assignment on that device with no engine running and
+    // no route left for the board to stop.
+    if let Err(e) =
+        tokio::task::spawn_blocking(move || app.state::<DuplicationManager>().stop(pid)).await
+    {
+        warn!("the duplication teardown for PID {pid} did not finish: {e}");
+    }
 
     if sibling_routed {
         // The assignment Windows persists is stored per executable, and a
