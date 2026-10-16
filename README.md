@@ -42,9 +42,9 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 
 ## Screenshots
 
-The same board in both themes: `Music.exe` is the programme being looked at, so its card sits left of centre and its three destinations stand in a numbered column on the right — 01 is the system's own playback (the Bluetooth headset, *Main*), 02 and 03 are copies this app duplicates to, each with its own delay. The sidebar lists the programmes making sound, with each routed one marked by its ring, and the strip along the bottom holds the levers of whichever card was picked — for a copy, its delay and its share. The title bar keeps the count: two routed, two playing.
+The same board in both themes: `Music.exe` is the programme being looked at, so its card sits left of centre and its three destinations are numbered rows in the two dashed panels on the right — 01 is the system's own playback (the Bluetooth headset, *Main*) in the upper panel, 02 and 03 are copies this app duplicates to, each with its own delay, in the lower one. The sidebar lists the programmes making sound, with each routed one marked by its ring, and the strip along the bottom holds the levers of whichever row's number was clicked — for a copy, its delay and its share. The title bar keeps the count: two routed, two playing.
 
-![App Audio Router's node board: Music.exe's card wired to three numbered device cards, with the copy's delay and share in the strip below and the app list on the left](docs/images/app-audio-router-light.png)
+![App Audio Router's node board: Music.exe's card wired to numbered destination rows in two dashed panels (main device above, copies below), with one copy's delay and share open in the tuning strip and the app list on the left](docs/images/app-audio-router-light.png)
 
 ![The same node board shown in the dark theme](docs/images/app-audio-router-dark.png)
 
@@ -52,7 +52,7 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 
 ### Routing
 
-- **One app → many devices.** Pick a programme in the sidebar — and the circular button at the end of any other row adds that programme to the same change — then pick the discs it should play through; the audio is mirrored to all of them at once.
+- **One app → many devices.** Pick a programme in the sidebar — and the circular button at the end of any other row adds that programme to the same change — then add the devices it should play through with "+ Add destination"; the audio is mirrored to all of them at once.
 - **Applies immediately.** A running program is re-pointed to the selected devices without a restart or a settings dialog reboot.
 - **Ordered targets.** The first device becomes the program's native endpoint, handled by Windows itself; every further device receives a real-time copy of the stream.
 - **Stop on demand.** Stop routing and the program is handed back to the system default device — the fixed output device Windows took while the route was live is released again, so switching the default device by hand keeps moving that program.
@@ -78,10 +78,10 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 
 ### Interface and overhead
 
-- **A board, not a form** — the process list is a sidebar, and the routing screen is a node board: the programme you picked is a card left of centre, its destinations stand in a numbered column on the right (playback devices first, the programmes it feeds after), and a wire from the programme's out-pin to a destination's in-pin *is* that part of the route. **The number on a card is the order it plays in**: 01 is the one Windows plays itself (accent), everything after it is a copy (teal), and a copy is the only place delay and a share exist, because it is the only place there is a stream of ours to hold back or attenuate. Nothing takes effect until you click the programme's card, and nothing can leave a programme with nowhere to play — the last device card cannot be removed. Devices no route touches are not on the board at all, which is most devices most of the time. A programme playing to several devices carries its own level as a ring under its card, and the title bar keeps a quiet count — *2 routed · 2 playing*. Solid panels and hairlines, sentences instead of pills, monospaced figures for every value, and generous continuous-curvature corners.
+- **A board, not a form** — the process list is a sidebar, and the routing screen is a node board: the programme you picked is a card left of centre, its destinations are numbered rows inside two dashed panels on the right (the main device in the upper one, the copies and the programmes it feeds in the lower one), and a wire from the programme's out-pin to a destination's in-pin *is* that part of the route. **The number on a card is the order it plays in**: 01 is the one Windows plays itself (accent), everything after it is a copy (teal), and a copy is the only place delay and a share exist, because it is the only place there is a stream of ours to hold back or attenuate. Nothing takes effect until you click the programme's card, and nothing can leave a programme with nowhere to play — the last device card cannot be removed. Devices no route touches are not on the board at all, which is most devices most of the time. A programme playing to several devices carries its own level as a ring under its card, and the title bar keeps a quiet count — *2 routed · 2 playing*. Solid panels and hairlines, sentences instead of pills, monospaced figures for every value, and generous continuous-curvature corners.
 - **Process list search** — filter the list by name as you type, with the programs that are currently routed kept at the top so the one you are working with does not move under the cursor. `Escape` clears the search.
 - **Light and dark themes**, English and Simplified Chinese, both switchable from the title bar; the preferred theme and language are applied before the first frame paints, so there is no flash on startup.
-- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. The interface has exactly two things that move on their own: the dash running along the spokes of a programme that is sounding, and the pulse on the ring beside a programme that is — only while the window is visible, focused and free of the system's reduced-motion request; hidden, unfocused or silent, everything stands still and nothing repaints. An active route is idle when its program is, too: a routed program that has produced no sound for a second and a half stops being fed to its mirrored devices, rather than having silence written at them a hundred times a second apiece.
+- **Low background cost** — the app never polls the audio engine. It registers for change notifications and re-reads the lists when Windows says something actually moved, and each re-read that turns up no visible change is not even logged. The interface has exactly two things that move on their own: the dash running along the wires of a programme that is sounding, and the pulse on the ring beside a programme that is — only while the window is visible, focused and free of the system's reduced-motion request; hidden, unfocused or silent, everything stands still and nothing repaints. An active route is idle when its program is, too: a routed program that has produced no sound for a second and a half stops being fed to its mirrored devices, rather than having silence written at them a hundred times a second apiece.
 - **Fast cold start** — the window is created hidden and is revealed once the first frame is on screen (with a watchdog on the Rust side as a fallback), device enumeration waits for the first paint to be idle, and the release profile is tuned for a small, dense binary (LTO, one codegen unit, symbol stripping, `panic = "abort"`).
 
 ## How it compares to other options
@@ -120,8 +120,8 @@ Prefer building it yourself? See [Build from source](#build-from-source).
 
 1. **Play some sound in the app you want to route.** A program only appears in the process list while it has an active audio session — audio routing is per session, not per shortcut.
 2. **Pick it in the sidebar.** One programme at a time is what the ring shows; the circular button at the end of another row adds that programme to the same change.
-3. **Add the devices it should play through.** The first one added is the device Windows itself drives, and every one after it receives a copy carrying its own delay and share. The last one cannot be removed: a programme with nowhere to play is not a state this app offers.
-4. **Click the circle in the middle of the stage.** While a change is waiting, the hub wears a "click to apply" badge, and its accessible name says exactly what the click will do. Once the route is live, the spokes to those discs stay on the stage, and they flow while the programme is sounding.
+3. **Add the devices it should play through.** The device already at the head of the plan is the one Windows itself drives, and every one you add after it receives a copy carrying its own delay and share. Tapping a copy's role word hands it that seat; the main row's own picker can take it further. The last one cannot be removed: a programme with nowhere to play is not a state this app offers.
+4. **Click the programme's card.** While a change is waiting, the hub wears a "click to apply" badge, and its accessible name says exactly what the click will do. Once the route is live, the wires to those destinations stay on the board, and they flow while the programme is sounding.
 5. **Tune a copy if you need to** — its number badge opens its delay and share in the strip along the bottom.
 6. **Or feed another programme's input** — the same "add destination" card lists every programme that can take sound in; picking one connects it there and then (no hub press needed), and the toast offers the way back.
 6. **Turn on Auto-remember** in the settings so the route is restored the next time that program plays.
@@ -134,18 +134,18 @@ Two speakers playing the same audio will not sound in sync if one of them is a B
 - **Positive holds that device back; negative marks it as the earliest device in the route**, which lifts the others instead.
 - **Software delay can only be added, never removed.** The earliest device of the group is therefore the reference: it is the one Windows plays directly, and every other device is held back by the difference. The relative difference you configure is reproduced exactly; the absolute value is normalised to the earliest device.
 - **The route is applied in delay order**, so the earliest device normally becomes the primary (the one Windows drives). Lowering a delay while a route is running simply shifts the whole group instead of glitching.
-- **The assistant measures it for you.** Settings → Delay compensation → **Calibrate…**: pick the device you want Windows to drive and the copies, then each device plays three short tones in turn — hold the button while you hear one, release when it stops. Only the *differences* between devices are used, so your own reaction time sits in every measurement equally and cancels; the device that sounded last becomes the alignment reference (it ends at 0, so it is also the one Windows will drive), and every other device receives its difference minus the 100 ms of pipeline a copy holds anyway. Nothing is guessed from the device's type, and if the result is still a hair off you can nudge it on the board's tuning strip.
+- **The assistant measures it for you.** Settings → Delay compensation → **Calibrate…**: tick at least two devices (the ones in a live route start checked), and they play short tones **round by round** — a fresh order each round, so the drift of a long session lands on every device alike. Hold the button while you hear one, release when it stops; each device keeps going until it has three readings worth using. Only the *differences* between devices are used, so your own reaction time sits in every measurement equally and cancels; **the device that sounded last becomes the alignment reference** (it ends at 0, the seat the engine can fully align to), and every other device receives its difference minus the 100 ms of pipeline a copy holds anyway. Tapping a row on the results screen re-picks that reference — the numbers are all relative to each other, so it is arithmetic, not a re-measure. The wizard writes delay values and nothing else: it never reorders a live route, so make the reference the first device of a route when you want Windows to drive it. Nothing is guessed from the device's type, and if the result is still a hair off you can nudge it on the board's tuning strip.
 - **Step, and a ceiling.** The step is yours to set (1/10/50/100/1000 ms, 10 ms by default). There is no configurable range any more: a delay is held inside ±10 s, which is the width the engine's ring buffers are sized for.
-- **A delay needs something to delay.** It is realised by the mirrored copy, so it exists only when at least one further device receives a copy. Route a program to a single device and Windows plays it directly: the value is kept for when you add a second device, and the readout is dimmed with a note saying it is not applied — rather than showing a number that looks like it is doing something.
+- **A delay needs something to delay.** It is realised by the mirrored copy, so it exists only when at least one further device receives a copy. Route a program to a single device and Windows plays it directly: the board offers no tuning strip for it at all — its number is not a button — rather than a control that could never work shown as if it could. The value is kept for when you add a second device, and the per-device list in Settings edits the same number either way.
 
 ## Volume balancing explained
 
 Delay fixes *when* the audio arrives; the volume value fixes *how loud* each device is.
 
 - **Each device holds a 0–100 % value.** 100 % leaves the device exactly at the level the application produced; lower values attenuate it. 0 % is silence.
-- **The value is relative to the loudest device in the route.** The engine scales each mirrored copy by `own / max`, so software gain only ever attenuates and the loudest device is the reference the others are brought down towards.
+- **The value is relative to the loudest copy in the route.** The engine scales each mirrored copy by `own / max`, so software gain only ever attenuates and the loudest copy is the reference the others are brought down towards. The device Windows plays itself is not in that comparison — its loudness is the program's session volume, a different lever (next bullet).
 - **The primary device gets a volume of its own**, and it works through the program's session volume — the slider the Windows volume mixer shows for that program, which is the one lever that reaches the device Windows plays itself. The copies are compensated for it automatically, so it changes the main path alone. Stopping the route hands the program's previous loudness back, and so does quitting the app. It stops at 5 %: at 0 the audio this app captures would be true silence, and no gain could give the copies their loudness back.
-- **Like delay, it needs a mirrored copy to act on.** In a single-device route there is no copy and nothing is attenuated; the readout is dimmed and says as much, so a value that does nothing is never displayed as though it were doing something.
+- **Like delay, it needs a mirrored copy to act on.** In a single-device route there is no copy and nothing is attenuated, so the board shows no share row for it — a value that does nothing is never displayed as though it were doing something. The per-device value stays put for when a second device joins the route.
 - Volumes are stored per device and pushed to any route that is already running, so a change is audible immediately.
 
 ## What the reported latency means
@@ -200,22 +200,27 @@ Routing rules are keyed by **executable name**, not by PID, so a remembered rout
 AppAudioRouter/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── NodeStage.tsx         # the node board: the picked programme's card on the left-centre, a numbered column of destination cards on the right (devices, or another programme's input), a wire per route; the bottom strip tunes the picked card
+│   │   ├── NodeStage.tsx         # the node board: the picked programme's card on the left-centre, its destinations as numbered rows in two dashed panels on the right (devices, or another programme's input), a wire per route; the tuning strip for the row that was clicked
 │   │   ├── ProgramRail.tsx       # programmes with an audio session, and whether each one joins the change
 │   │   ├── BriefingPage.tsx      # the Status tab: every redirected programme as a row of destination chips
 │   │   ├── SourceLevelDial.tsx   # a programme's own level, as a ring under the hub
+│   │   ├── DelayCalibration.tsx  # the delay assistant: round-robin tones, held presses, results you can re-base
 │   │   ├── SettingsPage.tsx      # a section rail beside the chosen section's rows
 │   │   ├── LogPanel.tsx          # activity log (the third tab)
 │   │   ├── TitleBar.tsx          # custom frameless title bar, with the routed/playing count
-│   │   └── ui/                   # Ring, Switch, UnderlineTabs, SegmentedControl, Tooltip, ConfirmButton, …
-│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useLiveness
+│   │   ├── Toast.tsx             # the transient undo offer after a route or a feed
+│   │   ├── StartupWizard.tsx     # the four-step first-run tour
+│   │   ├── StartupNoticeDialog.tsx # the after-update notice, with the reset in place
+│   │   └── ui/                   # Ring, Switch, UnderlineTabs, SegmentedControl, Select, Tooltip, ConfirmButton, …
+│   ├── hooks/                    # useTheme, useLanguage, useDelayValue, useBackendEvent, useLiveness,
+│   │                             #   useProgramRoutes, useElementHeight
 │   ├── stores/routerStore.ts     # Zustand store
 │   ├── i18n/locales/             # en.json, zh-CN.json
-│   ├── lib/                      # invoke wrapper, stage geometry, delay maths, shared types
+│   ├── lib/                      # invoke wrapper, per-program route lookup, stage geometry, delay maths, shared types
 │   └── styles/index.css          # Tailwind entry + theme CSS variables
 └── src-tauri/                    # Rust backend
     └── src/
-        ├── main.rs               # entry point, command registration, close-to-tray
+        ├── main.rs               # entry point, command registration, close-to-tray, releasing everything on exit
         ├── commands.rs           # Tauri commands (invoke handlers)
         ├── config.rs             # route / delay / volume / shell-settings persistence
         ├── tray.rs               # tray icon, its menu, show and hide
@@ -225,8 +230,11 @@ AppAudioRouter/
         └── audio/
             ├── devices.rs        # IMMDeviceEnumerator
             ├── sessions.rs       # IAudioSessionEnumerator
+            ├── process_meta.rs   # window title, file description, icon extraction
             ├── routing.rs        # IPolicyConfig per-process routing
             ├── duplication.rs    # WASAPI process-loopback duplication engine
+            ├── calibration.rs    # the calibration tones the assistant times itself
+            ├── levels.rs         # per-source level table (readings no older than a second)
             └── notifications.rs  # endpoint + session change callbacks
 ```
 
@@ -244,15 +252,19 @@ pnpm tauri build      # installers in src-tauri/target/release/bundle
 Useful checks, all of which also run in CI:
 
 ```bash
-pnpm exec tsc --noEmit         # type check
-pnpm build                     # tsc -b && vite build
+pnpm fmt:check                   # prettier, including Tailwind class order
+pnpm typecheck                   # tsc --noEmit
+pnpm build                       # tsc -b && vite build
+pnpm test                        # unit tests (Vitest, against a fake Tauri IPC)
+pnpm test:e2e                    # end-to-end (Playwright; it starts the dev server itself)
 cd src-tauri
 cargo fmt -- --check
 cargo clippy -- -D warnings
 cargo check
+cargo test
 ```
 
-The CI workflow runs the frontend type check and build on Linux, `cargo fmt` / `check` / `clippy` on Windows, and `cargo audit` before a tagged release is built.
+CI runs the frontend checks, the unit tests and the end-to-end tests on Linux, and `cargo fmt` / `check` / `clippy` / `test` on Windows — on every push and every pull request. A tagged release runs `cargo audit` first, then builds the installers.
 
 ## FAQ
 
@@ -274,11 +286,11 @@ Yes. Routing is applied to the live audio session, so the program does not need 
 
 ### After I stop a route, does the program follow the system default again?
 
-Yes, and that is the point of 2.1.1. While a program is routed, Windows has a fixed output device stored for it — that is the mechanism that moves a running program's audio — and that stored device outranks the system default. Stopping the route, quitting the app and **Settings → Reset per-app output** each release it, so the program follows the default device again, including every device you pick afterwards. If Windows refuses to release it, the log says which device the program is still fixed to instead of pretending the route is gone; the volume mixer's own **Reset** for that app clears it too. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device — or ignore your device switches — until the reset was done.
+Yes, and that is the point of 2.1.1. While a program is routed, Windows has a fixed output device stored for it — that is the mechanism that moves a running program's audio — and that stored device outranks the system default. Stopping the route, quitting the app and **Settings → Reset per-app output** each release it, so the program follows the default device again, including every device you pick afterwards. If Windows refuses to release it, the log says which device the program is still fixed to instead of pretending the route is gone; the volume mixer's own **Reset** for that app clears it too. 2.1.0 — the release that introduced that stored device — left it in place after a stop, which is why a program could keep playing to the old device, or ignore your device switches, until the reset was done. Versions before it stored nothing to leave behind, and every release from 2.1.1 on gives the device back on all four paths.
 
 ### What does the app say on the first launch after an update?
 
-One thing, once. Windows stores a program's output device per executable and keeps that stored device after the program exits, so a version that stopped a route without handing it back (2.1.1 and earlier) can leave a program fixed to one device — it stops following the devices you switch to in Windows, and no reboot helps. Nothing in the app can tell such a leftover from an assignment you made by hand in the volume mixer, so rather than clearing anything on its own, the app says so on the first launch after the update and offers **Reset per-app output** right there. Ignore it if no program is misbehaving. A fresh install gets a two-line welcome instead, which points at the reset as well. Each notice appears once per version — the version that last ran is recorded in `install-state.json` — and both are written to the log.
+One thing, once. Windows stores a program's output device per executable and keeps that stored device after the program exits, so the one version that stopped a route without handing it back (2.1.0, the release that introduced those stored devices) can leave a program fixed to one device — it stops following the devices you switch to in Windows, and no reboot helps. Nothing in the app can tell such a leftover from an assignment you made by hand in the volume mixer, so rather than clearing anything on its own, the app says so on the first launch after the update and offers **Reset per-app output** right there. Ignore it if no program is misbehaving. Nothing from 2.1.1 or later is ever asked — those releases returned what they pinned, so a machine coming from one has nothing to clean. A fresh install gets a two-line welcome instead, which points at the reset as well. Each notice appears once per version — the version that last ran is recorded in `install-state.json` — and both are written to the log.
 
 ### Can it fix the delay between a Bluetooth headset and wired speakers?
 
@@ -316,7 +328,7 @@ It never polls, and there is no service. The app registers for the audio engine'
 
 While a route is active, the engine is only as busy as the sound it carries. An audio device has to be fed every few milliseconds for as long as a stream is open, so an engine that kept writing silence at a program that was not playing would hold the CPU out of its low-power states indefinitely — a cost that shows up as fan noise rather than in any CPU figure. So when a routed program has produced nothing for a second and a half, the engine stops feeding its mirrored devices and parks until the program plays again. The first sound after a pause comes out at the same latency as any other, because the pipeline depth is rebuilt before the device is fed again.
 
-The interface is not left redrawing anything either: there is no decorative animation to leave running — no drifting backdrop, nothing that moves because it looked nice. Exactly two things move, because each reports something true: the dash running along the spokes of a programme that is sounding, and the pulse beside one that is. Both stop existing the moment nobody is watching — window hidden, focus elsewhere, or the system asking for less motion — so a resting window repaints nothing at all.
+The interface is not left redrawing anything either: there is no decorative animation to leave running — no drifting backdrop, nothing that moves because it looked nice. Exactly two things move, because each reports something true: the dash running along the wires of a programme that is sounding, and the pulse beside one that is. Both stop existing the moment nobody is watching — window hidden, focus elsewhere, or the system asking for less motion — so a resting window repaints nothing at all.
 
 ### Can I run two copies of the app at once?
 
@@ -345,7 +357,7 @@ No. The routing mechanism is built on Windows Core Audio, so the app is Windows-
 - Delay compensation can only *add* latency. The earliest device of the group is the alignment reference and cannot be pulled earlier — that is why routing is applied in delay order.
 - A mirrored copy is buffered for stability (about 100 ms of pipeline latency) so that all mirrors play the same sample at the same moment. Alignment between mirrored devices is exact; the offset to the primary device, which Windows plays natively, is inherent to capturing and re-rendering the stream.
 - Calibration times your own presses against the tones each device plays, so it measures the room you are actually listening in and is only as good as your timing. A delay is held inside ±10 s: a value beyond that is refused rather than silently clamped, because that width is what the engine's buffers are sized for.
-- Volume can only attenuate, so the loudest device in the group is the reference and cannot be pushed below the level the application produced on it.
+- Volume can only attenuate, so the loudest copy in the group is the reference and cannot be pushed below the level the application produced on it.
 - Delay and volume act on mirrored copies only, so neither does anything in a single-device route; the values are kept for when you add a second device.
 - Routes for system-critical processes are refused rather than half-applied.
 - A routed program carries a **fixed output device** while its route is live, and Windows keeps that device stored per executable — even after the program exits. It is given back when the route stops, when the app quits, when the program is next seen playing after having exited while routed, or by **Settings → Reset per-app output**. A program that an earlier version left fixed keeps ignoring the system default until one of those happens (the volume mixer's own **Reset** for that app works too).
