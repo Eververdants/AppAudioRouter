@@ -360,7 +360,7 @@ test('the routed capsule stops one programme, and asks before it does', async ({
 
   await routedCapsule(page).click();
   const stop = routedRow(page, 1001).getByRole('button', {
-    name: /^Stop output and return to the system default$|^Click again to confirm$/,
+    name: /^Stop and return to the system default$|^Click again to confirm$/,
   });
   await stop.click();
   expect(await callsFor(page, 'stop_route')).toHaveLength(0);

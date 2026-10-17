@@ -125,7 +125,7 @@ export function hub(page: Page) {
  */
 export function stopAllRail(page: Page) {
   return page.getByRole('button', {
-    name: /^All back to system default$|^Click again to return everything to the system default$/,
+    name: /^All back to system default$|^Click again to stop everything$/,
   });
 }
 
