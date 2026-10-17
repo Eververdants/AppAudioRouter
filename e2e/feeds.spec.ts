@@ -3,6 +3,7 @@ import {
   appRow,
   callsFor,
   changePrimary,
+  deviceRowShell,
   feedRow,
   hub,
   openApp,
@@ -118,4 +119,70 @@ test('a device route and a feed sit on the same board', async ({ page }) => {
   // not touch the feed's own endpoints.
   expect(await callsFor(page, 'set_feed_target')).toHaveLength(1);
   await expect(feedRow(page, 1002)).toBeVisible();
+});
+
+/** The carrier's playback side as the machine names it. */
+const CARRIER = 'CABLE Input (VB-Audio Virtual Cable)';
+
+/**
+ * The carrier is a pipe, not an output.
+ *
+ * The user named its playback side in settings, so the board must not hand it
+ * back as a destination — a programme routed into the pipe is a feed's job, and
+ * a feed owns both of its ends. The two lists are where the board offers
+ * devices, so both are where the name has to be missing. Each assertion is
+ * paired with a real device that is still there: "the carrier is not in this
+ * menu" on its own would also hold for a menu that never opened.
+ */
+test('the board does not offer the carrier as a destination', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+
+  await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
+  const addMenu = page.getByRole('menu', { name: 'Add destination' });
+  await expect(addMenu.getByRole('menuitem', { name: 'TV', exact: true })).toBeVisible();
+  await expect(addMenu.getByRole('menuitem', { name: CARRIER })).toHaveCount(0);
+
+  // The change-primary list reads the whole inventory rather than what is left
+  // to add, so it has to reach the same answer by its own route.
+  await page.keyboard.press('Escape');
+  await changePrimary(page, 'Speakers', 'TV');
+  await page
+    .locator('main')
+    .getByRole('button', { name: 'Change the main device, currently TV' })
+    .click();
+  const changeMenu = page.getByRole('menu', { name: 'Change' });
+  await expect(changeMenu.getByRole('menuitem', { name: 'Speakers', exact: true })).toBeVisible();
+  await expect(changeMenu.getByRole('menuitem', { name: CARRIER })).toHaveCount(0);
+});
+
+/**
+ * A plan the carrier already stands on keeps its row — and its way out.
+ *
+ * The carrier can be on the plan without ever having been handed out: the
+ * system default may be the pipe itself. Hiding that row would take away the
+ * only gesture that moves the programme off it, so a device already drawn stays
+ * drawn, and the change-primary menu still ticks the seat it holds.
+ */
+test('a plan the carrier already stands on keeps its row and its seat', async ({ page }) => {
+  await openApp(page, { defaultDeviceId: 'cable-in' });
+  await appRow(page, 'music.exe').click();
+
+  await expect(deviceRowShell(page, CARRIER)).toContainText('Main');
+
+  await page
+    .locator('main')
+    .getByRole('button', { name: `Change the main device, currently ${CARRIER}` })
+    .click();
+  const menu = page.getByRole('menu', { name: 'Change' });
+  await expect(menu.getByRole('menuitem', { name: CARRIER })).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+
+  // And out is still walkable.
+  await menu.getByRole('menuitem', { name: 'TV', exact: true }).click();
+  await expect(
+    page.locator('main').getByRole('button', { name: 'Change the main device, currently TV' }),
+  ).toBeVisible();
 });

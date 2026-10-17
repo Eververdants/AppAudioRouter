@@ -87,3 +87,18 @@ test('a device list that shrinks under an open picker leaves a row to choose', a
   expect(set).toHaveLength(1);
   expect(set[0]?.args).toMatchObject({ render: 'dev-2' });
 });
+
+test('the carrier’s own playback endpoint stays in the settings picker', async ({ page }) => {
+  // The board withholds the carrier from its candidate lists; this page is
+  // where it is chosen and cleared, so the name has to stay reachable here —
+  // a filter that reached the store's device list would leave the carrier
+  // configured in a place the user can no longer see or change.
+  await openApp(page);
+  await openCarrierPicker(page);
+
+  await expect(
+    page
+      .getByRole('listbox', { name: 'Playback side' })
+      .getByRole('option', { name: 'CABLE Input (VB-Audio Virtual Cable)' }),
+  ).toBeVisible();
+});
