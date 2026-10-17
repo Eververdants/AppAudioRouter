@@ -31,6 +31,7 @@ blob-report/
 
 # IDE
 .vscode/
+.trae/
 .idea/
 *.swp
 *.swo
