@@ -603,20 +603,29 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       {t('settings.feedCarrierPaired', { driver: carrierMatch.driver.display })}
                     </div>
                   )}
-                  {!carrierMatch && !feedCarrier.render && !feedCarrier.capture && (
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-                        {t('settings.feedCarrierMissing')}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void openCarrierDownload('vb-cable')}
-                        className={ROW_BUTTON_CLASS}
-                      >
-                        {t('settings.feedCarrierDownload')}
-                      </button>
-                    </div>
-                  )}
+                  {/* The offer belongs to "no known driver here and nothing
+                      usable picked", not to "nothing picked at all": a pair with
+                      one side still empty carries nothing (the restore skips
+                      it), so it needs the driver as much as an empty one does.
+                      Keying it on both sides being blank left a half-picked pair
+                      with no branch at all — no note, no way to the download —
+                      and since the half-state is persisted, a reload did not
+                      bring it back. */}
+                  {!carrierMatch &&
+                    (feedCarrier.render === null || feedCarrier.capture === null) && (
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                          {t('settings.feedCarrierMissing')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void openCarrierDownload('vb-cable')}
+                          className={ROW_BUTTON_CLASS}
+                        >
+                          {t('settings.feedCarrierDownload')}
+                        </button>
+                      </div>
+                    )}
                 </Block>
               </>
             )}
