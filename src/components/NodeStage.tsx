@@ -240,6 +240,20 @@ export function NodeStage() {
   const primaryDeviceId = drawn[0];
   const copyDeviceIds = drawn.slice(1);
 
+  // The feed carrier's playback side is a pipe, not an output: the user named it
+  // in settings, and offering it back as a destination invites routing a
+  // programme straight into the pipe — which is a feed's own job, and a feed owns
+  // both of its ends. A device already on the plan stays listed all the same: the
+  // board draws plans, and a staged row the user can no longer see is a row they
+  // cannot take back out (the system default may well be the carrier). The filter
+  // lives here rather than in the store because the settings page picks the
+  // carrier from the same list — narrowing it there would leave the user no way
+  // to change or clear what they configured.
+  const pickableDevices = devices.filter(
+    (d) => d.id !== feedCarrier.render || drawn.includes(d.id),
+  );
+  const addableDevices = pickableDevices.filter((d) => !drawn.includes(d.id));
+
   // The wires move only when what is drawn is what is playing — a plan waiting
   // for the hub is a proposal, and a proposal does not hum.
   const flowing = sounding && answered && liveness;
@@ -876,31 +890,27 @@ export function NodeStage() {
               >
                 <div className="overflow-y-auto" style={{ maxHeight: addPickerCap - 14 }}>
                   <PickerSection label={t('stage.pickDevice')}>
-                    {devices.filter((d) => !drawn.includes(d.id)).length === 0 && (
-                      <PickerEmpty text={t('stage.pickNone')} />
-                    )}
-                    {devices
-                      .filter((d) => !drawn.includes(d.id))
-                      .map((d) => (
-                        <motion.button
-                          key={d.id}
-                          type="button"
-                          role="menuitem"
-                          variants={PICKER_ITEM_VARIANTS}
-                          transformTemplate={MAIN_THREAD_TRANSFORM}
-                          onClick={() => {
-                            // Append, never toggle: "add" has to leave the plan's
-                            // membership alone and put the new device on the tail.
-                            // The seat it ends up in is the delay order's call,
-                            // exactly as for any other row.
-                            appendDeviceTarget(d.id);
-                            setPickerOpen(false);
-                          }}
-                          className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                        >
-                          {d.name}
-                        </motion.button>
-                      ))}
+                    {addableDevices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {addableDevices.map((d) => (
+                      <motion.button
+                        key={d.id}
+                        type="button"
+                        role="menuitem"
+                        variants={PICKER_ITEM_VARIANTS}
+                        transformTemplate={MAIN_THREAD_TRANSFORM}
+                        onClick={() => {
+                          // Append, never toggle: "add" has to leave the plan's
+                          // membership alone and put the new device on the tail.
+                          // The seat it ends up in is the delay order's call,
+                          // exactly as for any other row.
+                          appendDeviceTarget(d.id);
+                          setPickerOpen(false);
+                        }}
+                        className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        {d.name}
+                      </motion.button>
+                    ))}
                   </PickerSection>
                   <PickerSection label={t('stage.pickFeed')}>
                     {sessions.filter(
@@ -973,8 +983,8 @@ export function NodeStage() {
               >
                 <div className="overflow-y-auto" style={{ maxHeight: primaryPickerCap - 14 }}>
                   <PickerSection label={t('stage.pickPrimary')}>
-                    {devices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
-                    {devices.map((d) => {
+                    {pickableDevices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {pickableDevices.map((d) => {
                       const picked = d.id === primaryDeviceId;
                       return (
                         <motion.button
