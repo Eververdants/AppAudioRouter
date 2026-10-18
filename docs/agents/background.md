@@ -81,13 +81,15 @@
 - 系统关键进程在 `set_process_default_endpoint_flow`（`set_process_default_device` 与 `set_process_default_capture_device` 两条写入流共用的那个入口）被 `routing_refusal` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径。槽 25 那层（`set_persisted_default`）只是裸调用，**不带任何校验**，从它旁边另起一条写入路就等于把这条红线删了。
 - ⚠️ **读不出进程名的 pid 一律拒绝**（`None` 不是「不在名单上」）：`csrss`/`lsass`/`audiodg` 对本应用不可见的原因，正是它们受保护。名字先用 `QueryFullProcessImageNameW` 再退回 `GetProcessImageFileNameA`——后者 260 字节的缓冲区对长路径返回 0，而「返回 0」当年就是放行系统进程的那个答案。代价是比本应用权限更高的程序无法被路由，提示语要说清是哪一种，别把它们都叫成系统进程。
 
-## 启动提示（`install.rs`，2.1.1 起）
+## 启动提示（`install.rs`；2.3.0 起并入全屏向导）
 
-首次启动和升级后的首次启动各要说一句话：**全新安装进全屏向导**（`StartupWizard`，四步：欢迎 → 看板怎么读 → 送入载体 → 后台习惯；载体一步复用 `lib/carrierDetect.ts` 的探测，完成/跳过/`Escape` 都走同一条 ack），**装过 2.1.0** 则在弹窗里直接提供「重置每应用音频输出」。升级是警告不是导览，所以升级永远走小弹窗、不走向导。2.1.0 是唯一会把固定端点留在 Windows 里的版本（它就是引入这条 per-app 记录的版本，更早的版本压根没有它可留；见上一节与 `install.rs` 的 `LEFTOVER_VERSION`——升级提示只认这一个版本号。2.1.1 起四条归还路径闭环，从那以后升上来的机器无事可清、**不再弹这个窗**），而应用分不出「2.1.0 留下的」和「用户在音量合成器里手设的」——所以既不静默清理，也不装作没事，而是问一次。
+**第一次跑 2.3.x 的机器一律进全屏向导**（`StartupWizard`）：全新安装是四步导览（欢迎 → 看板怎么读 → 送入载体 → 后台习惯；载体一步复用 `lib/carrierDetect.ts` 的探测，完成/跳过/`Escape` 都走同一条 ack）；从任何旧版本升上来，向导开头**多一屏「是否继承以前版本的设置」**——「重新开始」走 store 的 `startClean`（停掉刚恢复的路由与送入，再清空记住的路由/送入、延迟补偿、设备份额、程序电平，见 `commands.rs` 的 `forget_previous_settings`），「继承」什么都不动。**没有升级弹窗**：旧的 `StartupNoticeDialog` 已删，它的内容并入向导的一屏。
+
+2.1.0 是唯一会把固定端点留在 Windows 里的版本（它就是引入这条 per-app 记录的版本，更早的版本压根没有它可留；见上一节与 `install.rs` 的 `LEFTOVER_VERSION`），所以「重置每应用音频输出」那一屏只对它、以及版本不可考的机器出现（`StartupNotice.leftover_endpoints`）；2.1.1 起四条归还路径闭环，从那以后升上来的机器无事可清、那一屏不出现。而应用分不出「2.1.0 留下的」和「用户在音量合成器里手设的」——所以既不静默清理，也不装作没事，而是问一次。
 
 - ⚠️ **判定必须在建窗口之前完成**（`main.rs` 里 `tauri::Builder` 之前），依据是本应用自己的两个目录：`%APPDATA%\<identifier>`（配置文件，只有存过东西才存在）和 `%LOCALAPPDATA%\<identifier>\EBWebView`（WebView2 档案，任何版本跑过一次就有）。挪进 `setup()` 就晚了：这一次启动自己会建出 EBWebView，全新安装会被认成升级。
 - 目录取自环境变量而不是 `app.path()`，因为判定时机在 App 存在之前；`identifier` 从 `generate_context!().config()` 读，别手抄字面量（会和 `tauri.conf.json` 漂移）。
-- 「上次运行的版本」记在 `app_data_dir/install-state.json`，**在用户点掉提示时写**（`ack_startup_notice`），所以同一版本只提示一次；升级是否再提示**只看上次的版本是不是 2.1.0**，从 2.1.1 及以后升上来一律沉默。install-state.json 比 2.1.0 晚出现，所以现实中「装过 2.1.0」的证据就是**目录在、记录不在**（`ran_before()` 且读不到版本）。写失败只记日志，不能让提示卡在那里。
-- `StartupNotice { kind, previous_version }` 的 `kind`（kebab-case）是前后端契约，`src/lib/types.ts` 的联合类型按字面量认它，`install.rs` 里有测试钉住；新增第三种之前先想清楚前端怎么显示。
-- 弹窗里那个重置按钮复用 `resetPinnedEndpoints`，不要再写一条清理路径；文案必须写明「会清掉当前正在运行的程序」，否则用户会以为它只清旧版本留下的东西。
+- 「上次运行的版本」记在 `app_data_dir/install-state.json`，**在用户点掉向导时写**（`ack_startup_notice`），所以同一版本只走一次；是否再走**只看上次的版本到没到 `WIZARD_VERSION`（2.3.0）**（`version_below` 按数字段比较，读不出来的段按 0 算——一个坏掉的记录不许冒充新版本把向导跳过去）。install-state.json 比 2.1.0 晚出现，所以现实中「装过 2.1.0」的证据就是**目录在、记录不在**（`ran_before()` 且读不到版本）。写失败只记日志，不能让提示卡在那里。
+- `StartupNotice { kind, previous_version, leftover_endpoints }` 的 `kind`（kebab-case）是前后端契约，`src/lib/types.ts` 按字面量认它，`install.rs` 里有测试钉住；新增第三种之前先想清楚前端怎么显示。
+- 重置按钮复用 `resetPinnedEndpoints`，不要再写一条清理路径；文案必须写明「会清掉当前正在运行的程序」，否则用户会以为它只清旧版本留下的东西。`forget_previous_settings` 同理：它只清本应用自己的记忆与调音文件（route-memory / feed-memory / device-delays / device-volumes / source-volumes），**不动**固定端点、不动主输出音量、不动 app-settings——清单每多一样东西，先回这里改这段话再改代码。
 - **开发期测试入口**：debug 构建读环境变量 `AAR_STARTUP_NOTICE`（取值 `first-run` / `upgrade`），强制本次启动提示的种类——ack 过一次的机器否则永远见不到向导（状态文件正在尽职）。release 构建不读这个变量；强制提示被点掉时照常写 `install-state.json`。
