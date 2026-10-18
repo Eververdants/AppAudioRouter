@@ -15,7 +15,12 @@
 //!      `SetPersistedDefaultAudioEndpoint(processId: u32, flow: i32,
 //!      role: i32, deviceId: HSTRING)`.
 //!    - The device id must be wrapped as the endpoint's device-interface
-//!      symlink: `\\?\SWD#MMDEVAPI#{<endpoint id>}#{e6327cad-…}`.
+//!      symlink: `\\?\SWD#MMDEVAPI#{<endpoint id>}#{<interface class>}`, where
+//!      the class is the endpoint's own registration — `DEVINTERFACE_AUDIO_RENDER`
+//!      for the playback half, `DEVINTERFACE_AUDIO_CAPTURE` for the recording
+//!      half a feed is pinned through. A class the endpoint is not registered
+//!      under names a symlink that does not exist, and the service answers
+//!      `E_INVALIDARG`.
 //!    - One call per ERole; the audio service persists the assignment per
 //!      executable and applies it to sessions started afterwards (same
 //!      behavior as the Settings UI). Because the audio service owns that
@@ -54,8 +59,17 @@ const KNOWN_FACTORY_IIDS: [GUID; 3] = [
     GUID::from_u128(0x32aa8e18_6496_4e24_9f94_b800e7eccc45), // older Win10
 ];
 
-// Device-interface id appended after the endpoint id for render endpoints.
-const RENDER_DEVICE_INTERFACE: &str = "#{e6327cad-dcec-4949-ae8a-991e976a79d2}";
+// Device-interface classes the endpoint's symlink is registered under, appended
+// after the endpoint id. The class must match the endpoint's data flow: a
+// capture endpoint has no `DEVINTERFACE_AUDIO_RENDER` symlink to its name, and
+// a wrapped id pointing at an interface that does not exist is what the audio
+// service answers with `E_INVALIDARG` (0x80070057).
+const RENDER_DEVICE_INTERFACE: &str = "#{e6327cad-dcec-4949-ae8a-991e976a79d2}"; // DEVINTERFACE_AUDIO_RENDER
+const CAPTURE_DEVICE_INTERFACE: &str = "#{2eef81be-33fa-4800-9670-1cd474972c3f}"; // DEVINTERFACE_AUDIO_CAPTURE
+/// The class some render endpoints — Bluetooth hands-free ones, seen on a
+/// Windows 11 24H2 machine — are registered under *instead of* the render
+/// class. Tried after it, so such an endpoint is still pinnable.
+const ALT_RENDER_DEVICE_INTERFACE: &str = "#{934bd8a8-a593-445a-9e1d-a915ffaca629}";
 const MMDEVAPI_TOKEN: &str = "\\\\?\\SWD#MMDEVAPI#";
 
 // EDataFlow
@@ -374,22 +388,46 @@ impl Drop for AudioPolicyConfig {
 }
 
 /// Wrap a raw endpoint id (`{0.0.0.00000000}.{guid}`) into the device-interface
-/// symlink form expected by `SetPersistedDefaultAudioEndpoint`.
-fn wrap_device_id(device_id: &str) -> String {
+/// symlink forms expected by `SetPersistedDefaultAudioEndpoint`, one per class
+/// that flow's endpoints may be registered under — most preferred first.
+///
+/// A wrap per data flow, because the interface class is part of the endpoint's
+/// registration: the capture side of a feed pair is only reachable through
+/// `DEVINTERFACE_AUDIO_CAPTURE`, and wrapping it in the render class names a
+/// symlink that does not exist (`E_INVALIDARG` on every role).
+fn wrap_device_id_candidates(device_id: &str, data_flow: i32) -> Vec<String> {
     if device_id.starts_with(MMDEVAPI_TOKEN) {
-        return device_id.to_string();
+        return vec![device_id.to_string()];
     }
-    format!("{MMDEVAPI_TOKEN}{device_id}{RENDER_DEVICE_INTERFACE}")
+    interface_suffixes(data_flow)
+        .iter()
+        .map(|suffix| format!("{MMDEVAPI_TOKEN}{device_id}{suffix}"))
+        .collect()
+}
+
+/// The interface-class suffixes worth trying for one data flow, in order.
+fn interface_suffixes(data_flow: i32) -> &'static [&'static str] {
+    if data_flow == E_CAPTURE {
+        &[CAPTURE_DEVICE_INTERFACE]
+    } else {
+        &[RENDER_DEVICE_INTERFACE, ALT_RENDER_DEVICE_INTERFACE]
+    }
 }
 
 /// Turn a device-interface symlink back into the plain endpoint id the rest of
 /// the app (and the Windows volume mixer) uses.
 fn unwrap_device_id(device_id: &str) -> String {
     let trimmed = device_id.strip_prefix(MMDEVAPI_TOKEN).unwrap_or(device_id);
-    trimmed
-        .strip_suffix(RENDER_DEVICE_INTERFACE)
-        .unwrap_or(trimmed)
-        .to_string()
+    for suffix in [
+        RENDER_DEVICE_INTERFACE,
+        CAPTURE_DEVICE_INTERFACE,
+        ALT_RENDER_DEVICE_INTERFACE,
+    ] {
+        if let Some(stripped) = trimmed.strip_suffix(suffix) {
+            return stripped.to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 /// Validate a device id before it reaches any COM call.
@@ -1074,14 +1112,23 @@ async fn set_process_default_endpoint_flow(
 
         let result = (|| -> Result<(), AudioError> {
             let policy = AudioPolicyConfig::activate()?;
-            let wrapped = HSTRING::from(wrap_device_id(&device_id));
+            let candidates: Vec<HSTRING> = wrap_device_id_candidates(&device_id, data_flow)
+                .into_iter()
+                .map(HSTRING::from)
+                .collect();
             let mut ok = 0;
             let mut last_err: Option<windows::core::HRESULT> = None;
             for &r in role_values(role) {
-                let hr = policy.set_persisted_default(pid, data_flow, r, &wrapped);
-                if hr.is_ok() {
-                    ok += 1;
-                } else {
+                // One role per class candidate: the first form the service
+                // accepts is the endpoint's own registration, and a class it
+                // rejects is left for the next candidate rather than failing
+                // the whole pin over a device that registered elsewhere.
+                for wrapped in &candidates {
+                    let hr = policy.set_persisted_default(pid, data_flow, r, wrapped);
+                    if hr.is_ok() {
+                        ok += 1;
+                        break;
+                    }
                     last_err = Some(hr);
                 }
             }
@@ -1350,5 +1397,47 @@ mod tests {
     #[test]
     fn an_ordinary_process_is_not_protected() {
         assert_eq!(routing_refusal(std::process::id()), None);
+    }
+
+    /// The capture half of a feed pair is only registered under the capture
+    /// class: wrapping it in the render class is exactly the write that came
+    /// back `E_INVALIDARG` (0x80070057) when a feed rule was recorded.
+    #[test]
+    fn each_flow_wraps_in_its_own_interface_class() {
+        let id = "{0.0.1.00000000}.{516edd6f-fe3d-4ff3-a66a-d240838187d7}";
+        let capture = wrap_device_id_candidates(id, E_CAPTURE);
+        assert_eq!(
+            capture,
+            vec![format!("{MMDEVAPI_TOKEN}{id}{CAPTURE_DEVICE_INTERFACE}")]
+        );
+
+        let id = "{0.0.0.00000000}.{1c1b1e0d-e0e3-41de-915c-5db74e4b693a}";
+        let render = wrap_device_id_candidates(id, E_RENDER);
+        // The render class is the common registration and goes first; the
+        // alternate is offered for the endpoints registered only under it.
+        assert_eq!(
+            render,
+            vec![
+                format!("{MMDEVAPI_TOKEN}{id}{RENDER_DEVICE_INTERFACE}"),
+                format!("{MMDEVAPI_TOKEN}{id}{ALT_RENDER_DEVICE_INTERFACE}"),
+            ]
+        );
+    }
+
+    /// Whatever class a call succeeded with, what `GetPersistedDefault` hands
+    /// back is read as the plain endpoint id the rest of the app speaks.
+    #[test]
+    fn every_wrapped_form_unwraps_to_the_endpoint_id() {
+        let id = "{0.0.0.00000000}.{1c1b1e0d-e0e3-41de-915c-5db74e4b693a}";
+        for suffix in [
+            RENDER_DEVICE_INTERFACE,
+            CAPTURE_DEVICE_INTERFACE,
+            ALT_RENDER_DEVICE_INTERFACE,
+        ] {
+            let wrapped = format!("{MMDEVAPI_TOKEN}{id}{suffix}");
+            assert_eq!(unwrap_device_id(&wrapped), id);
+            // An id that arrives already wrapped is passed through untouched.
+            assert_eq!(wrap_device_id_candidates(&wrapped, E_RENDER), vec![wrapped]);
+        }
     }
 }
