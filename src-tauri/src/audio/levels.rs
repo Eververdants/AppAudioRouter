@@ -136,7 +136,8 @@ impl SourceLevels {
 /// a 400 % gain waiting for the first sound the program makes.
 const SILENT_LEVEL: f32 = 1e-3;
 
-/// How far below the group's loudest program every other program is brought.
+/// How far below the group's loudest measured level the whole aligned group
+/// lands — the loudest included, so everything plays at one shared level.
 ///
 /// Several programs aligned to the same level add up at the device, and that sum
 /// belongs to the Windows mixer where this side cannot see it. So this is a

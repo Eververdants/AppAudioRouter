@@ -342,6 +342,31 @@ fn measure_chunk(bytes: &[u8], format: SampleFormat) -> Option<(f32, f32)> {
     Some(((sum_sq / count as f64) as f32, peak))
 }
 
+/// Fold one captured chunk into the engine's level estimate, in the units the
+/// program produced.
+///
+/// The tap sits behind the session volume (see `session_compensation`), so what
+/// arrives here is the program's audio at the level the *primary* plays it — and
+/// the mirrors divide that same factor straight back out again. Publishing the
+/// estimate as the program produced it is what keeps the level alignment honest:
+/// read behind the session volume, two programmes with different primary volumes
+/// measure an exact session-ratio apart and the gains "aligning" them would be
+/// wrong by that same ratio on every device they are copied to. The factor
+/// scales the mean square by its square and the peak by itself.
+fn measure_into(level: &mut LevelTracker, shared: &EngineShared, chunk: &[u8], frames: u32) {
+    let Some((mean_sq, peak)) = measure_chunk(chunk, shared.sample) else {
+        return;
+    };
+    let produced = f64::from(session_compensation(shared));
+    let chunk_ms = frames as f32 * 1000.0 / shared.sample_rate.max(1) as f32;
+    level.fold(
+        (f64::from(mean_sq) * produced * produced) as f32,
+        (f64::from(peak) * produced) as f32,
+        chunk_ms,
+    );
+    level.publish_if_due(&shared.levels, &shared.exe_name, shared.pid);
+}
+
 /// Scale every sample of `bytes` by `gain`, in place.
 ///
 /// This runs on the capture-format bytes on their way into one mirror, and that
@@ -1647,14 +1672,10 @@ fn capture_packets_inner(
                 let bytes = frames as usize * shared.block_align;
                 // SAFETY: GetBuffer guarantees `bytes` writable bytes.
                 let chunk = unsafe { std::slice::from_raw_parts(data, bytes) };
-                // Measured before the push and outside the ring, so the level
-                // describes what the program produced rather than what any one
-                // device was handed after its own gains.
-                if let Some((mean_sq, peak)) = measure_chunk(chunk, shared.sample) {
-                    let chunk_ms = frames as f32 * 1000.0 / shared.sample_rate.max(1) as f32;
-                    level.fold(mean_sq, peak, chunk_ms);
-                    level.publish_if_due(&shared.levels, &shared.exe_name, shared.pid);
-                }
+                // Measured before the push and outside the ring, and published
+                // in what the program produced (`measure_into`) rather than
+                // what any one device was handed after its own gains.
+                measure_into(&mut level, shared, chunk, frames);
                 // Timestamp first, then the push, then the wake: a mirror that
                 // runs on either of the last two must not conclude the source
                 // is quiet on the strength of the packet it is already holding.
@@ -2887,6 +2908,30 @@ mod tests {
         // A new loud moment takes over immediately, whatever the decay has done.
         tracker.fold(0.01, 0.9, chunk_ms);
         assert_eq!(tracker.peak, 0.9);
+    }
+
+    #[test]
+    fn a_level_is_published_as_the_program_produced_it() {
+        // The tap sits behind the session volume and the mirrors put that
+        // factor straight back: an estimate left in tap units would rank two
+        // programmes an exact session-ratio apart, and the alignment would
+        // write gains wrong by that ratio on every copied device.
+        let mut eng = engine(&[0], 0, true);
+        eng.sample = SampleFormat::Float32;
+        eng.session_volume_percent.store(50, Ordering::Relaxed);
+
+        // Four samples at 0.5: mean square 0.25, peak 0.5 at the tap.
+        let bytes: Vec<u8> = [0.5f32; 4].iter().flat_map(|v| v.to_le_bytes()).collect();
+        let mut level = LevelTracker::default();
+        measure_into(&mut level, &eng, &bytes, 4);
+
+        // Halved at the tap, so what the program produced is twice as loud.
+        assert!(
+            (level.rms() - 1.0).abs() < 1e-6,
+            "level was {}",
+            level.rms()
+        );
+        assert!((level.peak - 1.0).abs() < 1e-6, "peak was {}", level.peak);
     }
 
     #[test]
