@@ -74,13 +74,12 @@ AppAudioRouter/
 │   │   ├── RoutedCapsule.tsx       # 「已路由 n」胶囊：所有路由的管理面（只有停止，没有开始）
 │   │   ├── BriefingPage.tsx        # 「现状」页（路由与活动记录之间）：每个程序一行 chip 的去向图
 │   │   ├── SourceLevelDial.tsx     # hub 卡下的每程序电平环（仅多设备路由挂载）
-│   │   ├── DelayCalibration.tsx    # 延迟校准向导（设置页「延迟补偿」区进入：轮流出声、按住计时、结果屏可改基准）
+│   │   ├── DelayCalibration.tsx    # 延迟校准向导（设置页「延迟补偿」区进入：轮流出声、听到就点一下、结果屏可改基准）
 │   │   ├── Toast.tsx               # 瞬态提示：路由与送入的撤销入口（全项目唯一）
 │   │   ├── SettingsPage.tsx        # 设置独立页面（左分区导航 + 右内容）
 │   │   ├── LogPanel.tsx            # 活动记录（下划线标签页第三页）
 │   │   ├── TitleBar.tsx            # 自定义标题栏（透明；「已路由 · 播放中」计数 + 设置入口）
-│   │   ├── StartupWizard.tsx       # 首次启动全屏向导（四步）
-│   │   ├── StartupNoticeDialog.tsx # 升级提示弹窗（旧版本固定端点警告 + 就地重置）
+│   │   ├── StartupWizard.tsx       # 启动全屏向导：全新安装四步；升级进 2.3.x 先问「是否继承设置」，旧版可能留下固定端点时再加一屏就地重置
 │   │   ├── ui/                     # Ring（同心圆，全项目一枚）/ ProcessIcon / Switch / UnderlineTabs /
 │   │                               #   SegmentedControl / Select（自研下拉，带 data-owns-escape）/ ScrubReadout /
 │   │                               #   StepButton / Tooltip / ConfirmButton / DelayStepper / Spinner
