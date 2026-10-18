@@ -34,8 +34,15 @@ const STATE_FILE: &str = "install-state.json";
 const PROFILE_DIR: &str = "EBWebView";
 
 /// The only release whose launches could leave a per-app endpoint assignment
-/// behind. The upgrade notice exists for it and for nothing else.
+/// behind. The reset offer inside the tour is for it and for nothing else.
 const LEFTOVER_VERSION: &str = "2.1.0";
+
+/// The release line the full-screen tour belongs to: the first launch on or
+/// after it walks the user in, whichever version ran here before. That launch
+/// also carries the one screen asking whether to keep the predecessor's
+/// settings — the reason an upgrade is worth a tour at all, and the only thing
+/// that separates it from a first run beyond the tour itself.
+const WIZARD_VERSION: &str = "2.3.0";
 
 /// Debug-only override for what this launch says: `first-run` or `upgrade`
 /// bypasses the probe, so a machine that has already acknowledged once — which
@@ -51,6 +58,32 @@ pub struct StartupNotice {
     pub kind: NoticeKind,
     /// Version that ran here last, when one was recorded.
     pub previous_version: Option<String>,
+    /// Whether that version could have left per-app endpoint assignments
+    /// pinned — the one thing the tour's upgrade screen offers to clean.
+    /// Nothing in the app can tell such a leftover from an assignment the user
+    /// made by hand in the volume mixer, so it is an offer, never an action.
+    pub leftover_endpoints: bool,
+}
+
+/// Whether `a` names an earlier release than `b`, component by component
+/// (`2.2.9` below `2.3.0`, `2.3` equal to `2.3.0`). A component that is not a
+/// number counts as zero, so a mangled record can never pass itself off as
+/// newer than the tour's line and silence the wizard.
+fn version_below(a: &str, b: &str) -> bool {
+    let mut left = a.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+    let mut right = b.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return false,
+            (l, r) => {
+                let l = l.unwrap_or(0);
+                let r = r.unwrap_or(0);
+                if l != r {
+                    return l < r;
+                }
+            }
+        }
+    }
 }
 
 /// The two kinds of launch the app comments on.
@@ -117,29 +150,34 @@ impl InstallProbe {
         match self.recorded_version() {
             // This version already ran here: the notice has been shown.
             Some(seen) if seen == current_version => None,
-            // The rule is the version, not the distance to it. The state file
-            // postdates 2.1.0, so in the wild this arm is rarely the evidence —
-            // the arm below is — but the rule stays total rather than inferred.
-            Some(seen) if seen == LEFTOVER_VERSION => Some(StartupNotice {
+            // The first launch on the tour's line — the machine's very first,
+            // or one coming from anything older — walks the user in. A
+            // predecessor below 2.1.1 may also have left endpoint assignments
+            // behind, which the tour's upgrade screen offers to clean.
+            Some(seen) if version_below(&seen, WIZARD_VERSION) => Some(StartupNotice {
                 kind: NoticeKind::Upgrade,
+                leftover_endpoints: seen == LEFTOVER_VERSION,
                 previous_version: Some(seen),
             }),
-            // Anything else recorded (2.1.1 and on) released its own
-            // allocations on every path. An upgrade from it has nothing to
-            // reset and gets silence, not the same dialog every release.
-            Some(_) => None,
             // Nothing recorded but the directories are here: a version from
             // before the file existed ran here — the era that closed with
-            // 2.1.0, the release the reset is for.
+            // 2.1.0, the release the reset is for. Nothing is known about
+            // which of them it was, and the older half of that era is exactly
+            // the half that pinned endpoints.
             None if self.ran_before() => Some(StartupNotice {
                 kind: NoticeKind::Upgrade,
                 previous_version: None,
+                leftover_endpoints: true,
             }),
             // Neither directory exists: an empty machine.
             None => Some(StartupNotice {
                 kind: NoticeKind::FirstRun,
                 previous_version: None,
+                leftover_endpoints: false,
             }),
+            // Recorded, and already on the tour's line: there is nothing left
+            // to walk through and nothing left to clean.
+            Some(_) => None,
         }
     }
 
@@ -203,6 +241,9 @@ impl StartupNoticeState {
                         notice: Some(StartupNotice {
                             kind,
                             previous_version: None,
+                            // A forced upgrade is for looking at the upgrade
+                            // screen, reset offer included.
+                            leftover_endpoints: kind == NoticeKind::Upgrade,
                         }),
                         shown: std::sync::Mutex::new(false),
                     };
@@ -240,9 +281,10 @@ mod tests {
         let dir = std::env::temp_dir().join("aar-install-probe-empty");
         let _ = std::fs::remove_dir_all(&dir);
         let notice = probe(Some(dir.join("roaming")), Some(dir.join("local")))
-            .notice("2.1.1")
+            .notice("2.3.0")
             .expect("a first run still says something");
         assert_eq!(notice.kind, NoticeKind::FirstRun);
+        assert!(!notice.leftover_endpoints);
     }
 
     /// No state file but the webview profile is here: the machine last ran a
@@ -254,10 +296,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("local").join(PROFILE_DIR)).unwrap();
         let notice = probe(Some(dir.join("roaming")), Some(dir.join("local")))
-            .notice("2.1.1")
+            .notice("2.3.0")
             .expect("an update is worth mentioning");
         assert_eq!(notice.kind, NoticeKind::Upgrade);
         assert_eq!(notice.previous_version, None);
+        assert!(notice.leftover_endpoints);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -271,19 +314,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 2.1.1 and later return what they pin on every path, so an upgrade from
-    /// them has nothing to reset — and must not see the same dialog again on
-    /// every future release.
+    /// The first launch on the tour's line walks the user in whatever ran here
+    /// before — that is what the screen asking about the predecessor's settings
+    /// is for — but a predecessor from 2.1.1 on returned what it pinned on
+    /// every path, so its screen has no reset to offer. Once the machine is on
+    /// the line, later releases say nothing at all.
     #[test]
-    fn an_upgrade_from_2_1_1_or_later_is_not_asked() {
+    fn the_first_launch_on_the_tour_line_is_walked_in() {
         let dir = std::env::temp_dir().join("aar-install-probe-post-2-1-0");
         let _ = std::fs::remove_dir_all(&dir);
         let probe = probe(Some(dir.clone()), None);
-        probe.record("2.1.1").unwrap();
+        for seen in ["2.1.1", "2.2.0", "2.2.9"] {
+            probe.record(seen).unwrap();
+            let notice = probe
+                .notice("2.3.0")
+                .expect("a machine walking into 2.3.0 is shown the tour");
+            assert_eq!(notice.kind, NoticeKind::Upgrade);
+            assert_eq!(notice.previous_version.as_deref(), Some(seen));
+            assert!(!notice.leftover_endpoints);
+        }
+        probe.record("2.3.0").unwrap();
         assert_eq!(probe.notice("2.3.0"), None);
-        probe.record("2.2.0").unwrap();
-        assert_eq!(probe.notice("2.3.0"), None);
+        probe.record("2.3.1").unwrap();
+        assert_eq!(probe.notice("2.3.2"), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Versions compare by their numbers: the record is user-editable, and one
+    /// that parses as nothing must not pass itself off as newer than the tour's
+    /// line and skip it.
+    #[test]
+    fn versions_compare_by_their_numbers() {
+        assert!(version_below("2.2.9", "2.3.0"));
+        assert!(!version_below("2.3", "2.3.0"));
+        assert!(version_below("2.3.0", "2.3.1"));
+        assert!(version_below("beta", "2.3.0"));
+        assert!(!version_below("2.3.1", "2.3.0"));
     }
 
     /// Only 2.1.0 earns the notice. The state file postdates that release, so
@@ -300,6 +366,7 @@ mod tests {
             .expect("2.1.0 is the version the reset is for");
         assert_eq!(notice.kind, NoticeKind::Upgrade);
         assert_eq!(notice.previous_version.as_deref(), Some("2.1.0"));
+        assert!(notice.leftover_endpoints);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -310,18 +377,20 @@ mod tests {
         let notice = StartupNotice {
             kind: NoticeKind::FirstRun,
             previous_version: None,
+            leftover_endpoints: false,
         };
         assert_eq!(
             serde_json::to_string(&notice).unwrap(),
-            r#"{"kind":"first-run","previous_version":null}"#
+            r#"{"kind":"first-run","previous_version":null,"leftover_endpoints":false}"#
         );
         let notice = StartupNotice {
             kind: NoticeKind::Upgrade,
             previous_version: Some("2.1.0".to_string()),
+            leftover_endpoints: true,
         };
         assert_eq!(
             serde_json::to_string(&notice).unwrap(),
-            r#"{"kind":"upgrade","previous_version":"2.1.0"}"#
+            r#"{"kind":"upgrade","previous_version":"2.1.0","leftover_endpoints":true}"#
         );
     }
 
@@ -331,9 +400,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let notice = probe(Some(dir.clone()), None)
-            .notice("2.1.1")
+            .notice("2.3.0")
             .expect("an update is worth mentioning");
         assert_eq!(notice.kind, NoticeKind::Upgrade);
+        assert_eq!(notice.previous_version, None);
+        assert!(notice.leftover_endpoints);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -157,6 +157,14 @@ impl RouteConfig {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     }
+
+    /// Forget every remembered route — one half of the "start clean" the tour's
+    /// inherit screen offers a machine walking in from an older release.
+    pub fn clear(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.map.routes.clear();
+        inner.persist()
+    }
 }
 
 impl RouteConfigInner {
@@ -293,6 +301,14 @@ impl DelayConfig {
             .map(|(k, v)| (k.clone(), *v))
             .collect()
     }
+
+    /// Forget every delay — the "start clean" the tour's inherit screen offers
+    /// a machine walking in from an older release.
+    pub fn clear(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.map.delays.clear();
+        inner.persist()
+    }
 }
 
 impl DelayConfigInner {
@@ -397,6 +413,14 @@ impl VolumeConfig {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect()
+    }
+
+    /// Forget every share — the "start clean" the tour's inherit screen offers
+    /// a machine walking in from an older release.
+    pub fn clear(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.map.volumes.clear();
+        inner.persist()
     }
 }
 
@@ -523,6 +547,14 @@ impl FeedConfig {
                     .map(move |target| (source.clone(), target.clone()))
             })
             .collect()
+    }
+
+    /// Forget every feed rule — one half of the "start clean" the tour's
+    /// inherit screen offers a machine walking in from an older release.
+    pub fn clear(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.map.feeds.clear();
+        inner.persist()
     }
 }
 
@@ -723,6 +755,14 @@ impl SourceVolumeConfig {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect()
+    }
+
+    /// Forget every level — the "start clean" the tour's inherit screen offers
+    /// a machine walking in from an older release.
+    pub fn clear(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.map.volumes.clear();
+        inner.persist()
     }
 }
 

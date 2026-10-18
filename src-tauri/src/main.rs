@@ -142,6 +142,7 @@ fn main() {
             commands::apply_route,
             commands::stop_route,
             commands::reset_pinned_endpoints,
+            commands::forget_previous_settings,
             commands::release_stale_routes,
             commands::get_active_duplications,
             commands::set_device_delay,

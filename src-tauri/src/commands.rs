@@ -495,6 +495,33 @@ async fn resume_suspended_feeds(exe: &str, pins: &PinnedRoutes) {
     }
 }
 
+/// Forget what this app remembers and what it has been tuned to: every
+/// remembered route and feed rule, every device delay and share, every program
+/// level. The "start clean" half of the tour's inherit question, offered to a
+/// machine walking into this version from an older one.
+///
+/// Deliberately not here: the per-app endpoint assignments (the tour's own
+/// reset offer, which also reaches what the user set by hand in the volume
+/// mixer and is therefore always its own button), the primary volumes (a
+/// program's session volume is the program's business, not this app's memory
+/// of it), and the shell settings (close-to-tray and the startup entry are
+/// habits, not learned state).
+#[tauri::command]
+pub fn forget_previous_settings(
+    routes: State<'_, RouteConfig>,
+    feeds: State<'_, FeedConfig>,
+    delays: State<'_, Arc<DelayConfig>>,
+    volumes: State<'_, Arc<VolumeConfig>>,
+    sources: State<'_, Arc<SourceVolumeConfig>>,
+) -> Result<(), String> {
+    info!("cmd: forget_previous_settings");
+    routes.clear()?;
+    feeds.clear()?;
+    delays.clear()?;
+    volumes.clear()?;
+    sources.clear()
+}
+
 /// Release the per-app assignments this app is not using right now.
 ///
 /// Every program an earlier version routed keeps an assignment Windows applies
