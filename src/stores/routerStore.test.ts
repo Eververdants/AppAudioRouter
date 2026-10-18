@@ -218,7 +218,11 @@ function reset(overrides: Partial<StoreState> = {}): void {
     sessions: [],
     selectedPids: [],
     selectedDeviceIds: [],
-    deviceSelectionPrefilled: true,
+    // A plan a fixture writes is that test's own staging, and staging is what
+    // freezes the plan against the route moving underneath it. The derived kind
+    // — the one that tracks the route and the system default — is only what
+    // `selectProcess` leaves behind.
+    deviceSelectionPrefilled: false,
     routedPids: {},
     engineGenerations: {},
     deviceLatencyMs: {},
@@ -314,6 +318,68 @@ describe('process and device selection', () => {
     // An empty guess still counts as a guess, so the first click replaces it
     // rather than adding to nothing.
     expect(state().deviceSelectionPrefilled).toBe(true);
+  });
+
+  it('follows the system default while the plan is still the prefill', async () => {
+    const backend = installBackend({ devices: [SPEAKERS, TV] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      defaultDeviceId: 'speakers',
+    });
+    state().selectProcess(MUSIC.pid);
+    expect(state().selectedDeviceIds).toEqual(['speakers']);
+
+    // The default switches under an unrouted programme — the board says where
+    // its sound goes, so it follows without the programme being re-selected.
+    backend.defaultDeviceId = 'tv';
+    await state().loadDefaultDevice();
+
+    expect(state().selectedDeviceIds).toEqual(['tv']);
+
+    // A plan the user staged is theirs: the default moving under it — the first
+    // click replaces the prefill, as ever — leaves the staging alone.
+    state().toggleDeviceSelection('speakers');
+    state().toggleDeviceSelection('tv');
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+
+    backend.defaultDeviceId = 'speakers';
+    await state().loadDefaultDevice();
+
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+  });
+
+  it('puts a returning device back on the board without a re-selection', async () => {
+    // The Bluetooth shape: a programme routed to a headset, the headset gone —
+    // the route released, remembered — and back again while the board is still
+    // looking at the programme. Only a re-selection used to redraw it.
+    const backend = installBackend({ devices: [SPEAKERS, TV] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      selectedPids: [MUSIC.pid],
+      selectedDeviceIds: ['tv'],
+      routedPids: { [MUSIC.pid]: ['tv'] },
+      engineGenerations: { [MUSIC.pid]: 0 },
+      rememberedRoutes: [{ exeName: 'music.exe', deviceIds: ['tv'] }],
+      defaultDeviceId: 'speakers',
+      deviceSelectionPrefilled: true,
+    });
+
+    backend.devices = [SPEAKERS];
+    await state().refreshDevices(true);
+    // The restore rides the assignment queue behind the refresh; let it land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // With the route released, the programme plays through the default again —
+    // which is exactly what the board now says.
+    expect(state().selectedDeviceIds).toEqual(['speakers']);
+
+    backend.devices = [SPEAKERS, TV];
+    await state().refreshDevices(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state().routedPids[MUSIC.pid]).toEqual(['tv']);
+    expect(state().selectedDeviceIds).toEqual(['tv']);
   });
 
   it('replaces the prefilled guess on the first device click instead of adding to it', () => {

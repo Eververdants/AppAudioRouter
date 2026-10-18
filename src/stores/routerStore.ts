@@ -391,6 +391,25 @@ function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>)
 }
 
 /**
+ * Where one process's program plays right now: the live route the program
+ * holds, or the system default it already plays through. The route is read
+ * through the program's owner — it is one per executable, so a sibling process
+ * of a routed program plays where that route says, and the board must draw that
+ * rather than a default the program is not on. The remembered route is
+ * deliberately not a guess: until it has been restored into a live route the
+ * program is playing through the default, and proposing a route the user just
+ * stopped back at them is not a guess about where the process plays.
+ */
+function selectionTargets(
+  state: Pick<RouterState, 'sessions' | 'routedPids' | 'devices' | 'defaultDeviceId'>,
+  pid: number,
+): string[] {
+  const owner = programEntryOf(state.sessions, state.routedPids, pid);
+  const routed = owner !== undefined ? state.routedPids[owner] : undefined;
+  return routed ?? defaultTargets(state);
+}
+
+/**
  * Identity of the device list, so a refresh that came from a Core Audio
  * notification can tell "the audio engine moved" apart from "what the screen
  * shows moved" — the first happens several times per hotplug, the second is the
@@ -1025,26 +1044,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   selectProcess: (pid) =>
-    set((s) => {
-      // Single selection starts fresh from that process's program live route, or
-      // from the system default endpoint it already plays through. The route is
-      // read through the program's owner: it is one per executable, so a sibling
-      // process of a routed program plays where that route says, and the board
-      // must draw that rather than a default the program is not on. The
-      // remembered route is deliberately not a guess: until it has been restored
-      // into a live route the program is playing through the default, and
-      // proposing a route the user just stopped back at them is not a guess
-      // about where the process plays.
-      const owner = programEntryOf(s.sessions, s.routedPids, pid);
-      const routed = owner !== undefined ? s.routedPids[owner] : undefined;
-      return {
-        selectedPids: [pid],
-        selectedDeviceIds: routed ?? defaultTargets(s),
-        // Whatever came out of that is a guess about where the process plays,
-        // not something the user asked for yet.
-        deviceSelectionPrefilled: true,
-      };
-    }),
+    set((s) => ({
+      selectedPids: [pid],
+      selectedDeviceIds: selectionTargets(s, pid),
+      // Whatever came out of that is a guess about where the process plays,
+      // not something the user asked for yet — and it stays derived: the
+      // subscription below keeps it tracking the route and the default.
+      deviceSelectionPrefilled: true,
+    })),
 
   toggleProcessSelection: (pid) =>
     set((s) => {
@@ -1728,9 +1735,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           ...Object.fromEntries(applied.map((t) => [t.pid, [...ordered]])),
         },
         selectedDeviceIds: ordered,
-        // The targets are now what the user chose and what was applied, so a
-        // later click on another device adds a copy instead of replacing them.
-        deviceSelectionPrefilled: false,
+        // What was applied is the route now, and the plan goes back to tracking
+        // it: a device returning to the list, a route the backend reports
+        // differently, and the board redraws with them instead of keeping the
+        // moment of the apply frozen on screen. The user's own staging is the
+        // only thing that freezes it again.
+        deviceSelectionPrefilled: true,
         // Mirrored locally so a program that plays again in this same session is
         // restored from what was just written, not from the boot-time copy.
         rememberedRoutes: autoRemember
@@ -2583,3 +2593,41 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }));
   },
 }));
+
+/**
+ * The staged targets are derived state while the user is staging nothing of
+ * their own, so they have to be re-derived whenever what they were derived
+ * *from* moves: the system default switching under an unrouted program, a
+ * routed device leaving and coming back with the Bluetooth headset it belongs
+ * to, the backend reporting a route the engine list did not. Without this the
+ * plan held the moment of the last selection or apply, and the board needed a
+ * program switch to catch up with what the audio engine had already been doing.
+ *
+ * One subscription rather than a call inside every refresh: the sources move
+ * from more places than any one list of call sites keeps up with, and a stale
+ * board is exactly what a missed call site looks like. The user's own staging
+ * (`deviceSelectionPrefilled` false) freezes the plan on purpose — a proposal
+ * being built must not be rewritten under the cursor — so this does nothing for
+ * it, and the equality check keeps a refresh that changed nothing from
+ * repainting the plan with a fresh array.
+ */
+useRouterStore.subscribe((state, previous) => {
+  if (!state.deviceSelectionPrefilled || state.selectedPids.length !== 1) return;
+  if (
+    state.routedPids === previous.routedPids &&
+    state.defaultDeviceId === previous.defaultDeviceId &&
+    state.devices === previous.devices &&
+    state.sessions === previous.sessions &&
+    state.selectedPids === previous.selectedPids
+  ) {
+    return;
+  }
+  const pid = state.selectedPids[0];
+  if (pid === undefined) return;
+  const desired = selectionTargets(state, pid);
+  const current = state.selectedDeviceIds;
+  if (desired.length === current.length && desired.every((id, index) => id === current[index])) {
+    return;
+  }
+  useRouterStore.setState({ selectedDeviceIds: desired });
+});
