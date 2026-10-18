@@ -223,6 +223,9 @@
   },
   "tray": {
     "show": "显示 / 隐藏 App Audio Router",
+    "openSettings": "打开设置",
+    "autostart": "开机自动启动",
+    "stopAll": "停止全部路由",
     "quit": "退出"
   },
   "tabs": {

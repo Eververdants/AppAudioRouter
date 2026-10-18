@@ -143,7 +143,16 @@ describe('invoke wrappers', () => {
       return null;
     });
 
-    await expect(api.setTrayLabels('Show', 'Quit')).resolves.toBeUndefined();
+    await expect(
+      api.setTrayLabels({
+        show: 'Show',
+        openSettings: 'Settings',
+        autostart: 'Start',
+        autostartChecked: true,
+        stopAll: 'Stop all',
+        quit: 'Quit',
+      }),
+    ).resolves.toBeUndefined();
     await expect(api.ackStartupNotice()).resolves.toBeUndefined();
     await expect(api.setAutostart(true)).resolves.toBeUndefined();
     await expect(api.setCloseToTray(false)).resolves.toBeUndefined();

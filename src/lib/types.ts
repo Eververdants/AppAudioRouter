@@ -233,6 +233,12 @@ export interface SessionActivityEvent {
   active: boolean;
 }
 
+/** A native tray menu item that changes frontend-owned state was clicked. The
+ * tray only reports which one; the store and the view are the ones that act. */
+export interface TrayMenuEvent {
+  action: 'open-settings' | 'toggle-autostart' | 'stop-all';
+}
+
 /** A process's executable icon, as top-down RGBA rows (4 bytes per pixel),
  * base64-packed. Turned into an `img`-wearing data URL by `lib/icons.ts`. */
 export interface ProcessIcon {

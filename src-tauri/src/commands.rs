@@ -1029,10 +1029,29 @@ pub fn is_silent_launch() -> bool {
     crate::autostart::is_silent_launch()
 }
 
-/// Push the tray menu labels in the frontend's language.
+/// Push the tray menu's labels in the frontend's language, and the startup
+/// item's check mark — the registry is the truth for that one, and the tray
+/// shows what the settings page would.
 #[tauri::command]
-pub fn set_tray_labels(show: String, quit: String, app: AppHandle) -> Result<(), String> {
-    crate::tray::set_labels(&app, &show, &quit)
+#[allow(clippy::too_many_arguments)]
+pub fn set_tray_labels(
+    show: String,
+    open_settings: String,
+    autostart: String,
+    autostart_checked: bool,
+    stop_all: String,
+    quit: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::tray::set_labels(
+        &app,
+        &show,
+        &open_settings,
+        &autostart,
+        autostart_checked,
+        &stop_all,
+        &quit,
+    )
 }
 
 // ---------------------------------------------------------------- launch notice

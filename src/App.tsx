@@ -20,6 +20,7 @@ import type {
   DuplicationStoppedEvent,
   MirrorFailedEvent,
   SessionActivityEvent,
+  TrayMenuEvent,
 } from '@/lib/types';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
@@ -55,6 +56,7 @@ export default function App() {
   const loadPrimaryVolumes = useRouterStore((s) => s.loadPrimaryVolumes);
   const loadSourceVolumes = useRouterStore((s) => s.loadSourceVolumes);
   const loadShellSettings = useRouterStore((s) => s.loadShellSettings);
+  const autostart = useRouterStore((s) => s.autostart);
   const loadRememberedRoutes = useRouterStore((s) => s.loadRememberedRoutes);
   const loadFeeds = useRouterStore((s) => s.loadFeeds);
   const loadFeedCarrier = useRouterStore((s) => s.loadFeedCarrier);
@@ -98,12 +100,31 @@ export default function App() {
 
   useEffect(() => {
     // The tray menu is a native control and cannot read i18next, so its labels
-    // are pushed over whenever the UI language changes.
-    void setTrayLabels(t('tray.show'), t('tray.quit')).catch((error) => {
+    // are pushed over whenever the UI language changes — and the startup item's
+    // check mark with them, so the menu and the settings page never disagree
+    // about the registry entry they both describe.
+    void setTrayLabels({
+      show: t('tray.show'),
+      openSettings: t('tray.openSettings'),
+      autostart: t('tray.autostart'),
+      autostartChecked: autostart,
+      stopAll: t('tray.stopAll'),
+      quit: t('tray.quit'),
+    }).catch((error) => {
       // A plain browser tab during `vite dev` has no tray at all.
       console.warn('[tray] could not set the menu labels', error);
     });
-  }, [t, i18n.language]);
+  }, [t, i18n.language, autostart]);
+
+  // The tray's own work one press away: it names the action and no more, and
+  // the state each one changes lives here — the routes in the store, the
+  // startup entry's switch on the settings page, and the settings view itself.
+  useBackendEvent<TrayMenuEvent>('tray-menu', ({ action }) => {
+    const store = useRouterStore.getState();
+    if (action === 'open-settings') setView('settings');
+    else if (action === 'toggle-autostart') void store.toggleAutostart();
+    else if (action === 'stop-all') void store.stopAllRoutes();
+  });
 
   useEffect(() => {
     // Enumerating devices and sessions walks the Core Audio graph on the Rust

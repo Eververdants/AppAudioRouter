@@ -223,6 +223,9 @@
   },
   "tray": {
     "show": "Show / hide App Audio Router",
+    "openSettings": "Open settings",
+    "autostart": "Start with Windows",
+    "stopAll": "Stop all routes",
     "quit": "Quit"
   },
   "tabs": {

@@ -180,9 +180,22 @@ export async function isSilentLaunch(): Promise<boolean> {
   return invoke<boolean>('is_silent_launch');
 }
 
+/** What the native tray menu says, in the frontend's language — its labels and
+ * the startup item's check mark, which follows the registry. A type alias so
+ * the object can go to `invoke` as it is: an interface carries no implicit
+ * index signature and would not be an argument bag. */
+export type TrayMenuLabels = {
+  show: string;
+  openSettings: string;
+  autostart: string;
+  autostartChecked: boolean;
+  stopAll: string;
+  quit: string;
+};
+
 /** Localize the native tray menu, which cannot reach the frontend's i18n itself. */
-export async function setTrayLabels(show: string, quit: string): Promise<void> {
-  await invoke('set_tray_labels', { show, quit });
+export async function setTrayLabels(labels: TrayMenuLabels): Promise<void> {
+  await invoke('set_tray_labels', labels);
 }
 
 /** What this install should be told about itself: a first run, or an update
