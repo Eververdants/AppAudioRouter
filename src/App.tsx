@@ -7,7 +7,6 @@ import { LogPanel } from '@/components/LogPanel';
 import { ProgramRail } from '@/components/ProgramRail';
 import { RoutedCapsule } from '@/components/RoutedCapsule';
 import { SettingsPage } from '@/components/SettingsPage';
-import { StartupNoticeDialog } from '@/components/StartupNoticeDialog';
 import { StartupWizard } from '@/components/StartupWizard';
 import { TitleBar } from '@/components/TitleBar';
 import { Toast } from '@/components/Toast';
@@ -66,9 +65,12 @@ export default function App() {
   const startupNotice = useRouterStore((s) => s.startupNotice);
   const [view, setView] = useState<'router' | 'settings'>('router');
   const [tab, setTab] = useState<WorkTab>('router');
-  // The first run owns the work area until it is acknowledged; upgrades stay a
-  // dialog, because a warning is one sentence, not a tour.
-  const wizardActive = startupNotice?.kind === 'first-run';
+  // The launch owns the work area until it is acknowledged: the first run of
+  // this version line — a fresh install, or a machine walking in from anything
+  // older — walks the user in, and the upgrade's tour carries the one screen
+  // about the predecessor's settings. What that predecessor left pinned is one
+  // more stop of the same tour, never a layer of its own.
+  const wizardActive = startupNotice !== null;
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
@@ -343,11 +345,10 @@ export default function App() {
         )}
       </div>
 
-      {/* Last children, so they cover both views: the warning an install that
-          once ran 2.1.0 is owed, and the standing offer to undo the route that
-          was just applied. The first run itself is the wizard in the work
-          area, not a layer here. */}
-      <StartupNoticeDialog />
+      {/* Last children, so they cover both views: the standing offer to undo
+          the route that was just applied. Everything a launch owes the user —
+          the tour, the predecessor-settings question, the endpoint cleanup —
+          is a stop of that tour in the work area, not a layer here. */}
       <Toast />
     </div>
   );

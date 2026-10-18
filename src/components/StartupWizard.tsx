@@ -2,15 +2,17 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Ring } from '@/components/ui/Ring';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import { Spinner } from '@/components/ui/Spinner';
 import { Switch } from '@/components/ui/Switch';
 import { detectCarrierPair, matchesCarrier, type CarrierMatch } from '@/lib/carrierDetect';
 import { openCarrierDownload } from '@/lib/invoke';
 import { FADE, MAIN_THREAD_TRANSFORM } from '@/lib/motion';
-import type { FeedCarrier } from '@/lib/types';
+import type { FeedCarrier, ResetOutcome } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
-/** The four stops of the tour, in the order a new user needs them. */
-const STEPS = 4;
+/** The tour's stops, in the order a new user needs them. */
+type StepId = 'inherit' | 'legacy-endpoints' | 'welcome' | 'board' | 'carrier' | 'background';
 
 /**
  * Text that arrives one character at a time, each sharpening out of a blur. A
@@ -80,7 +82,9 @@ function BlurText({
 export function StartupWizard() {
   const { t } = useTranslation();
   const [step, setStep] = useState(0);
+  const notice = useRouterStore((s) => s.startupNotice);
   const dismiss = useRouterStore((s) => s.dismissStartupNotice);
+  const startClean = useRouterStore((s) => s.startClean);
   const devices = useRouterStore((s) => s.devices);
   const captureDevices = useRouterStore((s) => s.captureDevices);
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
@@ -89,6 +93,23 @@ export function StartupWizard() {
   const toggleAutostart = useRouterStore((s) => s.toggleAutostart);
   const closeToTray = useRouterStore((s) => s.closeToTray);
   const toggleCloseToTray = useRouterStore((s) => s.toggleCloseToTray);
+  /** The inherit question's answer: keeping is the default, and the words
+   *  under the choice change with it so neither answer is a blind press. */
+  const [keepSettings, setKeepSettings] = useState(true);
+  const [cleaning, setCleaning] = useState(false);
+
+  // A machine walking in from an older version answers for its predecessor's
+  // settings before anything else — that screen is the reason an upgrade gets
+  // a tour at all — and a predecessor that could have left per-app endpoint
+  // assignments pinned gets their cleanup as one more stop before the tour
+  // proper. A fresh install is the tour and nothing else.
+  const steps: StepId[] = [];
+  if (notice?.kind === 'upgrade') {
+    steps.push('inherit');
+    if (notice.leftover_endpoints) steps.push('legacy-endpoints');
+  }
+  steps.push('welcome', 'board', 'carrier', 'background');
+  const current = steps[step] ?? 'welcome';
 
   const carrierMatch = useMemo(
     () => detectCarrierPair(devices, captureDevices),
@@ -105,7 +126,22 @@ export function StartupWizard() {
     return () => window.removeEventListener('keydown', onKey);
   }, [dismiss]);
 
-  const last = step === STEPS - 1;
+  const last = step === steps.length - 1;
+
+  /** The footer's forward press: the inherit answer is acted on here, not
+   *  written down for later — what it discards is the predecessor's memory,
+   *  and the tour behind it should see the clean state it just chose. */
+  const advance = async () => {
+    if (current === 'inherit' && !keepSettings) {
+      setCleaning(true);
+      try {
+        await startClean();
+      } finally {
+        setCleaning(false);
+      }
+    }
+    setStep((s) => Math.min(s + 1, steps.length - 1));
+  };
 
   return (
     // The tour has no container at all: content sits straight on the work
@@ -125,9 +161,19 @@ export function StartupWizard() {
             transition={FADE}
             transformTemplate={MAIN_THREAD_TRANSFORM}
           >
-            {step === 0 && <WelcomeStep />}
-            {step === 1 && <BoardStep />}
-            {step === 2 && (
+            {current === 'inherit' && (
+              <InheritStep
+                keep={keepSettings}
+                onKeep={setKeepSettings}
+                previousVersion={notice?.previous_version ?? null}
+              />
+            )}
+            {current === 'legacy-endpoints' && (
+              <LegacyEndpointsStep previousVersion={notice?.previous_version ?? null} />
+            )}
+            {current === 'welcome' && <WelcomeStep />}
+            {current === 'board' && <BoardStep />}
+            {current === 'carrier' && (
               <CarrierStep
                 carrierMatch={carrierMatch}
                 feedCarrier={feedCarrier}
@@ -138,7 +184,7 @@ export function StartupWizard() {
                 }}
               />
             )}
-            {step === 3 && (
+            {current === 'background' && (
               <BackgroundStep
                 autostart={autostart}
                 onAutostart={() => void toggleAutostart()}
@@ -154,8 +200,8 @@ export function StartupWizard() {
             The tone switch is already animated inside `.con-ring`. */}
         <div className="mt-8 flex items-center justify-between">
           <div className="flex items-center gap-2" role="group" aria-label={t('wizard.stepsLabel')}>
-            {Array.from({ length: STEPS }, (_, i) => (
-              <Ring key={i} size={12} tone={i === step ? 'main' : 'idle'} />
+            {steps.map((id, i) => (
+              <Ring key={id} size={12} tone={i === step ? 'main' : 'idle'} />
             ))}
           </div>
           <div className="flex items-center gap-2">
@@ -178,8 +224,9 @@ export function StartupWizard() {
             <button
               type="button"
               autoFocus
-              onClick={() => (last ? void dismiss() : setStep(step + 1))}
-              className="pressable rounded-ctl bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+              disabled={cleaning}
+              onClick={() => (last ? void dismiss() : void advance())}
+              className="pressable rounded-ctl bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
             >
               {last ? t('wizard.start') : t('wizard.next')}
             </button>
@@ -238,6 +285,116 @@ function StepBlock({ children, base = 0.85 }: { children: ReactNode; base?: numb
     >
       {children}
     </motion.div>
+  );
+}
+
+/**
+ * The one screen an upgrade earns: what to do with the predecessor's settings.
+ *
+ * "Keep" is the whole of what an older version left behind — the routes and
+ * feeds it remembered and every value they were tuned to — and the question is
+ * asked rather than guessed because both answers are reasonable and only the
+ * user knows whose machine this is. Starting clean is acted on by the footer
+ * before the tour moves on (the store's `startClean`); it leaves the per-app
+ * endpoint assignments alone, because those belong to the next screen when the
+ * predecessor could have left any.
+ */
+function InheritStep({
+  keep,
+  onKeep,
+  previousVersion,
+}: {
+  keep: boolean;
+  onKeep: (keep: boolean) => void;
+  previousVersion: string | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <StepText title={t('wizard.inheritTitle')}>
+      <StepProse
+        text={
+          previousVersion === null
+            ? t('wizard.inheritBody')
+            : t('wizard.inheritBodyVersion', { version: previousVersion })
+        }
+      />
+      <StepBlock>
+        <div className="mt-5">
+          <SegmentedControl
+            layoutId="wizard-inherit"
+            ariaLabel={t('wizard.inheritTitle')}
+            value={keep ? 'keep' : 'clean'}
+            onChange={(value) => onKeep(value === 'keep')}
+            options={[
+              { value: 'keep', label: t('wizard.inheritKeep') },
+              { value: 'clean', label: t('wizard.inheritClean') },
+            ]}
+          />
+          <p className="mt-3 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+            {keep ? t('wizard.inheritKeepHint') : t('wizard.inheritCleanHint')}
+          </p>
+        </div>
+      </StepBlock>
+    </StepText>
+  );
+}
+
+/**
+ * The cleanup the old upgrade dialog offered, now one stop of the tour.
+ *
+ * Windows keeps a per-app endpoint assignment after the program that wrote it
+ * is gone. 2.1.0 — the release that introduced them — stopped a route without
+ * releasing the assignment, and could leave a program stuck on one device: the
+ * system default no longer moves it, and a reboot does not help. Nothing in
+ * the app can tell such a leftover from an assignment the user made by hand in
+ * the volume mixer, so this is an offer pressed on purpose, never a silent
+ * step — and it stands apart from the inherit question on purpose: that one
+ * forgets what this app remembers, this one hands Windows back what it holds.
+ */
+function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | null }) {
+  const { t } = useTranslation();
+  const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
+  const [result, setResult] = useState<ResetOutcome | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <StepText title={t('startup.upgradeTitle')}>
+      <StepProse
+        text={
+          previousVersion === null
+            ? t('startup.upgradeBody')
+            : t('startup.upgradeBodyVersion', { version: previousVersion })
+        }
+      />
+      <StepBlock>
+        <p className="mt-4 text-[11px] leading-relaxed text-text-muted">{t('startup.resetHint')}</p>
+        {result !== null && (
+          <p
+            className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] tabular-nums leading-relaxed ${
+              result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
+            }`}
+          >
+            {t('startup.resetDone', { n: result.released })}
+            {result.still_pinned.length > 0 &&
+              ` ${t('startup.resetRemaining', { processes: result.still_pinned.join(', ') })}`}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setBusy(true);
+            void resetPinnedEndpoints()
+              .then((outcome) => setResult(outcome))
+              .finally(() => setBusy(false));
+          }}
+          disabled={busy}
+          className="pressable mt-4 flex items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+        >
+          {busy && <Spinner size={11} />}
+          {busy ? t('startup.resetting') : t('startup.resetAction')}
+        </button>
+      </StepBlock>
+    </StepText>
   );
 }
 

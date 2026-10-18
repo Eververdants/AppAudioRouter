@@ -181,8 +181,7 @@
     "resetAction": "重置每应用音频输出",
     "resetting": "正在清理…",
     "resetDone": "已清除 {{n}} 个程序的固定输出设备。",
-    "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。",
-    "dismiss": "知道了"
+    "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。"
   },
   "wizard": {
     "skip": "跳过向导",
@@ -212,7 +211,14 @@
     "backgroundCloseToTrayHint": "不开的话，按 X 就退出应用、停掉所有路由。",
     "back": "上一步",
     "next": "下一步",
-    "start": "开始使用"
+    "start": "开始使用",
+    "inheritTitle": "要继承以前版本的设置吗？",
+    "inheritBody": "这台电脑以前运行过本应用。它记住的路由与送入规则、延迟补偿、设备份额与程序电平都在：可以原样继承，也可以清掉重新开始。",
+    "inheritBodyVersion": "上次在这台电脑上运行的是 {{version}}。它记住的路由与送入规则、延迟补偿、设备份额与程序电平都在：可以原样继承，也可以清掉重新开始。",
+    "inheritKeep": "继承",
+    "inheritKeepHint": "一切照旧：记住的路由与送入规则、延迟补偿、设备份额与程序电平都保留。",
+    "inheritClean": "重新开始",
+    "inheritCleanHint": "清空记住的路由与送入规则、延迟补偿、设备份额与程序电平，回到出厂状态；刚恢复的路由会立即停止。"
   },
   "titleBar": {
     "minimize": "最小化",
@@ -331,6 +337,8 @@
     "autostartOn": "已注册为开机启动应用",
     "autostartOff": "已移除开机启动项",
     "autostartFailed": "修改开机启动项失败：{{error}}",
+    "forgetPrevious": "已清空以前版本记住的路由、送入规则与调音值",
+    "forgetPreviousFailed": "清空以前版本的设置失败：{{error}}",
     "shellSettingsFailed": "加载托盘与启动设置失败：{{error}}",
     "startupNoticeFailed": "读取启动提示失败：{{error}}",
     "startupNoticeAckFailed": "记录启动提示状态失败：{{error}}",

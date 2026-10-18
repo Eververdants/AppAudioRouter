@@ -181,8 +181,7 @@
     "resetAction": "Reset per-app output",
     "resetting": "Clearing…",
     "resetDone": "Cleared the fixed output device of {{n}} program(s).",
-    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again.",
-    "dismiss": "Got it"
+    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again."
   },
   "wizard": {
     "skip": "Skip the tour",
@@ -212,7 +211,14 @@
     "backgroundCloseToTrayHint": "Otherwise the X exits the app and stops every route.",
     "back": "Back",
     "next": "Next",
-    "start": "Start routing"
+    "start": "Start routing",
+    "inheritTitle": "Keep the previous version's settings?",
+    "inheritBody": "This computer ran the app before. The routes and feeds it remembered, the delay compensation, device shares and program levels are all still here: keep them, or clear them and start clean.",
+    "inheritBodyVersion": "Last run here was {{version}}. The routes and feeds it remembered, the delay compensation, device shares and program levels are all still here: keep them, or clear them and start clean.",
+    "inheritKeep": "Keep them",
+    "inheritKeepHint": "Everything stays as it is: remembered routes and feeds, delay compensation, device shares and program levels.",
+    "inheritClean": "Start clean",
+    "inheritCleanHint": "Remembered routes, feeds, delay compensation, device shares and program levels are cleared to factory state; anything just restored stops at once."
   },
   "titleBar": {
     "minimize": "Minimize",
@@ -331,6 +337,8 @@
     "autostartOn": "Registered as a Windows startup app",
     "autostartOff": "Removed from Windows startup",
     "autostartFailed": "Failed to change the startup entry: {{error}}",
+    "forgetPrevious": "Cleared the previous version's remembered routes, feeds and tuning values",
+    "forgetPreviousFailed": "Could not clear the previous version's settings: {{error}}",
     "shellSettingsFailed": "Failed to load the tray and startup settings: {{error}}",
     "startupNoticeFailed": "Could not read the startup notice: {{error}}",
     "startupNoticeAckFailed": "Could not record the startup notice: {{error}}",

@@ -300,6 +300,9 @@ interface RouterState {
    * The way out for programs an earlier version of this app left pinned. The
    * outcome is returned so the launch notice can report what it cleared. */
   resetPinnedEndpoints: () => Promise<ResetOutcome | null>;
+  /** The tour's "start clean": take down what the boot restore already put up,
+   *  then forget the predecessor's memory and tuning. */
+  startClean: () => Promise<void>;
   /** Release assignments whose program exited while it was routed, so its next
    * launch follows the system default again instead of the old device. */
   releaseStaleRoutes: () => Promise<void>;
@@ -2091,6 +2094,34 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }), 'error');
       return null;
     }
+  },
+
+  startClean: async () => {
+    // Everything the restore already put up came from the memory about to be
+    // forgotten, so it goes down the way the user would take it down: a stop
+    // releases its assignment, a feed disconnects its pair. Only then the
+    // files go — all of them in one backend call, so a half-done wipe can
+    // never be mistaken for a clean slate.
+    await get().stopAllRoutes();
+    for (const [sourcePid, targets] of Object.entries(get().feeds)) {
+      for (const targetPid of targets) {
+        await get().removeFeed(Number(sourcePid), targetPid);
+      }
+    }
+    try {
+      await api.forgetPreviousSettings();
+    } catch (e) {
+      get().addLog(i18next.t('log.forgetPreviousFailed', { error: String(e) }), 'error');
+      return;
+    }
+    await Promise.all([
+      get().loadRememberedRoutes(),
+      get().loadFeeds(),
+      get().loadDelaySettings(),
+      get().loadDeviceVolumes(),
+      get().loadSourceVolumes(),
+    ]);
+    get().addLog(i18next.t('log.forgetPrevious'), 'info');
   },
 
   releaseStaleRoutes: async () => {

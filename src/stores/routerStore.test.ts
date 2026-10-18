@@ -173,6 +173,12 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
       case 'clear_route':
         backend.remembered = backend.remembered.filter(([name]) => name !== args.exeName);
         return null;
+      case 'forget_previous_settings':
+        backend.remembered = [];
+        backend.feeds = [];
+        backend.delays = [];
+        backend.volumes = [];
+        return null;
       case 'get_device_delays':
         return backend.delays;
       case 'set_device_delay':
@@ -1784,5 +1790,49 @@ describe('primary volume', () => {
     await state().setPrimaryVolume('music.exe', 70);
 
     expect(state().primaryVolumes['music.exe']).toBe(80);
+  });
+});
+
+describe("the tour's start clean", () => {
+  it('takes down what the restore put up, then forgets the memory and tuning', async () => {
+    const backend = installBackend({
+      remembered: [['music.exe', ['tv']]],
+      feeds: [['music.exe', 'game.exe']],
+      delays: [['tv', 120]],
+      volumes: [['tv', 80]],
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, GAME],
+      routedPids: { [MUSIC.pid]: ['tv'] },
+      engineGenerations: { [MUSIC.pid]: 0 },
+      rememberedRoutes: [{ exeName: 'music.exe', deviceIds: ['tv'] }],
+      rememberedFeeds: [{ sourceExe: 'music.exe', targetExe: ['game.exe'] }],
+      feeds: { [MUSIC.pid]: [GAME.pid] },
+      deviceDelays: { tv: 120 },
+      deviceVolumes: { tv: 80 },
+      defaultDeviceId: 'speakers',
+    });
+
+    await state().startClean();
+
+    // What the boot restore had put up is down again: the route stopped — its
+    // assignment released by the stop, not left for the reset to find — and the
+    // feed disconnected at both ends rather than only on screen.
+    expect(state().routedPids).toEqual({});
+    expect(state().feeds).toEqual({});
+    const seen = backend.calls.map((c) => c.cmd);
+    expect(seen).toContain('stop_route');
+    expect(seen).toContain('remove_feed_target');
+
+    // And the predecessor's memory and tuning are gone in one write, with the
+    // boards reloaded from what is now an empty file.
+    expect(seen).toContain('forget_previous_settings');
+    expect(state().rememberedRoutes).toEqual([]);
+    expect(state().rememberedFeeds).toEqual([]);
+    expect(state().deviceDelays).toEqual({});
+    expect(state().deviceVolumes).toEqual({});
+    expect(backend.remembered).toEqual([]);
+    expect(backend.delays).toEqual([]);
   });
 });

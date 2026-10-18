@@ -65,10 +65,15 @@ export interface FeedOutcome {
 
 /** What the window should say about this install on launch. */
 export interface StartupNotice {
-  /** A fresh install, or an earlier version that may have left assignments. */
+  /** A fresh install, or the first launch of this version line over an older
+   * one. Both walk the user in; the upgrade's tour adds the screen asking what
+   * to do with the predecessor's settings. */
   kind: 'first-run' | 'upgrade';
   /** Version that ran here last, when the install recorded one. */
   previous_version: string | null;
+  /** Whether that version may have left per-app endpoint assignments pinned —
+   * the one thing the upgrade screen offers to clean, its own button. */
+  leftover_endpoints: boolean;
 }
 
 /** One executable's remembered route, as the store keeps it. */

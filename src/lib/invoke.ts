@@ -198,6 +198,13 @@ export async function setTrayLabels(labels: TrayMenuLabels): Promise<void> {
   await invoke('set_tray_labels', labels);
 }
 
+/** Forget what the app remembers and how it was tuned: remembered routes and
+ * feeds, device delays and shares, program levels. The "start clean" half of
+ * the tour's inherit question. */
+export async function forgetPreviousSettings(): Promise<void> {
+  await invoke('forget_previous_settings');
+}
+
 /** What this install should be told about itself: a first run, or an update
  * whose earlier version may have left per-app endpoint assignments behind. */
 export async function getStartupNotice(): Promise<StartupNotice | null> {
