@@ -23,16 +23,26 @@ interface ToneMarker {
 interface MeasureFailure {
   /** The backend's complaint, when the run itself failed. */
   message: string | null;
-  /** Devices that played through with no usable press; they get a re-run. */
+  /** Devices that played through with no usable tap; they get a re-run. */
   noPresses: string[];
 }
 
 /**
- * A press counts when the held duration matches the burst it was meant to
- * bracket; looser than this reads as a guess about when the tone began, and a
- * guess is exactly what the wizard exists to replace.
+ * How close to the tone a tap has to land: this much anticipation before it and
+ * this much of a slow reaction after it are still a person answering a sound.
+ *
+ * A tap is scored once, against the one burst that is sounding — the wizard
+ * plays one at a time — so the window can be generous without admitting a press
+ * that answers nothing. What it must not do is punish reaction time: the number
+ * a device ends up with is its tap minus the tone's start, and the reaction that
+ * sits inside it is the same for every device, so it cancels in every difference
+ * the alignment is built from. The strict bracketing the held press needed
+ * (match the burst's length or be discarded) is gone for exactly this reason:
+ * two timings per tone is a dexterity test, and the second one adds nothing the
+ * first does not already say.
  */
-const HOLD_TOLERANCE_MS = 250;
+const TAP_EARLY_MS = 150;
+const TAP_LATE_MS = 900;
 
 /** Valid presses a device needs before the wizard stops sampling it. */
 const MIN_VALID = 3;
@@ -115,7 +125,8 @@ export function DelayCalibration({
   const [currentDevice, setCurrentDevice] = useState<string | null>(null);
   const [offsets, setOffsets] = useState<Record<string, number>>({});
   const [baselineId, setBaselineId] = useState<string | null>(null);
-  const [holding, setHolding] = useState(false);
+  /** Taps kept for the device being sampled, so a click visibly counts. */
+  const [tapped, setTapped] = useState(0);
   const [sloppy, setSloppy] = useState(false);
   const [failure, setFailure] = useState<MeasureFailure | null>(null);
   const [applying, setApplying] = useState(false);
@@ -131,12 +142,8 @@ export function DelayCalibration({
   /** Valid per-burst offsets collected per device so far. */
   const repsRef = useRef<Record<string, number[]>>({});
   const currentDeviceRef = useRef<string | null>(null);
+  /** When the burst being answered began, as the events report it. */
   const markerStart = useRef<number | null>(null);
-  const markerEnd = useRef<number | null>(null);
-  /** Counts bursts; a press that spans two bursts is discarded. */
-  const markerSeq = useRef(0);
-  const pressDown = useRef<number | null>(null);
-  const pressSeq = useRef(0);
 
   const deviceName = useCallback(
     (id: string) => devices.find((d) => d.id === id)?.name ?? id,
@@ -174,6 +181,10 @@ export function DelayCalibration({
           if (!alive()) return;
           currentDeviceRef.current = id;
           setCurrentDevice(id);
+          // A re-run keeps what a device already has; the tally on screen says
+          // so rather than starting the count again under the user.
+          setTapped(repsRef.current[id]?.length ?? 0);
+          setSloppy(false);
           await calibrationStart(id, {
             reps: 1,
             leadMs: LEAD_MIN_MS + Math.floor(Math.random() * LEAD_SPREAD_MS),
@@ -222,11 +233,11 @@ export function DelayCalibration({
     runId.current += 1;
     selectedRef.current = selectedIds;
     repsRef.current = {};
-    markerSeq.current = 0;
     measuring.current = true;
     setFailure(null);
     setApplyFailed(false);
     setSloppy(false);
+    setTapped(0);
     setOffsets({});
     setBaselineId(null);
     setStep('measure');
@@ -245,56 +256,42 @@ export function DelayCalibration({
     void runRounds(runId.current, failed);
   }, [failure, runRounds]);
 
-  // Tone markers arrive while a command is in flight; score completed presses
-  // against them. The handler reads refs, so the subscription stays stable
-  // for the wizard's whole life.
+  // Tone markers arrive while a command is in flight; a tap is scored against
+  // the one the events placed. The handler reads refs, so the subscription
+  // stays stable for the wizard's whole life.
   useBackendEvent<ToneMarker>('calibration-tone', (payload) => {
     if (!measuring.current) return;
     if (payload.phase === 'start') {
       markerStart.current = performance.now();
-      markerSeq.current += 1;
-    } else {
-      markerEnd.current = performance.now();
     }
   });
 
-  const scorePress = useCallback((down: number, up: number, seq: number) => {
+  const scoreTap = useCallback((tap: number) => {
     const device = currentDeviceRef.current;
     const start = markerStart.current;
-    const end = markerEnd.current;
+    if (
+      device === null ||
+      start === null ||
+      tap < start - TAP_EARLY_MS ||
+      tap > start + TAP_LATE_MS
+    ) {
+      // The press answered no tone — early before one, or late past the window.
+      // The burst is not spent by it: the tap that answers it still counts.
+      setSloppy(true);
+      return;
+    }
     markerStart.current = null;
-    markerEnd.current = null;
-    if (device === null || start === null || end === null || seq !== markerSeq.current) {
-      // The press did not sit inside one burst (or missed it entirely).
-      setSloppy(true);
-      return;
-    }
-    const hold = up - down;
-    const burst = end - start;
-    if (Math.abs(hold - burst) > HOLD_TOLERANCE_MS) {
-      setSloppy(true);
-      return;
-    }
     setSloppy(false);
     const list = repsRef.current[device] ?? [];
-    list.push((down + up) / 2 - (start + end) / 2);
+    list.push(tap - start);
     repsRef.current = { ...repsRef.current, [device]: list };
+    setTapped(list.length);
   }, []);
 
-  const beginPress = useCallback(() => {
-    if (!measuring.current || pressDown.current !== null) return;
-    pressDown.current = performance.now();
-    pressSeq.current = markerSeq.current;
-    setHolding(true);
-  }, []);
-
-  const endPress = useCallback(() => {
-    const down = pressDown.current;
-    if (down === null) return;
-    pressDown.current = null;
-    setHolding(false);
-    scorePress(down, performance.now(), pressSeq.current);
-  }, [scorePress]);
+  const tap = useCallback(() => {
+    if (!measuring.current) return;
+    scoreTap(performance.now());
+  }, [scoreTap]);
 
   const cancelRun = useCallback(() => {
     // Any in-flight loop goes stale at its next checkpoint and stands down.
@@ -498,29 +495,20 @@ export function DelayCalibration({
                   whileTap={{ scale: 0.985 }}
                   transition={SPRING_TAP}
                   transformTemplate={MAIN_THREAD_TRANSFORM}
-                  onPointerDown={(e) => {
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    beginPress();
-                  }}
-                  onPointerUp={endPress}
-                  onPointerCancel={endPress}
+                  onPointerDown={tap}
                   onKeyDown={(e) => {
-                    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) beginPress();
+                    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) tap();
                   }}
-                  onKeyUp={(e) => {
-                    if (e.key === ' ' || e.key === 'Enter') endPress();
-                  }}
-                  aria-label={holding ? t('calibration.holding') : t('calibration.hold')}
-                  className={`mt-4 flex h-20 w-full items-center justify-center rounded-ctl border text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
-                    holding
-                      ? 'border-accent bg-accent-muted text-accent'
-                      : 'border-line bg-surface-raised text-text-secondary hover:border-accent/50'
-                  }`}
+                  aria-label={t('calibration.tap')}
+                  className="mt-4 flex h-20 w-full items-center justify-center rounded-ctl border border-line bg-surface-raised text-[13px] font-medium text-text-secondary outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
-                  {holding ? t('calibration.holding') : t('calibration.hold')}
+                  {t('calibration.tap')}
                 </motion.button>
+                <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
+                  {t('calibration.tapTally', { n: tapped, need: MIN_VALID })}
+                </p>
                 {sloppy && (
-                  <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
+                  <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
                     {t('calibration.sloppy')}
                   </p>
                 )}
