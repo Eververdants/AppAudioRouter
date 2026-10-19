@@ -5,6 +5,7 @@ import type { AudioSession } from '@/lib/types';
 import { ConfirmButton } from '@/components/ui/ConfirmButton';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
 import { Ring } from '@/components/ui/Ring';
+import { Spinner } from '@/components/ui/Spinner';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE, SPRING_TAP } from '@/lib/motion';
@@ -28,6 +29,7 @@ export function ProgramRail() {
   const { t } = useTranslation();
   const devices = useRouterStore((s) => s.devices);
   const sessions = useRouterStore((s) => s.sessions);
+  const sessionsLoaded = useRouterStore((s) => s.sessionsLoaded);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const routedPids = useRouterStore((s) => s.routedPids);
   // The route each row reads, keyed by its own pid: a program's sibling
@@ -66,6 +68,9 @@ export function ProgramRail() {
    */
   const filter = useDeferredValue(query);
   const searching = filter.trim() !== '';
+  // The search box cannot be open while this holds: it only mounts once the
+  // list has rows, and the query clears itself when the list empties.
+  const loading = !sessionsLoaded && sessions.length === 0;
 
   // The search box only exists while there are programmes to search; a query
   // that outlived it would keep filtering a list whose field is gone — rows
@@ -234,30 +239,44 @@ export function ProgramRail() {
               transformTemplate={MAIN_THREAD_TRANSFORM}
               className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 py-10 text-center"
             >
-              {!searching && (
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  className="text-text-muted/60"
-                >
-                  <path d="M11 5 6 9H2v6h4l5 4V5z" />
-                  <line x1="22" y1="9" x2="16" y2="15" />
-                  <line x1="16" y1="9" x2="22" y2="15" />
-                </svg>
+              {/* The enumeration is deferred past the first paint, so for the
+                  first beat the list is empty because nobody has asked yet. A
+                  placeholder says so; "no apps are playing sound" is a claim
+                  about the machine, and this frame makes it before the machine
+                  has answered. */}
+              {loading ? (
+                <>
+                  <Spinner size={16} className="text-text-muted/60" />
+                  <p className="text-[11px] leading-relaxed text-text-muted">{t('rail.reading')}</p>
+                </>
+              ) : (
+                <>
+                  {!searching && (
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      className="text-text-muted/60"
+                    >
+                      <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                      <line x1="22" y1="9" x2="16" y2="15" />
+                      <line x1="16" y1="9" x2="22" y2="15" />
+                    </svg>
+                  )}
+                  <p className="text-[11px] leading-relaxed text-text-muted">
+                    {searching ? t('rail.noMatch') : t('rail.empty')}
+                    {!searching && (
+                      <>
+                        <br />
+                        <span>{t('rail.emptyHint')}</span>
+                      </>
+                    )}
+                  </p>
+                </>
               )}
-              <p className="text-[11px] leading-relaxed text-text-muted">
-                {searching ? t('rail.noMatch') : t('rail.empty')}
-                {!searching && (
-                  <>
-                    <br />
-                    <span>{t('rail.emptyHint')}</span>
-                  </>
-                )}
-              </p>
             </motion.div>
           )}
         </AnimatePresence>

@@ -64,6 +64,13 @@ export function feedLiveness(
 interface RouterState {
   devices: AudioDevice[];
   sessions: AudioSession[];
+  /**
+   * Whether the first session enumeration has returned, with a list or with an
+   * error. An empty `sessions` before that is not a fact about the machine —
+   * the enumeration is deferred past the first paint on purpose, so the rail
+   * would otherwise open by claiming no app is playing sound.
+   */
+  sessionsLoaded: boolean;
   /** Processes targeted by the current selection (Ctrl+click to multi-select). */
   selectedPids: number[];
   /** Devices targeted by the current selection — the plan, in the order the
@@ -826,6 +833,7 @@ function pickRestorable(
 export const useRouterStore = create<RouterState>((set, get) => ({
   devices: [],
   sessions: [],
+  sessionsLoaded: false,
   selectedPids: [],
   selectedDeviceIds: [],
   deviceSelectionPrefilled: false,
@@ -1011,6 +1019,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       get().addLog(i18next.t('log.sessionsRefreshFailed', { error: String(e) }), 'error');
     } finally {
+      // Raised whether the enumeration answered or refused: after a failure the
+      // rail would otherwise sit on "reading" forever, which is a different
+      // lie and a worse one — nothing is coming to change it.
+      set({ sessionsLoaded: true });
       sessionRefreshGate.inFlight = false;
       runQueuedRefresh(sessionRefreshGate, (rerunViaNotification) => {
         void get().refreshSessions(rerunViaNotification);

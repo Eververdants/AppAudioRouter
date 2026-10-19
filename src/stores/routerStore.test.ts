@@ -1092,6 +1092,34 @@ describe('session activity', () => {
   });
 });
 
+describe('the first session enumeration', () => {
+  it('is what makes an empty list a statement about the machine', async () => {
+    installBackend({ sessions: [] });
+    reset();
+
+    // Until the answer comes back, the rail owes the user a placeholder: an
+    // empty list here is a round-trip still in flight, not an app that is quiet.
+    expect(state().sessionsLoaded).toBe(false);
+
+    await state().refreshSessions();
+
+    expect(state().sessionsLoaded).toBe(true);
+  });
+
+  it('counts as returned when the enumeration refused', async () => {
+    // A list that would not answer is not a list still on its way: "reading"
+    // would stand there forever with nothing left to change it, and the failure
+    // is what the user has to be told.
+    installBackend({ fail: (cmd) => cmd === 'list_sessions' });
+    reset();
+
+    await state().refreshSessions();
+
+    expect(state().sessionsLoaded).toBe(true);
+    expect(lastLog()?.level).toBe('error');
+  });
+});
+
 describe('hotplug', () => {
   it('drops an unplugged device from the selection and from live routes', async () => {
     installBackend({ devices: [SPEAKERS] });
