@@ -173,6 +173,7 @@ fn main() {
             commands::set_feed_target,
             commands::remove_feed_target,
             commands::open_carrier_download,
+            commands::open_help_page,
         ])
         .build(context)
         .expect("error while building tauri application")

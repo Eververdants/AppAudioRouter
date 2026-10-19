@@ -116,6 +116,7 @@
   },
   "routed": {
     "capsule": "已路由 {{n}}",
+    "deviceGone": "一台已经离开的设备",
     "title": "正在路由的程序",
     "tooltip": "查看每个程序的去向，或让它回到系统默认",
     "tune": "打开「{{name}}」的看板"
@@ -175,6 +176,13 @@
     "feedCarrierDownload": "下载 VB-Cable（免费）",
     "feedCarrierDownloadFailed": "浏览器没有打开——请自行访问 VB-Cable 的官方页面。",
     "about": "关于",
+    "replayTour": "重新走一遍导览",
+    "replayTourDesc": "某个版本第一次在这台电脑上运行时会出现的向导：看板怎么读、送入需要装什么、以及两个后台习惯。它只出现一次，走完不会自己再来。",
+    "replayTourAction": "打开导览",
+    "help": "帮助与说明",
+    "helpDesc": "README 讲清看板、送入所经过的回环端点对，以及本应用退出后 Windows 仍留着的那些记录。会在浏览器里打开。",
+    "helpAction": "打开说明文档",
+    "helpFailed": "浏览器没有打开——说明文档在本应用的代码仓库里。",
     "aboutDesc": "Windows 每应用音频路由；Rust 直连 Core Audio，无第三方 exe。"
   },
   "startup": {
@@ -197,9 +205,9 @@
     "welcomePoint3": "一切都会被记住：路由与送入跟着程序回来",
     "boardTitle": "看板怎么读",
     "boardBody": "选中的程序坐在中间，去向在右边排成一列——输出设备在前，收它声音的程序在后。程序到去向之间的那根线就是路由本身，卡片上的编号就是顺序。",
-    "boardPoint1": "点去向卡就是接上或松开这条路由",
+    "boardPoint1": "点一行去向就是接上或松开；面板标题行里的 ＋ 添一台设备，或添另一个程序的输入",
     "boardPoint2": "按下程序卡之前什么都不会变——看板先给提案，由你拍板落地",
-    "boardPoint3": "看板底部的调音条管每条去向的延迟与音量",
+    "boardPoint3": "点行首的编号就能给那台去向调音——副本调延迟与份额，主输出调程序自己的音量",
     "sketchHub": "程序",
     "sketchHubHint": "坐在中间",
     "sketchTargetDevice": "输出设备",
@@ -247,6 +255,7 @@
   },
   "briefingPage": {
     "defaultFallback": "系统默认设备",
+    "deviceGone": "一台已经离开的设备",
     "defaultHint": "没有改道的程序，声音都跟着它走",
     "following": "{{n}} 个程序跟随",
     "empty": "还没有任何程序被改道",

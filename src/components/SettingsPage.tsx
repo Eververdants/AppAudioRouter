@@ -12,7 +12,7 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { detectCarrierPair, matchesCarrier } from '@/lib/carrierDetect';
 import { DELAY_STEP_OPTIONS, formatStep } from '@/lib/delay';
 import { isEditableTarget } from '@/lib/productionGuards';
-import { openCarrierDownload } from '@/lib/invoke';
+import { openCarrierDownload, openHelpPage } from '@/lib/invoke';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import type { AudioDevice, AudioSession, RememberedRouteEntry, ResetOutcome } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
@@ -291,6 +291,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
   const forgetRememberedRoute = useRouterStore((s) => s.forgetRememberedRoute);
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
+  const replayWizard = useRouterStore((s) => s.replayWizard);
   const raiseError = useRouterStore((s) => s.raiseError);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
@@ -762,21 +763,47 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             )}
 
             {section === 'about' && (
-              <div className="py-3">
-                <div className="mb-1 flex items-center justify-between gap-4">
-                  <span className="text-[13px] font-medium text-text-primary">
-                    App Audio Router
-                  </span>
-                  {/* The version is a fact, not an achievement: set in the same
+              <>
+                {/* The tour is acknowledged once per version and never returns on
+                      its own, and there is no other explanation inside the window
+                      — so both ways back to "what did that screen say" live here,
+                      beside the version number a bug report would quote. */}
+                <Row title={t('settings.replayTour')} desc={t('settings.replayTourDesc')}>
+                  <button type="button" onClick={replayWizard} className={ROW_BUTTON_CLASS}>
+                    {t('settings.replayTourAction')}
+                  </button>
+                </Row>
+                <Row title={t('settings.help')} desc={t('settings.helpDesc')}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void openHelpPage(language.startsWith('zh') ? 'readme-zh' : 'readme').catch(
+                        () => {
+                          raiseError(t('settings.helpFailed'));
+                        },
+                      )
+                    }
+                    className={ROW_BUTTON_CLASS}
+                  >
+                    {t('settings.helpAction')}
+                  </button>
+                </Row>
+                <div className="py-3">
+                  <div className="mb-1 flex items-center justify-between gap-4">
+                    <span className="text-[13px] font-medium text-text-primary">
+                      App Audio Router
+                    </span>
+                    {/* The version is a fact, not an achievement: set in the same
                         monospaced muted type as every other number in the app. */}
-                  <span className="font-mono text-[10px] tabular-nums text-text-muted">
-                    v{__APP_VERSION__}
-                  </span>
+                    <span className="font-mono text-[10px] tabular-nums text-text-muted">
+                      v{__APP_VERSION__}
+                    </span>
+                  </div>
+                  <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
+                    {t('settings.aboutDesc')}
+                  </p>
                 </div>
-                <p className="max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
-                  {t('settings.aboutDesc')}
-                </p>
-              </div>
+              </>
             )}
           </motion.div>
         </div>

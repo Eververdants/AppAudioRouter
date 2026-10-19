@@ -116,6 +116,7 @@
   },
   "routed": {
     "capsule": "{{n}} routed",
+    "deviceGone": "a device that has left",
     "title": "Routed programs",
     "tooltip": "See where each program goes, or return one to the system default",
     "tune": "Open {{name}}'s board"
@@ -175,6 +176,13 @@
     "feedCarrierDownload": "Get VB-Cable (free)",
     "feedCarrierDownloadFailed": "The browser did not open — copy the address of the VB-Cable page and open it yourself.",
     "about": "About",
+    "replayTour": "Walk the tour again",
+    "replayTourDesc": "The guide that runs the first time a version starts on this PC — what the board is, what feeding another program needs, and the two background habits. It is answered once and never comes back on its own.",
+    "replayTourAction": "Show the tour",
+    "help": "Help and documentation",
+    "helpDesc": "The README covers the board, the loopback pair a feed runs through, and what Windows keeps after this app closes. It opens in your browser.",
+    "helpAction": "Open the documentation",
+    "helpFailed": "The browser did not open — the documentation lives in this app's repository.",
     "aboutDesc": "Per-app audio routing for Windows — Rust on Core Audio directly, no third-party executables."
   },
   "startup": {
@@ -197,9 +205,9 @@
     "welcomePoint3": "Everything is remembered: routes and feeds come back with the program",
     "boardTitle": "How the board reads",
     "boardBody": "The program you select sits in the middle. Its destinations line up on the right — output devices first, then programs receiving its sound. A line from the program to a destination is the route itself, and the number on a card is its place in that order.",
-    "boardPoint1": "Click a destination card to connect it or let it go",
+    "boardPoint1": "Click a destination row to connect it or let it go; ＋ in the panel's title row adds another device, or another program's input",
     "boardPoint2": "Nothing changes until you click the program card — the board proposes first, applies on your word",
-    "boardPoint3": "The dock under the board holds delay and volume for each destination",
+    "boardPoint3": "Click the number leading a row to tune that destination — delay and share for a copy, the program's own volume for the main one",
     "sketchHub": "The program",
     "sketchHubHint": "sits in the middle",
     "sketchTargetDevice": "Output device",
@@ -247,6 +255,7 @@
   },
   "briefingPage": {
     "defaultFallback": "System default device",
+    "deviceGone": "a device that has left",
     "defaultHint": "Programs that are not redirected follow it",
     "following": "{{n}} following",
     "empty": "Nothing is redirected yet",

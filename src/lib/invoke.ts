@@ -264,3 +264,8 @@ export async function removeFeedTarget(sourcePid: number, targetPid: number): Pr
 export async function openCarrierDownload(key: 'vb-cable' | 'voicemeeter'): Promise<void> {
   await invoke('open_carrier_download', { key });
 }
+
+/** Open a reference page. Same bargain: a key, never a URL. */
+export async function openHelpPage(key: 'readme' | 'readme-zh'): Promise<void> {
+  await invoke('open_help_page', { key });
+}

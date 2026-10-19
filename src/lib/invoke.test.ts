@@ -26,6 +26,22 @@ describe('invoke wrappers', () => {
     expect(seen).toEqual(['list_devices', 'list_sessions', 'get_default_device']);
   });
 
+  it('opens a page by its key, because the URL never comes from here', async () => {
+    const seen: [string, Record<string, unknown>][] = [];
+    mockIPC((cmd, args) => {
+      seen.push([cmd, args as Record<string, unknown>]);
+      return null;
+    });
+
+    await api.openCarrierDownload('voicemeeter');
+    await api.openHelpPage('readme-zh');
+
+    expect(seen).toEqual([
+      ['open_carrier_download', { key: 'voicemeeter' }],
+      ['open_help_page', { key: 'readme-zh' }],
+    ]);
+  });
+
   it('passes the route as an ordered device list with the remember flag', async () => {
     let payload: Record<string, unknown> | undefined;
     mockIPC((cmd, args) => {

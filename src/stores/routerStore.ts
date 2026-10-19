@@ -285,6 +285,11 @@ interface RouterState {
   loadStartupNotice: () => Promise<void>;
   /** Take the notice down and record that this version has run. */
   dismissStartupNotice: () => Promise<void>;
+  /** Put the tour back on the screen. Acking it writes the version that is
+   *  already on file, so replaying changes nothing about this machine — it only
+   *  answers the one question the tour used to be able to answer: what was that
+   *  second screen saying? */
+  replayWizard: () => void;
   toggleCloseToTray: () => Promise<void>;
   toggleAutostart: () => Promise<void>;
   /** Route one program to `deviceIds` and resolve with the generation of the
@@ -1627,6 +1632,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // record it, so the next launch shows it once more.
       get().addLog(i18next.t('log.startupNoticeAckFailed', { error: String(e) }), 'error');
     }
+  },
+
+  replayWizard: () => {
+    // The first-run shape: four screens of guide, and none of the questions
+    // that belong to a machine walking in from an older version — those were
+    // answered, or this screen would not be reachable at all.
+    set({
+      startupNotice: { kind: 'first-run', previous_version: null, leftover_endpoints: false },
+    });
   },
 
   toggleCloseToTray: async () => {

@@ -533,7 +533,11 @@ function MiniToggle({
       className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
         pressed
           ? 'border-accent bg-accent text-accent-ink'
-          : 'border-line bg-surface text-text-muted opacity-0 hover:text-accent focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
+          : // Present, not conjured: a control that only exists under a pointer
+            // is a control a touch, a pen, or a fast reader never finds — and
+            // this one makes a five-program batch, which is not something to
+            // discover after the fact. Quiet until asked for, then ordinary.
+            'border-line bg-surface text-text-muted opacity-30 hover:text-accent hover:opacity-100 focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
       }`}
     >
       {/* The plus does not turn into a tick, it is replaced by one: the mark

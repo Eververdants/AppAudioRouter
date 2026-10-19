@@ -102,3 +102,25 @@ test('the carrier’s own playback endpoint stays in the settings picker', async
       .getByRole('option', { name: 'CABLE Input (VB-Audio Virtual Cable)' }),
   ).toBeVisible();
 });
+
+test('the about section keeps the two ways back to an explanation', async ({ page }) => {
+  // The tour is acknowledged once per version and there is nothing else in the
+  // window that explains the board, so both ways to ask again — replay it, or
+  // open the README — live beside the version number a bug report would quote.
+  await openApp(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'About' }).click();
+
+  await page.getByRole('button', { name: 'Show the tour' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Welcome to App Audio Router' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Skip the tour' }).click();
+
+  // The tour replaces the work area, so the page under it starts from its
+  // first section on the way back — the same thing leaving for the board has
+  // always done. What matters is that the user lands back in Settings.
+  await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+  await page.getByRole('button', { name: 'About' }).click();
+  await expect(page.getByRole('button', { name: 'Open the documentation' })).toBeVisible();
+});

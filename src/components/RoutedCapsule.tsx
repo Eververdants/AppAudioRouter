@@ -92,7 +92,7 @@ export function RoutedCapsule() {
       pid: session.pid,
       name: session.display_name ?? session.exe_name,
       exeName: session.exe_name,
-      devices: ids.map((id) => devices.find((d) => d.id === id)?.name ?? id),
+      devices: ids.map((id) => devices.find((d) => d.id === id)?.name ?? t('routed.deviceGone')),
     });
   }
 

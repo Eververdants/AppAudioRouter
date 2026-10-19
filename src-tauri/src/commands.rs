@@ -1435,6 +1435,32 @@ pub fn open_carrier_download(key: &str) -> Result<(), String> {
     open_in_browser(url)
 }
 
+/// The reference pages the About section points at. The same bargain as the
+/// driver pages: the frontend names a key, never a URL, so nothing
+/// user-controlled reaches the shell. The tour is gone once acknowledged and
+/// there is no other documentation inside the window, so this is where a user
+/// stuck on 未接通 can be sent.
+const HELP_PAGES: &[(&str, &str)] = &[
+    (
+        "readme",
+        "https://github.com/Eververdants/AppAudioRouter#readme",
+    ),
+    (
+        "readme-zh",
+        "https://github.com/Eververdants/AppAudioRouter/blob/main/README.zh-CN.md",
+    ),
+];
+
+/// Open a reference page in the user's browser.
+#[tauri::command]
+pub fn open_help_page(key: &str) -> Result<(), String> {
+    info!("cmd: open_help_page {key}");
+    let Some((_, url)) = HELP_PAGES.iter().find(|(name, _)| *name == key) else {
+        return Err(format!("unknown help page key: {key}"));
+    };
+    open_in_browser(url)
+}
+
 /// Hand a URL to the shell's "open" verb; the browser association decides
 /// where it lands, and this process never sees the browser.
 fn open_in_browser(url: &str) -> Result<(), String> {

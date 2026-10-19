@@ -151,7 +151,7 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
       redirectedExes.add(key);
       const destinations: Destination[] = ids.map((id, index) => ({
         key: `dev:${id}`,
-        name: nameById.get(id) ?? id,
+        name: nameById.get(id) ?? t('briefingPage.deviceGone'),
         role: index === 0 ? 'primary' : 'copy',
       }));
       for (const targetPid of targetPids) {
