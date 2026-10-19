@@ -97,6 +97,10 @@ export function StartupWizard() {
    *  under the choice change with it so neither answer is a blind press. */
   const [keepSettings, setKeepSettings] = useState(true);
   const [cleaning, setCleaning] = useState(false);
+  /** Why the inherit step could not be carried out, in the backend's own words.
+   *  It holds the step: the tour will not be offered to this machine twice, so
+   *  advancing past a wipe that failed would report a clean slate that is not. */
+  const [cleanError, setCleanError] = useState<string | null>(null);
 
   // A machine walking in from an older version answers for its predecessor's
   // settings before anything else — that screen is the reason an upgrade gets
@@ -116,32 +120,48 @@ export function StartupWizard() {
     [devices, captureDevices],
   );
 
-  // Escape leaves the tour exactly the way the skip link does. The listener
-  // lives only while the wizard does — the app's Escape paths never overlap.
+  // Escape leaves the tour exactly the way the skip link does — carrying the
+  // inherit answer with it, which is the one thing no door may drop. The
+  // listener lives only while the wizard does; the app's Escape paths never
+  // overlap.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') void dismiss();
+      if (e.key === 'Escape') void leave();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dismiss]);
+  });
 
   const last = step === steps.length - 1;
 
-  /** The footer's forward press: the inherit answer is acted on here, not
-   *  written down for later — what it discards is the predecessor's memory,
-   *  and the tour behind it should see the clean state it just chose. */
-  const advance = async () => {
-    if (current === 'inherit' && !keepSettings) {
-      setCleaning(true);
-      try {
-        await startClean();
-      } finally {
-        setCleaning(false);
-      }
+  /** Act on the inherit answer; true when the tour may move on.
+   *  Both doors go through here. Choosing 「重新开始」 and then leaving by any
+   *  of them is still choosing it — and the answer is worth more than the walk
+   *  behind it, so a refusal holds the step instead of advancing over it. */
+  async function settleInherit(): Promise<boolean> {
+    if (current !== 'inherit' || keepSettings) return true;
+    setCleaning(true);
+    try {
+      await startClean();
+      setCleanError(null);
+      return true;
+    } catch (e) {
+      setCleanError(String(e));
+      return false;
+    } finally {
+      setCleaning(false);
     }
+  }
+
+  async function advance() {
+    if (!(await settleInherit())) return;
     setStep((s) => Math.min(s + 1, steps.length - 1));
-  };
+  }
+
+  async function leave() {
+    if (!(await settleInherit())) return;
+    await dismiss();
+  }
 
   return (
     // The tour has no container at all: content sits straight on the work
@@ -164,7 +184,13 @@ export function StartupWizard() {
             {current === 'inherit' && (
               <InheritStep
                 keep={keepSettings}
-                onKeep={setKeepSettings}
+                error={cleanError}
+                onKeep={(value) => {
+                  setKeepSettings(value);
+                  // The refusal described the attempt that just failed; a new
+                  // answer makes it stale.
+                  setCleanError(null);
+                }}
                 previousVersion={notice?.previous_version ?? null}
               />
             )}
@@ -207,7 +233,7 @@ export function StartupWizard() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => void dismiss()}
+              onClick={() => void leave()}
               className="pressable rounded-ctl px-2.5 py-1 text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('wizard.skip')}
@@ -225,7 +251,7 @@ export function StartupWizard() {
               type="button"
               autoFocus
               disabled={cleaning}
-              onClick={() => (last ? void dismiss() : void advance())}
+              onClick={() => (last ? void leave() : void advance())}
               className="pressable rounded-ctl bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
             >
               {last ? t('wizard.start') : t('wizard.next')}
@@ -302,10 +328,12 @@ function StepBlock({ children, base = 0.85 }: { children: ReactNode; base?: numb
 function InheritStep({
   keep,
   onKeep,
+  error,
   previousVersion,
 }: {
   keep: boolean;
   onKeep: (keep: boolean) => void;
+  error: string | null;
   previousVersion: string | null;
 }) {
   const { t } = useTranslation();
@@ -333,6 +361,11 @@ function InheritStep({
           <p className="mt-3 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
             {keep ? t('wizard.inheritKeepHint') : t('wizard.inheritCleanHint')}
           </p>
+          {error !== null && (
+            <p className="mt-3 rounded-seg border border-line px-3 py-2 text-[11px] leading-relaxed text-error">
+              {t('wizard.inheritCleanFailed', { error })}
+            </p>
+          )}
         </div>
       </StepBlock>
     </StepText>
@@ -354,7 +387,9 @@ function InheritStep({
 function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | null }) {
   const { t } = useTranslation();
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
-  const [result, setResult] = useState<ResetOutcome | null>(null);
+  // Three answers, not two: a reset the backend refused returns null, and a
+  // button that re-enables with nothing said is read as "done".
+  const [result, setResult] = useState<ResetOutcome | 'refused' | null>(null);
   const [busy, setBusy] = useState(false);
 
   return (
@@ -368,23 +403,28 @@ function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | nu
       />
       <StepBlock>
         <p className="mt-4 text-[11px] leading-relaxed text-text-muted">{t('startup.resetHint')}</p>
-        {result !== null && (
-          <p
-            className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] tabular-nums leading-relaxed ${
-              result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
-            }`}
-          >
-            {t('startup.resetDone', { n: result.released })}
-            {result.still_pinned.length > 0 &&
-              ` ${t('startup.resetRemaining', { processes: result.still_pinned.join(', ') })}`}
-          </p>
-        )}
+        {result !== null &&
+          (result === 'refused' ? (
+            <p className="mt-3 rounded-seg border border-line px-3 py-2 text-[11px] leading-relaxed text-error">
+              {t('startup.resetRefused')}
+            </p>
+          ) : (
+            <p
+              className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] tabular-nums leading-relaxed ${
+                result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
+              }`}
+            >
+              {t('startup.resetDone', { n: result.released })}
+              {result.still_pinned.length > 0 &&
+                ` ${t('startup.resetRemaining', { processes: result.still_pinned.join(', ') })}`}
+            </p>
+          ))}
         <button
           type="button"
           onClick={() => {
             setBusy(true);
             void resetPinnedEndpoints()
-              .then((outcome) => setResult(outcome))
+              .then((outcome) => setResult(outcome ?? 'refused'))
               .finally(() => setBusy(false));
           }}
           disabled={busy}

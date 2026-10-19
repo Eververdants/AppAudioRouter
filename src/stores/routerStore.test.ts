@@ -1863,4 +1863,20 @@ describe("the tour's start clean", () => {
     expect(backend.remembered).toEqual([]);
     expect(backend.delays).toEqual([]);
   });
+
+  it('refuses out loud when the memory would not go', async () => {
+    // The tour is the only place this wipe is offered, and it does not come
+    // back for a second try — a half-done clean the user cannot see leaves them
+    // on a machine they believe is empty.
+    const backend = installBackend({
+      remembered: [['music.exe', ['tv']]],
+      fail: (cmd) => cmd === 'forget_previous_settings',
+    });
+    reset({ rememberedRoutes: [{ exeName: 'music.exe', deviceIds: ['tv'] }] });
+
+    await expect(state().startClean()).rejects.toThrow();
+
+    expect(lastLog()?.level).toBe('error');
+    expect(backend.remembered).toEqual([['music.exe', ['tv']]]);
+  });
 });

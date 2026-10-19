@@ -308,7 +308,10 @@ interface RouterState {
    * outcome is returned so the launch notice can report what it cleared. */
   resetPinnedEndpoints: () => Promise<ResetOutcome | null>;
   /** The tour's "start clean": take down what the boot restore already put up,
-   *  then forget the predecessor's memory and tuning. */
+   *  then forget the predecessor's memory and tuning. Rejects when the files
+   *  could not be forgotten — the tour is the only place this is offered and it
+   *  never returns to offer it twice, so an unfinished wipe has to be said out
+   *  loud rather than watched past. */
   startClean: () => Promise<void>;
   /** Release assignments whose program exited while it was routed, so its next
    * launch follows the system default again instead of the old device. */
@@ -2124,7 +2127,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       await api.forgetPreviousSettings();
     } catch (e) {
       get().addLog(i18next.t('log.forgetPreviousFailed', { error: String(e) }), 'error');
-      return;
+      // Refuse out loud. A wipe that half happened and was reported as done
+      // leaves the user on a machine they believe is clean, with no door left
+      // to try again — the tour is gone for this version.
+      throw e;
     }
     await Promise.all([
       get().loadRememberedRoutes(),

@@ -5,6 +5,7 @@
     "refresh": "Refresh",
     "search": "Search apps",
     "noMatch": "No app matches the search",
+    "reading": "Reading which apps are playing…",
     "empty": "No apps are playing audio",
     "emptyHint": "Play sound in an app, then refresh",
     "pid": "PID {{pid}}",
@@ -94,6 +95,7 @@
     "pickFeed": "Program inputs",
     "pickFeedItem": "{{process}}'s input",
     "pickNone": "Nothing left to add",
+    "pickNoDevices": "Windows reports no output device",
     "feedRole": "Send in",
     "feedHeld": "Held",
     "feedNoCarrier": "No carrier",
@@ -181,7 +183,8 @@
     "resetAction": "Reset per-app output",
     "resetting": "Clearing…",
     "resetDone": "Cleared the fixed output device of {{n}} program(s).",
-    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again."
+    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again.",
+    "resetRefused": "Nothing could be cleared — the app could not reach the audio service. Try again."
   },
   "wizard": {
     "skip": "Skip the tour",
@@ -218,7 +221,8 @@
     "inheritKeep": "Keep them",
     "inheritKeepHint": "Everything stays as it is: remembered routes and feeds, delay compensation, device shares and program levels.",
     "inheritClean": "Start clean",
-    "inheritCleanHint": "Remembered routes, feeds, delay compensation, device shares and program levels are cleared to factory state; anything just restored stops at once."
+    "inheritCleanHint": "Remembered routes, feeds, delay compensation, device shares and program levels are cleared to factory state; anything just restored stops at once.",
+    "inheritCleanFailed": "Nothing was cleared: {{error}}. This screen is not offered to this PC twice, so try again, or switch to keeping them."
   },
   "titleBar": {
     "minimize": "Minimize",

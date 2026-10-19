@@ -5,6 +5,7 @@
     "refresh": "刷新",
     "search": "搜索程序",
     "noMatch": "没有匹配的程序",
+    "reading": "正在读取哪些程序在放音…",
     "empty": "未检测到正在播放音频的程序",
     "emptyHint": "请先让程序播放声音，再刷新",
     "pid": "PID {{pid}}",
@@ -94,6 +95,7 @@
     "pickFeed": "程序输入",
     "pickFeedItem": "{{process}} 的输入",
     "pickNone": "没有可添加的了",
+    "pickNoDevices": "Windows 没有报告任何输出设备",
     "feedRole": "送入",
     "feedHeld": "挂起",
     "feedNoCarrier": "未接通",
@@ -181,7 +183,8 @@
     "resetAction": "重置每应用音频输出",
     "resetting": "正在清理…",
     "resetDone": "已清除 {{n}} 个程序的固定输出设备。",
-    "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。"
+    "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。",
+    "resetRefused": "未能清理——应用没能连上音频服务，请重试。"
   },
   "wizard": {
     "skip": "跳过向导",
@@ -218,7 +221,8 @@
     "inheritKeep": "继承",
     "inheritKeepHint": "一切照旧：记住的路由与送入规则、延迟补偿、设备份额与程序电平都保留。",
     "inheritClean": "重新开始",
-    "inheritCleanHint": "清空记住的路由与送入规则、延迟补偿、设备份额与程序电平，回到出厂状态；刚恢复的路由会立即停止。"
+    "inheritCleanHint": "清空记住的路由与送入规则、延迟补偿、设备份额与程序电平，回到出厂状态；刚恢复的路由会立即停止。",
+    "inheritCleanFailed": "没有清掉：{{error}}。这一屏在这台电脑上只出现一次，请重试，或改选「继承」。"
   },
   "titleBar": {
     "minimize": "最小化",
