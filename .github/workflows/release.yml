@@ -75,7 +75,14 @@ jobs:
           # The release page is an indexed landing page, so it carries the
           # same description and links as the README instead of a placeholder.
           releaseBody: |
-            Per-app audio routing for Windows 10 and 11 — send one program to several output devices at once, each with its own delay compensation and its own volume. No virtual audio driver and no third-party executable.
+            Per-app audio routing for Windows 10 and 11 — send one program to several output devices at once, each with its own delay compensation and its own volume; since 2.3.0, send one program's output into another program's input. Routing calls Core Audio directly from one native binary: no helper process, and no driver bundled or installed by the app. Feeds run through a loopback endpoint pair you install and name once in Settings.
+
+            ### What's in this release
+
+            - **Send one program into another's input** — the destination picker lists every program that can take sound in; selecting one connects it on the spot, with undo in the toast. The loopback pair is picked in Settings, and an unconfigured pair is named on the board rather than pretended past.
+            - **Delay calibration wizard** — each device plays a short tone in turn, you tap when you hear it, and the measured differences are written as the compensation.
+            - **A tray menu that does the whole job** — settings, start-with-Windows, stop all routes, quit; in the interface's own language.
+            - **The first run is a tour** — four screens on a new machine; an upgrade answers one question first, what to do with the previous version's settings.
 
             ### Install
 

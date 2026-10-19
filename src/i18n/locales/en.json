@@ -183,7 +183,7 @@
     "helpDesc": "The README covers the board, the loopback pair a feed runs through, and what Windows keeps after this app closes. It opens in your browser.",
     "helpAction": "Open the documentation",
     "helpFailed": "The browser did not open — the documentation lives in this app's repository.",
-    "aboutDesc": "Per-app audio routing for Windows — Rust on Core Audio directly, no third-party executables."
+    "aboutDesc": "Per-app audio routing for Windows — Rust on Core Audio directly, with no helper process and no driver bundled. Feeds run through a loopback endpoint pair you install and pick yourself."
   },
   "startup": {
     "upgradeTitle": "An earlier version ran on this PC",
@@ -213,7 +213,7 @@
     "sketchTargetDevice": "Output device",
     "sketchTargetFeed": "Program input",
     "carrierTitle": "Feeding another program's input",
-    "carrierBody": "Sending sound into a program's microphone runs through a loopback driver's endpoint pair. The app ships no driver — one you already have is recognized here, and the free VB-Cable is one click away. Skipping this costs nothing else: routing to devices works without it.",
+    "carrierBody": "Sending sound into a program's microphone runs through a loopback driver's endpoint pair. The app ships no driver and installs none — one you already have is recognized here, and the free VB-Cable's own page opens from the button below. Skipping this costs nothing else: routing to devices works without it.",
     "carrierMissing": "No loopback driver found. Install the free VB-Cable now, or pick the pair later in Settings → Feed carrier.",
     "backgroundTitle": "While you are away",
     "backgroundBody": "The app lives in the tray and keeps routes working with the window closed. Two habits to choose:",

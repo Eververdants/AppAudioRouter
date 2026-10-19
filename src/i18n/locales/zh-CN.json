@@ -183,7 +183,7 @@
     "helpDesc": "README 讲清看板、送入所经过的回环端点对，以及本应用退出后 Windows 仍留着的那些记录。会在浏览器里打开。",
     "helpAction": "打开说明文档",
     "helpFailed": "浏览器没有打开——说明文档在本应用的代码仓库里。",
-    "aboutDesc": "Windows 每应用音频路由；Rust 直连 Core Audio，无第三方 exe。"
+    "aboutDesc": "Windows 每应用音频路由；Rust 直连 Core Audio，不带辅助进程、不自带驱动。送入用的是你自己安装并在设置里点名的那对回环端点。"
   },
   "startup": {
     "upgradeTitle": "检测到曾安装过旧版本",
@@ -213,7 +213,7 @@
     "sketchTargetDevice": "输出设备",
     "sketchTargetFeed": "程序输入",
     "carrierTitle": "送进另一个程序的输入",
-    "carrierBody": "把声音送进程序的麦克风，要经过回环驱动的一对端点。本应用不自带驱动——装过的一认便知，免费的 VB-Cable 一键可达。跳过这步没有别的代价：路由到设备不需要它。",
+    "carrierBody": "把声音送进程序的麦克风，要经过回环驱动的一对端点。本应用不自带驱动，也不会替你安装——装过的一认便知，没装的话下面的按钮会打开 VB-Cable 的官方页面。跳过这步没有别的代价：路由到设备不需要它。",
     "carrierMissing": "未检测到回环驱动。可以现在装免费的 VB-Cable，也可以以后在 设置 → 送入载体 里配。",
     "backgroundTitle": "你不在的时候",
     "backgroundBody": "应用常驻托盘，窗口关了路由也在。两个习惯由你定：",

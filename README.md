@@ -18,7 +18,7 @@
   <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-> **App Audio Router is a free, open-source desktop application for Windows 10 and Windows 11 that routes the audio of individual programs to the playback devices you choose.** It can send one application to several devices at the same time, and it lets you tune each device separately — a delay compensation to line a Bluetooth headset up with wired speakers, and a volume to balance how loud each device is. Everything is done with the Windows Core Audio API from a single native binary: there is no virtual audio driver to install and no third-party executable to bundle.
+> **App Audio Router is a free, open-source desktop application for Windows 10 and Windows 11 that routes the audio of individual programs to the playback devices you choose.** It can send one application to several devices at the same time, and it lets you tune each device separately — a delay compensation to line a Bluetooth headset up with wired speakers, and a volume to balance how loud each device is. Everything is done with the Windows Core Audio API from a single native binary: there is no third-party executable to bundle and no driver to install for routing. Feeding one program into another's input runs through a loopback endpoint pair you pick yourself — the app never ships or installs one.
 
 ---
 
@@ -36,7 +36,7 @@ It is aimed at ordinary users rather than audio engineers. There is no mixer gra
 | **Installer** | MSI or NSIS setup from [Releases](https://github.com/Eververdants/AppAudioRouter/releases) |
 | **Licence** | MIT |
 | **UI languages** | English, Simplified Chinese |
-| **External dependencies** | None — no virtual audio driver, no helper executable |
+| **External dependencies** | None for routing — no helper executable, no driver. Feeds run through a loopback endpoint pair you install and pick yourself |
 | **Built with** | Tauri 2, Rust, React 19, TypeScript, TailwindCSS, Vite |
 | **Source code** | https://github.com/Eververdants/AppAudioRouter |
 
@@ -58,6 +58,7 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 - **Stop on demand.** Stop routing and the program is handed back to the system default device — the fixed output device Windows took while the route was live is released again, so switching the default device by hand keeps moving that program.
 - **Nothing left behind.** The only trace of a route is an output device Windows fixes for the program while it is routed. Stopping the route, quitting the app and **Settings → Reset per-app output** each give it back, and a program that exited while routed gets its device back the next time it plays.
 - **Auto-remember.** Routing rules are stored per executable name and restored when that program plays again.
+- **One app → another app's input (2.3.0).** The same "+ Add destination" picker lists every program that can take sound in; choosing one connects it there on the spot — no hub press, and the toast offers the way back. It runs through the endpoint pair a loopback driver provides, picked once in Settings; this app ships no driver and installs none. Until that pair is configured the rule is still remembered and the row on the board reads *No carrier* instead of pretending sound is moving.
 - **A mirror that fails says so.** If one device of a multi-device route cannot be opened, the engine keeps playing on the others and the log names the device that went silent — a route that is only half alive should not look fully applied.
 
 ### Per-device fine-tuning
@@ -72,7 +73,7 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 
 - **Live lists.** The device list and the process list follow the audio engine on their own — plug in a headset, or start and stop playback in an app, and both lists update without pressing anything. This uses Core Audio's own change notifications, not a polling timer.
 - **One copy, one tray icon.** Launching the app again does not start a second process: the copy already running brings its window to the front instead. Two instances would fight over the same configuration files and the same audio devices.
-- **System tray.** A tray icon appears while the app runs: left click shows or hides the window, the right-click menu has *Show / hide* and *Quit*.
+- **System tray.** A tray icon appears while the app runs: left click shows or hides the window, the right-click menu has *Show / hide*, *Open settings*, *Start with Windows*, *Stop all routes* and *Quit* — in the interface's own language.
 - **Close to tray.** Optionally, the close button hides the window instead of quitting, so routing keeps running with no window on screen. Off by default; `Quit` is the action that stops the routes.
 - **Start with Windows.** Optionally registers the app under your user's startup entries (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), launching silently into the tray so remembered routes are ready before you open anything. Turn it back off from the same switch, or from Task Manager → Startup apps.
 
@@ -95,7 +96,8 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 | Per-program level balance | **Yes** — 0–400 % per program, dialed on its node, aligned in one click | No | Yes, but every strip is set by hand | No |
 | How many programs and devices at once | **No built-in limit** — each routed program is its own engine | — | A fixed number of buses (3/5/8 by edition) | No |
 | Remembers the route per application | **Yes**, automatically | Yes (this is the same Windows setting) | Configured in Windows, not in the mixer | Inherits the Windows per-app setting |
-| Requires a virtual audio driver | **No** | — | Yes | — |
+| One app → another app's input | **Yes** (2.3.0, through a loopback endpoint pair, applied on selection) | No | No | Yes (virtual channels) |
+| Requires a virtual audio driver | **Routing: no. Feeds: a loopback pair you install** — the app itself ships and installs no driver | — | Yes | — |
 | Cost | **Free, MIT licensed** | Bundled with Windows | Free or pay-what-you-want | Free, MIT licensed |
 
 *The other columns describe publicly documented behaviour of those approaches; check their own documentation for the current feature set.*
@@ -104,7 +106,7 @@ The same board in both themes: `Music.exe` is the programme being looked at, so 
 
 - **Windows 10 or Windows 11, 64-bit.**
 - WebView2 runtime — already present on Windows 11 and on any Windows 10 with Microsoft Edge installed.
-- That is all for the installed build: no audio driver, no service, no third-party executable.
+- That is all for the installed build: no audio driver, no service, no third-party executable. (Feeding one program into another's input uses a loopback endpoint pair *you* install and name in Settings — the app bundles no driver and runs no installer.)
 
 To build from source you additionally need Node.js 20 or later, pnpm 10, and a stable Rust toolchain with the MSVC target and the WebView2 build tools that Tauri uses.
 
