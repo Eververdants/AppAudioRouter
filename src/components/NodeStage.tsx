@@ -253,6 +253,10 @@ export function NodeStage() {
     (d) => d.id !== feedCarrier.render || drawn.includes(d.id),
   );
   const addableDevices = pickableDevices.filter((d) => !drawn.includes(d.id));
+  // A machine Windows reports no render endpoint for must not be told its plan
+  // is already full — "nothing left to add" reads as a finished action, and
+  // there was nothing to act on.
+  const devicePickerEmpty = devices.length === 0 ? t('stage.pickNoDevices') : t('stage.pickNone');
 
   // The wires move only when what is drawn is what is playing — a plan waiting
   // for the hub is a proposal, and a proposal does not hum.
@@ -890,7 +894,7 @@ export function NodeStage() {
               >
                 <div className="overflow-y-auto" style={{ maxHeight: addPickerCap - 14 }}>
                   <PickerSection label={t('stage.pickDevice')}>
-                    {addableDevices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {addableDevices.length === 0 && <PickerEmpty text={devicePickerEmpty} />}
                     {addableDevices.map((d) => (
                       <motion.button
                         key={d.id}
@@ -983,7 +987,7 @@ export function NodeStage() {
               >
                 <div className="overflow-y-auto" style={{ maxHeight: primaryPickerCap - 14 }}>
                   <PickerSection label={t('stage.pickPrimary')}>
-                    {pickableDevices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {pickableDevices.length === 0 && <PickerEmpty text={devicePickerEmpty} />}
                     {pickableDevices.map((d) => {
                       const picked = d.id === primaryDeviceId;
                       return (
