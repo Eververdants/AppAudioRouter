@@ -75,7 +75,7 @@ AppAudioRouter/
 │   │   ├── BriefingPage.tsx        # 「现状」页（路由与活动记录之间）：每个程序一行 chip 的去向图
 │   │   ├── SourceLevelDial.tsx     # hub 卡下的每程序电平环（仅多设备路由挂载）
 │   │   ├── DelayCalibration.tsx    # 延迟校准向导（设置页「延迟补偿」区进入：轮流出声、听到就点一下、结果屏可改基准）
-│   │   ├── Toast.tsx               # 瞬态提示：路由与送入的撤销入口（全项目唯一）
+│   │   ├── Toast.tsx               # 瞬态提示：路由与送入的撤销入口，加上「你刚要做的事没做成」（全项目唯一）
 │   │   ├── SettingsPage.tsx        # 设置独立页面（左分区导航 + 右内容）
 │   │   ├── LogPanel.tsx            # 活动记录（下划线标签页第三页）
 │   │   ├── TitleBar.tsx            # 自定义标题栏（透明；「已路由 · 播放中」计数 + 设置入口）
@@ -174,6 +174,8 @@ AppAudioRouter/
 - 路由只由看板表达，别在别处画第二份（树 / 状态条 / 常驻文字摘要）；例外只有两个、都叫得出名字：**「现状」页**（一个标签页）与**已路由胶囊**。底部**没有**常驻 status bar——调音条只在点了某行编号时出现。
 - 看板几何唯一来源 `lib/stage.ts`（组件用 `style` 取值，不用 Tailwind `w-[…]`）；没有拖动、平移、缩放。复制面板装不下时以**半行**收尾 + 背景渐隐提示可滚动。
 - 左栏选中高亮是**圆角矩形 + 行首竖规**，不是胶囊。
+- **失败分两条路**：用户刚发起、却没做成的事走 `raiseError`（Toast 里一条 `role="alert"`，同时照常写 error 日志）；后台读取失败**只**写日志——开机时三份数据谁先到不由人，全举起来等于应用一开口就在抱怨。撤销卡不许被复用成错误提示，错误卡没有按钮。
+- **键盘要能走到每一个入口**：`role="menu"` 的选择器打开时把焦点放进第一行、关闭时还给打开它的那枚按钮（`Select` 的 combobox 走的是另一套：焦点留在触发器 + `aria-activedescendant`）；会自己卸载的输入控件（`ScrubReadout` 键入态）必须把焦点交回宿主；只有滚动条能到的区域要挂 `tabIndex`。
 - 已删不复活：液态玻璃、自由画布、路由树、设备表格、同心圆舞台、`StatusBriefing`（「直说」浮层）（[board-ui.md](docs/agents/board-ui.md) 有完整清单）；`tauri-plugin-*` 见「安全注意事项」。
 
 ---
@@ -206,7 +208,7 @@ AppAudioRouter/
 - 系统关键进程的路由必须在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；槽 25 的 `set_persisted_default` 只是裸调用，从它旁边另起一路就等于绕过这道拒绝；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
-- 前端永不传 URL：`open_carrier_download` 只收驱动 key，URL 映射固定在 Rust 侧（`commands.rs` 的 `CARRIER_PAGES`），页面经 `ShellExecuteW` 的 open 动词交给浏览器关联
+- 前端永不传 URL：`open_carrier_download` 只收驱动 key（映射在 `commands.rs` 的 `CARRIER_PAGES`），`open_help_page` 只收文档 key（映射在 `HELP_PAGES`），页面都经 `ShellExecuteW` 的 open 动词交给浏览器关联
 
 ---
 

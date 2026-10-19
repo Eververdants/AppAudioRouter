@@ -93,3 +93,7 @@
 - `StartupNotice { kind, previous_version, leftover_endpoints }` 的 `kind`（kebab-case）是前后端契约，`src/lib/types.ts` 按字面量认它，`install.rs` 里有测试钉住；新增第三种之前先想清楚前端怎么显示。
 - 重置按钮复用 `resetPinnedEndpoints`，不要再写一条清理路径；文案必须写明「会清掉当前正在运行的程序」，否则用户会以为它只清旧版本留下的东西。`forget_previous_settings` 同理：它只清本应用自己的记忆与调音文件（route-memory / feed-memory / device-delays / device-volumes / source-volumes），**不动**固定端点、不动主输出音量、不动 app-settings——清单每多一样东西，先回这里改这段话再改代码。
 - **开发期测试入口**：debug 构建读环境变量 `AAR_STARTUP_NOTICE`（取值 `first-run` / `upgrade`），强制本次启动提示的种类——ack 过一次的机器否则永远见不到向导（状态文件正在尽职）。release 构建不读这个变量；强制提示被点掉时照常写 `install-state.json`。
+- **正式构建也有一条重看的路**：设置 →「关于」的 `replayWizard` 只是把 `startupNotice` 摆回 `first-run` 那四步（不问继承、不问旧端点），ack 写的还是同一个版本号，所以 `install-state.json` 不会因此改变这台机器的记录。**别**为了重看去改 `install.rs` 的判定或往 release 构建里读环境变量。
+- **「重新开始」这个答案由每一扇门执行**：`advance()`、`跳过`、`Escape` 都先 `settleInherit()` 再走（[StartupWizard.tsx](../../src/components/StartupWizard.tsx)）。选中「重新开始」之后从任何一扇门离开都是同一个选择——这一屏每台机器只出现一次，答漏了就再也没有问的机会。清理被拒绝时**留着这一步**并把后端的原话说在屏幕上：把半清的状态报成"已重新开始"，比停在原地更糟。窗口的 ✕ 永远是绝对出口。
+- 「重置每应用音频输出」那一屏区分三种回答：清了几台、哪几台还钉着（内联在按钮下面，逐程序点名）、以及后端根本没答应（走错误卡）。`resetPinnedEndpoints` 用 `null` 表示第三种，别把它当成"零台"。
+- 文档入口同驱动页一样走 key：`open_help_page('readme' | 'readme-zh')`，URL 固定在 `commands.rs` 的 `HELP_PAGES`，前端永不传 URL。
