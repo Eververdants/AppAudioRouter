@@ -172,6 +172,7 @@
     "feedCarrierPaired": "正在使用 {{driver}} 作为载体",
     "feedCarrierMissing": "未检测到回环驱动。装一个免费的 VB-Cable 即可，列表会自动刷新，无需重启。",
     "feedCarrierDownload": "下载 VB-Cable（免费）",
+    "feedCarrierDownloadFailed": "浏览器没有打开——请自行访问 VB-Cable 的官方页面。",
     "about": "关于",
     "aboutDesc": "Windows 每应用音频路由；Rust 直连 Core Audio，无第三方 exe。"
   },
@@ -183,8 +184,7 @@
     "resetAction": "重置每应用音频输出",
     "resetting": "正在清理…",
     "resetDone": "已清除 {{n}} 个程序的固定输出设备。",
-    "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。",
-    "resetRefused": "未能清理——应用没能连上音频服务，请重试。"
+    "resetRemaining": "未能清除 {{processes}}——请先让其播放声音，再重试。"
   },
   "wizard": {
     "skip": "跳过向导",

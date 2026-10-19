@@ -172,6 +172,7 @@
     "feedCarrierPaired": "{{driver}} is the carrier",
     "feedCarrierMissing": "No loopback driver found. A free VB-Cable is enough — the lists here refresh on their own, no restart needed.",
     "feedCarrierDownload": "Get VB-Cable (free)",
+    "feedCarrierDownloadFailed": "The browser did not open — copy the address of the VB-Cable page and open it yourself.",
     "about": "About",
     "aboutDesc": "Per-app audio routing for Windows — Rust on Core Audio directly, no third-party executables."
   },
@@ -183,8 +184,7 @@
     "resetAction": "Reset per-app output",
     "resetting": "Clearing…",
     "resetDone": "Cleared the fixed output device of {{n}} program(s).",
-    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again.",
-    "resetRefused": "Nothing could be cleared — the app could not reach the audio service. Try again."
+    "resetRemaining": "{{processes}} could not be cleared — a program must be playing audio to be released; try again."
   },
   "wizard": {
     "skip": "Skip the tour",

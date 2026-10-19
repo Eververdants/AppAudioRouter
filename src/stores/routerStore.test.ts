@@ -1388,6 +1388,26 @@ describe('settings and log', () => {
     expect(state().logs[state().logs.length - 1]?.message).toBe('entry 259');
   });
 
+  it('raises a failure where the user is looking, and in the log', () => {
+    installBackend();
+    reset();
+
+    state().raiseError('apply_route failed');
+
+    expect(state().errorNotice?.message).toBe('apply_route failed');
+    expect(lastLog()?.level).toBe('error');
+
+    // One notice at a time, keyed on a counter: a second failure replaces the
+    // first, and the identical text still counts as a new arrival so the
+    // countdown restarts rather than expiring under a message that just came in.
+    const first = state().errorNotice?.id;
+    state().raiseError('apply_route failed');
+    expect(state().errorNotice?.id).not.toBe(first);
+
+    state().dismissError();
+    expect(state().errorNotice).toBeNull();
+  });
+
   it('clamps a delay past the hard bound before storing it', async () => {
     installBackend();
     reset({ deviceDelays: {} });

@@ -387,9 +387,10 @@ function InheritStep({
 function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | null }) {
   const { t } = useTranslation();
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
-  // Three answers, not two: a reset the backend refused returns null, and a
-  // button that re-enables with nothing said is read as "done".
-  const [result, setResult] = useState<ResetOutcome | 'refused' | null>(null);
+  // What the press cleared. A refusal is the store's to report — it reaches the
+  // toast everywhere — so this screen keeps only the outcome it can spell out
+  // per program: which ones are still fixed somewhere.
+  const [result, setResult] = useState<ResetOutcome | null>(null);
   const [busy, setBusy] = useState(false);
 
   return (
@@ -403,28 +404,25 @@ function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | nu
       />
       <StepBlock>
         <p className="mt-4 text-[11px] leading-relaxed text-text-muted">{t('startup.resetHint')}</p>
-        {result !== null &&
-          (result === 'refused' ? (
-            <p className="mt-3 rounded-seg border border-line px-3 py-2 text-[11px] leading-relaxed text-error">
-              {t('startup.resetRefused')}
-            </p>
-          ) : (
-            <p
-              className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] tabular-nums leading-relaxed ${
-                result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
-              }`}
-            >
-              {t('startup.resetDone', { n: result.released })}
-              {result.still_pinned.length > 0 &&
-                ` ${t('startup.resetRemaining', { processes: result.still_pinned.join(', ') })}`}
-            </p>
-          ))}
+        {result !== null && (
+          <p
+            className={`mt-3 rounded-seg border border-line px-3 py-2 font-mono text-[11px] tabular-nums leading-relaxed ${
+              result.still_pinned.length === 0 ? 'text-accent' : 'text-text-secondary'
+            }`}
+          >
+            {t('startup.resetDone', { n: result.released })}
+            {result.still_pinned.length > 0 &&
+              ` ${t('startup.resetRemaining', { processes: result.still_pinned.join(', ') })}`}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => {
             setBusy(true);
             void resetPinnedEndpoints()
-              .then((outcome) => setResult(outcome ?? 'refused'))
+              .then((outcome) => {
+                if (outcome !== null) setResult(outcome);
+              })
               .finally(() => setBusy(false));
           }}
           disabled={busy}
@@ -531,6 +529,7 @@ function CarrierStep({
   onPair: () => void;
 }) {
   const { t } = useTranslation();
+  const raiseError = useRouterStore((s) => s.raiseError);
   const paired = carrierMatch !== null && matchesCarrier(carrierMatch, feedCarrier);
   return (
     <StepText title={t('wizard.carrierTitle')}>
@@ -562,7 +561,11 @@ function CarrierStep({
             </span>
             <button
               type="button"
-              onClick={() => void openCarrierDownload('vb-cable')}
+              onClick={() =>
+                void openCarrierDownload('vb-cable').catch(() => {
+                  raiseError(t('settings.feedCarrierDownloadFailed'));
+                })
+              }
               className="pressable shrink-0 rounded-ctl border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {t('settings.feedCarrierDownload')}

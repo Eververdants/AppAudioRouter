@@ -196,6 +196,12 @@ interface RouterState {
    * once acknowledged. */
   startupNotice: StartupNotice | null;
   logs: LogEntry[];
+  /**
+   * A failure the user has to see without opening the activity tab, while the
+   * notice stands. One at a time: a second failure replaces the first, the way
+   * a new route replaces the undo offer that described the last one.
+   */
+  errorNotice: { id: number; message: string } | null;
   /** True while a route request is in flight, so a rapid double-click cannot
    * dispatch two overlapping routes against the same selection. */
   applying: boolean;
@@ -356,9 +362,18 @@ interface RouterState {
    *  no Core Audio change to be measured. */
   reconcileActiveDuplications: () => Promise<void>;
   addLog: (message: string, level?: LogEntry['level']) => void;
+  /**
+   * Report a failure where the user is looking, and in the log. Only for the
+   * things someone just asked for that did not happen — a background read that
+   * failed reaches the log alone, or every launch would open holding a stack of
+   * complaints nobody caused.
+   */
+  raiseError: (message: string) => void;
+  dismissError: () => void;
 }
 
 let logId = 0;
+let errorId = 0;
 
 /**
  * A refresh gate coalesces concurrent requests instead of dropping them: if a
@@ -862,6 +877,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   autostart: false,
   startupNotice: null,
   logs: [],
+  errorNotice: null,
   applying: false,
   engineGenerations: {},
   undoSnapshot: null,
@@ -931,7 +947,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      get().addLog(i18next.t('log.deviceRefreshFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.deviceRefreshFailed', { error: String(e) }));
     } finally {
       deviceRefreshGate.inFlight = false;
       runQueuedRefresh(deviceRefreshGate, (rerunViaNotification) => {
@@ -1020,7 +1036,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      get().addLog(i18next.t('log.sessionsRefreshFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.sessionsRefreshFailed', { error: String(e) }));
     } finally {
       // Raised whether the enumeration answered or refused: after a failure the
       // rail would otherwise sit on "reading" forever, which is a different
@@ -1256,9 +1272,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // The file still carries it, so the list must too: showing a route as
       // forgotten while the next launch restores it is the worse lie.
       set({ rememberedRoutes: previous });
-      get().addLog(
+      get().raiseError(
         i18next.t('log.rememberedRouteClearedFailed', { process: exeName, error: String(e) }),
-        'error',
       );
     }
   },
@@ -1303,7 +1318,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       queueAssignmentWork(() => get().restoreRememberedFeeds());
     } catch (e) {
       set({ feedCarrier: previous });
-      get().addLog(i18next.t('log.feedCarrierSetFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.feedCarrierSetFailed', { error: String(e) }));
     }
   },
 
@@ -1398,7 +1413,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           feedUndo: null,
         };
       });
-      get().addLog(i18next.t('log.feedSetFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.feedSetFailed', { error: String(e) }));
     }
   },
 
@@ -1455,7 +1470,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // Say it here, and name the way out — this is the one case where the
       // settings page's reset is the only thing left that can reach it.
       if (stuck.length > 0) {
-        get().addLog(i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }), 'error');
+        get().raiseError(i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }));
       }
     } catch (e) {
       // The backend kept the rule: put this one wire and this one memory entry
@@ -1486,7 +1501,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           feedUndo: null,
         };
       });
-      get().addLog(i18next.t('log.feedRemoveFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.feedRemoveFailed', { error: String(e) }));
     }
   },
 
@@ -1622,7 +1637,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t(next ? 'log.closeToTrayOn' : 'log.closeToTrayOff'), 'info');
     } catch (e) {
       set({ closeToTray: !next });
-      get().addLog(i18next.t('log.closeToTrayFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.closeToTrayFailed', { error: String(e) }));
     }
   },
 
@@ -1636,7 +1651,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // Writing HKCU\...\Run can genuinely fail; the switch must snap back rather
       // than lie about an entry that is not there.
       set({ autostart: !next });
-      get().addLog(i18next.t('log.autostartFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.autostartFailed', { error: String(e) }));
     }
   },
 
@@ -1672,7 +1687,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     });
     if (targets.length === 0) {
       set({ applying: false });
-      get().addLog(i18next.t('log.processGone'), 'error');
+      get().raiseError(i18next.t('log.processGone'));
       return;
     }
     // Counted against the list, not against the fold: a selection of four that
@@ -1728,10 +1743,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
       });
       if (applied.length === 0) {
-        get().addLog(
-          i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }),
-          'error',
-        );
+        get().raiseError(i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }));
         // Every apply tears the selection's old engines down before it starts
         // new ones, so a rejected re-route has left the backend with no engine
         // for these pids while the badges above may still carry the old route.
@@ -1809,9 +1821,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'success',
       );
       if (errors.length > 0) {
-        get().addLog(
+        get().raiseError(
           i18next.t('log.routePartiallyFailed', { ok: count, n: targets.length, error: errors[0] }),
-          'error',
         );
       }
       // The route is in effect and the 自动记忆 switch is on, so one of them did
@@ -1828,7 +1839,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // for the next route, or for Core Audio to move.
       await get().reconcileActiveDuplications();
     } catch (e) {
-      get().addLog(i18next.t('log.routeFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.routeFailed', { error: String(e) }));
     } finally {
       // Always release the flighting flag — a failed route must not leave the
       // hub latched disabled against a still-routable selection.
@@ -1898,7 +1909,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     if (failure === null) {
       get().addLog(i18next.t('log.routeUndone', { n: snapshot.entries.length }), 'info');
     } else {
-      get().addLog(i18next.t('log.routeUndoFailed', { error: failure }), 'error');
+      get().raiseError(i18next.t('log.routeUndoFailed', { error: failure }));
     }
   },
 
@@ -1964,14 +1975,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // switching devices by hand will not move the program until the
         // assignment is released, and only the settings page can do that.
         const device = outcome.pinned_device;
-        get().addLog(
+        get().raiseError(
           device === null
             ? i18next.t('log.routeStoppedUnreleased', { process })
             : i18next.t('log.routeStoppedStillPinned', {
                 process,
                 device: get().devices.find((d) => d.id === device)?.name ?? device,
               }),
-          'error',
         );
       }
     } catch (e) {
@@ -1990,7 +2000,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
         };
       });
-      get().addLog(i18next.t('log.stopRouteFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.stopRouteFailed', { error: String(e) }));
     }
   },
 
@@ -2017,7 +2027,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       if (pid === undefined) return;
       if (result.status === 'rejected') {
         failed.push(pid);
-        get().addLog(i18next.t('log.stopRouteFailed', { error: String(result.reason) }), 'error');
+        get().raiseError(i18next.t('log.stopRouteFailed', { error: String(result.reason) }));
       } else if (!result.value.released && !result.value.sibling_held) {
         // Stopped, but the program keeps a fixed output device: one line for the
         // whole batch is enough, the single-stop case names the device. A stop
@@ -2106,7 +2116,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       }
       return outcome;
     } catch (e) {
-      get().addLog(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }));
       return null;
     }
   },
@@ -2213,7 +2223,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { deviceVolumes };
       });
-      get().addLog(i18next.t('log.deviceVolumeFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.deviceVolumeFailed', { error: String(e) }));
     }
   },
 
@@ -2264,7 +2274,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { primaryVolumes };
       });
-      get().addLog(i18next.t('log.primaryVolumeFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.primaryVolumeFailed', { error: String(e) }));
     }
   },
 
@@ -2311,7 +2321,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { sourceVolumes };
       });
-      get().addLog(i18next.t('log.sourceVolumeFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.sourceVolumeFailed', { error: String(e) }));
     }
   },
 
@@ -2340,7 +2350,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      get().addLog(i18next.t('log.sourceLevelsAlignFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.sourceLevelsAlignFailed', { error: String(e) }));
     }
     // Read the levels back rather than trusting the ones this side could have
     // predicted: the backend rounds each gain and bounds it by that program's
@@ -2432,7 +2442,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { deviceDelays };
       });
-      get().addLog(i18next.t('log.delaySetFailed', { error: String(e) }), 'error');
+      get().raiseError(i18next.t('log.delaySetFailed', { error: String(e) }));
       return false;
     }
   },
@@ -2466,7 +2476,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // misleading failure line for a route that has already been replaced.
     if (generation !== (get().engineGenerations[pid] ?? 0)) return;
     if (reason === 'error') {
-      get().addLog(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }), 'error');
+      get().raiseError(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }));
       // End it the way a stop ends it, and it has to be the stop. The engine
       // took its mirrors down with itself but not the endpoint Windows was told
       // to play this program on. Cleared locally only, that assignment stays
@@ -2532,7 +2542,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // plays directly. The honest answer is to end the route instead of
     // reassigning its roles.
     if (routed[0] === deviceId) {
-      get().addLog(i18next.t('log.duplicationFailed', { pid, error }), 'error');
+      get().raiseError(i18next.t('log.duplicationFailed', { pid, error }));
       // Same reasoning as an engine that stops by itself: this ends the route,
       // so it ends it through the stop, which is the path that hands the
       // program's endpoint back. The clear below would leave the badge gone and
@@ -2547,10 +2557,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       routedPids: { ...s.routedPids, [pid]: routed.filter((id) => id !== deviceId) },
     }));
     const device = get().devices.find((d) => d.id === deviceId);
-    get().addLog(
-      i18next.t('log.mirrorFailed', { device: device?.name ?? deviceId, error }),
-      'error',
-    );
+    get().raiseError(i18next.t('log.mirrorFailed', { device: device?.name ?? deviceId, error }));
   },
 
   reconcileActiveDuplications: async () => {
@@ -2641,6 +2648,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       logs: [...s.logs, { id: ++logId, timestamp: ts, message, level }].slice(-200),
     }));
   },
+
+  raiseError: (message) => {
+    // Keyed on a counter, not on the text: the same refusal happening twice is
+    // two notices, and the second one's countdown starts on its own arrival.
+    set({ errorNotice: { id: ++errorId, message } });
+    get().addLog(message, 'error');
+  },
+
+  dismissError: () => set({ errorNotice: null }),
 }));
 
 /**

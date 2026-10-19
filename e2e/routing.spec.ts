@@ -386,6 +386,11 @@ test('a route the backend rejects leaves the app where it was', async ({ page })
   await expect(page.getByRole('button', { name: 'Undo' })).toBeHidden();
   await expect(hub(page)).toBeEnabled();
   await expect(appRow(page, 'music.exe')).toBeVisible();
+
+  // And the refusal is on the screen, not only in the log: a press that did
+  // nothing reads as a press that worked when the sole record sits in a tab
+  // nobody opens.
+  await expect(page.getByRole('alert')).toContainText('Routing failed');
 });
 
 test('the rail header offers a way back for everything, and asks once before taking it', async ({

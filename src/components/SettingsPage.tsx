@@ -14,7 +14,7 @@ import { DELAY_STEP_OPTIONS, formatStep } from '@/lib/delay';
 import { isEditableTarget } from '@/lib/productionGuards';
 import { openCarrierDownload } from '@/lib/invoke';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
-import type { AudioDevice, AudioSession, RememberedRouteEntry } from '@/lib/types';
+import type { AudioDevice, AudioSession, RememberedRouteEntry, ResetOutcome } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -291,6 +291,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const rememberedRoutes = useRouterStore((s) => s.rememberedRoutes);
   const forgetRememberedRoute = useRouterStore((s) => s.forgetRememberedRoute);
   const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
+  const raiseError = useRouterStore((s) => s.raiseError);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const routedCount = useRouterStore((s) => Object.keys(s.routedPids).length);
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
@@ -309,6 +310,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const [section, setSection] = useState<SettingsSection>('appearance');
   // The delay wizard; mounted over the page while it runs.
   const [calibrationOpen, setCalibrationOpen] = useState(false);
+  // What the last "reset per-app output" press cleared, so the press has an
+  // answer of its own instead of only a line in another tab.
+  const [resetOutcome, setResetOutcome] = useState<ResetOutcome | null>(null);
   // The section that is already on the paper when the page opens lands in
   // place; only a *change* of section plays the arrival. A ref rather than
   // state: it is read on the section's own mount, so it has to be a value that
@@ -525,11 +529,28 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                         in one press — and it reaches programs that are not on the
                         board. The same action asks first in the process list's
                         header for the same reason, so it asks here too. */}
-                  <ConfirmButton
-                    label={t('settings.resetEndpointsAction')}
-                    confirmLabel={t('settings.resetEndpointsConfirm')}
-                    onConfirm={() => void resetPinnedEndpoints()}
-                  />
+                  <div className="flex flex-col items-end gap-1.5">
+                    <ConfirmButton
+                      label={t('settings.resetEndpointsAction')}
+                      confirmLabel={t('settings.resetEndpointsConfirm')}
+                      onConfirm={() => {
+                        void resetPinnedEndpoints().then((outcome) => {
+                          // A refusal is the toast's; what belongs here is the
+                          // count, so the press is not mistaken for a no-op.
+                          if (outcome !== null) setResetOutcome(outcome);
+                        });
+                      }}
+                    />
+                    {resetOutcome !== null && (
+                      <span className="max-w-[34ch] text-right text-[11px] leading-relaxed text-text-muted">
+                        {t('startup.resetDone', { n: resetOutcome.released })}
+                        {resetOutcome.still_pinned.length > 0 &&
+                          ` ${t('startup.resetRemaining', {
+                            processes: resetOutcome.still_pinned.join(', '),
+                          })}`}
+                      </span>
+                    )}
+                  </div>
                 </Row>
                 <Row title={t('settings.stopAllRoutes')} desc={t('settings.stopAllRoutesDesc')}>
                   <ConfirmButton
@@ -619,7 +640,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                         </span>
                         <button
                           type="button"
-                          onClick={() => void openCarrierDownload('vb-cable')}
+                          onClick={() =>
+                            void openCarrierDownload('vb-cable').catch(() => {
+                              // The page is the only way to the driver, and a
+                              // press that opens nothing looks like a press
+                              // that worked.
+                              raiseError(t('settings.feedCarrierDownloadFailed'));
+                            })
+                          }
                           className={ROW_BUTTON_CLASS}
                         >
                           {t('settings.feedCarrierDownload')}

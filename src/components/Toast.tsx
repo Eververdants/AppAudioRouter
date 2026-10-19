@@ -9,17 +9,24 @@ import { useRouterStore } from '@/stores/routerStore';
 const TOAST_DISMISS_MS = 8000;
 
 /**
- * The offer to undo the route that was just applied.
+ * Two things stand here briefly, and they answer different questions.
  *
- * Routing is one click, and it is a click that takes over programs the user may
- * not have meant to move — several at once when they were multi-selected, and
- * onto every selected device. This is the way back, on screen for as long as the
- * mistake is still fresh.
+ * The offer to undo the route that was just applied. Routing is one click, and
+ * it is a click that takes over programs the user may not have meant to move —
+ * several at once when they were multi-selected, and onto every selected
+ * device. This is the way back, on screen for as long as the mistake is still
+ * fresh.
  *
- * It is transient by design and never modal: it reports what happened, offers
- * the one action that can still change it, and gets out of the way. Nothing is
- * stolen from the user to show it — no focus, no layout, no dialog to dismiss
- * before the next thing they wanted to do.
+ * And the notice that something the user just asked for did not happen. Every
+ * failure used to land only in the activity log — the third tab, the one
+ * nobody opens — so a refused route, a stopped program still pinned to a
+ * device, a copy that went silent, all read as "I clicked it and nothing
+ * changed". The log keeps the record; this says it where they are looking.
+ *
+ * Both are transient by design and never modal: they report what happened,
+ * offer the one action that can still change it, and get out of the way.
+ * Nothing is stolen from the user to show them — no focus, no layout, no
+ * dialog to dismiss before the next thing they wanted to do.
  */
 export function Toast() {
   const { t } = useTranslation();
@@ -29,12 +36,14 @@ export function Toast() {
   const feedUndo = useRouterStore((s) => s.feedUndo);
   const undoFeed = useRouterStore((s) => s.undoFeed);
   const dismissFeedUndo = useRouterStore((s) => s.dismissFeedUndo);
+  const errorNotice = useRouterStore((s) => s.errorNotice);
+  const dismissError = useRouterStore((s) => s.dismissError);
   // Held while the pointer or the keyboard is on *that* card, so a user reaching
   // for the button does not have it taken away mid-reach. Which card is held,
   // not whether one is: two offers can stand at once, and freezing both
   // countdowns because the cursor is on one of them pauses the other's question
   // indefinitely.
-  const [held, setHeld] = useState<'route' | 'feed' | null>(null);
+  const [held, setHeld] = useState<'route' | 'feed' | 'error' | null>(null);
 
   // Keyed on the snapshot itself, not on it being non-null: a route applied
   // while the offer is still standing replaces it, and the countdown starts over
@@ -53,6 +62,12 @@ export function Toast() {
   }, [feedUndo, held, dismissFeedUndo]);
 
   useEffect(() => {
+    if (errorNotice === null || held === 'error') return;
+    const timer = window.setTimeout(() => dismissError(), TOAST_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [errorNotice, held, dismissError]);
+
+  useEffect(() => {
     // A card that is gone cannot report the pointer leaving it: an offer that
     // ended while the pointer was on it — the button was clicked, Escape was
     // pressed — must not leave the *other* one held forever, because nothing
@@ -66,7 +81,11 @@ export function Toast() {
   }, [feedUndo, held]);
 
   useEffect(() => {
-    if (snapshot === null && feedUndo === null) return;
+    if (errorNotice === null && held === 'error') setHeld(null);
+  }, [errorNotice, held]);
+
+  useEffect(() => {
+    if (snapshot === null && feedUndo === null && errorNotice === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       // Escape belongs to the field that has the focus first. Clearing the
@@ -76,10 +95,11 @@ export function Toast() {
       if (isEditableTarget(event.target)) return;
       dismissUndo();
       dismissFeedUndo();
+      dismissError();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [snapshot, feedUndo, dismissUndo, dismissFeedUndo]);
+  }, [snapshot, feedUndo, errorNotice, dismissUndo, dismissFeedUndo, dismissError]);
 
   const entries = snapshot?.entries ?? [];
   const only = entries[0];
@@ -100,6 +120,28 @@ export function Toast() {
     // the cards themselves are clickable, so whatever is behind it stays usable.
     // Two offers can stand at once (a route and a feed); they stack.
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col items-center justify-center gap-2 p-4">
+      <AnimatePresence>
+        {errorNotice !== null && (
+          <motion.div
+            key={`error-toast-${errorNotice.id}`}
+            role="alert"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0, pointerEvents: 'auto' }}
+            exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
+            transition={{ opacity: FADE, y: SPRING_GLIDE }}
+            transformTemplate={MAIN_THREAD_TRANSFORM}
+            onPointerEnter={() => setHeld('error')}
+            onPointerLeave={() => setHeld((current) => (current === 'error' ? null : current))}
+            className="pointer-events-auto flex items-center gap-2.5 rounded-full border border-error/50 bg-surface py-2 pl-4 pr-4"
+          >
+            {/* A dot in the failure's own colour leads the sentence: the undo
+                cards ask a question, this one reports, and the difference has to
+                read before the words are parsed. */}
+            <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-error" />
+            <span className="text-[12px] text-text-secondary">{errorNotice.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {feedUndo !== null && feedSource !== undefined && feedTarget !== undefined && (
           <motion.div
