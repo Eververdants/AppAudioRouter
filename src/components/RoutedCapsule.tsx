@@ -76,6 +76,8 @@ export function RoutedCapsule() {
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const pillRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Walk the session list, not the route table: a programme on its way out can
   // still carry a route for a breath, and a row without a name or an icon has
@@ -95,10 +97,22 @@ export function RoutedCapsule() {
   }
 
   // The last row stopping from inside the panel takes the pill with it — an
-  // empty list would be a panel asking to manage nothing.
+  // empty list would be a panel asking to manage nothing. The keyboard comes
+  // back to the pill with it: the row that was pressed no longer exists.
   useEffect(() => {
-    if (open && rows.length === 0) setOpen(false);
+    if (open && rows.length === 0) {
+      setOpen(false);
+      pillRef.current?.focus();
+    }
   }, [open, rows.length]);
+
+  // Opening walks into the panel. Its rows sit *before* the pill in the
+  // document — the sheet hangs above the button it belongs to — so a Tab from
+  // the pill would pass every routed program on its way out.
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.querySelector<HTMLElement>('button')?.focus();
+  }, [open]);
 
   // Escape and outside-pointerdown follow the panel's visibility, exactly the
   // way the stage's pickers do it: a standing listener would swallow the key
@@ -112,6 +126,9 @@ export function RoutedCapsule() {
       if (isEditableTarget(event.target)) return;
       event.stopPropagation();
       setOpen(false);
+      // The panel is gone; the pill it hung off is where the keyboard was, and
+      // where it belongs — outside presses are their own answer and keep it.
+      pillRef.current?.focus();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -144,6 +161,7 @@ export function RoutedCapsule() {
           {open && (
             <motion.div
               key="routed"
+              ref={panelRef}
               role="group"
               aria-label={t('routed.title')}
               data-routed-panel
@@ -179,6 +197,7 @@ export function RoutedCapsule() {
         <Tooltip label={open ? '' : t('routed.tooltip')}>
           <motion.button
             type="button"
+            ref={pillRef}
             data-routed-capsule
             aria-expanded={open}
             aria-label={t('routed.tooltip')}

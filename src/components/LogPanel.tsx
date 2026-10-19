@@ -67,7 +67,16 @@ export function LogPanel() {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-2 font-mono text-[11px] leading-4">
+    // `tabIndex` because this is the only scrollable region on the page that a
+    // keyboard could otherwise not reach: the newest line is scrolled to by the
+    // app, but reading back through the record takes an arrow key, and a plain
+    // div swallows it. No live region — the log gains a line for ordinary audio
+    // events, and announcing every one of them would be a second voice talking
+    // over the interface.
+    <div
+      tabIndex={0}
+      className="min-h-0 flex-1 overflow-y-auto px-5 py-2 font-mono text-[11px] leading-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+    >
       {logs.map((log) => (
         <LogRow key={log.id} log={log} />
       ))}

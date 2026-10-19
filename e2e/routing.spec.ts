@@ -458,6 +458,18 @@ test('the board’s picker answers the arrow keys', async ({ page }) => {
   // jump to the ends of the menu rather than out of it.
   const device = page.getByRole('menuitem', { name: 'TV', exact: true });
   const input = page.getByRole('menuitem', { name: "game.exe's input" });
+
+  // Opening walks in. The menu's rows sit after the whole panel in the
+  // document, so a keyboard left outside would Tab past every device on the
+  // board before reaching one it could choose; Escape hands the caret back to
+  // the button the menu came out of.
+  await expect(device).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(
+    page.locator('main').getByRole('button', { name: 'Add destination' }),
+  ).toBeFocused();
+  await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
+
   await device.focus();
   await page.keyboard.press('ArrowDown');
   await expect(input).toBeFocused();

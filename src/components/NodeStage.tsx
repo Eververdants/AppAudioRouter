@@ -177,6 +177,11 @@ export function NodeStage() {
    *  the key that replays the hub's landing beat. */
   const [landPulse, setLandPulse] = useState(0);
   const wellRef = useRef<HTMLDivElement | null>(null);
+  /** The button a picker came from, so closing hands the keyboard back to it. */
+  const pickerReturnRef = useRef<HTMLElement | null>(null);
+  /** The two menu surfaces, for the focus an open `role=menu` is expected to take. */
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const primaryMenuRef = useRef<HTMLDivElement | null>(null);
   /** The board's rows as of the last pass, as one signature — what the reveal
    *  diff reads to find the destination that has just arrived. */
   const prevRowsRef = useRef<string | null>(null);
@@ -334,16 +339,24 @@ export function NodeStage() {
   // swallows the search box's Escape (the same rule the routed capsule
   // follows). Both pickers are shut together: they are never open at once, and
   // whichever key or press arrives belongs to the one on screen.
+  /** Close the pickers. `toTrigger` puts the keyboard back on the button the
+   *  menu came out of: one dismissed with Escape, or answered by choosing a row,
+   *  must not leave the caret in the air — the next Tab would start wherever the
+   *  unmounted menu last stood. A press somewhere else is its own answer, so
+   *  that door does not reach back. */
+  const closePicker = (toTrigger: boolean) => {
+    setPickerOpen(false);
+    setPrimaryPickerOpen(false);
+    if (toTrigger) pickerReturnRef.current?.focus();
+    pickerReturnRef.current = null;
+  };
+
   useEffect(() => {
     if (!pickerOpen && !primaryPickerOpen) return;
-    const closePickers = () => {
-      setPickerOpen(false);
-      setPrimaryPickerOpen(false);
-    };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        closePickers();
+        closePicker(true);
       }
     };
     const onPointerDown = (event: PointerEvent) => {
@@ -354,7 +367,7 @@ export function NodeStage() {
       // well, the halo, the cards, the strip) closes them.
       const target = event.target;
       if (target instanceof Element && target.closest('[data-owns-picker]')) return;
-      closePickers();
+      closePicker(false);
     };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('pointerdown', onPointerDown, true);
@@ -362,6 +375,19 @@ export function NodeStage() {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('pointerdown', onPointerDown, true);
     };
+  }, [pickerOpen, primaryPickerOpen]);
+
+  // A menu is walked, not Tabbed through: its rows sit after the whole panel in
+  // the document, so Tab would visit every device on the board before reaching
+  // one. Opening moves the focus to the first row, which is where the arrows the
+  // menus already answer have to start.
+  useEffect(() => {
+    const menu = pickerOpen
+      ? addMenuRef.current
+      : primaryPickerOpen
+        ? primaryMenuRef.current
+        : null;
+    menu?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
   }, [pickerOpen, primaryPickerOpen]);
 
   // Selecting a different programme resets the inspector to the card that is
@@ -804,7 +830,10 @@ export function NodeStage() {
                 onToggle={() => toggleTarget(primaryDeviceId)}
                 onRemove={() => undefined}
                 onPromote={() => undefined}
-                onPrimaryPick={() => setPrimaryPickerOpen((value) => !value)}
+                onPrimaryPick={() => {
+                  pickerReturnRef.current = document.activeElement as HTMLElement | null;
+                  setPrimaryPickerOpen((value) => !value);
+                }}
                 onInspect={() => setInspectorKey(`dev:${primaryDeviceId}`)}
                 onHover={setHoverKey}
               />
@@ -829,7 +858,10 @@ export function NodeStage() {
                 data-owns-picker
                 aria-label={t('stage.addTarget')}
                 title={t('stage.addTargetTitle')}
-                onClick={() => setPickerOpen((value) => !value)}
+                onClick={(event) => {
+                  pickerReturnRef.current = event.currentTarget;
+                  setPickerOpen((value) => !value);
+                }}
                 className="pressable flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] leading-none text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none"
               >
                 ＋
@@ -876,6 +908,7 @@ export function NodeStage() {
             {pickerOpen && (
               <motion.div
                 key="picker"
+                ref={addMenuRef}
                 role="menu"
                 data-owns-picker
                 aria-label={t('stage.addTarget')}
@@ -908,7 +941,7 @@ export function NodeStage() {
                           // The seat it ends up in is the delay order's call,
                           // exactly as for any other row.
                           appendDeviceTarget(d.id);
-                          setPickerOpen(false);
+                          closePicker(true);
                         }}
                         className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
                       >
@@ -939,7 +972,7 @@ export function NodeStage() {
                           transformTemplate={MAIN_THREAD_TRANSFORM}
                           onClick={() => {
                             if (pid !== undefined) void addFeed(pid, s.pid);
-                            setPickerOpen(false);
+                            closePicker(true);
                           }}
                           className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
                         >
@@ -969,6 +1002,7 @@ export function NodeStage() {
             {primaryPickerOpen && (
               <motion.div
                 key="primary-picker"
+                ref={primaryMenuRef}
                 role="menu"
                 data-owns-picker
                 aria-label={t('stage.changePrimary')}
@@ -1000,7 +1034,7 @@ export function NodeStage() {
                           aria-current={picked ? 'true' : undefined}
                           onClick={() => {
                             setPrimaryDevice(d.id);
-                            setPrimaryPickerOpen(false);
+                            closePicker(true);
                           }}
                           className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
                         >

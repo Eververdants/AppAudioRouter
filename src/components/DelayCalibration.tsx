@@ -144,6 +144,15 @@ export function DelayCalibration({
   const currentDeviceRef = useRef<string | null>(null);
   /** When the burst being answered began, as the events report it. */
   const markerStart = useRef<number | null>(null);
+  /** The dialog surface, so the keyboard lands inside a modal rather than
+   *  behind it: the page under this is unreachable while it runs, and the walk
+   *  is a timed one — every second spent hunting for the button is a burst not
+   *  heard. */
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
 
   const deviceName = useCallback(
     (id: string) => devices.find((d) => d.id === id)?.name ?? id,
@@ -404,10 +413,12 @@ export function DelayCalibration({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 outline-none"
       role="dialog"
       aria-modal="true"
       aria-labelledby="delay-calibration-title"
+      ref={dialogRef}
+      tabIndex={-1}
     >
       <motion.div
         initial={{ opacity: 0, y: 12, scale: 0.98 }}

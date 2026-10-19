@@ -255,6 +255,11 @@ export function ScrubReadout({
             if (e.key === 'Enter') {
               commit();
               setEditing(false);
+              // The span carrying `tabIndex` is rebuilt, not kept: without
+              // reaching for it the focus dies with the input and the next Tab
+              // starts over at the top of the window. A blur is left alone —
+              // that press elsewhere is where the focus is going.
+              hostRef.current?.focus();
             }
             if (e.key === 'Escape') {
               // `commit` is what clears the draft; the flag only stops it from
@@ -262,6 +267,7 @@ export function ScrubReadout({
               reverting.current = true;
               commit();
               setEditing(false);
+              hostRef.current?.focus();
             }
           }}
           aria-label={label}

@@ -308,8 +308,11 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const captureDevices = useRouterStore((s) => s.captureDevices);
 
   const [section, setSection] = useState<SettingsSection>('appearance');
-  // The delay wizard; mounted over the page while it runs.
+  // The delay wizard; mounted over the page while it runs. The button keeps a
+  // ref because the wizard takes the keyboard when it closes: the caret goes
+  // back to the control that opened it, not to the top of the window.
   const [calibrationOpen, setCalibrationOpen] = useState(false);
+  const calibrateButtonRef = useRef<HTMLButtonElement | null>(null);
   // What the last "reset per-app output" press cleared, so the press has an
   // answer of its own instead of only a line in another tab.
   const [resetOutcome, setResetOutcome] = useState<ResetOutcome | null>(null);
@@ -680,14 +683,25 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             {section === 'delays' && (
               <>
                 <Row title={t('settings.delayCalibrate')} desc={t('settings.delayCalibrateDesc')}>
-                  <button
-                    type="button"
-                    onClick={() => setCalibrationOpen(true)}
-                    disabled={devices.length < 2}
-                    className={ROW_BUTTON_CLASS}
-                  >
-                    {t('settings.delayCalibrateAction')}
-                  </button>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <button
+                      type="button"
+                      ref={calibrateButtonRef}
+                      onClick={() => setCalibrationOpen(true)}
+                      disabled={devices.length < 2}
+                      className={ROW_BUTTON_CLASS}
+                    >
+                      {t('settings.delayCalibrateAction')}
+                    </button>
+                    {/* A disabled control with no reason beside it is a dead end:
+                        the walk needs two devices, and nothing on this row says
+                        that the machine in front of the user has one. */}
+                    {devices.length < 2 && (
+                      <span className="max-w-[34ch] text-right text-[11px] leading-relaxed text-text-muted">
+                        {t('settings.delayCalibrateNeedsTwo')}
+                      </span>
+                    )}
+                  </div>
                 </Row>
                 <Row title={t('settings.delayStep')} desc={t('settings.delayStepDesc')}>
                   <SegmentedControl
@@ -771,7 +785,13 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
       {/* The delay wizard reads devices that are already on the page; it sits
           above the paper like every other surface does. */}
       {calibrationOpen && (
-        <DelayCalibration devices={devices} onClose={() => setCalibrationOpen(false)} />
+        <DelayCalibration
+          devices={devices}
+          onClose={() => {
+            setCalibrationOpen(false);
+            calibrateButtonRef.current?.focus();
+          }}
+        />
       )}
     </div>
   );
