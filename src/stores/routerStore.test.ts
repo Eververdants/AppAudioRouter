@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
+import i18next from 'i18next';
 import type {
   AudioDevice,
   AudioSession,
@@ -813,6 +814,53 @@ describe('applyRoute', () => {
       previous: ['tv'],
     });
   });
+
+  it('names a device that left between staging and apply as one that has left', async () => {
+    // The undo card speaks to the user, and an endpoint GUID answers nothing.
+    // A device unplugged while the plan sat staged is exactly the case the
+    // components stopped printing — the store's own strings have to follow the
+    // same rule, in the offer and in the log alike.
+    installBackend();
+    reset({
+      devices: [SPEAKERS],
+      sessions: [MUSIC],
+      selectedPids: [MUSIC.pid],
+      // 'tv' was staged while it was live and has left since; the apply still
+      // lands, and what the offer says about it must not be the raw id.
+      selectedDeviceIds: ['tv'],
+    });
+
+    await state().applyRoute();
+
+    expect(state().undoSnapshot?.deviceName).toBe(i18next.t('stage.deviceGone'));
+    expect(state().undoSnapshot?.deviceName).not.toContain('tv');
+    const routed = state()
+      .logs.filter((entry) => entry.level === 'success')
+      .at(-1);
+    expect(routed?.message).not.toContain('tv');
+  });
+
+  it('asks the engines again once the route resolves', async () => {
+    // The engine agent's requirement: a stop that lands later than this
+    // resolve can tear the engine down behind the badges, so the pass has to
+    // run on the resolve — after `apply_route` answers, not beside it — and the
+    // readings come back with the route instead of waiting for Core Audio.
+    const backend = installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      selectedPids: [MUSIC.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+    });
+
+    await state().applyRoute();
+
+    const seen = backend.calls.map((call) => call.cmd);
+    expect(seen.lastIndexOf('apply_route')).toBeLessThan(
+      seen.lastIndexOf('get_active_duplications'),
+    );
+    expect(state().deviceLatencyMs.tv).toBe(20);
+  });
 });
 
 describe('stopRoute', () => {
@@ -1367,6 +1415,87 @@ describe('engine events', () => {
     expect(state().routedPids[PLAYER.pid]).toEqual(['speakers']);
     expect(state().deviceLatencyMs.tv).toBeUndefined();
   });
+
+  it('names a mirror that is no longer on the list as one that has left', () => {
+    // The notice this event exists to raise must not print an endpoint GUID:
+    // the device may be gone from `devices` faster than the badge is pruned,
+    // and an id in a sentence is the same lie on the store's side that the
+    // components were called out for.
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      routedPids: { 1001: ['speakers', 'vanished-endpoint'] },
+      engineGenerations: { 1001: 1 },
+    });
+
+    state().handleMirrorFailed({
+      pid: 1001,
+      generation: 1,
+      deviceId: 'vanished-endpoint',
+      error: 'busy',
+    });
+
+    expect(state().errorNotice?.message).toContain(i18next.t('stage.deviceGone'));
+    expect(state().errorNotice?.message).not.toContain('vanished-endpoint');
+  });
+
+  it('takes the dead program out of the selection as a whole program', () => {
+    // The engine died with one process; the route was the program's, and the
+    // selection is drawn per process. A sibling left standing keeps a plan for
+    // a route nothing runs — the same stale board a manual stop clears for
+    // every process of the executable, so this local clear has to follow the
+    // exe rule too, and take only the dead program's processes with it.
+    const HOLDER: AudioSession = { pid: 4201, exe_name: 'dying.exe' };
+    const SIBLING: AudioSession = { pid: 4202, exe_name: 'dying.exe' };
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [HOLDER, SIBLING, GAME],
+      routedPids: { [HOLDER.pid]: ['speakers', 'tv'] },
+      engineGenerations: { [HOLDER.pid]: 1 },
+      selectedPids: [SIBLING.pid, GAME.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+    });
+
+    state().handleDuplicationStopped({
+      pid: HOLDER.pid,
+      generation: 1,
+      reason: 'process-exited',
+      error: null,
+    });
+
+    expect(state().routedPids).toEqual({});
+    expect(state().selectedPids).toEqual([GAME.pid]);
+    expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+  });
+
+  it('takes the plan down with the selection when the dead program held all of it', () => {
+    // A sibling alone in the selection is still in it with the route: once the
+    // program's engine ends there is nothing left staged, and a non-empty
+    // device plan under an empty selection is a frozen stale board.
+    const HOLDER: AudioSession = { pid: 4211, exe_name: 'solo-dying.exe' };
+    const SIBLING: AudioSession = { pid: 4212, exe_name: 'solo-dying.exe' };
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [HOLDER, SIBLING],
+      routedPids: { [HOLDER.pid]: ['speakers', 'tv'] },
+      engineGenerations: { [HOLDER.pid]: 1 },
+      selectedPids: [SIBLING.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+    });
+
+    state().handleDuplicationStopped({
+      pid: HOLDER.pid,
+      generation: 1,
+      reason: 'process-exited',
+      error: null,
+    });
+
+    expect(state().selectedPids).toEqual([]);
+    expect(state().selectedDeviceIds).toEqual([]);
+  });
 });
 
 describe('session activity', () => {
@@ -1505,6 +1634,31 @@ describe('the first session enumeration', () => {
 
     expect(lastLog()?.level).toBe('error');
     expect(state().errorNotice?.message).toContain('list_sessions');
+  });
+
+  it('takes a program whose route holder died out of the selection', async () => {
+    // The session list is the authority that a single-device route's holder is
+    // gone, and it drops the badge here — but the route was the *program's*,
+    // and a surviving sibling left in the selection keeps planning a route the
+    // audio service no longer runs. The same death through the engine event
+    // clears the whole program; the list-driven path has to follow the exe rule
+    // too, and leave every other program's selection alone.
+    const HOLDER: AudioSession = { pid: 4221, exe_name: 'dead-holder.exe' };
+    const SIBLING: AudioSession = { pid: 4222, exe_name: 'dead-holder.exe' };
+    installBackend({ sessions: [SIBLING, GAME] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [HOLDER, SIBLING, GAME],
+      routedPids: { [HOLDER.pid]: ['tv'] },
+      selectedPids: [SIBLING.pid, GAME.pid],
+      selectedDeviceIds: ['tv'],
+    });
+
+    await state().refreshSessions();
+
+    expect(state().routedPids).toEqual({});
+    expect(state().selectedPids).toEqual([GAME.pid]);
+    expect(state().selectedDeviceIds).toEqual(['tv']);
   });
 });
 
@@ -2027,6 +2181,38 @@ describe('settings and log', () => {
     await state().setDeviceDelayValue('tv', 99_999);
 
     expect(state().deviceDelays.tv).toBe(10_000);
+  });
+
+  it('prunes a delay of 0 instead of storing it', async () => {
+    // A delay of 0 is an absence, not a value: like the neutral source level
+    // and the neutral share, it must have exactly one representation — the
+    // missing key that every reader already treats as 0. The backend still
+    // gets the write, so its file sheds the entry with the store.
+    const backend = installBackend();
+    reset({ devices: [SPEAKERS, TV], deviceDelays: { tv: 150 } });
+
+    await state().setDeviceDelayValue('tv', 0);
+
+    expect('tv' in state().deviceDelays).toBe(false);
+    expect(
+      backend.calls.some((call) => call.cmd === 'set_device_delay' && call.args.delayMs === 0),
+    ).toBe(true);
+  });
+
+  it('reads a stored 0 back as no entry at all', async () => {
+    // A file written by a build that stored the neutral value must not
+    // smuggle that shape back in: the read prunes it the write would have.
+    installBackend({
+      delays: [
+        ['tv', 0],
+        ['speakers', 40],
+      ],
+    });
+    reset();
+
+    await state().loadDelaySettings();
+
+    expect(state().deviceDelays).toEqual({ speakers: 40 });
   });
 
   it('answers the calibration walk in booleans: accepted true, refused false', async () => {
@@ -2811,6 +2997,42 @@ describe('stop of every route', () => {
 
     expect(state().logs.filter((entry) => entry.level === 'error')).toHaveLength(0);
   });
+
+  it('raises one card for the whole batch, however many stops refused', async () => {
+    // One user action, one card: without the batch each refused stop replaced
+    // the notice before it — the card flickered through the failures and only
+    // the last one was left standing, which is the stack of complaints the
+    // rule exists to prevent. The log still keeps every refusal.
+    const FIRST: AudioSession = { pid: 9101, exe_name: 'batch-a.exe' };
+    const SECOND: AudioSession = { pid: 9102, exe_name: 'batch-b.exe' };
+    installBackend({
+      sessions: [FIRST, SECOND],
+      fail: (cmd) => cmd === 'stop_route',
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [FIRST, SECOND],
+      routedPids: { [FIRST.pid]: ['tv'], [SECOND.pid]: ['speakers'] },
+    });
+
+    const noticeIds: number[] = [];
+    const unwatch = useRouterStore.subscribe((s, previous) => {
+      if (s.errorNotice !== null && s.errorNotice !== previous.errorNotice) {
+        noticeIds.push(s.errorNotice.id);
+      }
+    });
+    await state().stopAllRoutes();
+    unwatch();
+
+    expect(noticeIds).toHaveLength(1);
+    // The two identical refusals are said once on the card…
+    expect(state().errorNotice?.message).toBe(
+      i18next.t('log.stopRouteFailed', { error: 'Error: stop_route failed' }),
+    );
+    // …but every one of them is on the record: two refusals plus the batch's
+    // own error line.
+    expect(state().logs.filter((entry) => entry.level === 'error')).toHaveLength(3);
+  });
 });
 
 describe('primary volume', () => {
@@ -2895,5 +3117,47 @@ describe("the tour's start clean", () => {
 
     expect(lastLog()?.level).toBe('error');
     expect(backend.remembered).toEqual([['music.exe', ['tv']]]);
+  });
+
+  it('raises one card for the whole wipe and says every refusal together', async () => {
+    // The wipe is one user action that can fail in several places at once — a
+    // refused stop per route and a stuck wire per feed — and the tour demands
+    // exactly one notice for it. Without the batch this raises three cards in a
+    // row; with it the refusals ride one card, each still written to the log
+    // the moment it happens, including when the wipe throws.
+    const SOURCE: AudioSession = { pid: 9001, exe_name: 'wipe-a.exe' };
+    const SECOND: AudioSession = { pid: 9002, exe_name: 'wipe-b.exe' };
+    const LISTENER: AudioSession = { pid: 9003, exe_name: 'wipe-c.exe' };
+    installBackend({
+      sessions: [SOURCE, SECOND, LISTENER],
+      fail: (cmd) => cmd === 'stop_route' || cmd === 'remove_feed_target',
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [SOURCE, SECOND, LISTENER],
+      routedPids: { [SOURCE.pid]: ['tv'], [SECOND.pid]: ['speakers', 'tv'] },
+      engineGenerations: { [SECOND.pid]: 1 },
+      rememberedFeeds: [{ sourceExe: 'wipe-a.exe', targetExe: ['wipe-c.exe'] }],
+      feeds: { [SOURCE.pid]: [LISTENER.pid] },
+    });
+
+    const noticeIds: number[] = [];
+    const unwatch = useRouterStore.subscribe((s, previous) => {
+      if (s.errorNotice !== null && s.errorNotice !== previous.errorNotice) {
+        noticeIds.push(s.errorNotice.id);
+      }
+    });
+    await state().startClean();
+    unwatch();
+
+    expect(noticeIds).toHaveLength(1);
+    const stopMsg = i18next.t('log.stopRouteFailed', { error: 'Error: stop_route failed' });
+    const feedMsg = i18next.t('log.feedRemoveFailed', {
+      error: 'Error: remove_feed_target failed',
+    });
+    expect(state().errorNotice?.message).toBe([stopMsg, feedMsg].join(' · '));
+    // Two refusals to stop, one refused wire, and the batch's own line — the
+    // record keeps them all even though the card is one.
+    expect(state().logs.filter((entry) => entry.level === 'error')).toHaveLength(4);
   });
 });

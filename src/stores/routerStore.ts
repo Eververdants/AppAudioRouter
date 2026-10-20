@@ -381,6 +381,34 @@ let logId = 0;
 let errorId = 0;
 
 /**
+ * One action, one card.
+ *
+ * A batch action can fail in several places at once — the tour's wipe meets
+ * refused stops and stuck wires, and "stop all" meets one refusal per route.
+ * Each `raiseError` replaces the notice before it and remounts the card (Toast
+ * keys on the notice id), so one user action flickered through a stack of
+ * complaints with only the last one left standing. Inside a batch, `raiseError`
+ * collects instead: every message still writes its own error log the moment it
+ * happens, and one card for all of them goes up when the action ends. Nesting is
+ * by depth — the wipe wraps the batch stop it calls — so the card belongs to the
+ * outermost action, and identical refusals are said once.
+ */
+let errorBatchDepth = 0;
+const errorBatchMessages: string[] = [];
+
+function beginErrorBatch(): void {
+  errorBatchDepth += 1;
+}
+
+function endErrorBatch(): void {
+  errorBatchDepth -= 1;
+  if (errorBatchDepth > 0 || errorBatchMessages.length === 0) return;
+  const message = [...new Set(errorBatchMessages)].join(' · ');
+  errorBatchMessages.length = 0;
+  useRouterStore.setState({ errorNotice: { id: ++errorId, message } });
+}
+
+/**
  * A refresh gate coalesces concurrent requests instead of dropping them: if a
  * refresh arrives while one is in flight, one more run is queued.
  */
@@ -806,10 +834,13 @@ function rememberFeedTargets(
   ];
 }
 
-/** A device's name for the log, or its id when it is not in the list. */
+/** A device's name for a user-visible string, or its id when it is not in the
+ * list. Never the raw id: an endpoint GUID answers nothing, and the store's
+ * strings have the same hole the components were called out for — they name a
+ * device that has left, with the words `stage.deviceGone` already carries. */
 function deviceName(deviceId: string | undefined, devices: AudioDevice[]): string {
   if (deviceId === undefined) return '';
-  return devices.find((device) => device.id === deviceId)?.name ?? deviceId;
+  return devices.find((device) => device.id === deviceId)?.name ?? i18next.t('stage.deviceGone');
 }
 
 /**
@@ -1035,11 +1066,27 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // A single-device route has no duplication engine to report its end, so
         // the session list is the authoritative signal that its PID is gone.
         const routedPids: Record<number, string[]> = {};
+        // A route is the program's but held by one of its processes: when the
+        // holder died the route died with it, and the program's surviving
+        // siblings carry a plan for a route nothing runs any more. They leave
+        // the selection with it — the same rule a manual stop follows. The
+        // executable is read from the *outgoing* list; the new one no longer
+        // names a process that has left.
+        const endedRouteExes = new Set<string>();
         for (const [pid, ids] of Object.entries(s.routedPids)) {
           const numericPid = Number(pid);
-          if (livePids.has(numericPid)) routedPids[numericPid] = ids;
+          if (livePids.has(numericPid)) {
+            routedPids[numericPid] = ids;
+          } else {
+            const exe = s.sessions.find((x) => x.pid === numericPid)?.exe_name.toLowerCase();
+            if (exe !== undefined) endedRouteExes.add(exe);
+          }
         }
-        const selectedPids = s.selectedPids.filter((pid) => livePids.has(pid));
+        const selectedPids = s.selectedPids.filter((pid) => {
+          if (!livePids.has(pid)) return false;
+          const exe = sessions.find((x) => x.pid === pid)?.exe_name.toLowerCase();
+          return exe === undefined || !endedRouteExes.has(exe);
+        });
         const engineGenerations: Record<number, number> = {};
         for (const [pid, generation] of Object.entries(s.engineGenerations)) {
           const numericPid = Number(pid);
@@ -1187,7 +1234,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         : [...selectedDeviceIds, deviceId];
     set({ selectedDeviceIds: next, deviceSelectionPrefilled: false });
     if (replacesGuess) {
-      const device = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+      const device = deviceName(deviceId, devices);
       const process = sessions.find((s) => s.pid === selectedPids[0])?.exe_name;
       get().addLog(
         process === undefined
@@ -1838,7 +1885,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // reordering here would seat a device the user never picked (with
     // calibrated values the baseline sits at 0 and would always win it).
     const ordered = [...selectedDeviceIds];
-    const deviceNames = ordered.map((id) => get().devices.find((d) => d.id === id)?.name ?? id);
+    const deviceNames = ordered.map((id) => deviceName(id, get().devices));
     const primary = deviceNames[0];
     const extra = ordered.length - 1;
     // What this route is about to replace, read before anything moves: the offer
@@ -2137,7 +2184,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
             ? i18next.t('log.routeStoppedUnreleased', { process })
             : i18next.t('log.routeStoppedStillPinned', {
                 process,
-                device: get().devices.find((d) => d.id === device)?.name ?? device,
+                device: deviceName(device, get().devices),
               }),
         );
       }
@@ -2187,6 +2234,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const generationSnapshot = { ...get().engineGenerations };
     invalidateReconciliation();
     set({ routedPids: {}, engineGenerations: {} });
+    // One card for this whole batch: a stop refused per route would replace the
+    // notice before it as fast as the batch answers, and the tour's wipe —
+    // which calls this — is one user action failing in several places at once.
+    beginErrorBatch();
     const results = await Promise.allSettled(pids.map((pid) => api.stopRoute(pid)));
     const failed: number[] = [];
     const stillPinned: string[] = [];
@@ -2205,6 +2256,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         stillPinned.push(names.get(pid) ?? `PID ${pid}`);
       }
     });
+    endErrorBatch();
     // Same second retirement as a single stop: an ask made while this batch was in
     // the air still lists engines that are now down. When every stop refused the
     // engines are all still running, so nothing is thrown away.
@@ -2306,29 +2358,38 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // releases its assignment, a feed disconnects its pair. Only then the
     // files go — all of them in one backend call, so a half-done wipe can
     // never be mistaken for a clean slate.
-    await get().stopAllRoutes();
-    for (const [sourcePid, targets] of Object.entries(get().feeds)) {
-      for (const targetPid of targets) {
-        await get().removeFeed(Number(sourcePid), targetPid);
-      }
-    }
+    //
+    // One user action, one card: every refused stop and every stuck wire still
+    // writes its own error log the moment it happens, but the notice says them
+    // together when the wipe ends — including when the wipe ends by throwing.
+    beginErrorBatch();
     try {
-      await api.forgetPreviousSettings();
-    } catch (e) {
-      get().addLog(i18next.t('log.forgetPreviousFailed', { error: String(e) }), 'error');
-      // Refuse out loud. A wipe that half happened and was reported as done
-      // leaves the user on a machine they believe is clean, with no door left
-      // to try again — the tour is gone for this version.
-      throw e;
+      await get().stopAllRoutes();
+      for (const [sourcePid, targets] of Object.entries(get().feeds)) {
+        for (const targetPid of targets) {
+          await get().removeFeed(Number(sourcePid), targetPid);
+        }
+      }
+      try {
+        await api.forgetPreviousSettings();
+      } catch (e) {
+        get().addLog(i18next.t('log.forgetPreviousFailed', { error: String(e) }), 'error');
+        // Refuse out loud. A wipe that half happened and was reported as done
+        // leaves the user on a machine they believe is clean, with no door left
+        // to try again — the tour is gone for this version.
+        throw e;
+      }
+      await Promise.all([
+        get().loadRememberedRoutes(),
+        get().loadFeeds(),
+        get().loadDelaySettings(),
+        get().loadDeviceVolumes(),
+        get().loadSourceVolumes(),
+      ]);
+      get().addLog(i18next.t('log.forgetPrevious'), 'info');
+    } finally {
+      endErrorBatch();
     }
-    await Promise.all([
-      get().loadRememberedRoutes(),
-      get().loadFeeds(),
-      get().loadDelaySettings(),
-      get().loadDeviceVolumes(),
-      get().loadSourceVolumes(),
-    ]);
-    get().addLog(i18next.t('log.forgetPrevious'), 'info');
   },
 
   releaseStaleRoutes: async () => {
@@ -2350,6 +2411,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const delays = await api.getDeviceDelays();
       const deviceDelays: Record<string, number> = {};
       for (const [deviceId, delayMs] of delays) {
+        // A stored 0 is the absence written by an older build: read it as no
+        // entry, the same way every reader of `deviceDelays` treats one, so a
+        // reload cannot smuggle the stored-zero shape back onto the board.
+        if (delayMs === 0) continue;
         deviceDelays[deviceId] = delayMs;
       }
       set({ deviceDelays });
@@ -2374,7 +2439,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   setDeviceVolume: async (deviceId, percent) => {
     const current = get().deviceVolumes[deviceId] ?? 100;
     if (current === percent) return;
-    const device = get().devices.find((d) => d.id === deviceId);
     set((s) => {
       const deviceVolumes = { ...s.deviceVolumes };
       if (percent >= 100) {
@@ -2387,7 +2451,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     try {
       await api.setDeviceVolume(deviceId, percent);
       get().addLog(
-        i18next.t('log.deviceVolumeSet', { device: device?.name ?? deviceId, n: percent }),
+        i18next.t('log.deviceVolumeSet', {
+          device: deviceName(deviceId, get().devices),
+          n: percent,
+        }),
         'info',
       );
     } catch (e) {
@@ -2603,12 +2670,19 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // Nothing to change is a success, not a refusal: the calibration's apply
     // walks every measured device and treats a falsy answer as a failure.
     if (current === next) return true;
-    const device = get().devices.find((d) => d.id === deviceId);
-    set((s) => ({ deviceDelays: { ...s.deviceDelays, [deviceId]: next } }));
+    set((s) => {
+      // A delay of 0 is an absence, not a value: like the neutral source level
+      // and the neutral share, the entry is pruned, so "no compensation" has
+      // exactly one representation — the missing key every reader treats as 0.
+      const deviceDelays = { ...s.deviceDelays };
+      if (next === 0) delete deviceDelays[deviceId];
+      else deviceDelays[deviceId] = next;
+      return { deviceDelays };
+    });
     try {
       await api.setDeviceDelay(deviceId, next);
       get().addLog(
-        i18next.t('log.delaySet', { device: device?.name ?? deviceId, n: next }),
+        i18next.t('log.delaySet', { device: deviceName(deviceId, get().devices), n: next }),
         'info',
       );
       // The reading is made of this number, so it has to be re-asked: it is
@@ -2690,13 +2764,23 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       delete routedPids[pid];
       const engineGenerations = { ...s.engineGenerations };
       delete engineGenerations[pid];
-      const selectedPids = s.selectedPids.filter((p) => p !== pid);
-      const wasSelected = s.selectedPids.includes(pid);
+      // A route is the program's and is held by one of its processes, but the
+      // selection is drawn per process: with the engine down, the program's
+      // siblings carry a plan for a route that no longer runs, and they leave
+      // the selection with it — the same rule a manual stop follows. When the
+      // dead pid has already left the session list its executable cannot be
+      // named, and only its own selection can go.
+      const endedExe = s.sessions.find((x) => x.pid === pid)?.exe_name.toLowerCase();
+      const selectedPids = s.selectedPids.filter((p) => {
+        if (p === pid) return false;
+        if (endedExe === undefined) return true;
+        return s.sessions.find((x) => x.pid === p)?.exe_name.toLowerCase() !== endedExe;
+      });
       return {
         routedPids,
         engineGenerations,
         selectedPids,
-        selectedDeviceIds: wasSelected && selectedPids.length === 0 ? [] : s.selectedDeviceIds,
+        selectedDeviceIds: selectedPids.length === 0 ? [] : s.selectedDeviceIds,
       };
     });
     get().addLog(i18next.t('log.duplicationProcessExited', { pid }), 'info');
@@ -2760,8 +2844,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     set((s) => ({
       routedPids: { ...s.routedPids, [pid]: routed.filter((id) => id !== deviceId) },
     }));
-    const device = get().devices.find((d) => d.id === deviceId);
-    get().raiseError(i18next.t('log.mirrorFailed', { device: device?.name ?? deviceId, error }));
+    get().raiseError(
+      i18next.t('log.mirrorFailed', { device: deviceName(deviceId, get().devices), error }),
+    );
   },
 
   reconcileActiveDuplications: async () => {
@@ -2854,6 +2939,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   raiseError: (message) => {
+    // Inside a batched action, collect rather than replace: the card goes up
+    // once when the action ends (see `beginErrorBatch`). The log line is never
+    // deferred — every failure is on the record the moment it happens.
+    if (errorBatchDepth > 0) {
+      errorBatchMessages.push(message);
+      get().addLog(message, 'error');
+      return;
+    }
     // Keyed on a counter, not on the text: the same refusal happening twice is
     // two notices, and the second one's countdown starts on its own arrival.
     set({ errorNotice: { id: ++errorId, message } });
