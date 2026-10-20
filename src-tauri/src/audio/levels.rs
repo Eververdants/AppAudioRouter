@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use log::info;
+
 use crate::config::SOURCE_VOLUME_MAX;
 
 /// One program's most recent measurement.
@@ -35,7 +37,45 @@ pub struct SourceLevel {
 /// sound, so a program that has gone quiet keeps whatever it last measured.
 /// Past this age the reading means "not playing", which is a different thing
 /// from "playing quietly" and must not be aligned against.
+///
+/// Ages are measured with `Instant` (the query performance counter), never the
+/// system time: a clock correction, or the machine coming back from sleep, must
+/// not make a stale reading look fresh or a fresh one look stale. Sleep is the
+/// case that *should* age everything out, and it does — the engines publish on
+/// arrival of a packet, so after a long sleep every entry in here is old.
 pub const LEVEL_MAX_AGE: Duration = Duration::from_millis(1_000);
+
+/// How long an entry may stay in the table before it is dropped outright.
+///
+/// Past [`LEVEL_MAX_AGE`] a reading is already not returned; it is only kept
+/// because the engine that took it may be alive and about to publish again — a
+/// program that paused is the same program. Once it is this old, nothing is
+/// refreshing it: a parked engine wakes on the first packet and publishes with
+/// it, and an engine that is over calls [`SourceLevels::forget`] on the way out.
+/// `forget` is the prompt path; this is the net under it, for the exits that
+/// never reached it, so the table cannot grow with the session.
+pub const LEVEL_TRIM_AGE: Duration = Duration::from_secs(60);
+
+/// How old a reading is against a clock the caller supplies.
+///
+/// `Instant::elapsed` is what production uses; taking `now` separately is what
+/// lets the age rule — the whole contract of this table — be tested without
+/// waiting on a clock, and it keeps a clock that somehow reads backwards from
+/// ageing an entry out.
+fn age_of(at: Instant, now: Instant) -> Duration {
+    now.checked_duration_since(at).unwrap_or_default()
+}
+
+/// Drop readings past `age`, returning how many went.
+fn trim_older_than(
+    levels: &mut HashMap<(String, u32), SourceLevel>,
+    now: Instant,
+    age: Duration,
+) -> usize {
+    let before = levels.len();
+    levels.retain(|_, level| age_of(level.at, now) < age);
+    before - levels.len()
+}
 
 /// Level measurements for every program an engine is duplicating.
 ///
@@ -63,18 +103,21 @@ impl SourceLevels {
 
     /// Record the current estimate for one engine's program, replacing whatever
     /// that engine published last.
+    ///
+    /// Every write also trims the table, because this is the only call made
+    /// regularly enough for the sweep to be worth paying for — and an entry
+    /// nobody trimmed would sit here for the rest of the session.
     pub fn record(&self, exe_name: &str, pid: u32, rms: f32, peak: f32) {
-        self.levels
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                (exe_name.to_string(), pid),
-                SourceLevel {
-                    rms,
-                    peak,
-                    at: Instant::now(),
-                },
-            );
+        let now = Instant::now();
+        let mut levels = self.levels.lock().unwrap_or_else(|e| e.into_inner());
+        levels.insert(
+            (exe_name.to_string(), pid),
+            SourceLevel { rms, peak, at: now },
+        );
+        let dropped = trim_older_than(&mut levels, now, LEVEL_TRIM_AGE);
+        if dropped > 0 {
+            info!("dropped {dropped} level reading(s) no engine refreshed");
+        }
     }
 
     /// Drop one engine's reading.
@@ -104,10 +147,11 @@ impl SourceLevels {
     /// forgetting its number would throw away the estimate that is about to be
     /// refreshed anyway.
     pub fn fresh_all(&self, max_age: Duration) -> Vec<(String, SourceLevel)> {
+        let now = Instant::now();
         let levels = self.levels.lock().unwrap_or_else(|e| e.into_inner());
         let mut folded: HashMap<&str, SourceLevel> = HashMap::new();
         for ((exe_name, _), level) in levels.iter() {
-            if level.at.elapsed() >= max_age {
+            if age_of(level.at, now) >= max_age {
                 continue;
             }
             folded
@@ -214,6 +258,62 @@ mod tests {
             peak,
             at: Instant::now(),
         }
+    }
+
+    /// The trim is a net under `forget`, so it has to be able to say which
+    /// entries nothing is refreshing any more — and keep the ones a paused
+    /// program is about to refresh.
+    #[test]
+    fn readings_nobody_refreshes_are_dropped_from_the_table() {
+        let now = Instant::now();
+        let mut table = HashMap::new();
+        table.insert(
+            ("old.exe".to_string(), 11),
+            SourceLevel {
+                rms: 0.2,
+                peak: 0.3,
+                at: now,
+            },
+        );
+        table.insert(
+            ("older.exe".to_string(), 22),
+            SourceLevel {
+                rms: 0.2,
+                peak: 0.3,
+                at: now,
+            },
+        );
+
+        // An hour on: both are past the horizon, and a table never trimmed would
+        // carry them for the rest of the session.
+        let later = now + Duration::from_secs(3_600);
+        assert_eq!(trim_older_than(&mut table, later, LEVEL_TRIM_AGE), 2);
+        assert!(table.is_empty());
+
+        // Inside the horizon they stay, however stale the *answer* already is:
+        // the engine that took the reading may be parked rather than gone.
+        table.insert(
+            ("paused.exe".to_string(), 33),
+            SourceLevel {
+                rms: 0.3,
+                peak: 0.4,
+                at: now,
+            },
+        );
+        assert_eq!(
+            trim_older_than(&mut table, now + LEVEL_MAX_AGE * 4, LEVEL_TRIM_AGE),
+            0
+        );
+        assert_eq!(table.len(), 1);
+    }
+
+    /// A clock that reads backwards (it cannot with `Instant`, but the age rule
+    /// is the whole contract of this table) must not age an entry out at zero.
+    #[test]
+    fn a_reading_never_measures_as_negative_age() {
+        let now = Instant::now();
+        assert_eq!(age_of(now, now), Duration::ZERO);
+        assert_eq!(age_of(now + Duration::from_secs(5), now), Duration::ZERO);
     }
 
     #[test]

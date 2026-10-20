@@ -114,11 +114,21 @@ fn device_info(device: &IMMDevice) -> Result<AudioDevice, AudioError> {
     }
 
     // SAFETY: OpenPropertyStore with STGM_READ is valid.
-    let props: IPropertyStore = unsafe {
-        device
-            .OpenPropertyStore(windows::Win32::System::Com::STGM_READ)
-            .map_err(|e| AudioError::Api(format!("OpenPropertyStore({id}) failed: {e}")))?
-    };
+    let props: IPropertyStore =
+        match unsafe { device.OpenPropertyStore(windows::Win32::System::Com::STGM_READ) } {
+            Ok(props) => props,
+            // The store refusing is the same case as the name inside it refusing:
+            // the endpoint is still there and still routable, so it is listed by id
+            // rather than lost. `GetId` already succeeded, which is the half of the
+            // information the picker and the routing commands need.
+            Err(e) => {
+                warn!("property store of {id} unreadable; listing it by id: {e}");
+                return Ok(AudioDevice {
+                    name: id.clone(),
+                    id,
+                });
+            }
+        };
 
     // A name the service will not hand over is not a device that cannot be
     // routed: the id is already in hand, and dropping the entry here would hide
@@ -169,8 +179,9 @@ pub fn get_default_render_device() -> Result<AudioDevice, AudioError> {
 
 /// Extract the friendly name string from a PROPVARIANT.
 ///
-/// Any answer that is not a usable string — another type, or an empty name —
-/// falls back to `fallback`, so a device never reaches the list nameless.
+/// Any answer that is not a usable string — another type, an empty or
+/// whitespace-only name — falls back to `fallback`, so a device never reaches
+/// the list nameless.
 fn extract_friendly_name(var: &windows::core::PROPVARIANT, fallback: &str) -> String {
     // Access the inner imp type via as_raw().
     // SAFETY: Accessing union field requires unsafe.
@@ -184,9 +195,51 @@ fn extract_friendly_name(var: &windows::core::PROPVARIANT, fallback: &str) -> St
     } else {
         String::new()
     };
-    if name.is_empty() {
+    usable_name(name, fallback)
+}
+
+/// Whether a name read off a device is worth showing.
+///
+/// A driver that answers with an empty string has not named the endpoint, and a
+/// blank row in the picker is indistinguishable from the endpoint next to it —
+/// which is worse than an id, because the id at least matches what the routing
+/// commands and the reset path report when the same device is refused.
+fn usable_name(read: String, fallback: &str) -> String {
+    if read.trim().is_empty() {
         fallback.to_string()
     } else {
-        name
+        read
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A name that is not a name is the case the whole fallback exists for:
+    /// drivers hand back an empty string, and both halves of that — the blank
+    /// value and the id that replaces it — have to reach the same list row.
+    #[test]
+    fn an_empty_or_blank_name_is_not_a_name() {
+        assert_eq!(usable_name(String::new(), "id-1"), "id-1");
+        assert_eq!(usable_name("   ".to_string(), "id-1"), "id-1");
+        assert_eq!(usable_name("\t \n".to_string(), "id-1"), "id-1");
+        assert_eq!(
+            usable_name("Headphones".to_string(), "id-1"),
+            "Headphones",
+            "a real name is shown as it reads"
+        );
+    }
+
+    /// A property variant that is not a string — another type, or the value
+    /// missing altogether — used to be the arm that dropped the device from the
+    /// list. It names it by id instead.
+    #[test]
+    fn a_variant_that_is_not_a_string_falls_back_to_the_id() {
+        // `VT_EMPTY`, which is what a service that has no friendly name hands
+        // over; the read never reaches the string arm.
+        let empty = windows::core::PROPVARIANT::default();
+        let id = "{0.0.0.00000000}\\{b7a1}";
+        assert_eq!(extract_friendly_name(&empty, id), id);
     }
 }

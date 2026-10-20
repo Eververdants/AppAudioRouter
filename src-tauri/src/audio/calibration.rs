@@ -32,10 +32,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use log::warn;
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_FAILED};
 use windows::Win32::Media::Audio::{
     IAudioClient, IAudioRenderClient, IMMDeviceEnumerator, MMDeviceEnumerator,
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
@@ -88,6 +89,12 @@ const PADDING_TARGET_MS: usize = 50;
 /// Shared-mode stream buffer, in hundreds of nanoseconds (200 ms) — the same
 /// request the engine's render clients make.
 const STREAM_BUFFER_DURATION: i64 = 2_000_000;
+/// The stream flags a burst is written with: the device event, plus the
+/// conversion pair that lets a format taken from the **default** endpoint be
+/// opened on any other one. Same request the engine's mirror clients make.
+const FLAGS_WITH_CONVERSION: u32 = AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+    | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+    | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
 /// Backstop for the wait on the render event: the event fires once per device
 /// period while the stream is running; the timeout only bounds how long a
 /// cancelled run can linger between writes.
@@ -245,6 +252,27 @@ fn mix_layout(format: &[u8]) -> (usize, bool) {
     (wfx.nChannels as usize, float)
 }
 
+/// The stream flags to try, in order, for one calibration burst.
+///
+/// The engine's render clients retry without `AUTOCONVERTPCM` when an endpoint
+/// refuses the conversion path (`duplication.rs`, `open_render_session`), and
+/// this player has to as well: a device that says no to the flag is a wizard
+/// that reports a failure where it could have reported a measurement.
+///
+/// The fallback is only offered when the frames being written already are
+/// float32 (`native_float`). A device that mixes in integer PCM gets the
+/// synthesized float32 format instead, and that format is only meaningful
+/// *with* the conversion flag — a stream opened without it takes the bytes it
+/// is handed as its own format, so the burst would land as noise rather than as
+/// the tone being measured. A plain retry there is a wrong answer, not a
+/// fallback.
+fn init_attempts(native_float: bool) -> (u32, Option<u32>) {
+    (
+        FLAGS_WITH_CONVERSION,
+        native_float.then_some(AUDCLNT_STREAMFLAGS_EVENTCALLBACK),
+    )
+}
+
 fn play_test_tone_inner(
     device_id: &str,
     reps: usize,
@@ -300,20 +328,42 @@ fn play_test_tone_inner(
     // default device's mix format; the 18-byte prefix is valid for either shape.
     let mix = unsafe { &*(mix_format.as_ptr() as *const WAVEFORMATEX) };
     let format = if native_float { mix } else { &float32_format };
-    // SAFETY: shared-mode event-driven render; periodicity must be 0.
-    unsafe {
+    let (flags, fallback_flags) = init_attempts(native_float);
+    // SAFETY: shared-mode event-driven render; periodicity must be 0, and
+    // `format` outlives both calls. A client whose Initialize failed is still
+    // uninitialized, so the fallback attempt is allowed on the same client —
+    // which is how the engine's own render clients do it.
+    let initialized = unsafe {
         client
             .Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
-                AUDCLNT_STREAMFLAGS_EVENTCALLBACK
-                    | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
-                    | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+                flags,
                 STREAM_BUFFER_DURATION,
                 0,
                 format,
                 None,
             )
-            .map_err(|e| com_err("Initialize(calibration)", e))?;
+            .or_else(|first_error| match fallback_flags {
+                None => Err(first_error),
+                Some(plain) => client
+                    .Initialize(
+                        AUDCLNT_SHAREMODE_SHARED,
+                        plain,
+                        STREAM_BUFFER_DURATION,
+                        0,
+                        format,
+                        None,
+                    )
+                    .map_err(|retry_error| {
+                        warn!("calibration retry without auto-convert failed: {retry_error}");
+                        first_error
+                    }),
+            })
+    };
+    initialized.map_err(|e| com_err("Initialize(calibration)", e))?;
+    // SAFETY: valid handle; the client is event-driven, so the handle must stay
+    // valid for the lifetime of the stream. Must come after Initialize.
+    unsafe {
         client
             .SetEventHandle(event)
             .map_err(|e| com_err("SetEventHandle(calibration)", e))?;
@@ -357,6 +407,14 @@ fn play_test_tone_inner(
     unsafe {
         let _ = client.Stop();
     }
+    // The client was handed the event handle by `SetEventHandle`, so it goes
+    // first: `EventHandle` closes the handle at the end of this scope, and a
+    // closed handle value is one another thread can be given for a different
+    // object — the engine would then be signalling something that is not this
+    // stream's event. Same ordering as `duplication`'s `RenderSession`, whose
+    // client field drops before the handle field it owns.
+    drop(render);
+    drop(client);
     result
 }
 
@@ -400,7 +458,8 @@ fn burst_frames(schedule: &[Segment]) -> usize {
 ///
 /// Every wait in this loop is woken by the device's render event (once per
 /// period) or bounded by the backstop timeout, which exists so a cancelled run
-/// cannot linger between writes; the cancel flag is checked on both exits.
+/// cannot linger between writes; the cancel flag is checked on both exits, and a
+/// wait that fails outright ends the run rather than spinning it (see below).
 // Tauri commands carry their State params in the signature, so the argument
 // count is fixed by the framework — same allowance the route command carries.
 #[allow(clippy::too_many_arguments)]
@@ -434,8 +493,20 @@ fn pump(
             return Err(AudioError::Api("calibration cancelled".to_string()));
         }
         // SAFETY: valid event handle; signalled once per device period while
-        // the stream runs.
-        unsafe { WaitForSingleObject(event, WAIT_BACKSTOP_MS) };
+        // the stream runs, and a timeout is the expected answer between periods.
+        let waited = unsafe { WaitForSingleObject(event, WAIT_BACKSTOP_MS) };
+        if waited == WAIT_FAILED {
+            // The handle is not waitable any more, so the wait returns at once
+            // instead of pacing the loop: carrying on would spin this thread at
+            // full tilt while writing the burst as fast as the buffer allows,
+            // which is the opposite of a predictable measurement.
+            // SAFETY: GetLastError only reads this thread's last-error slot.
+            let code = unsafe { GetLastError() };
+            return Err(AudioError::Api(format!(
+                "WaitForSingleObject(calibration) failed: 0x{:08X}",
+                code.0
+            )));
+        }
         if cancel.load(Ordering::SeqCst) {
             return Err(AudioError::Api("calibration cancelled".to_string()));
         }
@@ -474,10 +545,16 @@ fn pump(
                         start_marked = true;
                         // The start marker rides on the first write of the
                         // burst: from here the tone is on its way to the DAC.
-                        let _ = app.emit(
+                        // It is the measurement, not a courtesy: a marker the
+                        // window never got leaves the wizard scoring the next
+                        // tap against the previous burst, so the failure is
+                        // logged rather than swallowed.
+                        if let Err(e) = app.emit(
                             "calibration-tone",
                             json!({ "index": rep, "phase": "start" }),
-                        );
+                        ) {
+                            warn!("could not deliver the tone start marker: {e}");
+                        }
                     }
                     // SAFETY: copy of exactly `take` frames into the buffer
                     // returned by GetBuffer; valid until ReleaseBuffer.
@@ -498,8 +575,11 @@ fn pump(
                         end_marked = true;
                         // The end marker rides on the burst's last write, so
                         // the two markers bracket exactly the burst.
-                        let _ =
-                            app.emit("calibration-tone", json!({ "index": rep, "phase": "end" }));
+                        if let Err(e) =
+                            app.emit("calibration-tone", json!({ "index": rep, "phase": "end" }))
+                        {
+                            warn!("could not deliver the tone end marker: {e}");
+                        }
                     }
                 }
             }
@@ -644,5 +724,27 @@ mod tests {
         );
         // A format too short to read at all is not float32, whatever it claims.
         assert_eq!(mix_layout(&[0u8; 4]), (0, false));
+    }
+
+    /// An endpoint that refuses `AUTOCONVERTPCM` still takes a plain stream, and
+    /// the wizard has to find out by trying — but only when the frames it writes
+    /// are the device's own. On an integer-PCM mixer the burst is synthesized as
+    /// float32, and a stream opened without conversion would read those bytes as
+    /// its own format: the fallback exists to save a measurement, not to turn it
+    /// into noise.
+    #[test]
+    fn the_plain_retry_is_only_offered_to_a_device_that_mixes_in_float32() {
+        let (convert, fallback) = init_attempts(true);
+        assert_eq!(convert, FLAGS_WITH_CONVERSION);
+        assert_eq!(fallback, Some(AUDCLNT_STREAMFLAGS_EVENTCALLBACK));
+        assert_eq!(
+            init_attempts(false),
+            (FLAGS_WITH_CONVERSION, None),
+            "no plain attempt against a PCM mixer"
+        );
+        // The conversion attempt always asks for the flag it is falling back
+        // from, so a device that took the first call is never retried wrong.
+        assert!(convert & AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM != 0);
+        assert!(convert & AUDCLNT_STREAMFLAGS_EVENTCALLBACK != 0);
     }
 }
