@@ -595,15 +595,51 @@ let reconcileFlight = 0;
 
 /** Discard the reply of every reconciliation still in flight.
  *
- * `reconcileFlight` only compares reconciliations with each other, but a stop
- * is a mutation of the same picture: a reply asked for before it lands carries
- * the engine that has just been taken down, and writing that back would put the
- * badge and its generation on a route nothing is duplicating any more — which
- * then swallows every later event as a stale one. A stop therefore retires the
- * outstanding ask rather than asking again: stopping starts no engine, and the
- * next pass (a notification, the next route) re-reads the whole list anyway. */
+ * `reconcileFlight` only compares reconciliations with each other, but a stop is a
+ * mutation of the same picture: a reply asked for before it lands carries the
+ * engine that has just been taken down, and writing that back would put the badge
+ * and its generation on a route nothing is duplicating any more — which then
+ * swallows every later event as a stale one. A stop therefore retires the
+ * outstanding ask rather than asking again: stopping starts no engine, and the next
+ * pass (a notification, the next route) re-reads the whole list anyway. Because the
+ * engine only comes down when the backend answers, a stop retires the asks **twice**
+ * — once against the picture the store still shows, once against the one its own
+ * take-down provoked — and the two engine handlers retire the outstanding ask once,
+ * since a route can end with nobody pressing anything and they have no answer of
+ * their own to wait for. What the second retirement can throw away is a reading a
+ * *different* route was owed, and an engine that starts asks for its own through
+ * `duplication-ready`: a figure that waits is the cost, not a stopped route drawn as
+ * playing. */
 function invalidateReconciliation(): void {
   reconcileFlight += 1;
+}
+
+/** Take back a route whose stop is still in the air, if a reconciliation answer put
+ * it back on screen while the take-down was being processed.
+ *
+ * Retiring the outstanding asks cannot reach a reply that already committed, and
+ * such a reply can only be one thing: the engine this stop is taking down, drawn as
+ * running again — the badge and the generation of a route nothing is duplicating,
+ * which then swallows every event of whatever route comes next. So a badge still
+ * wearing the generation this stop retired goes back down with it, while a route the
+ * user applied inside that window keeps its own, newer number: the backend hands
+ * generations out monotonically, so two engines never share one. A route with no
+ * engine (generation 0) is not in any answer to begin with, so there is nothing to
+ * take back. */
+function retireStaleRevival(
+  set: (updater: (state: RouterState) => Partial<RouterState>) => void,
+  pid: number,
+  retiredGeneration: number,
+): void {
+  if (retiredGeneration <= 0) return;
+  set((s) => {
+    if (s.engineGenerations[pid] !== retiredGeneration) return {};
+    const routedPids = { ...s.routedPids };
+    delete routedPids[pid];
+    const engineGenerations = { ...s.engineGenerations };
+    delete engineGenerations[pid];
+    return { routedPids, engineGenerations };
+  });
 }
 
 /**
@@ -965,7 +1001,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      get().raiseError(i18next.t('log.deviceRefreshFailed', { error: String(e) }));
+      const message = i18next.t('log.deviceRefreshFailed', { error: String(e) });
+      // The channel follows who asked for the read, not what caused it. Unplugging
+      // a device is something the user did, but nobody asked for this list — and the
+      // enumeration that runs before any device list exists is the app asking on its
+      // own, which is one of the three boot inputs whose arrival order nobody
+      // caused. Only a press against a list already on screen is a thing the user
+      // tried and did not get, and that one answers where they are looking.
+      if (viaNotification || get().devices.length === 0) get().addLog(message, 'error');
+      else get().raiseError(message);
     } finally {
       deviceRefreshGate.inFlight = false;
       runQueuedRefresh(deviceRefreshGate, (rerunViaNotification) => {
@@ -980,6 +1024,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       return;
     }
     sessionRefreshGate.inFlight = true;
+    // Whether a list is already on screen: the same seam the device refresh reads.
+    const listWasUp = get().sessionsLoaded;
     try {
       const sessions = (await api.listSessions()).sort(compareSessions);
       const livePids = new Set(sessions.map((s) => s.pid));
@@ -1054,7 +1100,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      get().raiseError(i18next.t('log.sessionsRefreshFailed', { error: String(e) }));
+      const message = i18next.t('log.sessionsRefreshFailed', { error: String(e) });
+      // The rule the device refresh states in full: a read the notification
+      // provoked, and the app's own first read before anything is on screen, are
+      // background reads and reach the log alone. The rail's Refresh button pressed
+      // against a list that is already there is the user's own ask, and its refusal
+      // has to stand where the user is looking.
+      if (viaNotification || !listWasUp) get().addLog(message, 'error');
+      else get().raiseError(message);
     } finally {
       // Raised whether the enumeration answered or refused: after a failure the
       // rail would otherwise sit on "reading" forever, which is a different
@@ -1313,8 +1366,19 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.rememberedRouteCleared', { process: exeName }), 'info');
     } catch (e) {
       // The file still carries it, so the list must too: showing a route as
-      // forgotten while the next launch restores it is the worse lie.
-      set({ rememberedRoutes: previous });
+      // forgotten while the next launch restores it is the worse lie. Only this
+      // executable's own rows go back, though — the array as it stood before the
+      // await can be a stale picture of somebody else's memory, since a route
+      // applied meanwhile rewrites its row, and restoring the whole list would put
+      // that row's old device list back on the settings page. Order is not
+      // load-bearing here (this list is not numbered the way the feed board is), so
+      // the row rejoins at the end.
+      set((s) => {
+        const gone = previous.filter((entry) => entry.exeName.toLowerCase() === key);
+        if (gone.length === 0) return {};
+        if (s.rememberedRoutes.some((entry) => entry.exeName.toLowerCase() === key)) return {};
+        return { rememberedRoutes: [...s.rememberedRoutes, ...gone] };
+      });
       get().raiseError(
         i18next.t('log.rememberedRouteClearedFailed', { process: exeName, error: String(e) }),
       );
@@ -1360,7 +1424,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // Same as the load path: a carrier moving re-opens every suspended rule.
       queueAssignmentWork(() => get().restoreRememberedFeeds());
     } catch (e) {
-      set({ feedCarrier: previous });
+      set((s) => {
+        // Roll this pair back only while it is still the pair on screen: the two
+        // picker rows fire without waiting, so a second pairing can have restated
+        // the carrier while this write was in flight, and the pair that write
+        // accepted stands — the file holds it, and the liveness of every feed is
+        // read from it.
+        if (s.feedCarrier.render !== render || s.feedCarrier.capture !== capture) return {};
+        return { feedCarrier: previous };
+      });
       get().raiseError(i18next.t('log.feedCarrierSetFailed', { error: String(e) }));
     }
   },
@@ -2031,6 +2103,19 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         };
       });
       const outcome = await api.stopRoute(pid);
+      // Retire the asks made *after* the one above too. The engine comes down when
+      // this call answers, and the teardown itself raises a Core Audio change, so a
+      // reconciliation asked inside that window still pictures the live engine: its
+      // reply would put the badge and the generation of an engine that has just gone
+      // back on screen, and nothing asks a third time on a quiet machine. What this
+      // can discard is a reading another route was owed — and an engine that starts
+      // asks for its own through `duplication-ready`, so the cost is a figure that
+      // waits, not a stopped route drawn as playing.
+      invalidateReconciliation();
+      // And take back the answer that landed before it could be retired: a reply
+      // committing while this call was in the air has already been written, and it
+      // drew the very engine this stop is taking down.
+      retireStaleRevival(set, pid, previousGeneration);
       if (outcome.released) {
         get().addLog(i18next.t('log.routeStopped', { process }), 'info');
       } else if (outcome.sibling_held) {
@@ -2120,6 +2205,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         stillPinned.push(names.get(pid) ?? `PID ${pid}`);
       }
     });
+    // Same second retirement as a single stop: an ask made while this batch was in
+    // the air still lists engines that are now down. When every stop refused the
+    // engines are all still running, so nothing is thrown away.
+    if (failed.length < pids.length) invalidateReconciliation();
+    for (const pid of pids) {
+      // A stop that refused keeps its live route, so only the ones that came down
+      // have a revival to take back.
+      if (failed.includes(pid)) continue;
+      const retired = generationSnapshot[pid];
+      if (retired !== undefined) retireStaleRevival(set, pid, retired);
+    }
     set((s) => {
       const routedPids = { ...s.routedPids };
       const engineGenerations = { ...s.engineGenerations };
@@ -2570,6 +2666,13 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // Reject stale events before logging too: an old engine must not produce a
     // misleading failure line for a route that has already been replaced.
     if (generation !== (get().engineGenerations[pid] ?? 0)) return;
+    // The engine is down and nothing is going to start it again, so whatever ask is
+    // still holding its picture is retired here. Both branches below end the route,
+    // and the process-exited one has no stop to lean on: the session refresh that
+    // would prune a revived badge can easily have run *before* the late reply
+    // lands, which leaves a route drawn as playing for a program that has left, for
+    // the rest of the session on a quiet machine.
+    invalidateReconciliation();
     if (reason === 'error') {
       get().raiseError(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }));
       // End it the way a stop ends it, and it has to be the stop. The engine
@@ -2628,6 +2731,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     if (generation !== (get().engineGenerations[pid] ?? 0)) return;
     const routed = get().routedPids[pid];
     if (routed === undefined || !routed.includes(deviceId)) return;
+    // A reconciliation asked before this event still names the device that just
+    // went quiet: its reply would redraw the badge with it, bring the pulse back,
+    // and hand a latency reading to a stream the engine no longer writes — the lie
+    // this event exists to report. The engine itself keeps running, so the ask is
+    // retired rather than replaced; the next one re-reads the whole list.
+    invalidateReconciliation();
     // The first id is the primary — the endpoint the OS plays natively — and the
     // backend reports a mirror, never the primary: an engine holds its primary
     // apart from the copies it duplicates to. So a device reported at that
