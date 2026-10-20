@@ -129,8 +129,13 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
     return map;
   }, [devices]);
 
+  // A default device the enumeration no longer reports is said as one that has
+  // left, never as its GUID: that string answers nothing, and like the chips
+  // below this is a transient mismatch between two refreshes.
   const defaultName =
-    defaultDeviceId !== null ? (nameById.get(defaultDeviceId) ?? defaultDeviceId) : null;
+    defaultDeviceId !== null
+      ? (nameById.get(defaultDeviceId) ?? t('briefingPage.deviceGone'))
+      : null;
 
   const { cards, following } = useMemo(() => {
     // The route table is keyed by the process that holds the route — one per

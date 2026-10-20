@@ -85,6 +85,7 @@
     "inspectAria": "调音 {{name}}",
     "inspectTitle": "打开 {{name}} 的调音条",
     "inspectClear": "收起调音条",
+    "deviceGone": "一台已经离开的设备",
     "groupPrimary": "主设备",
     "groupPrimaryEmpty": "还没有输出设备",
     "groupCopies": "复制设备 · 应用输入",

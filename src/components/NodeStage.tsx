@@ -179,6 +179,9 @@ export function NodeStage() {
   const wellRef = useRef<HTMLDivElement | null>(null);
   /** The button a picker came from, so closing hands the keyboard back to it. */
   const pickerReturnRef = useRef<HTMLElement | null>(null);
+  /** The number badge the strip was opened from: closing the strip with its own
+   *  ✕ must not leave the caret in the air where the strip just unmounted. */
+  const inspectorReturnRef = useRef<HTMLElement | null>(null);
   /** The two menu surfaces, for the focus an open `role=menu` is expected to take. */
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const primaryMenuRef = useRef<HTMLDivElement | null>(null);
@@ -413,6 +416,7 @@ export function NodeStage() {
     setCopyScroll(0);
     setRevealIndex(null);
     prevRowsRef.current = null;
+    inspectorReturnRef.current = null;
   }, [pid]);
 
   // The strip names a device and shows the levers that belong to it. If that
@@ -471,6 +475,17 @@ export function NodeStage() {
 
   const clearReveal = useCallback(() => setRevealIndex(null), []);
 
+  /** Close the strip from its own ✕ and hand the keyboard back to the number
+   *  badge that opened it — the strip is about to unmount, and focus left in a
+   *  dead subtree restarts the Tab walk at the top of the window. Other closes
+   *  (a programme switch, the inspected row leaving the plan) are presses that
+   *  already moved the keyboard somewhere, so only this one reaches back. */
+  const clearInspector = () => {
+    setInspectorKey(null);
+    inspectorReturnRef.current?.focus();
+    inspectorReturnRef.current = null;
+  };
+
   const wires: WireSpec[] = [];
   // Hub → the primary row, then → every row of the copies panel. The hub's own
   // wires light together when it is hovered.
@@ -504,8 +519,18 @@ export function NodeStage() {
       live: flowing && state === 'live',
     });
   });
-  // Feeders → hub.
+  // Feeders → hub. A card clipped whole out of the board by the well's own
+  // edge has nothing to meet: the same rule `rowVisible` carries for a
+  // destination row scrolled out of its panel — no visible row, no line.
+  // A card still partly visible keeps its wire, clipped at the board edge:
+  // the half-cut is the "there are more of these" cue, and the wire is the
+  // only thing pointing at where they go.
+  const feederShows = (index: number): boolean => {
+    const y = feederY(index, feeders.length, height);
+    return y < height && y + MINI_H > 0;
+  };
   feeders.forEach((feeder, index) => {
+    if (!feederShows(index)) return;
     const source = feederOutPort(index, feeders.length, height);
     const to = hubInPort(height);
     wires.push({
@@ -541,8 +566,12 @@ export function NodeStage() {
 
   // The hub's accessible name lists every device the plan reaches, joined the
   // way the disc stage always joined them: a screen reader hears the whole
-  // answer, not just the primary.
-  const targets = drawn.map((id) => devices.find((d) => d.id === id)?.name ?? id).join(' + ');
+  // answer, not just the primary. A device that has left `devices` is said as
+  // one that has left, never as its GUID — that string answers nothing, and
+  // the mismatch only lasts until the next refresh anyway.
+  const deviceNameOf = (id: string): string =>
+    devices.find((d) => d.id === id)?.name ?? t('stage.deviceGone');
+  const targets = drawn.map(deviceNameOf).join(' + ');
   const applyAria =
     selectedPids.length > 1
       ? t('stage.applyAriaMany', { n: selectedPids.length, device: targets })
@@ -642,6 +671,10 @@ export function NodeStage() {
               to that programme's own board — the graph answers one programme at
               a time, and this is the door between them. */}
           {feeders.map((feeder, index) => {
+            // The well clips vertically and never scrolls: a card whole
+            // levels off the board is neither visible nor reachable, and a
+            // focusable button nobody can reach or see is not on the board.
+            if (!feederShows(index)) return null;
             const feederName = feeder.display_name ?? feeder.exe_name;
             const feederSounding = soundingFeeders.has(feeder.exe_name.toLowerCase());
             return (
@@ -840,7 +873,7 @@ export function NodeStage() {
             {primaryDeviceId !== undefined && (
               <DeviceRow
                 deviceId={primaryDeviceId}
-                deviceName={devices.find((d) => d.id === primaryDeviceId)?.name ?? primaryDeviceId}
+                deviceName={deviceNameOf(primaryDeviceId)}
                 index={0}
                 top={rowContentY(0) - ROW_H / 2}
                 isPrimary
@@ -859,7 +892,10 @@ export function NodeStage() {
                   setPickerOpen(false);
                   setPrimaryPickerOpen((value) => !value);
                 }}
-                onInspect={() => setInspectorKey(`dev:${primaryDeviceId}`)}
+                onInspect={(source) => {
+                  inspectorReturnRef.current = source;
+                  setInspectorKey(`dev:${primaryDeviceId}`);
+                }}
                 onHover={setHoverKey}
               />
             )}
@@ -902,7 +938,7 @@ export function NodeStage() {
                 <DeviceRow
                   key={deviceId}
                   deviceId={deviceId}
-                  deviceName={devices.find((d) => d.id === deviceId)?.name ?? deviceId}
+                  deviceName={deviceNameOf(deviceId)}
                   index={offset + 1}
                   top={rowContentY(offset) - ROW_H / 2}
                   isPrimary={false}
@@ -913,7 +949,10 @@ export function NodeStage() {
                   onToggle={() => toggleTarget(deviceId)}
                   onRemove={() => toggleTarget(deviceId)}
                   onPromote={() => promoteDevice(deviceId)}
-                  onInspect={() => setInspectorKey(`dev:${deviceId}`)}
+                  onInspect={(source) => {
+                    inspectorReturnRef.current = source;
+                    setInspectorKey(`dev:${deviceId}`);
+                  }}
                   onHover={setHoverKey}
                 />
               );
@@ -1104,7 +1143,7 @@ export function NodeStage() {
           >
             <Inspector
               inspectorKey={inspectorKey}
-              onClear={() => setInspectorKey(null)}
+              onClear={clearInspector}
               drawn={drawn}
               deviceLatencyMs={deviceLatencyMs}
             />
@@ -1294,7 +1333,9 @@ function DeviceRow({
   /** Present on the primary row only: clicking the row opens the picker that
    *  hands the primary seat to another device. */
   onPrimaryPick?: () => void;
-  onInspect: () => void;
+  /** Opens the strip, with the badge that was pressed: closing the strip
+   *  later puts the keyboard back there. */
+  onInspect: (source: HTMLElement) => void;
   onHover: (key: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -1327,7 +1368,7 @@ function DeviceRow({
         <button
           type="button"
           className="no pressable cursor-pointer hover:border-accent hover:text-accent"
-          onClick={onInspect}
+          onClick={(event) => onInspect(event.currentTarget)}
           aria-label={t('stage.inspectAria', { name: deviceName })}
           title={t('stage.inspectTitle', { name: deviceName })}
         >
@@ -1433,7 +1474,7 @@ function DeviceRow({
           // multiplication sign, so the action has to be said.
           aria-label={t('stage.removeTarget', { name: deviceName })}
           onClick={onRemove}
-          className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
+          className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error focus-visible:border-error focus-visible:text-error"
         >
           ✕
         </button>
@@ -1635,7 +1676,7 @@ function FeedRow({
         title={t('stage.removeFeed', { name: targetName })}
         aria-label={t('stage.removeFeed', { name: targetName })}
         onClick={onRemove}
-        className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
+        className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error focus-visible:border-error focus-visible:text-error"
       >
         ✕
       </button>
@@ -1778,6 +1819,10 @@ function Inspector({
   const exeName = sessions.find((s) => s.pid === selectedPids[0])?.exe_name;
   const deviceId = inspectorKey.slice(4);
   const device = devices.find((d) => d.id === deviceId);
+  // A staged device that has left `devices` is named as one that has left, not
+  // by its GUID — the strip speaks to the user, and between two refreshes the
+  // honest sentence is "this one is gone", not an unreadable identifier.
+  const deviceLabel = device?.name ?? t('stage.deviceGone');
   // The strip only exists while the plan has copies (`drawn.length > 1`, the
   // caller's guard), so a device at index 0 is the primary and every other one
   // is a copy. A device whose delay is not the group's smallest is still a
@@ -1799,7 +1844,7 @@ function Inspector({
         <div className="flex items-center gap-2.5">
           <Ring tone="main" size={14} />
           <span>
-            <span className="block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
+            <span className="block text-[12.5px] font-bold">{deviceLabel}</span>
             <span className="text-[9.5px] text-text-muted">{t('stage.main')}</span>
           </span>
         </div>
@@ -1826,7 +1871,7 @@ function Inspector({
         <div className="flex items-center gap-2.5">
           <Ring tone="copy" size={14} />
           <span>
-            <span className="block text-[12.5px] font-bold">{device?.name ?? deviceId}</span>
+            <span className="block text-[12.5px] font-bold">{deviceLabel}</span>
             <span className="text-[9.5px] text-text-muted">{t('stage.copy')}</span>
           </span>
         </div>
@@ -1835,7 +1880,7 @@ function Inspector({
           title={
             latency !== undefined
               ? t('deviceLatency.reading', { ms: latency })
-              : t('deviceDelay.valueLabel', { device: device?.name ?? deviceId })
+              : t('deviceDelay.valueLabel', { device: deviceLabel })
           }
           value={`${formatDelaySigned(delay)} ms`}
           onDown={() => void setDeviceDelayValue(deviceId, clampDelay(delay - delayStepMs))}
@@ -1847,7 +1892,7 @@ function Inspector({
         />
         <StripRow
           label={t('stage.stripShare')}
-          title={t('deviceVolume.valueLabel', { device: device?.name ?? deviceId })}
+          title={t('deviceVolume.valueLabel', { device: deviceLabel })}
           value={`${share}%`}
           onDown={() => void setDeviceVolume(deviceId, Math.max(0, share - 5))}
           onUp={() => void setDeviceVolume(deviceId, Math.min(100, share + 5))}
@@ -1868,7 +1913,7 @@ function Inspector({
       <button
         type="button"
         onClick={onClear}
-        className="pressable flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
+        className="pressable flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
         title={t('stage.inspectClear')}
         aria-label={t('stage.inspectClear')}
       >

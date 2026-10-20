@@ -37,6 +37,14 @@ const STOP_GLYPH = (
   </svg>
 );
 
+/** The cap on the sheet's list, in CSS pixels: the sheet's own surface measure
+ *  (the family of its `w-[320px]`), not board geometry — `lib/stage.ts` sizes
+ *  the board's 52px rows, and these are the capsule's own 28px ones. Even at
+ *  the app's minimum window height the pill leaves more than this above it, so
+ *  the sheet's cut always lands on a row inside the box and the fade below is
+ *  what says there is more under it. */
+const SHEET_LIST_MAX_PX = 280;
+
 /**
  * The routed capsule: one pill that counts every live route, and the list it
  * opens — one row per routed programme, each with its own way out.
@@ -78,6 +86,16 @@ export function RoutedCapsule() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  /** Whether the capped list has more rows above or below what is visible —
+   *  the same two background fades the board's panels use at their cut edge. */
+  const [listFade, setListFade] = useState({ up: false, down: false });
+  const measureListFade = () => {
+    const el = listRef.current;
+    const up = el !== null && el.scrollTop > 0.5;
+    const down = el !== null && el.scrollTop + el.clientHeight < el.scrollHeight - 0.5;
+    setListFade((prev) => (prev.up === up && prev.down === down ? prev : { up, down }));
+  };
 
   // Walk the session list, not the route table: a programme on its way out can
   // still carry a route for a breath, and a row without a name or an icon has
@@ -113,6 +131,15 @@ export function RoutedCapsule() {
     if (!open) return;
     panelRef.current?.querySelector<HTMLElement>('button')?.focus();
   }, [open]);
+
+  // A routed list longer than the sheet can show must not be clipped by the
+  // window's top: the rows scroll inside the sheet, and the fades say which
+  // side still has more. Measured when the sheet mounts and whenever the list
+  // grows or shrinks; every scroll — the user's own or a focused row the
+  // browser brings into view — re-measures through `measureListFade`.
+  useEffect(() => {
+    if (open) measureListFade();
+  }, [open, rows.length]);
 
   // Escape and outside-pointerdown follow the panel's visibility, exactly the
   // way the stage's pickers do it: a standing listener would swallow the key
@@ -181,15 +208,36 @@ export function RoutedCapsule() {
               <div className="px-2 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">
                 {t('routed.title')}
               </div>
-              <div className="flex flex-col">
-                {rows.map((row) => (
-                  <CapsuleRow
-                    key={row.pid}
-                    row={row}
-                    liveness={liveness}
-                    onNavigate={() => setOpen(false)}
-                  />
-                ))}
+              {/* The rows scroll inside a capped box; the two background fades
+                  are the board panels' own language for *that side still has
+                  rows*, painted on the sheet's surface colour and only lit
+                  while there is something on that side to reach. */}
+              <div className="relative">
+                <div
+                  ref={listRef}
+                  onScroll={measureListFade}
+                  className="flex flex-col overflow-y-auto"
+                  style={{ maxHeight: SHEET_LIST_MAX_PX }}
+                >
+                  {rows.map((row) => (
+                    <CapsuleRow
+                      key={row.pid}
+                      row={row}
+                      liveness={liveness}
+                      onNavigate={() => setOpen(false)}
+                    />
+                  ))}
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-surface to-transparent transition-opacity duration-200"
+                  style={{ opacity: listFade.up ? 1 : 0 }}
+                />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-surface to-transparent transition-opacity duration-200"
+                  style={{ opacity: listFade.down ? 1 : 0 }}
+                />
               </div>
             </motion.div>
           )}

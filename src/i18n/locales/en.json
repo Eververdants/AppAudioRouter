@@ -85,6 +85,7 @@
     "inspectAria": "Tune {{name}}",
     "inspectTitle": "Open the tuning strip for {{name}}",
     "inspectClear": "Close the tuning strip",
+    "deviceGone": "a device that has left",
     "groupPrimary": "Primary device",
     "groupPrimaryEmpty": "No output device yet",
     "groupCopies": "Copies · app inputs",
