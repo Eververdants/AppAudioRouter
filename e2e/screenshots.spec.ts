@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { addDevice, appRow, changePrimary, hub, tuneButton } from './fixtures';
+import { addDevice, appRow, changePrimary, hub, tuneButton, tunerStrip } from './fixtures';
 import { installBridge, type BridgeState } from './tauri/bridge';
 
 /**
@@ -100,11 +100,16 @@ for (const theme of ['light', 'dark'] as const) {
     await appRow(page, 'chrome.exe').click();
     await changePrimary(page, 'WH-1000XM5', 'Speakers (Realtek)');
     await hub(page).click();
+    // The offer is up, so the wait below is a wait for it to expire rather than
+    // a check of a button that was never there: `toBeHidden` is just as pleased
+    // with an element that does not exist.
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
 
     // Back to the three-device programme with one copy's strip open: the shot
     // shows the board and the levers a copy actually has.
     await appRow(page, 'Music.exe').click();
     await tuneButton(page, 'HDMI output').click();
+    await expect(tunerStrip(page).getByText('Delay')).toBeVisible();
 
     // Let the undo offer expire: the shot is of the resting state, not of the
     // moment after the click.

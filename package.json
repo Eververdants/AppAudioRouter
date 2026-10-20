@@ -14,8 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "fmt": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
-    "fmt:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\""
+    "fmt": "prettier --write \"src/**/*.{ts,tsx,css,json}\" \"e2e/**/*.ts\" \"playwright.config.ts\"",
+    "fmt:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\" \"e2e/**/*.ts\" \"playwright.config.ts\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.0",

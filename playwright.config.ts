@@ -39,6 +39,16 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev --port 1420',
     url: 'http://localhost:1420',
+    // CI is safe, and it is safe by failing rather than by borrowing: GitHub
+    // Actions sets `CI`, so a runner that finds port 1420 occupied — a leftover
+    // service, an image with something already listening — dies here instead of
+    // quietly testing whoever happens to be serving that port.
+    //
+    // Reusing a server is a local convenience only, and it carries the local
+    // hole: whatever answers 1420 is what gets tested, which can be a dev server
+    // started from another worktree, another branch, or before the change under
+    // test. `CI=1 pnpm test:e2e` forces a fresh server for the run; that is the
+    // way to be sure the suite is talking about this checkout.
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

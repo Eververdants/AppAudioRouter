@@ -23,6 +23,11 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
+  // `e2e` is in here on purpose: the specs drive the same React tree and the
+  // same IPC surface as the app, so a drifted fixture or a locator that no
+  // longer exists is a real break — and a suite nothing type-checks rots in
+  // silence (the screenshot spec could not even boot). Same strict settings,
+  // and the DOM lib the page-side bridge code needs.
+  "include": ["src", "e2e", "playwright.config.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

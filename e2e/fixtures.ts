@@ -2,9 +2,11 @@ import { expect, type Page } from '@playwright/test';
 import {
   DEFAULT_STATE,
   installBridge,
+  type BridgeCalibrationRun,
   type BridgeDevice,
   type BridgeSession,
   type BridgeState,
+  type BridgeToneMarker,
 } from './tauri/bridge';
 
 /**
@@ -63,6 +65,23 @@ export async function setWindowFocused(page: Page, focused: boolean): Promise<vo
 
 export async function resetCalls(page: Page): Promise<void> {
   await page.evaluate(() => window.__AAR__?.resetCalls());
+}
+
+/**
+ * The tone player's admitted runs, read out of the page.
+ *
+ * The wizard's whole contract with the backend is a sequence — one burst per
+ * call, the devices rotating, a marker pair bracketing each burst — and none of
+ * it leaves a mark on the screen. Reading the fake's books is what lets a spec
+ * hold the sequence to the real shape instead of to whatever the dialog says.
+ */
+export async function calibrationRuns(page: Page): Promise<BridgeCalibrationRun[]> {
+  return page.evaluate(() => window.__AAR__?.calibrationRuns() ?? []);
+}
+
+/** Every `calibration-tone` marker the fake played, with its page-clock instant. */
+export async function calibrationTones(page: Page): Promise<BridgeToneMarker[]> {
+  return page.evaluate(() => window.__AAR__?.calibrationTones() ?? []);
 }
 
 /**
