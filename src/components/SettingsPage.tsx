@@ -120,7 +120,7 @@ function RememberedChip({
   // tooltip says so: an endpoint id in a sentence nobody can read is the same
   // GUID-on-screen the capsule and the 「现状」 page were called out for.
   const target = entry.deviceIds
-    .map((id) => devices.find((device) => device.id === id)?.name ?? t('routed.deviceGone'))
+    .map((id) => devices.find((device) => device.id === id)?.name ?? t('settings.deviceGone'))
     .join(' · ');
   return (
     <motion.span
@@ -333,6 +333,16 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     firstSection.current = false;
   }, []);
+
+  // The wizard is mounted outside the section column (it is an overlay, not a
+  // row), so switching away from 「延迟补偿」 does not unmount it on its own: a
+  // measurement would keep playing short tones over a page that no longer shows
+  // them. Closing it here is the stop — the wizard's own unmount cancels a live
+  // run — and it resets for the same reason the section state does: the page
+  // records the start of a visit, not where the user parked.
+  useEffect(() => {
+    if (section !== 'delays') setCalibrationOpen(false);
+  }, [section]);
 
   // Only ever disables one button, but it walks the whole session list, and
   // this page re-renders for every store field it reads — several of which
@@ -598,7 +608,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                         title={t('settings.feedCarrierRenderHint')}
                         value={feedCarrier.render ?? ''}
                         options={carrierOptions}
-                        missingLabel={t('routed.deviceGone')}
+                        missingLabel={t('settings.deviceGone')}
                         onChange={(next) =>
                           void setFeedCarrier(next === '' ? null : next, feedCarrier.capture)
                         }
