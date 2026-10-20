@@ -76,7 +76,19 @@ export function ScrubReadout({
 }: ScrubReadoutProps) {
   const [editing, setEditing] = useState(false);
   /** Text being typed; `null` while the field mirrors the committed value. */
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraftState] = useState<string | null>(null);
+  /**
+   * The same text, readable inside the tick a commit is made.
+   *
+   * ⚠️ `commit` must not read the state: both `Enter` and `Escape` write, close
+   * the editor and then hand the focus to the host, and that `focus()` fires the
+   * input's blur *synchronously* — so `commit` runs a second time from the same
+   * render's closure, where `draft` still holds the text React has already
+   * discarded. Reading state alone made `Enter` cost two identical writes and
+   * made `Escape` write back the very number it was meant to abandon. The ref is
+   * cleared with the state, so the second call has nothing left to do.
+   */
+  const text = useRef<string | null>(null);
   /** Value shown mid-scrub; `null` when the field mirrors the store. */
   const [scrub, setScrub] = useState<number | null>(null);
   /** Stepped value waiting for the quiet period; `null` once written. */
@@ -98,6 +110,12 @@ export function ScrubReadout({
 
   const clamp = (raw: number) => Math.max(min, Math.min(max, Math.round(raw)));
   const shown = scrub ?? stepped ?? value;
+
+  /** Set the typed text where both the next render and this tick can see it. */
+  const setDraft = (next: string | null) => {
+    text.current = next;
+    setDraftState(next);
+  };
 
   const rememberStep = (next: number | null) => {
     steppedRef.current = next;
@@ -121,7 +139,7 @@ export function ScrubReadout({
   };
 
   const commit = () => {
-    const raw = draft;
+    const raw = text.current;
     setDraft(null);
     if (reverting.current) {
       reverting.current = false;
@@ -134,7 +152,8 @@ export function ScrubReadout({
   };
 
   const stepBy = (direction: 1 | -1, times = 1) => {
-    const typed = draft !== null && draft.trim() !== '' ? Number(draft) : Number.NaN;
+    const raw = text.current;
+    const typed = raw !== null && raw.trim() !== '' ? Number(raw) : Number.NaN;
     // Step from the pending figure rather than from the store: a burst of wheel
     // notches all arrive before React re-renders, so `value` would still be the
     // old one for every single of them.

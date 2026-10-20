@@ -20,8 +20,14 @@ export function Tooltip({ label, children }: { label: string; children: ReactNod
           somewhere else must not flash a bubble, but leaving shows no courtesy
           period — a tooltip that lingers reads as stuck. */}
       {label !== '' && (
+        // ⚠️ `aria-hidden`, not just faded out: `opacity: 0` keeps an element in
+        // the accessibility tree, so a bubble that only *looks* hidden was being
+        // read as part of every row that carries one — a second voice saying what
+        // the anchor already names. The design is that screen readers never depend
+        // on this being visible (the anchor keeps its own accessible name), so the
+        // bubble is taken out of the tree as well as out of the sight line.
         <span
-          role="tooltip"
+          aria-hidden="true"
           className="pointer-events-none absolute bottom-full left-0 z-40 mb-2 w-max max-w-[250px] translate-y-1 rounded-full border border-line bg-surface px-2.5 py-1.5 text-[11px] leading-relaxed text-text-secondary opacity-0 transition duration-150 group-focus-within/tip:translate-y-0 group-focus-within/tip:opacity-100 group-focus-within/tip:delay-300 group-hover/tip:translate-y-0 group-hover/tip:opacity-100 group-hover/tip:delay-300"
         >
           {label}

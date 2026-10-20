@@ -67,6 +67,27 @@ export function Toast() {
     return () => window.clearTimeout(timer);
   }, [errorNotice, held, dismissError]);
 
+  // The card that is *this* notice, as opposed to the next one wearing the same
+  // slot. `raiseError` replaces the message and bumps the id, which remounts the
+  // card; a card that is removed under the pointer never reports that the pointer
+  // left it, so the `held` it set would stand for the new one as well — and a
+  // held card starts no countdown at all. One action that fails in several places
+  // at once (a wipe that refuses several stops) raises several notices in a row,
+  // so this is not a corner: the last failure would simply never go away. Same
+  // reasoning for the feed offer, whose key changes when the pair or the
+  // direction does.
+  const errorId = errorNotice?.id ?? null;
+  const feedKey =
+    feedUndo === null
+      ? null
+      : `${feedUndo.added ? 'add' : 'remove'}:${feedUndo.sourcePid}:${feedUndo.targetPid}`;
+  useEffect(() => {
+    setHeld((current) => (current === 'error' ? null : current));
+  }, [errorId]);
+  useEffect(() => {
+    setHeld((current) => (current === 'feed' ? null : current));
+  }, [feedKey]);
+
   useEffect(() => {
     // A card that is gone cannot report the pointer leaving it: an offer that
     // ended while the pointer was on it — the button was clicked, Escape was

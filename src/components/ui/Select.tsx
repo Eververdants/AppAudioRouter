@@ -20,6 +20,15 @@ interface SelectProps {
   title?: string;
   /** Shown on the trigger while `value` names no option. */
   placeholder?: string;
+  /**
+   * Shown on the trigger while `value` names an option that is *gone* — a
+   * configured device that has left the machine. Without it the raw id is put on
+   * screen, and an endpoint guid is not something a person can read; the two
+   * states still have to look different (`placeholder` means "nothing picked",
+   * this means "something is picked and it is not here"), which is why they are
+   * two props rather than one.
+   */
+  missingLabel?: string;
   disabled?: boolean;
 }
 
@@ -45,6 +54,7 @@ export function Select({
   ariaLabel,
   title,
   placeholder,
+  missingLabel,
   disabled = false,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
@@ -179,7 +189,10 @@ export function Select({
         role="combobox"
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-controls={listId}
+        // Only while the listbox is actually in the document: `aria-controls`
+        // naming an element that is not there is a broken reference, and the
+        // menu is mounted only when it is open.
+        aria-controls={open ? listId : undefined}
         aria-activedescendant={activeId}
         aria-label={ariaLabel}
         title={title}
@@ -196,10 +209,12 @@ export function Select({
           className={`min-w-0 flex-1 truncate ${selected === undefined ? 'text-text-muted' : 'text-text-secondary'}`}
         >
           {/* A value that names no option is not silence: a device that was
-              unplugged after it was chosen still has its id stored, and showing
-              the id says "something is configured here, and it is gone" — a
-              blank trigger would read as "nothing is configured". */}
-          {selected?.label ?? (value === '' ? (placeholder ?? '') : value)}
+              unplugged after it was chosen still has its id stored, and a blank
+              trigger would read as "nothing is configured". But the id is not
+              something a person can read either — the caller says what a missing
+              option *means* (`missingLabel`), and the raw id only shows when a
+              caller had nothing to say. */}
+          {selected?.label ?? (value === '' ? (placeholder ?? '') : (missingLabel ?? value))}
         </span>
         {/* The chevron turns over as the menu arrives: the one mark that says
             the control is open, in place of a native menu's popup. */}

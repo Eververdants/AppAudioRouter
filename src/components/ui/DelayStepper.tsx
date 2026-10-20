@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StepButton } from '@/components/ui/StepButton';
 import { useDelayValue } from '@/hooks/useDelayValue';
@@ -7,17 +8,32 @@ import { useDelayValue } from '@/hooks/useDelayValue';
  * stepping by the configured step, with a directly editable millisecond value
  * in between so an exact figure can be entered too.
  *
- * The settings page is the only place this control appears; the same delay is
- * also stepped from the mirror's row in the board's tuning dock (`NodeStage`),
- * and both share the editing logic in `useDelayValue`.
+ * The settings page is the only place this control appears; the board's tuning
+ * dock steps the same delay through `setDeviceDelayValue` itself.
+ *
+ * ⚠️ The draft is the hook's business, and the hook holds it against the device
+ * it was typed for. That is what makes this control safe to render without a
+ * key: the settings rows happen to be keyed by id, but a control must not be
+ * correct only because of how its caller renders it — one device removed above
+ * this row, and device A's typed number used to be written onto device B. If the
+ * hook ever stops binding the draft, the row that re-renders with a new
+ * `deviceId` must drop the draft here instead; do not rely on the key again.
  */
 export function DelayStepper({ deviceId, name }: { deviceId: string; name: string }) {
   const { t } = useTranslation();
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const { committed, draft, setDraft, commit, nudge, cancel, stepMs, stepLabel, atMin, atMax } =
     useDelayValue(deviceId);
 
   return (
-    <div className="flex flex-none items-center gap-1">
+    <div
+      ref={hostRef}
+      // Not a tab stop, only a place to hand the focus to: the row's own −/+/field
+      // controls stay in order, and `Escape` from the field leaves the caret here
+      // rather than at the top of the document.
+      tabIndex={-1}
+      className="flex flex-none items-center gap-1 outline-none"
+    >
       <StepButton
         label={t('deviceDelay.stepDown', { step: stepLabel })}
         disabled={atMin}
@@ -34,13 +50,28 @@ export function DelayStepper({ deviceId, name }: { deviceId: string; name: strin
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
-            // Enter writes and Escape abandons, and the caret stays in the
-            // field: blurring it would hand focus to the page, and the next Tab
-            // would start again at the top of the window instead of here.
-            if (e.key === 'Enter') commit();
-            if (e.key === 'Escape') {
-              cancel();
+            // Enter writes and the caret stays put: blurring would hand the focus
+            // to the page, and the next Tab would start again at the top of the
+            // window instead of here.
+            if (e.key === 'Enter') {
               commit();
+              return;
+            }
+            if (e.key === 'Escape') {
+              // Escape abandons the draft, then leaves the field — the same
+              // bargain `ScrubReadout` strikes: the first press belongs to the
+              // control, the next one to the page. Staying here forever would
+              // make the settings page unclosable and a standing toast
+              // undismissable for as long as the caret sat in this number,
+              // because both listeners stand down for an editable target.
+              //
+              // ⚠️ `cancel()` only marks the edit abandoned; the blur that the
+              // focus move fires is what discards it. Committing here as well
+              // would run the abandonment twice — and the second one, from this
+              // same render's closure (the cleared draft has not re-rendered
+              // yet), would write back the number Escape was meant to drop.
+              cancel();
+              hostRef.current?.focus();
             }
           }}
           aria-label={t('deviceDelay.valueLabel', { device: name })}
