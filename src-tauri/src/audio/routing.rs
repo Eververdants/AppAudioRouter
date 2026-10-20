@@ -42,6 +42,15 @@
 //! There is deliberately no second channel: nothing here moves the *system*
 //! default device. The app's whole promise is per-program output, and a
 //! system-wide write is a machine-wide change no screen of this app offers.
+//!
+//! One more thing rides that single entry point, because it is the only place it
+//! can live: several writers can be in flight for the *same* per-program slot at
+//! the same moment — a manual Apply, a sweep release, a remembered restore — and
+//! whichever reached the audio service last used to win, including when it was the
+//! one asked for first. The per-executable claim order below (`slot_clock`) is what
+//! decides that instead: the newest ask for a slot writes, an older one is refused
+//! and says so, and the refusal happens before any slot call, so a losing writer
+//! never leaves a half-written assignment behind.
 
 use log::info;
 use windows::core::{GUID, HSTRING};
@@ -549,6 +558,189 @@ fn process_name_for_guard(pid: u32) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Write order
+// ---------------------------------------------------------------------------
+
+/// One program's endpoint slot, addressed the way the audio service addresses
+/// it: by executable, and by which of the two data flows the write means.
+///
+/// The two halves carry one counter each because they *are* two slots — a
+/// program can be routed to a device and receive a feed at the same time, and a
+/// newer ask on the capture half has no business refusing a write to the render
+/// half. Same reasoning that gives `PinnedRoutes` two feed books beside the
+/// route book, and it is why the release paths name the flow they mean.
+type SlotKey = (String, i32);
+
+/// The clock, and the lock that keeps a gated write alone with its slot.
+type SlotClock = std::sync::Mutex<std::collections::HashMap<SlotKey, u64>>;
+
+/// A hold on the clock taken at the gate.
+type SlotHoldGuard<'a> = std::sync::MutexGuard<'a, std::collections::HashMap<SlotKey, u64>>;
+
+/// Where one write stands in the order of its slot.
+///
+/// Frontend-side queueing was the other shape on the table and is deliberately
+/// not this one: a queue would make Apply wait behind whatever the sweep had
+/// already lined up, and the ticket a page hands out restarts with the page.
+/// The clock is therefore Rust's own, and nothing about it crosses the wire.
+#[derive(Clone)]
+struct SlotClaim {
+    key: SlotKey,
+    ticket: u64,
+}
+
+/// The clock every writer of a slot shares.
+///
+/// One mutex does both jobs — handing out tickets and gating the write — on
+/// purpose: with a single lock, a ticket can never be handed out while another
+/// writer is inside the slot, so a writer that passes the gate is certain to
+/// land, and a writer that loses it has not touched the slot at all. That is the
+/// whole window: the reader of an older ticket used to be free to arrive last.
+///
+/// **Leaf lock.** Nothing in this crate may take it while holding a
+/// `PinnedRoutes` book lock, and nothing may take a book lock while holding it.
+/// The books are written by callers once the slot call has returned, and no
+/// system call happens under either (`exe_routed_elsewhere` spells out the same
+/// rule for the books). Only the slot calls themselves run under this lock —
+/// the policy activation, which is the slow part, stays outside of it.
+fn slot_clock() -> &'static SlotClock {
+    static CLOCK: std::sync::OnceLock<SlotClock> = std::sync::OnceLock::new();
+    CLOCK.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Issue the next ticket for one slot. Kept apart from the lock so the numbering
+/// can be tested.
+fn ticket_for(clock: &mut std::collections::HashMap<SlotKey, u64>, key: &SlotKey) -> u64 {
+    let issued = clock.entry(key.clone()).or_insert(0);
+    *issued += 1;
+    *issued
+}
+
+/// Whether a claim still stands at the front of its own slot.
+///
+/// The rule, so it can be said out loud rather than inferred from an `if`: the
+/// newest claim wins, **equal counts as newest**, and an older one loses. A claim
+/// nothing else has touched its slot since is the writer that has to be allowed
+/// through, or the first route on a quiet machine would refuse itself. A claim
+/// *ahead* of the clock can only mean the clock forgot this slot, which is the
+/// same situation, so it goes through too. Nothing else is consulted: a stamp
+/// from another executable, or from the other half of the same program, says
+/// nothing about this slot.
+fn claim_is_newest(clock: &std::collections::HashMap<SlotKey, u64>, claim: &SlotClaim) -> bool {
+    clock
+        .get(&claim.key)
+        .map(|issued| *issued <= claim.ticket)
+        // A slot nobody has claimed since this write did — nothing to lose to.
+        .unwrap_or(true)
+}
+
+/// Which slot the write path addresses: the program `pid` runs, and the half of
+/// its assignment the write means. `None` when the executable cannot be named.
+fn slot_key_for(pid: u32, data_flow: i32) -> Option<SlotKey> {
+    let exe_name = process_name_for_guard(pid)?;
+    Some((exe_name.to_ascii_lowercase(), data_flow))
+}
+
+/// Take the next ticket for a slot the caller has already resolved.
+fn claim_slot(key: &SlotKey) -> SlotClaim {
+    let mut clock = slot_clock().lock().unwrap_or_else(|e| e.into_inner());
+    let ticket = ticket_for(&mut clock, key);
+    SlotClaim {
+        key: key.clone(),
+        ticket,
+    }
+}
+
+/// Take this write's place in the order of the program `pid` runs, on the
+/// `data_flow` half of its slot.
+///
+/// `None` when the executable cannot be named, and that hole is on purpose: the
+/// writers that reach this with an unnameable process are releases of a program
+/// that has already gone away, and refusing to hand an assignment back is the
+/// exact failure 2.1.1 exists to close. A *write* never takes it — an unreadable
+/// name is what `routing_refusal` refuses the route over, before this is asked.
+fn claim_endpoint_slot(pid: u32, data_flow: i32) -> Option<SlotClaim> {
+    slot_key_for(pid, data_flow).map(|key| claim_slot(&key))
+}
+
+/// The claim for `pid`'s slot, taken from `held` when this walk already took one.
+///
+/// Two processes of one program address the same slot, and one release walk speaks
+/// for that slot once: handing the second pid a second ticket would make the *first*
+/// pid's release the older claim and refuse it, so a walk would supersede itself and
+/// leave one of the two programs pinned while reporting both handed back.
+fn claim_walked_slot(
+    pid: u32,
+    data_flow: i32,
+    held: &mut std::collections::HashMap<SlotKey, Option<SlotClaim>>,
+) -> Option<SlotClaim> {
+    let key = slot_key_for(pid, data_flow)?;
+    if let Some(existing) = held.get(&key) {
+        return existing.clone();
+    }
+    let claim = Some(claim_slot(&key));
+    held.insert(key, claim.clone());
+    claim
+}
+
+/// A write's hold on its slot, or the reason it may not have the slot.
+enum SlotHold<'a> {
+    /// This write is the newest ask its slot has seen. The guard, when there is
+    /// one, keeps every other writer's claim and gate out until this write's slot
+    /// calls are done; `None` holds nothing, for a slot this side could not name.
+    Open(Option<SlotHoldGuard<'a>>),
+    /// A newer ask claimed the slot while this write was activating the policy
+    /// object, so writing now would land on top of something asked for afterwards.
+    Superseded(SlotClaim, u64),
+}
+
+/// Stand at the gate: refuse the write if a newer claim took its slot in the
+/// meantime, otherwise keep the slot to this write until the guard is dropped.
+///
+/// The check and the hold are the same lock acquisition, which is what makes the
+/// window close: between the read of the clock and the slot call there is no gap
+/// another writer can claim through.
+fn hold_slot(claim: Option<&SlotClaim>) -> SlotHold<'static> {
+    let Some(claim) = claim else {
+        return SlotHold::Open(None);
+    };
+    let hold = slot_clock().lock().unwrap_or_else(|e| e.into_inner());
+    if claim_is_newest(&hold, claim) {
+        return SlotHold::Open(Some(hold));
+    }
+    let newest = hold.get(&claim.key).copied().unwrap_or(claim.ticket);
+    drop(hold);
+    SlotHold::Superseded(claim.clone(), newest)
+}
+
+/// The flow's own word for the log and for the refusal's wording.
+fn flow_name(data_flow: i32) -> &'static str {
+    if data_flow == E_CAPTURE {
+        "capture"
+    } else {
+        "render"
+    }
+}
+
+/// The words a superseded write answers with.
+///
+/// Distinguishable because the two sides have to tell it apart from a plain
+/// failure: a write the service refused leaves nothing in charge of the slot,
+/// while a write refused here leaves a *newer* writer in charge, and the caller
+/// must not "fall back" over that writer's choice. The user reads this string in
+/// one Toast card, so it names the program and says what beat it.
+fn superseded_error(claim: &SlotClaim, newest: u64) -> AudioError {
+    AudioError::Api(format!(
+        "the {} assignment for {} was superseded by a newer one (this write was asked as #{}, \
+         the slot is at #{})",
+        flow_name(claim.key.1),
+        claim.key.0,
+        claim.ticket,
+        newest
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // Releasing an assignment again
 // ---------------------------------------------------------------------------
 
@@ -561,6 +753,17 @@ pub enum ReleaseOutcome {
     StillPinned(String),
     /// The audio service would not answer for this process.
     Unknown,
+    /// This run never asked the service at all: a newer write claimed the
+    /// program's slot while this release was still setting itself up, so the
+    /// assignment the release was aimed at belongs to that writer now.
+    ///
+    /// Not a refusal to hand the assignment back and not a success either —
+    /// nothing was cleared, and nothing may be written over the slot in apology.
+    /// A caller that read this as "not confirmed clear" and fell back to pointing
+    /// the program at the default would take the newer writer's route away, which
+    /// is the exact failure the claim order exists to prevent; a caller that read
+    /// it as "released" would forget a pin that is still standing.
+    Superseded,
 }
 
 /// Why this run is holding an endpoint assignment.
@@ -950,6 +1153,19 @@ const ALL_FLOWS: [i32; 2] = [E_RENDER, E_CAPTURE];
 ///
 /// One entry per PID, in no particular order. An error means the policy object
 /// itself was unavailable, so nothing was released.
+///
+/// Deliberately the one release walk that does not stand at the write gate: it
+/// answers for both data flows of every process it is handed, and its two callers
+/// are the settings page's bulk reset and app exit. Refusing either of those is
+/// the worse failure — exit cleanup gets no second chance at all, and the reset is
+/// the documented way out of an assignment nothing else can reach — so this walk
+/// clears whatever it is asked to. The reset still reads each slot back and reports
+/// what it could not drop, so an answer here is never a silent success. What it
+/// does not do is order itself against a concurrent write: a route that a restore
+/// lands while this walk is in the air can be cleared behind its own badge, and the
+/// reset's exclusion of executables with a live route is the only thing standing in
+/// the way. Narrower than the gate's window, because a reset is a button the user
+/// presses once rather than something that runs on every event.
 pub fn release_default_endpoints(
     pids: &[u32],
     role: Role,
@@ -1074,6 +1290,13 @@ pub async fn release_process_default_devices_flow(
 }
 
 /// The blocking body of [`release_process_default_devices_flow`].
+///
+/// Every release here stands at the same gate a pin write does, and for the same
+/// reason seen from the other side: a route that was asked for *after* this walk
+/// started must not be undone by a clear that began earlier and finished later.
+/// A release this run never attempted is reported as
+/// [`ReleaseOutcome::Superseded`] rather than tried anyway — the slot belongs to
+/// that newer writer now, and the caller has to be told nobody moved it.
 fn release_endpoints_of_flow(
     pids: &[u32],
     role: Role,
@@ -1081,6 +1304,21 @@ fn release_endpoints_of_flow(
 ) -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
     let com_owned = crate::audio::init_com()?;
     let flow = if capture { E_CAPTURE } else { E_RENDER };
+    // Stood up here, before the activation below: the ticket has to date from the
+    // moment this walk decided to clear the slot, not from the moment it reaches
+    // the slot, or a write that lands in between would be the older of the two.
+    // One claim per slot — the walk speaks for several programs, and a newer ask
+    // against one of them must not strand the others.
+    let mut held: std::collections::HashMap<SlotKey, Option<SlotClaim>> =
+        std::collections::HashMap::new();
+    let mut claims: std::collections::HashMap<u32, Option<SlotClaim>> =
+        std::collections::HashMap::new();
+    for &pid in pids {
+        if pid == 0 || claims.contains_key(&pid) {
+            continue;
+        }
+        claims.insert(pid, claim_walked_slot(pid, flow, &mut held));
+    }
 
     let result = (|| -> Result<Vec<(u32, ReleaseOutcome)>, AudioError> {
         let policy = AudioPolicyConfig::activate()?;
@@ -1089,6 +1327,24 @@ fn release_endpoints_of_flow(
             if pid == 0 {
                 continue;
             }
+            let claim = claims.get(&pid).and_then(|held| held.as_ref());
+            let _slot = match hold_slot(claim) {
+                SlotHold::Open(hold) => hold,
+                SlotHold::Superseded(claim, newest) => {
+                    // Background housekeeping losing to a newer ask is normal and
+                    // says itself in the outcome; the caller that owes the user a
+                    // word is the one matching on `Superseded`.
+                    log::info!(
+                        "the {} release of PID {pid} was superseded by a newer write \
+                         (this release was asked as #{}, the slot is at #{})",
+                        flow_name(flow),
+                        claim.ticket,
+                        newest
+                    );
+                    outcomes.push((pid, ReleaseOutcome::Superseded));
+                    continue;
+                }
+            };
             let mut cleared = false;
             for &r in role_values(role) {
                 if policy.clear_persisted_default(pid, flow, r).is_ok() {
@@ -1145,6 +1401,11 @@ pub async fn set_process_default_capture_device(
 }
 
 /// The pin itself, shared by both halves of the policy.
+///
+/// The one entry every endpoint write goes through — and now the one entry that
+/// decides *whether* a write still may happen, by the per-program claim order
+/// documented in the write-order section above. Nothing here is a second channel:
+/// the gate performs no slot call, it only refuses this one before it starts.
 async fn set_process_default_endpoint_flow(
     device_id: &str,
     pid: u32,
@@ -1161,6 +1422,11 @@ async fn set_process_default_endpoint_flow(
     }
     validate_device_id(device_id)?;
     let device_id = device_id.to_string();
+    // Stood up after every input check above, so a request that was never going to
+    // be honoured does not spend a ticket and refuse somebody else's write, and
+    // before the activation below, which is the slow part this race is measured
+    // against: the ticket dates from the moment this pin was asked for.
+    let claim = claim_endpoint_slot(pid, data_flow);
     // DllGetActivationFactory of AudioSes returns CLASS_E_CLASSNOTAVAILABLE on
     // an STA thread (Tauri sync commands run on the main thread, which WebView2
     // initializes as STA); run the whole activation on a dedicated MTA thread.
@@ -1169,6 +1435,15 @@ async fn set_process_default_endpoint_flow(
 
         let result = (|| -> Result<(), AudioError> {
             let policy = AudioPolicyConfig::activate()?;
+            // The gate: stand at the slot, or hand back the reason this write is no
+            // longer the newest ask for it. Nothing has been written on either way,
+            // which is what lets the caller's rollback skip the slot entirely.
+            let _slot = match hold_slot(claim.as_ref()) {
+                SlotHold::Open(hold) => hold,
+                SlotHold::Superseded(claim, newest) => {
+                    return Err(superseded_error(&claim, newest));
+                }
+            };
             let candidates: Vec<HSTRING> = wrap_device_id_candidates(&device_id, data_flow)
                 .into_iter()
                 .map(HSTRING::from)
@@ -1190,11 +1465,7 @@ async fn set_process_default_endpoint_flow(
                     last_err = Some(hr);
                 }
             }
-            let what = if data_flow == E_CAPTURE {
-                "capture"
-            } else {
-                "render"
-            };
+            let what = flow_name(data_flow);
             if applied.len() != wanted.len() {
                 // Half a pin is not a route. Reported as a success it would
                 // leave the roles that failed on whatever the program played
@@ -1444,6 +1715,173 @@ mod tests {
     #[test]
     fn an_ordinary_process_is_not_protected() {
         assert_eq!(routing_refusal(std::process::id()), None);
+    }
+
+    /// Tickets are handed out in the order the writers arrive, one counter per
+    /// slot, and nothing else moves them: a newer ask is by construction the
+    /// larger number, and two programs never share a queue.
+    #[test]
+    fn claims_are_numbered_in_the_order_writers_arrive() {
+        let mut clock = std::collections::HashMap::new();
+        let chrome: SlotKey = ("chrome.exe".to_string(), E_RENDER);
+        let edge: SlotKey = ("msedge.exe".to_string(), E_RENDER);
+        assert_eq!(ticket_for(&mut clock, &chrome), 1);
+        assert_eq!(ticket_for(&mut clock, &chrome), 2, "the next ask");
+        assert_eq!(
+            ticket_for(&mut clock, &edge),
+            1,
+            "another program starts a queue of its own"
+        );
+        assert_eq!(
+            ticket_for(&mut clock, &("chrome.exe".to_string(), E_CAPTURE)),
+            1,
+            "and so does the other half of the same program's slot"
+        );
+    }
+
+    /// The whole decision the gate makes, in one table: equal wins, older loses,
+    /// and a stamp from anywhere but this program's own half of the slot is not
+    /// consulted at all.
+    #[test]
+    fn only_the_newest_claim_for_a_slot_may_write() {
+        let mut clock = std::collections::HashMap::new();
+        let chrome: SlotKey = ("chrome.exe".to_string(), E_RENDER);
+        for _ in 0..5 {
+            ticket_for(&mut clock, &chrome);
+        }
+        let claim = |key: SlotKey, ticket: u64| SlotClaim { key, ticket };
+
+        assert!(
+            claim_is_newest(&clock, &claim(chrome.clone(), 5)),
+            "equal counts as newest — the writer that owns the front gets through"
+        );
+        assert!(
+            claim_is_newest(&clock, &claim(chrome.clone(), 6)),
+            "a claim ahead of the clock is the same situation, not a loss"
+        );
+        assert!(
+            !claim_is_newest(&clock, &claim(chrome.clone(), 4)),
+            "one ask behind loses"
+        );
+        assert!(
+            !claim_is_newest(&clock, &claim(chrome.clone(), 1)),
+            "and so does one five asks behind"
+        );
+
+        assert!(
+            claim_is_newest(&clock, &claim(("msedge.exe".to_string(), E_RENDER), 1)),
+            "a slot only another executable has touched is irrelevant here"
+        );
+        assert!(
+            claim_is_newest(&clock, &claim((chrome.0.clone(), E_CAPTURE), 1)),
+            "the capture half is ordered apart from the render half of the same program"
+        );
+        assert!(
+            claim_is_newest(&clock, &claim(("never-asked.exe".to_string(), E_RENDER), 9)),
+            "a slot the clock has never seen is nothing to lose to"
+        );
+    }
+
+    /// The gate holds the slot for the newest claim and refuses an older one — and
+    /// holding it is what makes the check mean something: no ticket can be handed
+    /// out while a writer is inside the slot, so a claim that passes never loses
+    /// afterwards, and one that loses never wrote at all.
+    #[test]
+    fn the_gate_holds_the_slot_for_the_newest_claim_only() {
+        let live = std::process::id();
+        // Asked for a flow this program's own process can be named for, which is
+        // the same witness the write path uses.
+        let first = claim_endpoint_slot(live, E_CAPTURE).expect("the test process can name itself");
+        match hold_slot(Some(&first)) {
+            SlotHold::Open(hold) => assert!(hold.is_some(), "the newest claim holds its slot"),
+            SlotHold::Superseded(_, newest) => {
+                panic!("the first ask for a quiet slot lost it at #{newest}")
+            }
+        }
+
+        let second = claim_endpoint_slot(live, E_CAPTURE).expect("the same program again");
+        assert!(
+            second.ticket > first.ticket,
+            "the newer ask carries the larger ticket"
+        );
+        assert!(
+            matches!(
+                hold_slot(Some(&first)),
+                SlotHold::Superseded(_, newest) if newest == second.ticket
+            ),
+            "and the ask it replaced is refused, naming who beat it"
+        );
+        match hold_slot(Some(&second)) {
+            SlotHold::Open(hold) => assert!(hold.is_some(), "the newer claim still stands"),
+            SlotHold::Superseded(_, newest) => panic!("the newest claim was refused at #{newest}"),
+        }
+
+        // A slot this side cannot name is not ordered — the release paths that walk
+        // a process which has already gone must not be refused a hand-back.
+        assert!(matches!(hold_slot(None), SlotHold::Open(None)));
+    }
+
+    /// One release walk speaks for a program's slot once, even when it is handed
+    /// two of that program's processes: with a second ticket, the walk's own first
+    /// release would be the older claim and get refused, so the walk would supersede
+    /// itself and report one program handed back while it is still pinned.
+    #[test]
+    fn one_walk_holds_one_claim_per_slot() {
+        let live = std::process::id();
+        let mut held = std::collections::HashMap::new();
+        let first =
+            claim_walked_slot(live, E_RENDER, &mut held).expect("the test process can name itself");
+        // The second process of one program is not something a unit test can conjure,
+        // so the same pid is asked twice — which reaches the same slot by the same
+        // road, and is the shape that used to take the second ticket.
+        let again = claim_walked_slot(live, E_RENDER, &mut held).expect("the same program again");
+        assert_eq!(first.ticket, again.ticket, "one slot, one ticket");
+        assert_eq!(
+            held.len(),
+            1,
+            "and the walk keys it by the slot, not the pid"
+        );
+
+        // The other half of the same program's assignment is a different slot, so a
+        // walk that means it takes its own ticket.
+        let capture = claim_walked_slot(live, E_CAPTURE, &mut held)
+            .expect("the same process, the recording half");
+        assert_ne!(capture.ticket, first.ticket, "ordered apart");
+        assert_eq!(held.len(), 2, "one hold per slot");
+    }
+
+    /// A writer that loses the slot has to say so in words that are not a service
+    /// failure: the caller's rollback turns on which of the two happened, and the
+    /// user reads this string as the whole explanation of a route that did not land.
+    #[test]
+    fn a_superseded_write_names_the_program_and_says_what_beat_it() {
+        let render = SlotClaim {
+            key: ("chrome.exe".to_string(), E_RENDER),
+            ticket: 4,
+        };
+        let message = superseded_error(&render, 6).to_string();
+        assert!(
+            message.contains("superseded"),
+            "the phrase the caller sorts on"
+        );
+        assert!(
+            message.contains("chrome.exe"),
+            "and the program it lost: {message}"
+        );
+        assert!(
+            message.contains("render"),
+            "and which half of its slot: {message}"
+        );
+
+        let capture = SlotClaim {
+            key: ("recorder.exe".to_string(), E_CAPTURE),
+            ticket: 1,
+        };
+        let message = superseded_error(&capture, 2).to_string();
+        assert!(
+            message.contains("capture") && message.contains("recorder.exe"),
+            "the other half reads differently: {message}"
+        );
     }
 
     /// The capture half of a feed pair is only registered under the capture

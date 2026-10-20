@@ -27,15 +27,34 @@ pub struct StopOutcome {
     pub released: bool,
     /// Endpoint the program is still pinned to, when the release did not take.
     /// The UI warns about this instead of claiming the route is fully undone.
+    /// Which of the two failures left it pinned is the `sibling_held` flag's
+    /// business, not something the UI may infer from the presence of a device.
     pub pinned_device: Option<String>,
     /// True when `released` is false because a sibling process of the same
     /// executable still routes the program: the assignment is owned by that live
     /// route and will go back when the sibling stops, not stuck. The stop path
     /// also yields `released: false` when Windows refused to clear the pin (and
-    /// the program was left on the default); `sibling_held` is false there. The
-    /// UI must not infer which it got — reporting a refused release as a sibling
-    /// route would drop the device name and hide a real failure.
+    /// the program was pointed at the default), and when a *newer* write claimed
+    /// the program's slot before this stop's release reached it — there the slot
+    /// was deliberately left to that newer writer, so neither the fallback write
+    /// nor the `sibling_held` flag describes it. The UI must not infer which it
+    /// got — reporting a refused release as a sibling route would drop the device
+    /// name and hide a real failure.
     pub sibling_held: bool,
+}
+
+/// Whether a release walk answered that it never asked the service at all,
+/// because a newer write claimed that program's slot first.
+///
+/// Worth pulling out because it is the one outcome a caller must *not* treat as a
+/// release that merely failed to confirm: the fallback paths below exist to point
+/// the program somewhere sensible when Windows would not let go, and writing the
+/// default device over a slot that a newer route just took is not sensible — it is
+/// the race this ordering exists to close, arriving by way of the rollback.
+fn superseded_release(outcomes: &[(u32, ReleaseOutcome)]) -> bool {
+    outcomes
+        .iter()
+        .any(|(_, outcome)| *outcome == ReleaseOutcome::Superseded)
 }
 
 /// What a sweep of left-over assignments found.
@@ -281,6 +300,21 @@ pub async fn apply_route(
                     // stop would hand them over.
                     resume_suspended_feeds(&exe_name, &pins).await;
                 }
+                Ok(outcomes) if superseded_release(&outcomes) => {
+                    // Somebody asked for this program's slot after this route did,
+                    // and that write — not this one — owns the endpoint now. The
+                    // fallback below would point the program at the default device
+                    // over their heads, so the slot stays where the newer write put
+                    // it and only this command's own bookkeeping is corrected: the
+                    // entry must come off `Route`, because the engine never started
+                    // and the board will not show a route to stop. Left standing it
+                    // would hide the assignment from the settings reset, which is
+                    // now the only path that can reach it.
+                    warn!(
+                        "the rollback of PID {pid} was superseded; the assignment stays with the newer write"
+                    );
+                    pins.mark_abandoned(pid);
+                }
                 _ => {
                     // The release did not take, so the assignment is still
                     // ours — but no live route answers for it any more.
@@ -432,6 +466,35 @@ pub async fn stop_route(
             Ok(StopOutcome {
                 released: true,
                 pinned_device: None,
+                sibling_held: false,
+            })
+        }
+        Ok(outcomes) if superseded_release(&outcomes) => {
+            // A newer write claimed this program's slot while the stop was setting
+            // itself up, so the assignment the stop was aimed at is gone and that
+            // writer's endpoint is what the program plays to now. Handing it to the
+            // default — the fallback below — would take *their* route away to undo a
+            // stop that lost, so the slot is left alone.
+            //
+            // What is ours to correct is the book: the engine is already down and the
+            // frontend has dropped the badge, so an entry still reading as a live
+            // route is the dead end `mark_abandoned` exists for — the reset skips
+            // every executable with a route, the sweep skips every live pid, and the
+            // board offers nothing to stop. Downgraded, the assignment stays on the
+            // book, stays reachable by the reset, and gets released for good when
+            // that writer's own route stops or this app quits.
+            let pinned = pins.device_of(pid);
+            warn!(
+                "stopping PID {pid} was superseded by a newer write; the slot stays with it{}",
+                pinned
+                    .as_deref()
+                    .map(|device| format!(" (this run last recorded {device})"))
+                    .unwrap_or_default()
+            );
+            pins.mark_abandoned(pid);
+            Ok(StopOutcome {
+                released: false,
+                pinned_device: pinned,
                 sibling_held: false,
             })
         }
@@ -821,6 +884,14 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
                     .iter()
                     .map(|(_, outcome)| match outcome {
                         ReleaseOutcome::StillPinned(device) => format!("still fixed to {device}"),
+                        // Not a refusal from the service — this run never asked. The
+                        // entry stays on the book either way and the next sweep
+                        // reaches it, but the line has to say which of the two
+                        // happened, or a route the user made a moment ago reads as
+                        // an audio service that would not answer.
+                        ReleaseOutcome::Superseded => {
+                            "a newer write took the slot first".to_string()
+                        }
                         _ => "not confirmed clear".to_string(),
                     })
                     .collect::<Vec<_>>()
@@ -1608,6 +1679,12 @@ fn released_cleanly(
                 .filter(|(_, outcome)| *outcome != ReleaseOutcome::Released)
                 .map(|(_, outcome)| match outcome {
                     ReleaseOutcome::StillPinned(device) => format!("still fixed to {device}"),
+                    // Answered `false`, which is the whole requirement here: the pin
+                    // stays on the book and the name goes into what the user is told,
+                    // because the endpoint was not handed back by this run.
+                    ReleaseOutcome::Superseded => {
+                        "a newer write took the slot before this release".to_string()
+                    }
                     _ => "not confirmed clear".to_string(),
                 })
                 .collect();
@@ -1789,6 +1866,35 @@ mod tests {
         assert!(
             require_exe_name("a route", "   ").is_err(),
             "a name of nothing but spaces is a blank key beside every session"
+        );
+    }
+
+    /// A release that was superseded is neither a hand-back nor a release the
+    /// service refused, and every caller has to be able to tell it apart from both:
+    /// read as a hand-back it forgets a pin that is still standing, read as a
+    /// refusal it writes the default device over the newer route that won the slot.
+    #[test]
+    fn a_superseded_release_is_neither_a_hand_back_nor_a_refusal_to_fall_back_on() {
+        let superseded = vec![(7, ReleaseOutcome::Superseded)];
+        assert!(
+            superseded_release(&superseded),
+            "the stop and the rollback both sort on this"
+        );
+        assert!(
+            !released_cleanly(Ok(superseded.clone()), "feed source"),
+            "and it is never read as clean, so a pin is never forgotten behind it"
+        );
+        assert!(
+            !superseded_release(&[(7, ReleaseOutcome::Released)]),
+            "a release that did run is not this"
+        );
+        assert!(
+            !superseded_release(&[(7, ReleaseOutcome::StillPinned("device".to_string()))]),
+            "and neither is one the service would not answer for — that one keeps its fallback"
+        );
+        assert!(
+            !superseded_release(&[]),
+            "an empty answer is the sweep's own problem, not a superseded one"
         );
     }
 }
