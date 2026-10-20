@@ -304,6 +304,14 @@ pub async fn stop_route(
     app: AppHandle,
 ) -> Result<StopOutcome, String> {
     info!("cmd: stop_route pid={pid}");
+    // PID 0 is the system-sounds session and nothing this app can route (the
+    // write path refuses it), but the release path does not stop there: it skips
+    // the PID and answers with no outcomes at all, which the check below would
+    // read as "nothing left to hand back" — a stop reported as done for a step
+    // that never ran.
+    if pid == 0 {
+        return Err("a stop needs a process".to_string());
+    }
     // The engine comes down first, before the lookup below can hold this command
     // for a round trip. The frontend has already cleared the badge optimistically
     // and anything that reconciles against the live engines in that window would
@@ -476,12 +484,15 @@ async fn pin_to_default_or_abandon(pid: u32, pins: &PinnedRoutes) -> StopOutcome
 /// a route of its own in the meantime keeps its slot: the route outranks the
 /// feed until it stops.
 async fn resume_suspended_feeds(exe: &str, pins: &PinnedRoutes) {
-    let routed_now: HashSet<u32> = pins.routed_pids().into_iter().collect();
     for (feed_pid, feed_exe) in pins.feed_source_pins() {
         if !feed_exe.eq_ignore_ascii_case(exe) {
             continue;
         }
-        if routed_now.contains(&feed_pid) {
+        // Asked with the liveness witness rather than from the book's route
+        // entries: an entry whose process exited — or whose pid the kernel has
+        // since handed to another program — holds nothing, and a feed that waits
+        // on one waits for good, because nothing sweeps that pid any more.
+        if pins.is_routed(feed_pid) {
             continue;
         }
         if let Some(render) = pins.feed_source_device_of(feed_pid) {
@@ -545,11 +556,6 @@ pub async fn reset_pinned_endpoints(
         .into_iter()
         .map(|route| route.pid)
         .collect();
-    // Only a live route is holding its assignment on purpose. A program this run
-    // handed back to the default — because Windows refused to release it at stop
-    // time — is exactly the case the user is asking about, and nothing else can
-    // reach it.
-    let live_routes: HashSet<u32> = pins.routed_pids().into_iter().collect();
     // The assignment is stored per executable, so releasing through *any*
     // process of a routed program would reach the live route's primary
     // endpoint — including through a sibling PID that was never routed
@@ -561,11 +567,14 @@ pub async fn reset_pinned_endpoints(
             .into_iter()
             .map(|name| name.to_ascii_lowercase())
             .collect();
-        // Only live routes speak for their executable here. A program this run
-        // handed back to the default — recorded with a pin but no live route —
-        // is exactly what the user is asking the reset to clear.
+        // "Live route" is `is_routed`'s question, not the book's: an entry whose
+        // process is gone, or whose pid the kernel recycled, holds nothing on
+        // purpose. Read as a route, it would speak for its executable here and
+        // hide that program's assignments from the reset for good — the reset is
+        // exactly where a program this run handed back to the default (because
+        // Windows refused to release it at stop time) has to be reachable.
         for (pid, exe_name, _device) in pins.snapshot() {
-            if live_routes.contains(&pid) {
+            if pins.is_routed(pid) {
                 exes.insert(exe_name.to_ascii_lowercase());
             }
         }
@@ -573,7 +582,7 @@ pub async fn reset_pinned_endpoints(
     };
     let pids: Vec<u32> = sessions
         .iter()
-        .filter(|session| !routed.contains(&session.pid) && !live_routes.contains(&session.pid))
+        .filter(|session| !routed.contains(&session.pid) && !pins.is_routed(session.pid))
         // The enumeration already read every one of these names; asking the
         // process again would be an OpenProcess per session for the same answer.
         .filter(|session| !routed_exes.contains(&session.exe_name.to_ascii_lowercase()))
@@ -659,31 +668,41 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         .map_err(|e| e.to_string())?;
 
     let live_pids: HashSet<u32> = sessions.iter().map(|session| session.pid).collect();
-    let mut live_by_exe: HashMap<String, u32> = HashMap::new();
-    for session in &sessions {
-        live_by_exe
-            .entry(session.exe_name.to_ascii_lowercase())
-            .or_insert(session.pid);
-    }
+    let live_by_exe = smallest_pid_per_exe(
+        sessions
+            .iter()
+            .map(|session| (session.exe_name.as_str(), session.pid)),
+    );
     // Snapshot, not the live map: the sweep below drops entries as it goes, and
     // a PID it drops is never the one it is about to hand the assignment to.
-    // Only a live route counts as ours here: an entry handed back to the default
-    // has nothing left to protect.
+    // Kind only, with no liveness witness, and used for one question at the end:
+    // whether the entry this sweep is dropping *was* a route, so its executable's
+    // render slot came free. The pid is a dead process by the time it is asked,
+    // so the witnessed question would always answer no and no feed would resume.
     let ours: HashSet<u32> = pins.routed_pids().into_iter().collect();
     // The assignment is stored per executable, and the PID it would be handed to
-    // need not be the PID of ours — a browser plays through whichever of its
-    // processes Windows lists first. What decides is whether that *executable*
+    // need not be the PID of ours. What decides is whether that *executable*
     // still has a live route of ours: clearing it through any of its processes
     // would take that route's primary endpoint away, leaving the mirrors playing
     // while the program quietly fell back to the system default.
+    //
+    // `is_routed` carries the witness, so a route whose program is alive but
+    // simply quiet right now — no session in the enumeration above — still holds
+    // its executable here. Presence of a session was never the question.
     let mut routed_exes: HashSet<String> = HashSet::new();
     for (pid, exe_name, _) in &pinned {
-        if ours.contains(pid) && live_pids.contains(pid) {
+        if pins.is_routed(*pid) {
             routed_exes.insert(exe_name.to_ascii_lowercase());
         }
     }
 
     let mut released: Vec<String> = Vec::new();
+    // Programs this sweep could not hand back. The sweep is best effort — one
+    // refusal, or a release walk that could not be asked at all, must not leave
+    // the remaining stale pins standing, nor skip the feed cleanup and the
+    // resumes below — so a failure is collected and said out loud instead of
+    // ending the walk with `?`.
+    let mut not_released: Vec<String> = Vec::new();
     // Executables whose *route* entry went back: freeing the render slot is the
     // same moment a stop frees it, so the feeds waiting on it resume here too.
     let mut routes_ended: Vec<String> = Vec::new();
@@ -700,7 +719,7 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         // *right now* — the mirrors would keep playing while the primary
         // silently fell back to the system default. That route owns the
         // assignment now; only the stale bookkeeping is ours to drop.
-        if ours.contains(&relaunched_pid) || routed_exes.contains(&exe_name.to_ascii_lowercase()) {
+        if pins.is_routed(relaunched_pid) || routed_exes.contains(&exe_name.to_ascii_lowercase()) {
             pins.forget(pid);
             continue;
         }
@@ -710,28 +729,57 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         // and clearing its capture half here would silence the feed while the
         // pin stayed on the books and the board kept drawing it delivered. Only
         // the settings reset and app exit are allowed to walk both flows.
-        let outcomes = audio::routing::release_process_default_devices_flow(
+        match audio::routing::release_process_default_devices_flow(
             vec![relaunched_pid],
             audio::Role::All,
             false,
         )
         .await
-        .map_err(|e| e.to_string())?;
-        if outcomes
-            .iter()
-            .all(|(_, outcome)| *outcome == ReleaseOutcome::Released)
         {
-            pins.forget(pid);
-            info!("released the assignment {exe_name} was left on by an earlier route");
-            if ours.contains(&pid) && !routes_ended.contains(&exe_name) {
-                routes_ended.push(exe_name.clone());
+            Ok(outcomes)
+                if outcomes
+                    .iter()
+                    .all(|(_, outcome)| *outcome == ReleaseOutcome::Released) =>
+            {
+                pins.forget(pid);
+                info!("released the assignment {exe_name} was left on by an earlier route");
+                if ours.contains(&pid) && !routes_ended.contains(&exe_name) {
+                    routes_ended.push(exe_name.clone());
+                }
+                // Several stale PIDs can share one executable; the log wants the
+                // name once, not once per PID.
+                if !released.contains(&exe_name) {
+                    released.push(exe_name);
+                }
             }
-            // Several stale PIDs can share one executable; the log wants the
-            // name once, not once per PID.
-            if !released.contains(&exe_name) {
-                released.push(exe_name);
+            Ok(outcomes) => {
+                // Windows kept the assignment (or would not confirm it clear), so
+                // the entry stays on the book: exit cleanup and the next sweep
+                // both reach it again.
+                let reason = outcomes
+                    .iter()
+                    .map(|(_, outcome)| match outcome {
+                        ReleaseOutcome::StillPinned(device) => format!("still fixed to {device}"),
+                        _ => "not confirmed clear".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                warn!("the sweep left {exe_name} pinned through PID {relaunched_pid}: {reason}");
+                not_released.push(exe_name);
+            }
+            Err(e) => {
+                warn!("the sweep could not ask about {exe_name}: {e}");
+                not_released.push(exe_name);
             }
         }
+    }
+    if !not_released.is_empty() {
+        warn!(
+            "the sweep released {} assignment(s) and could not reach {}: {}",
+            released.len(),
+            not_released.len(),
+            not_released.join(", ")
+        );
     }
     // Feed pins whose program is gone are bookkeeping with nothing to hold: the
     // endpoints they named died with the process. The rule itself stays in the
@@ -745,6 +793,28 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         resume_suspended_feeds(exe, &pins).await;
     }
     Ok(released)
+}
+
+/// Fold the session list down to one PID per executable: the smallest one.
+///
+/// The product rule is one executable routes one process, and the process it
+/// routes is the smallest pid of that name — that is the pid the frontend's
+/// route entry is keyed by. Taken as whichever session the enumeration happened
+/// to list first, the sweep would hand a stale assignment to an arbitrary
+/// sibling and could pick a different one on the next run of the same machine.
+/// Keys are lower-cased, because the name on a session is whatever case the
+/// launch used.
+fn smallest_pid_per_exe<'a>(
+    sessions: impl Iterator<Item = (&'a str, u32)>,
+) -> HashMap<String, u32> {
+    let mut by_exe: HashMap<String, u32> = HashMap::new();
+    for (exe_name, pid) in sessions {
+        by_exe
+            .entry(exe_name.to_ascii_lowercase())
+            .and_modify(|smallest| *smallest = (*smallest).min(pid))
+            .or_insert(pid);
+    }
+    by_exe
 }
 
 /// Live duplication engines and their ordered device lists.
@@ -1232,8 +1302,12 @@ pub async fn set_feed_target(
     {
         // The frontend rolls its optimistic write back on an error, so the
         // rule this call recorded must go too, or the next launch would
-        // resurrect a feed the UI does not show.
-        let _ = feeds.remove(&source_exe, &target_exe);
+        // resurrect a feed the UI does not show. A removal that itself fails
+        // has to be said out loud: the resurrecting rule is the one failure
+        // nothing else here reports.
+        if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
+            warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
+        }
         return Err(e.to_string());
     }
     pins.mark_feed_capture(target_pid, &target_exe, &capture);
@@ -1280,7 +1354,9 @@ pub async fn set_feed_target(
             .await;
             pins.forget_feed_capture(target_pid);
         }
-        let _ = feeds.remove(&source_exe, &target_exe);
+        if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
+            warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
+        }
         return Err(e.to_string());
     }
     Ok(FeedOutcome {
@@ -1489,4 +1565,33 @@ fn open_in_browser(url: &str) -> Result<(), String> {
         return Err(format!("ShellExecuteW failed with code {code} for {url}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sweep releases a stale assignment by asking the audio service through
+    /// one of the program's live processes, and the product routes one executable
+    /// through its smallest pid. Folded by whichever session was enumerated first,
+    /// the same machine walked twice could reach two different siblings, and the
+    /// one the route entry is keyed by would be the one left out.
+    #[test]
+    fn one_executable_is_handed_the_smallest_of_its_pids() {
+        let by_exe = smallest_pid_per_exe(
+            [
+                ("Chrome.exe", 4100u32),
+                ("chrome.exe", 900),
+                ("Game.exe", 70),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(by_exe.get("chrome.exe"), Some(&900));
+        assert_eq!(by_exe.get("game.exe"), Some(&70));
+        assert_eq!(
+            by_exe.len(),
+            2,
+            "one entry per executable, whatever the case"
+        );
+    }
 }
