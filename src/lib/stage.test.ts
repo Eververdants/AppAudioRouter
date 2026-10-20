@@ -12,6 +12,8 @@ import {
   ROW_GAP,
   ROW_H,
   alreadyApplied,
+  feederColumn,
+  feederOutPort,
   feederPitch,
   feederY,
   feedersFitting,
@@ -178,20 +180,28 @@ describe('board geometry', () => {
     }
   });
 
-  it('names the count of feeders the column can hold, and no more', () => {
+  it('names the count of feeders the column can seat, and no more', () => {
     // The loop above stops where the geometry does: the pitch compresses to a
     // card plus its smallest gap and cannot go tighter, so past this count the
-    // column leaves the board — `feederY` will still place the ninth card, off
-    // the bottom edge. This is the number the column must cut at (half a card
-    // and a fading edge, the same answer the copies panel gives), so the limit
-    // is stated here rather than discovered by a user with nine programs
-    // feeding one.
+    // column leaves the board. A seat is counted the way the cut works — a card
+    // still shows half of itself — so the outermost seats are the half-cards the
+    // treatment is made of, and `feederColumn` may never hand out more of them
+    // than the board has centres for. Nine programs feeding one hub is a rare
+    // board, but it is a reachable one, so the limit is stated here rather than
+    // discovered by a user with nine programs feeding one.
     const fits = feedersFitting(BOARD_H);
-    expect(fits).toBe(8);
-    const lastOf = feederY(fits - 1, fits, BOARD_H);
-    expect(lastOf + MINI_H).toBeLessThanOrEqual(BOARD_H);
-    const overflow = feederY(fits, fits + 1, BOARD_H);
-    expect(overflow + MINI_H).toBeGreaterThan(BOARD_H);
+    expect(fits).toBe(9);
+    // The whole column of them: every card seated, and the two outermost cut by
+    // the board's own edges rather than dropped.
+    const full = feederColumn(fits, BOARD_H);
+    expect(full.seated).toBe(fits);
+    expect(feederY(0, fits, BOARD_H)).toBeLessThan(0);
+    expect(feederY(fits - 1, fits, BOARD_H) + MINI_H).toBeGreaterThan(BOARD_H);
+    // One card more than the board has room for, and the column does cut.
+    const over = feederColumn(fits + 1, BOARD_H);
+    expect(over.seated).toBeLessThan(fits + 1);
+    expect(over.cutAbove).toBe(true);
+    expect(over.cutBelow).toBe(true);
     // Compressing has a floor, and it is a card plus its gap: a column of two
     // that floor is reached is never tighter than that.
     expect(feederPitch(2, BOARD_H)).toBeGreaterThanOrEqual(feederPitch(fits, BOARD_H));
@@ -200,6 +210,57 @@ describe('board geometry', () => {
     // board at all.
     expect(feedersFitting(MINI_H - 1)).toBe(0);
     expect(feedersFitting(MINI_H)).toBe(1);
+    expect(feederColumn(0, BOARD_H).seated).toBe(0);
+    expect(feederColumn(4, MINI_H - 1).seated).toBe(0);
+  });
+
+  it('seats no more feeders than the board can fit, at any height and count', () => {
+    // The invariant the drawing code leans on: `feedersFitting` is what the
+    // board's height buys at the tightest pitch, and the seat window can never
+    // spend more of it than it has — or a card would be drawn off the board and
+    // the stage, which never scrolls, would show a half of nothing.
+    for (const height of [40, 60, 120, 240, 320, 470, 520, 600, 760, 900, 1200]) {
+      const capacity = feedersFitting(height);
+      for (let count = 0; count <= 40; count += 1) {
+        const column = feederColumn(count, height);
+        expect(column.seated).toBeLessThanOrEqual(capacity);
+        expect(column.seated).toBeLessThanOrEqual(count);
+        expect(column.first + column.seated).toBeLessThanOrEqual(count);
+      }
+    }
+  });
+
+  it('draws the seated feeders and nothing else: half a card or better, with its wire', () => {
+    // What the drawing code promises, restated from the raw geometry rather
+    // than from `feederSeated`: a card the user can at least half-see is drawn
+    // and its wire lands on it; a card under half is neither. The two are one
+    // decision, so a visible card never loses the line that says where its
+    // sound goes — the bug the previous treatment carried.
+    for (const height of [130, 240, 320, 470, 600, 900]) {
+      for (let count = 1; count <= 24; count += 1) {
+        const column = feederColumn(count, height);
+        for (let index = 0; index < count; index += 1) {
+          const top = feederY(index, count, height);
+          const shown = Math.min(height, top + MINI_H) - Math.max(0, top);
+          const seated = index >= column.first && index < column.first + column.seated;
+          if (seated) {
+            expect(shown).toBeGreaterThanOrEqual(MINI_H / 2);
+            // The wire's end is the card's own centre, so it is on the board —
+            // which is what makes a half-cut card keep its line.
+            const port = feederOutPort(index, count, height);
+            expect(port.y).toBeGreaterThanOrEqual(0);
+            expect(port.y).toBeLessThanOrEqual(height);
+          } else {
+            expect(shown).toBeLessThan(MINI_H / 2);
+          }
+        }
+        // The flags say where the column carries on past the board — which is
+        // what the fading edge has to report, whether or not the last card the
+        // board seats was itself cut.
+        expect(column.cutAbove).toBe(column.seated === 0 || column.first > 0);
+        expect(column.cutBelow).toBe(column.seated === 0 || column.first + column.seated < count);
+      }
+    }
   });
 
   it('keeps the column inside the board down to its own floor', () => {

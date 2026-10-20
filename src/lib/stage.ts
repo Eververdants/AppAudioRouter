@@ -280,31 +280,105 @@ const FEEDER_MIN_PITCH = MINI_H + FEEDER_MIN_GAP;
 /** Row distance for the feeders' column: comfortable while it fits, then
  *  compressed — never past the point where two cards would touch.
  *
- *  Exported because the cut has to be drawn where the cards are drawn: a caller
- *  that fades or scrolls the column needs the same pitch the cards sit at, and
- *  re-deriving it is how a wire and a row end up disagreeing. */
+ *  Exported because the seat window is only honest at the pitch the cards
+ *  actually sit at: `feederColumn` reads `feederY`, `stage.test.ts` pins that the
+ *  compression has a floor, and re-deriving the number anywhere else is how a
+ *  wire and a card end up disagreeing. */
 export function feederPitch(count: number, height: number): number {
   if (count <= 1) return 0;
   const span = Math.max(0, height - COLUMN_MARGIN * 2 - MINI_H);
   return Math.max(FEEDER_MIN_PITCH, Math.min(FEEDER_COMFORT_PITCH, Math.floor(span / (count - 1))));
 }
 
-/** How many feeder cards the column can hold before it leaves the board.
+/**
+ * Whether feeder card `index` of `count` still shows at least half of itself.
  *
- *  `feederPitch` stops compressing at [`FEEDER_MIN_PITCH`](58) — two cards that
- *  are one gap apart are as close as they may be — so past this count the
- *  column's own height, `(count - 1) * 58 + MINI_H`, exceeds the board and the
- *  top and bottom cards hang off it. Nothing scrolls there and nothing fades:
- *  the board is the only place a route is drawn, so the answer is a number the
- *  column can show, not a claim that every feed fits.
+ * With `MINI_H <= height` that reads as the card's *centre* lying on the board:
+ * the top clip leaves half a card whenever the centre has not gone past 0, and
+ * the bottom clip likewise at `height`. A card past that is a sliver nobody can
+ * aim at, so it is drawn neither as a card nor as a wire.
+ */
+function feederSeated(index: number, count: number, height: number): boolean {
+  const centre = feederY(index, count, height) + MINI_H / 2;
+  return centre >= 0 && centre <= height;
+}
+
+/**
+ * How many feeder cards the board can seat.
  *
- *  Nine programs feeding one hub is a rare board, but it is a reachable one,
- *  and `feederY` will happily place the ninth card off-screen. Whoever draws the
- *  column owes it the same treatment the copies panel gets — a half-visible row
- *  and a fading edge (AGENTS.md) — and this is the count to cut at. */
+ * `feederPitch` stops compressing at [`FEEDER_MIN_PITCH`](58) — two cards that
+ * are one gap apart are as close as they may be — and the column is centred on
+ * the hub, so the cards it can hold is the cards whose *centre* lies on the
+ * board at that pitch: one every `58` px of height, plus the middle one. Past
+ * this count the outermost card is under half visible, which is nobody's card to
+ * draw: it is a focusable button nobody can aim at, and the board is the only
+ * place a route is drawn. So the answer is a number the column can show, not a
+ * claim that every feed fits — nine programs feeding one hub is a rare board,
+ * but it is a reachable one, and the half-cards at the two ends plus the fading
+ * edges are what says the column goes on (`feederColumn`).
+ */
 export function feedersFitting(height: number): number {
   if (height < MINI_H) return 0;
-  return Math.floor((height - MINI_H) / FEEDER_MIN_PITCH) + 1;
+  return Math.floor(height / FEEDER_MIN_PITCH) + 1;
+}
+
+/** The part of the feeders' column the board shows, and which edge cuts it. */
+export interface FeederColumn {
+  /** First feeder index with a seat; every card before it is off the board. */
+  first: number;
+  /** How many cards are seated, counting from `first`. Never more than
+   *  `feedersFitting(height)`, and never more than `count`. */
+  seated: number;
+  /** Whether the column carries on past the board's top / bottom edge — cards
+   *  exist there that the board cannot show, so that is the edge to fade. True
+   *  for both when nothing at all is seated: the feeders are there, the well is
+   *  simply too short for any of them. */
+  cutAbove: boolean;
+  cutBelow: boolean;
+}
+
+/**
+ * The seat window of the feeders' column: the cards the board can show for
+ * `count` feeders, and the edges it cuts them on.
+ *
+ * The stage never scrolls and this column has no panel to scroll inside itself,
+ * so the cut is the whole treatment, and it is one decision rather than two:
+ * whoever draws the column asks this one function for the window and draws both
+ * the card and the wire from it — a card the user can half-see keeps the line
+ * that says where its sound goes, and a card under half leaves without either.
+ * Then the edge the column runs on gets `Panel`'s soft fade, which is what makes
+ * a half-card read as "there are more of these" instead of a broken render.
+ *
+ * The cards run downhill — `feederY` grows with the index — so the seated ones
+ * are one unbroken window and only the two ends of the column can be cut.
+ */
+export function feederColumn(count: number, height: number): FeederColumn {
+  // Nothing seated: the cards exist and the board shows none of them, so both
+  // edges of the column are cut (or, with no feeders at all, neither is).
+  const empty: FeederColumn = {
+    first: 0,
+    seated: 0,
+    cutAbove: count > 0,
+    cutBelow: count > 0,
+  };
+  if (count <= 0 || height < MINI_H) return empty;
+  let first = 0;
+  while (first < count && !feederSeated(first, count, height)) first += 1;
+  let last = count - 1;
+  while (last >= 0 && !feederSeated(last, count, height)) last -= 1;
+  // The window is what the pitch leaves visible; the capacity is what the board
+  // can seat at its tightest pitch. Both say the same thing today — the pitch
+  // never goes under `FEEDER_MIN_PITCH` — and taking the smaller of the two is
+  // what keeps `seated <= feedersFitting(height)` a fact of this file rather
+  // than an emergent property of two functions that do not talk to each other.
+  const seated = Math.min(Math.max(0, last - first + 1), feedersFitting(height));
+  if (seated === 0) return empty;
+  return {
+    first,
+    seated,
+    cutAbove: first > 0,
+    cutBelow: first + seated < count,
+  };
 }
 
 /** Where the feeders' card `index` of `count` sits (top edge, in px). */

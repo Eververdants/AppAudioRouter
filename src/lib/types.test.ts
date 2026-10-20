@@ -71,7 +71,7 @@ describe('paired TS↔Rust literals', () => {
     ];
     // Files that still carry a local copy and have to be pointed at the
     // contract layer. This list may only ever shrink.
-    const knownDuplicates = ['src/components/SourceLevelDial.tsx'];
+    const knownDuplicates: string[] = [];
     const declarations = sourceFilesUnder('src').flatMap((relative) => {
       if (relative === 'src/lib/types.ts') return [];
       if (knownDuplicates.includes(relative)) return [];

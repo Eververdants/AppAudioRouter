@@ -1,12 +1,10 @@
+import { useEffect, type RefObject } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrubReadout } from '@/components/ui/ScrubReadout';
+import { SOURCE_LEVEL_MAX } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
-/** Upper bound of a program's level, in percent — about +12 dB, past which the
- *  noise floor rises with the signal. Kept in step with `SOURCE_VOLUME_MAX` on
- *  the Rust side; the two are literals and nothing binds them together. */
-const SOURCE_LEVEL_MAX = 400;
 /** 100 is the audio as the program produced it, the middle of the range rather
  *  than its top. */
 const SOURCE_LEVEL_NEUTRAL = 100;
@@ -67,19 +65,39 @@ function levelRing(shown: number): ReactNode {
  * nodes of programs whose route has at least two devices. The interaction is
  * the shared "the number is the control": drag, wheel, arrow keys, or click to
  * type.
+ *
+ * The dial is the board's, but the focus it holds is the window's: the route can
+ * come down to one device, or the program can leave the session list, while the
+ * caret sits inside the number. A control that goes away has to say where the
+ * keyboard goes next, so it hands the focus to the card it was mounted under —
+ * the same bargain `ScrubReadout` strikes with its own host when `Enter` or
+ * `Escape` closes the field it is typing in.
  */
 export function SourceLevelDial({
   exeName,
   displayName,
+  hostRef,
 }: {
   /** The storage key: the level belongs to the program by executable name. */
   exeName: string;
   /** What the label says — the display name, when the backend found one. */
   displayName?: string;
+  /** The card this dial is mounted under: where the focus goes when it leaves. */
+  hostRef: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
   const committed = useRouterStore((s) => s.sourceVolumes[exeName] ?? SOURCE_LEVEL_NEUTRAL);
   const setSourceVolume = useRouterStore((s) => s.setSourceVolume);
+
+  // Removing the focused element from the DOM leaves the caret on the body, so
+  // that is how this knows the focus was its own to give back. Anything else —
+  // a press that landed somewhere, a programme switch that moved it on — has
+  // already answered the question, and this must not reach over it.
+  useEffect(() => {
+    return () => {
+      if (document.activeElement === document.body) hostRef.current?.focus();
+    };
+  }, [hostRef]);
 
   return (
     <ScrubReadout

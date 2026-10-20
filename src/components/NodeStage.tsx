@@ -37,6 +37,7 @@ import {
   ROW_W,
   alreadyApplied,
   boardCentre,
+  feederColumn,
   feederOutPort,
   feederY,
   hubInPort,
@@ -120,7 +121,10 @@ const PICKER_ITEM_VARIANTS: Variants = {
  * the stage never scrolls: the copies panel grows to fill what is left, and
  * scrolls inside itself when its rows outnumber the room. That is why a wire to
  * a row that has been scrolled out of that panel is not drawn at all — it would
- * otherwise run out past the panel's edge and point at nothing.
+ * otherwise run out past the panel's edge and point at nothing. The feeders'
+ * column has no room to scroll in, so it is cut instead: `feederColumn` says
+ * which cards the board can show, the half-cut one keeps its card and its wire,
+ * and the edge it is cut by fades.
  *
  * The board is a proposal, exactly as the ring stage was: rows toggle
  * membership in the plan, and the hub — which wears a "click to apply" capsule
@@ -177,6 +181,9 @@ export function NodeStage() {
    *  the key that replays the hub's landing beat. */
   const [landPulse, setLandPulse] = useState(0);
   const wellRef = useRef<HTMLDivElement | null>(null);
+  /** The hub card: what the level dial belongs to, and the place its focus goes
+   *  back to when the dial unmounts with the caret still inside it. */
+  const hubRef = useRef<HTMLButtonElement | null>(null);
   /** The button a picker came from, so closing hands the keyboard back to it. */
   const pickerReturnRef = useRef<HTMLElement | null>(null);
   /** The number badge the strip was opened from: closing the strip with its own
@@ -519,18 +526,17 @@ export function NodeStage() {
       live: flowing && state === 'live',
     });
   });
-  // Feeders → hub. A card clipped whole out of the board by the well's own
-  // edge has nothing to meet: the same rule `rowVisible` carries for a
-  // destination row scrolled out of its panel — no visible row, no line.
-  // A card still partly visible keeps its wire, clipped at the board edge:
-  // the half-cut is the "there are more of these" cue, and the wire is the
-  // only thing pointing at where they go.
-  const feederShows = (index: number): boolean => {
-    const y = feederY(index, feeders.length, height);
-    return y < height && y + MINI_H > 0;
-  };
+  // Feeders → hub. The column is centred on the hub and compresses only to the
+  // cards' tightest pitch, so past `feedersFitting(height)` its ends leave the
+  // board. The seats are what `feederColumn` hands back: a card still showing
+  // half of itself keeps its seat *and* its wire — the half-cut card is the
+  // "there are more of these" cue, and the wire is the only thing saying where
+  // they go — while a card with nothing of itself left is drawn neither.
+  const feederSeats = feederColumn(feeders.length, height);
+  const feederHasSeat = (index: number): boolean =>
+    index >= feederSeats.first && index < feederSeats.first + feederSeats.seated;
   feeders.forEach((feeder, index) => {
-    if (!feederShows(index)) return;
+    if (!feederHasSeat(index)) return;
     const source = feederOutPort(index, feeders.length, height);
     const to = hubInPort(height);
     wires.push({
@@ -671,10 +677,12 @@ export function NodeStage() {
               to that programme's own board — the graph answers one programme at
               a time, and this is the door between them. */}
           {feeders.map((feeder, index) => {
-            // The well clips vertically and never scrolls: a card whole
-            // levels off the board is neither visible nor reachable, and a
-            // focusable button nobody can reach or see is not on the board.
-            if (!feederShows(index)) return null;
+            // The well clips vertically and never scrolls, so a card the board
+            // cannot show by half is one nobody can aim at or reach with the
+            // keyboard — and a focusable button nobody can see is not on the
+            // board. The seated half-cards are the column's end, and the fading
+            // edge below says the column goes on.
+            if (!feederHasSeat(index)) return null;
             const feederName = feeder.display_name ?? feeder.exe_name;
             const feederSounding = soundingFeeders.has(feeder.exe_name.toLowerCase());
             return (
@@ -716,6 +724,23 @@ export function NodeStage() {
             );
           })}
 
+          {/* The cut edges of the feeders' column: the same soft edge the copies
+              panel paints, and for the same reason — a card that ends mid-height
+              has to read as the column going on, not as a card that failed to
+              render. The well's own background closing over the cards, so it is
+              a gradient of one colour into nothing, never a mask. It paints
+              nothing while every card has its seat. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute top-0 h-4 bg-gradient-to-b from-surface-sunken to-transparent transition-opacity duration-200"
+            style={{ left: FEEDER_X, width: MINI_W, opacity: feederSeats.cutAbove ? 1 : 0 }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 h-6 bg-gradient-to-t from-surface-sunken to-transparent transition-opacity duration-200"
+            style={{ left: FEEDER_X, width: MINI_W, opacity: feederSeats.cutBelow ? 1 : 0 }}
+          />
+
           {/* The hub: the programme under the cursor. A proposal waiting for
               the press wears the apply capsule; already-applied, it is a card
               like the others and clicking it opens the strip below. */}
@@ -731,6 +756,7 @@ export function NodeStage() {
           ) : (
             <motion.button
               key={session.pid}
+              ref={hubRef}
               type="button"
               data-source-node="subject"
               // The card is a button only while it lands something: once what is
@@ -856,6 +882,7 @@ export function NodeStage() {
               <SourceLevelDial
                 exeName={session.exe_name}
                 displayName={session.display_name ?? undefined}
+                hostRef={hubRef}
               />
             </motion.div>
           )}
@@ -1229,9 +1256,17 @@ function Panel({
     const maxScroll = Math.max(0, contentHeight - bodyHeight);
     const target = rowContentY(revealIndex) + ROW_H / 2 + GROUP_PAD - bodyHeight;
     const next = Math.max(el.scrollTop, Math.min(target, maxScroll));
-    if (next !== el.scrollTop) el.scrollTop = next;
+    if (next !== el.scrollTop) {
+      el.scrollTop = next;
+      // Reported here as well as through the scroll event the DOM fires a task
+      // later: the wires are drawn from the parent's copy of the scroll, and
+      // waiting for that event would spend one frame with every line pointing at
+      // where its row sat before the reveal.
+      setScrollTop(next);
+      onScroll?.(next);
+    }
     onRevealed?.();
-  }, [revealIndex, bodyHeight, contentHeight, onRevealed]);
+  }, [revealIndex, bodyHeight, contentHeight, onScroll, onRevealed]);
   const canScrollUp = rows > 0 && scrollTop > 0.5;
   const canScrollDown = rows > 0 && scrollTop + bodyHeight < contentHeight - 0.5;
   return (
