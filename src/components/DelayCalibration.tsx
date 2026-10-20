@@ -87,9 +87,9 @@ function shuffled<T>(items: T[]): T[] {
 
 /**
  * The delay wizard: measure each device's real, audible latency by playing
- * short tones and letting the user time them with a held button — press when
- * a tone is heard, release when it stops — then write the difference between
- * the slowest device and the rest as the copies' compensation.
+ * short tones and letting the user tap the button once for every tone heard,
+ * then write the difference between the slowest device and the rest as the
+ * copies' compensation.
  *
  * The devices interleave: the wizard drives one burst per call and rotates
  * through them round by round, so the human reaction time sits inside every
@@ -165,6 +165,18 @@ export function DelayCalibration({
     [deviceName, i18n.language],
   );
 
+  // A device unplugged while the wizard is open leaves its row, so it has to
+  // leave the answer too: the two-device gate counts what is checked, and a
+  // phantom in it would start a run that measures nothing and a result screen
+  // that writes a number nothing can take. A run already going keeps the set it
+  // started with — the baseline must not move under it.
+  useEffect(() => {
+    setSelectedIds((ids) => {
+      const live = ids.filter((id) => devices.some((device) => device.id === id));
+      return live.length === ids.length ? ids : live;
+    });
+  }, [devices]);
+
   /**
    * Plays rounds until every session device has MIN_VALID presses or the cap
    * is hit, then hands the medians to the result screen.
@@ -190,6 +202,11 @@ export function DelayCalibration({
           if (!alive()) return;
           currentDeviceRef.current = id;
           setCurrentDevice(id);
+          // The burst that was sounding belongs to the device being left: a tap
+          // that arrives during the next device's lead silence answers nothing,
+          // and scoring it here would hand the previous device's timestamp to
+          // this one as a measurement.
+          markerStart.current = null;
           // A re-run keeps what a device already has; the tally on screen says
           // so rather than starting the count again under the user.
           setTapped(repsRef.current[id]?.length ?? 0);
@@ -390,6 +407,12 @@ export function DelayCalibration({
       // other device clamped at 0 or above), so the delay order cannot
       // preview or land a different seat than the wizard assigned.
       for (const [deviceId, value] of Object.entries(computed.values)) {
+        // A device that left since its own round cannot take a number: the
+        // backend refuses it, and the refusal would stand forever — this screen
+        // would have no way through, and the devices still here would never be
+        // written. Every value is a difference against the baseline, so the rest
+        // stay correct even when the baseline itself has gone.
+        if (!devices.some((device) => device.id === deviceId)) continue;
         // The store never rejects — a refused value rolls back and logs — so
         // the boolean is the only failure signal here. Stop on the first one
         // and keep the results screen up to say so, instead of closing as if
@@ -405,7 +428,7 @@ export function DelayCalibration({
     } finally {
       setApplying(false);
     }
-  }, [computed, onClose, setDeviceDelayValue]);
+  }, [computed, devices, onClose, setDeviceDelayValue]);
 
   const toggleDevice = (id: string) => {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
@@ -571,8 +594,16 @@ export function DelayCalibration({
                 <button
                   key={id}
                   type="button"
-                  disabled={id === baselineId}
-                  onClick={() => setBaselineId(id)}
+                  // Inert while the write is in flight: the numbers going out
+                  // were taken from this proposal, and a new baseline mid-write
+                  // would leave the screen describing a set that was never sent.
+                  disabled={id === baselineId || applying}
+                  onClick={() => {
+                    // The refusal described the numbers that were just sent; a
+                    // different proposal makes it stale.
+                    setApplyFailed(false);
+                    setBaselineId(id);
+                  }}
                   aria-pressed={id === baselineId}
                   className={`pressable flex w-full items-center justify-between gap-3 border-b border-line py-2 text-left outline-none last:border-b-0 focus-visible:ring-2 focus-visible:ring-accent/60 ${
                     id === baselineId

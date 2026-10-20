@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Ring } from '@/components/ui/Ring';
@@ -101,6 +101,9 @@ export function StartupWizard() {
    *  It holds the step: the tour will not be offered to this machine twice, so
    *  advancing past a wipe that failed would report a clean slate that is not. */
   const [cleanError, setCleanError] = useState<string | null>(null);
+  /** Guards the wipe against a second door reaching it while the first is still
+   *  running: Skip and Escape are not buttons the `cleaning` flag can disable. */
+  const settling = useRef(false);
 
   // A machine walking in from an older version answers for its predecessor's
   // settings before anything else — that screen is the reason an upgrade gets
@@ -126,10 +129,16 @@ export function StartupWizard() {
   // overlap.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') void leave();
+      if (e.key !== 'Escape' || e.repeat) return;
+      // Capture phase, and the key is consumed: leaving the tour must not also
+      // spend whatever the toast layer is still holding — an undo offer or a
+      // failure the user did not cause is one bubble-phase listener away, and a
+      // bubble-phase `stopPropagation` here could not keep the key from it.
+      e.stopPropagation();
+      void leave();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   });
 
   const last = step === steps.length - 1;
@@ -140,6 +149,10 @@ export function StartupWizard() {
    *  behind it, so a refusal holds the step instead of advancing over it. */
   async function settleInherit(): Promise<boolean> {
     if (current !== 'inherit' || keepSettings) return true;
+    // A second pass must not start a second wipe: the first is still in flight,
+    // and its own success or failure is the answer this one would give anyway.
+    if (settling.current) return false;
+    settling.current = true;
     setCleaning(true);
     try {
       await startClean();
@@ -149,6 +162,7 @@ export function StartupWizard() {
       setCleanError(String(e));
       return false;
     } finally {
+      settling.current = false;
       setCleaning(false);
     }
   }
@@ -184,6 +198,7 @@ export function StartupWizard() {
             {current === 'inherit' && (
               <InheritStep
                 keep={keepSettings}
+                cleaning={cleaning}
                 error={cleanError}
                 onKeep={(value) => {
                   setKeepSettings(value);
@@ -233,8 +248,9 @@ export function StartupWizard() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={cleaning}
               onClick={() => void leave()}
-              className="pressable rounded-ctl px-2.5 py-1 text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable rounded-ctl px-2.5 py-1 text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
             >
               {t('wizard.skip')}
             </button>
@@ -328,11 +344,16 @@ function StepBlock({ children, base = 0.85 }: { children: ReactNode; base?: numb
 function InheritStep({
   keep,
   onKeep,
+  cleaning,
   error,
   previousVersion,
 }: {
   keep: boolean;
   onKeep: (keep: boolean) => void;
+  /** The wipe this answer asked for is running: the choice it describes cannot
+   *  be taken back, so the control that makes it is inert until the wipe has
+   *  answered — and the doors that leave the tour are greyed beside it. */
+  cleaning: boolean;
   error: string | null;
   previousVersion: string | null;
 }) {
@@ -348,16 +369,18 @@ function InheritStep({
       />
       <StepBlock>
         <div className="mt-5">
-          <SegmentedControl
-            layoutId="wizard-inherit"
-            ariaLabel={t('wizard.inheritTitle')}
-            value={keep ? 'keep' : 'clean'}
-            onChange={(value) => onKeep(value === 'keep')}
-            options={[
-              { value: 'keep', label: t('wizard.inheritKeep') },
-              { value: 'clean', label: t('wizard.inheritClean') },
-            ]}
-          />
+          <fieldset disabled={cleaning}>
+            <SegmentedControl
+              layoutId="wizard-inherit"
+              ariaLabel={t('wizard.inheritTitle')}
+              value={keep ? 'keep' : 'clean'}
+              onChange={(value) => onKeep(value === 'keep')}
+              options={[
+                { value: 'keep', label: t('wizard.inheritKeep') },
+                { value: 'clean', label: t('wizard.inheritClean') },
+              ]}
+            />
+          </fieldset>
           <p className="mt-3 max-w-[52ch] text-[11px] leading-relaxed text-text-muted">
             {keep ? t('wizard.inheritKeepHint') : t('wizard.inheritCleanHint')}
           </p>

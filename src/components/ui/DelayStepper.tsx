@@ -34,10 +34,13 @@ export function DelayStepper({ deviceId, name }: { deviceId: string; name: strin
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur();
+            // Enter writes and Escape abandons, and the caret stays in the
+            // field: blurring it would hand focus to the page, and the next Tab
+            // would start again at the top of the window instead of here.
+            if (e.key === 'Enter') commit();
             if (e.key === 'Escape') {
               cancel();
-              e.currentTarget.blur();
+              commit();
             }
           }}
           aria-label={t('deviceDelay.valueLabel', { device: name })}
