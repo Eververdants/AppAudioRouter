@@ -610,9 +610,10 @@ const feedRestoreDecided = new Set<string>();
 /**
  * The newest `reconcileActiveDuplications` ask, so only the last answer lands.
  *
- * Six places ask the backend which engines are running — the boot, a route
- * landing, an undo, a delay change, a Core Audio notification, and one
- * `duplication-ready` per engine — and several of them can be in flight at once.
+ * Every path that changes an engine's life asks the backend which engines are
+ * running — the AGENTS.md red line: one reconciliation follows such a path, the
+ * all-rejected re-route included — and several of those asks can be in flight at
+ * once.
  * Each reply is a picture of a moment that has already gone, so an older reply
  * that lands last writes the older device lists *and the older generation
  * numbers* over the current ones; every event the live engine then sends is
