@@ -26,6 +26,11 @@
 //! opened or that errors out later does not take the engine down: it is dropped
 //! from the route and reported on its own through `duplication-mirror-failed`,
 //! so the remaining devices keep playing and the UI can say which one went quiet.
+//! When *every* mirror fails, though, the loopback tap has no consumer left: the
+//! engine releases its capture client and holds — registered, quiet, waiting for
+//! a stop or the process's end — because a `duplication-stopped` would take the
+//! still-playing primary route off the board with it. The state says as much:
+//! `active_routes` reports such an engine on the primary device alone.
 //!
 //! Synchronization: render clients do not start independently. The capture
 //! thread opens a gate once every device is initialized and every ring holds
@@ -124,6 +129,12 @@ enum ExitReason {
     ProcessExited,
     /// A Windows API call failed.
     Error(AudioError),
+    /// Every mirror is out of service and the pump has nothing left to feed.
+    /// Internal to `capture_session`, which releases the loopback client,
+    /// waits in `hold_after_lost_copies`, and replaces this with the reason
+    /// the hold ended — an engine that only lost its copies must not announce
+    /// itself as stopped, or the board takes the working primary route down.
+    AllMirrorsLost,
 }
 
 impl ExitReason {
@@ -132,6 +143,8 @@ impl ExitReason {
             ExitReason::Stopped => "stopped",
             ExitReason::ProcessExited => "process-exited",
             ExitReason::Error(_) => "error",
+            // Never reaches the frontend: `capture_session` converts it.
+            ExitReason::AllMirrorsLost => "all-mirrors-lost",
         }
     }
 
@@ -555,6 +568,12 @@ struct EngineShared {
     creation_time: u64,
     shutdown: AtomicBool,
     mirrors: Vec<Arc<MirrorChannel>>,
+    /// The engine's capture thread, published only while it waits with no
+    /// loopback consumer left (see `hold_after_lost_copies`), so a stop can
+    /// end that wait without sitting out the poll interval. `None` at every
+    /// other time: while the packet loop runs, that thread waits on a kernel
+    /// event, which `Thread::unpark` cannot break anyway.
+    capture_worker: Mutex<Option<Thread>>,
     /// Device the OS plays natively, i.e. the one endpoint this engine cannot
     /// hold back in software. Only used to route delay updates to
     /// `primary_delay_ms` — the primary's *volume* is the program's session
@@ -632,6 +651,19 @@ struct EngineShared {
 }
 
 impl EngineShared {
+    /// Whether every copy this engine was asked to make is out of service.
+    ///
+    /// A failed mirror ignores pushes, so once the last one goes the loopback
+    /// client has nothing left to feed and the pump must not keep the endpoint
+    /// busy for it (see `hold_after_lost_copies`). Mirrors are only ever
+    /// disabled by `fail_mirror`, whose render thread has already returned by
+    /// then, so an all-false reading means no consumer exists anywhere.
+    fn all_mirrors_lost(&self) -> bool {
+        self.mirrors
+            .iter()
+            .all(|m| !m.enabled.load(Ordering::Relaxed))
+    }
+
     /// Write the program's session volume back to what it was before this
     /// engine claimed it. Best effort and idempotent: a program whose session
     /// is gone has nothing left to restore, and one whose mixer value could
@@ -680,6 +712,43 @@ pub fn restore_session_volume_now(pid: u32, percent: u32) {
         Ok(_) => info!("restored session volume of PID {pid} to {percent}%"),
         Err(e) => warn!("giving PID {pid} its {percent}% back failed: {e}"),
     }
+}
+
+/// Wake the capture thread out of the copies-lost hold, if it is in one.
+///
+/// The same token semantics as [`MirrorChannel::wake`]: a thread that has not
+/// parked yet keeps the token and its next park returns immediately, so a wake
+/// arriving before the hold published the thread is not lost — the hold
+/// re-checks `shutdown` at the top of every pass regardless.
+fn wake_capture(shared: &EngineShared) {
+    if let Some(thread) = shared
+        .capture_worker
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        thread.unpark();
+    }
+}
+
+/// Take a removed engine out of service.
+///
+/// Setting `shutdown` and waking is the whole contract: mirrors may be parked
+/// on a quiet source on their own threads rather than on the device, and the
+/// capture thread may be waiting in `hold_after_lost_copies`; without the wake
+/// either would sit out its backstop before the caller could join it. The
+/// session-volume restore runs synchronously, before the caller moves on: the
+/// next thing it may do is start a new engine for the same program, and that
+/// engine reads the program's current session volume as its own pre-route
+/// value — a restore racing that read would hand the new engine the wrong
+/// baseline.
+fn retire_engine(shared: &Arc<EngineShared>) {
+    shared.shutdown.store(true, Ordering::Relaxed);
+    for mirror in &shared.mirrors {
+        mirror.wake();
+    }
+    wake_capture(shared);
+    shared.restore_session_volume();
 }
 
 /// Record that the source just produced audio. Called by the capture thread,
@@ -748,9 +817,84 @@ pub struct ActiveRoute {
     pub latency_ms: Vec<Option<u32>>,
 }
 
+/// In-flight-start bookkeeping, so a stop can never miss a landing start.
+///
+/// `start` registers itself here, under the same `engines` lock as its
+/// eviction, *before* the slow COM work (mix format, session-volume claim);
+/// `stop` waits for the count to drain before removing. Without this, a
+/// `stop_route` landing between a start's eviction and its insertion removes
+/// nothing, and the insertion then RESURRECTS an engine with no route — the
+/// mirrors keep playing while the board shows nothing.
+#[derive(Default)]
+struct StartRegistry {
+    /// pid → starts in flight for it: evicted the incumbent, not yet landed
+    /// (or withdrew) their engine. More than one because two `apply_route`s
+    /// for the same pid can overlap; the pid stays claimed until both settle.
+    counts: Mutex<HashMap<u32, u32>>,
+    /// Notified on every decrement, so a waiting `stop` cannot sleep past
+    /// the start it waits for.
+    landed: Condvar,
+}
+
+impl StartRegistry {
+    /// Count one more in-flight start for `pid`. Called while the caller holds
+    /// the `engines` lock — that pairing is what makes the eviction and the
+    /// registration one step no `stop` can slip between.
+    fn begin(&self, pid: u32) {
+        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        let count = counts.entry(pid).or_insert(0);
+        *count = count.saturating_add(1);
+    }
+
+    /// One fewer. The notify is unconditional: a waiter for another pid
+    /// re-checks its own entry and sleeps again, and losing this one's wake
+    /// would strand a `stop` past a start that already landed.
+    fn clear(&self, pid: u32) {
+        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = counts.get_mut(&pid) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                counts.remove(&pid);
+            }
+        }
+        self.landed.notify_all();
+    }
+
+    /// Sleep until `pid` has no start in flight. The caller's removal then
+    /// sees whatever that start landed — or nothing, if it withdrew, in which
+    /// case it retires nothing too. A stop arriving before any start registered
+    /// does not wait: honoring it over a *later* apply is the frontend's
+    /// ordering, and a route the user asked for after the stop has finished is
+    /// simply the next word, not a resurrection.
+    fn wait_for_quiet(&self, pid: u32) {
+        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        while counts.contains_key(&pid) {
+            counts = self.landed.wait(counts).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+/// Clears one in-flight start on the way out of `DuplicationManager::start`,
+/// on every return path — including the `?` and early `Err`/`Ok` returns that
+/// happen before an engine lands. A start that never lands must not leave a
+/// `stop` waiting on a count nobody will clear.
+struct StartGuard<'a> {
+    registry: &'a StartRegistry,
+    pid: u32,
+}
+
+impl Drop for StartGuard<'_> {
+    fn drop(&mut self) {
+        self.registry.clear(self.pid);
+    }
+}
+
 /// Per-process duplication engines, managed as Tauri state.
 pub struct DuplicationManager {
     engines: Mutex<HashMap<u32, Arc<EngineShared>>>,
+    /// Starts that are between their eviction and their insertion (see
+    /// `StartRegistry`); `stop` waits this out, `begin_start` fills it.
+    starting: StartRegistry,
     /// Persisted per-device delay compensation values.
     delays: Arc<DelayConfig>,
     /// Persisted per-device volume values.
@@ -778,6 +922,7 @@ impl DuplicationManager {
     ) -> Self {
         Self {
             engines: Mutex::new(HashMap::new()),
+            starting: StartRegistry::default(),
             delays,
             volumes,
             sources,
@@ -906,10 +1051,30 @@ impl DuplicationManager {
             .values()
             .cloned()
             .collect();
-        engines
-            .iter()
-            .filter_map(|engine| engine.take_restore_promise())
-            .collect()
+        let mut pending = Vec::new();
+        for engine in &engines {
+            // The claim lock again, for the same reason `update_primary_volume`
+            // takes it: this promise is what the exit worker hands back, and a
+            // primary-volume write that landed after it would leave the mixer
+            // remembering our route's value for the program's next launch with
+            // no engine left to undo it. The engine goes down with the app, so
+            // also raise its flag here — a write deciding under this lock then
+            // finds `shutdown` set and skips, and the wakes let a parked
+            // mirror or a held capture thread wind down promptly.
+            let _claim = engine
+                .volume_claim
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            engine.shutdown.store(true, Ordering::Relaxed);
+            for mirror in &engine.mirrors {
+                mirror.wake();
+            }
+            wake_capture(engine);
+            if let Some(promise) = engine.take_restore_promise() {
+                pending.push(promise);
+            }
+        }
+        pending
     }
 
     /// Push a program's level to every engine running for it.
@@ -981,6 +1146,11 @@ impl DuplicationManager {
     /// The capture format is probed synchronously (a fast call); the
     /// process-loopback activation runs on the engine thread and reports
     /// failures through the `duplication-stopped` event with reason `error`.
+    ///
+    /// A stop that arrives while this is in flight is honored after the start
+    /// lands: the eviction below and the registration in `starting` happen in
+    /// one step under the `engines` lock, and [`stop`](Self::stop) waits that
+    /// registration out before it removes.
     pub fn start(
         &self,
         pid: u32,
@@ -989,7 +1159,11 @@ impl DuplicationManager {
         mirror_device_ids: Vec<String>,
         app: &AppHandle,
     ) -> Result<u64, AudioError> {
-        self.stop(pid);
+        // Evict any incumbent and declare this start in flight, under one
+        // acquisition of `engines`. From here to the guard's drop at the end
+        // of this function, a `stop` for this pid waits rather than removing
+        // nothing and letting the insertion below resurrect what it stopped.
+        let _start_guard = self.begin_start(pid);
         if mirror_device_ids.is_empty() {
             return Ok(0);
         }
@@ -998,6 +1172,7 @@ impl DuplicationManager {
         }
 
         let (format, block_align, sample_rate) = default_mix_format()?;
+        validate_mix_format(block_align, sample_rate)?;
         let sample = SampleFormat::parse(&format);
         // Ring must hold the worst case pipeline a configuration can ask for:
         // the base latency plus the largest spread between the earliest and the
@@ -1032,6 +1207,7 @@ impl DuplicationManager {
             creation_time,
             shutdown: AtomicBool::new(false),
             mirrors,
+            capture_worker: Mutex::new(None),
             primary_device_id: primary_device_id.to_string(),
             primary_delay_ms: AtomicI32::new(self.delays.get(primary_device_id)),
             session_volume_percent: AtomicU32::new(self.primary_volumes.get(exe_name)),
@@ -1080,16 +1256,10 @@ impl DuplicationManager {
             engines.insert(pid, Arc::clone(&shared))
         };
         if let Some(losing) = losing {
-            losing.shutdown.store(true, Ordering::Relaxed);
-            // A mirror parked on a quiet source waits on its own thread rather
-            // than on the device; wake it or the capture thread cannot join it
-            // until the park's backstop expires.
-            for mirror in &losing.mirrors {
-                mirror.wake();
-            }
-            // Losing the seat is a stop like any other: the program's session
-            // volume goes back to what the loser read before it claimed it.
-            losing.restore_session_volume();
+            // Losing the seat is a stop like any other: shutdown, the wakes
+            // that end any park, and the program's session volume back to what
+            // the loser read before it claimed it.
+            retire_engine(&losing);
         }
 
         // Claim the program's session volume for this route — only now that the
@@ -1162,26 +1332,54 @@ impl DuplicationManager {
     }
 
     /// Signal the engine for `pid` to stop. Threads clean up asynchronously.
+    ///
+    /// A start still in flight for `pid` lands first: this waits for it, then
+    /// removes what it inserted. Returning before that would let the stop
+    /// remove nothing while an engine was mid-COM-work, and the late insertion
+    /// would play a stopped route's audio to mirrors the board no longer shows.
+    /// The wait is bounded by one start's slow path (format probe and session
+    /// claim), and callers already run `stop` off the main thread.
     pub fn stop(&self, pid: u32) {
+        self.starting.wait_for_quiet(pid);
+        self.evict(pid);
+    }
+
+    /// Remove `pid`'s engine, if one is seated, and take it down — without
+    /// waiting on an in-flight start. Public callers want [`stop`](Self::stop);
+    /// `begin_start` is the only caller that must not wait (it *is* the start).
+    fn evict(&self, pid: u32) {
         let engine = self
             .engines
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&pid);
         if let Some(shared) = engine {
-            shared.shutdown.store(true, Ordering::Relaxed);
-            // A mirror parked on a quiet source waits on its own thread rather
-            // than on the device, so it has to be woken or the capture thread
-            // cannot join it until the park's backstop expires.
-            for mirror in &shared.mirrors {
-                mirror.wake();
-            }
-            // Synchronously, before this returns: the next thing the caller
-            // may do is start a new engine for the same program (a re-route),
-            // and that engine reads the program's current session volume as
-            // its own pre-route value. A restore racing that read would hand
-            // the new engine the wrong baseline.
-            shared.restore_session_volume();
+            retire_engine(&shared);
+        }
+    }
+
+    /// Evict `pid`'s incumbent and register this start in one step, so a stop
+    /// that arrives from here on waits for this start to land instead of
+    /// removing nothing beneath it. The incumbent is retired outside the lock,
+    /// the way `stop` does it: handing its session volume back is a round of
+    /// device and session enumeration, and AudioSrv gets slow on a Bluetooth
+    /// reconnect — seconds in which every command that wants `engines` would
+    /// be queued behind us.
+    fn begin_start(&self, pid: u32) -> StartGuard<'_> {
+        let incumbent = {
+            let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+            // Lock order: `engines` before `starting`, everywhere. The two
+            // `StartRegistry` methods that take only its own lock never reach
+            // for `engines`, and `volume_claim` is only ever a leaf.
+            self.starting.begin(pid);
+            engines.remove(&pid)
+        };
+        if let Some(shared) = incumbent {
+            retire_engine(&shared);
+        }
+        StartGuard {
+            registry: &self.starting,
+            pid,
         }
     }
 
@@ -1266,6 +1464,9 @@ fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
             info!("duplication for PID {} ended: process exited", shared.pid)
         }
         ExitReason::Error(e) => warn!("duplication for PID {} failed: {e}", shared.pid),
+        // Unreachable: `capture_session` converts it into the reason the hold
+        // ended before returning. Kept so the match says which one it is.
+        ExitReason::AllMirrorsLost => {}
     }
     let mirror_wakes: u64 = shared
         .mirrors
@@ -1409,18 +1610,19 @@ fn capture_session(
         return Err(com_err("Start(capture)", e));
     }
 
-    let mut render_threads = Vec::with_capacity(shared.mirrors.len());
+    // Each handle paired with its mirror: a thread that dies in a panic
+    // reports through the mirror's own failure channel, not into the void.
+    let mut render_threads: Vec<(Arc<MirrorChannel>, std::thread::JoinHandle<()>)> =
+        Vec::with_capacity(shared.mirrors.len());
     for mirror in &shared.mirrors {
         let thread_shared = shared.clone();
         let thread_app = app.clone();
         let thread_mirror = mirror.clone();
-        // Render threads report their own errors via `enabled`, so the join
-        // result is ignored on purpose.
         let spawned = std::thread::Builder::new()
             .name(format!("aar-render-{}", shared.pid))
             .spawn(move || render_main(thread_shared, thread_mirror, thread_app));
         match spawned {
-            Ok(handle) => render_threads.push(handle),
+            Ok(handle) => render_threads.push((mirror.clone(), handle)),
             Err(e) => {
                 // The OS refused the thread. Spawning with `thread::spawn`
                 // would panic here, and the unwind would tear this capture
@@ -1445,7 +1647,32 @@ fn capture_session(
         opened_at: Instant::now(),
         opened: false,
     };
-    let reason = capture_packets(shared, &capture, event, &mut gate);
+    let mut reason = capture_packets(shared, &capture, event, &mut gate);
+    if matches!(reason, ExitReason::AllMirrorsLost) {
+        // The last copy is out of service: nothing on the device side of this
+        // engine can make a sound any more, and a started event-driven capture
+        // client keeps the endpoint signalling a thread with no consumer.
+        // Release the tap for good, then hold the engine registered — stopping
+        // it here would emit `duplication-stopped` and take the still-working
+        // primary route down with it. The outcome is reported as what it is:
+        // the mirrors each failed on their own events, and `active_routes`
+        // shows this engine on the primary alone.
+        // SAFETY: Stop on a started client; errors are not actionable, the
+        // client is being dropped either way.
+        unsafe {
+            let _ = client.Stop();
+        }
+        drop(capture);
+        drop(client);
+        reason = hold_after_lost_copies(shared);
+        shared.shutdown.store(true, Ordering::Relaxed);
+        for mirror in &shared.mirrors {
+            mirror.wake();
+        }
+        // No client to stop a second time: it is gone, which was the point.
+        join_render_threads(shared, app, render_threads);
+        return Ok(reason);
+    }
     // Release the render threads before waiting for them. This flag is the only
     // thing `pump_render` returns on, and a process exit or a capture error ends
     // the loop above without `stop()` ever having been called — joining first
@@ -1462,9 +1689,7 @@ fn capture_session(
     unsafe {
         let _ = client.Stop();
     }
-    for handle in render_threads {
-        let _ = handle.join();
-    }
+    join_render_threads(shared, app, render_threads);
     Ok(reason)
 }
 
@@ -1664,6 +1889,14 @@ fn capture_packets_inner(
             return Ok(ExitReason::Stopped);
         }
         open_gate_when_ready(shared, gate);
+        if shared.all_mirrors_lost() {
+            // Every mirror is out of service: the pump has nothing left to
+            // feed, and pumping keeps the loopback endpoint busy for copies
+            // that will never wake up. Hand over to the hold (see
+            // `capture_session`), which releases the client without taking
+            // the primary route down.
+            return Ok(ExitReason::AllMirrorsLost);
+        }
         if wait == WAIT_TIMEOUT {
             // The loopback event only fires while the process actually plays
             // audio; use idle timeouts to notice process exit.
@@ -1785,6 +2018,75 @@ fn fail_mirror(shared: &EngineShared, mirror: &MirrorChannel, app: &AppHandle, e
             "error": error.to_string(),
         }),
     );
+}
+
+/// Wait without the loopback client for as long as every copy is dead.
+///
+/// An engine whose mirrors have all failed would otherwise keep the loopback
+/// tap alive forever — and a plain engine stop is not an option either,
+/// because `duplication-stopped` takes the whole route, the still-playing
+/// primary included, off the board. So the thread waits, cheap and registered,
+/// until the route ends by itself: a user stop, or the program's exit.
+///
+/// What wakes it: a stop or re-route of this program sets the shutdown flag
+/// and calls [`wake_capture`], the same token semantics every other park in
+/// this module uses; the `CAPTURE_WAIT_MS` timeout is only the backstop for a
+/// wakeup that never arrives, and doubles as the idle engine's liveness check
+/// — the same one poll per two seconds a quiet-but-serving engine already
+/// pays. Nothing else can wake it, and nothing else should: the mirrors are
+/// dead and no packet revives them.
+fn hold_after_lost_copies(shared: &EngineShared) -> ExitReason {
+    *shared
+        .capture_worker
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current());
+    warn!(
+        "duplication for PID {} lost every copy: the route plays on the primary alone",
+        shared.pid
+    );
+    loop {
+        if shared.shutdown.load(Ordering::Relaxed) {
+            return ExitReason::Stopped;
+        }
+        if !process_alive(shared.pid, shared.creation_time) {
+            return ExitReason::ProcessExited;
+        }
+        // The park is armed before the next pass of the checks, so a stop that
+        // lands between a check and the park leaves its token here and the
+        // park returns at once.
+        std::thread::park_timeout(Duration::from_millis(CAPTURE_WAIT_MS as u64));
+    }
+}
+
+/// Join every mirror's render thread, reporting the ones that died in a panic.
+///
+/// The join result used to be ignored on the theory that render threads
+/// report their own failures through `enabled` — true, until one panics (a
+/// frame-arithmetic divide, say) and unwinds past every report: the mirror
+/// stays enabled, its ring grows with nobody popping, the board shows a copy
+/// playing that has no thread behind it, and nothing is logged. A panicked
+/// join now says so, and takes the mirror out of service through the same
+/// channel its clean failures use.
+fn join_render_threads(
+    shared: &EngineShared,
+    app: &AppHandle,
+    render_threads: Vec<(Arc<MirrorChannel>, std::thread::JoinHandle<()>)>,
+) {
+    for (mirror, handle) in render_threads {
+        if let Err(payload) = handle.join() {
+            let detail = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "panic without a message".to_string());
+            fail_mirror(
+                shared,
+                &mirror,
+                app,
+                AudioError::Api(format!("render thread panicked: {detail}")),
+            );
+        }
+    }
 }
 
 /// A kernel event handle that closes itself unless somebody takes ownership.
@@ -2326,6 +2628,28 @@ pub(crate) fn default_mix_format() -> Result<(Vec<u8>, usize, u32), AudioError> 
     result
 }
 
+/// Reject a mix format whose arithmetic would divide by zero.
+///
+/// Every trim, top-up and ring bound in this module is a division or modulo by
+/// `block_align`, and the pipeline milliseconds are a division by
+/// `sample_rate`; a zero from a broken device format would panic on the render
+/// thread, which the join now reports but which still leaves that device
+/// silent for the life of the route. A rejected start is a failure the caller
+/// can see and roll back instead.
+fn validate_mix_format(block_align: usize, sample_rate: u32) -> Result<(), AudioError> {
+    if block_align == 0 {
+        return Err(AudioError::Api(
+            "default mix format reports a zero block alignment".to_string(),
+        ));
+    }
+    if sample_rate == 0 {
+        return Err(AudioError::Api(
+            "default mix format reports a zero sample rate".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Creation time as a FILETIME (u64) read from an already-open process handle,
 /// or None if the query failed. The caller owns the handle and has already
 /// established that the process has not exited.
@@ -2446,6 +2770,7 @@ mod tests {
                     })
                 })
                 .collect(),
+            capture_worker: Mutex::new(None),
             primary_device_id: "primary".to_string(),
             primary_delay_ms: AtomicI32::new(primary_ms),
             session_volume_percent: AtomicU32::new(100),
@@ -2901,6 +3226,100 @@ mod tests {
             tracker.rms()
         );
         assert_eq!(tracker.peak, 0.5);
+    }
+
+    #[test]
+    fn an_engine_that_lost_every_copy_says_copies_failed_not_playing() {
+        // The hold decision and the honest `active_routes` reading both key on
+        // this: pushes are no-ops for a failed mirror, so once none is enabled
+        // the loopback client has no consumer and must be released. One copy
+        // left standing, though, keeps the engine pumping normally.
+        let shared = engine(&[0, 0], 0, true);
+        assert!(!shared.all_mirrors_lost());
+        shared.mirrors[0].enabled.store(false, Ordering::Relaxed);
+        assert!(!shared.all_mirrors_lost());
+        shared.mirrors[1].enabled.store(false, Ordering::Relaxed);
+        assert!(shared.all_mirrors_lost());
+    }
+
+    #[test]
+    fn a_stop_that_lands_while_a_start_is_in_flight_waits_for_it() {
+        // The resurrection bug: `stop` removed nothing while a start walked its
+        // slow COM path, and the start's later insertion brought back an engine
+        // whose route was already gone. The registry is what closes that window
+        // — a waiter must not pass until the start has settled.
+        let registry = Arc::new(StartRegistry::default());
+        registry.begin(7);
+        registry.begin(7); // two overlapping starts: one clear is not enough
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiting = {
+            let registry = Arc::clone(&registry);
+            std::thread::spawn(move || {
+                registry.wait_for_quiet(7);
+                let _ = tx.send(());
+            })
+        };
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "the stop passed while a start was still in flight"
+        );
+        registry.clear(7);
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "the stop passed while the second start was still in flight"
+        );
+        registry.clear(7);
+        assert!(
+            rx.recv_timeout(Duration::from_secs(1)).is_ok(),
+            "the stop never woke when both starts had settled"
+        );
+        waiting.join().unwrap();
+    }
+
+    #[test]
+    fn a_lost_copies_hold_ends_the_moment_a_stop_lands() {
+        // The hold's named wake source, exercised for real: the thread is
+        // parked, a stop sets the flag and unparks it, and the hold answers
+        // with `Stopped` — not by sitting out the backstop. The fixture's pid
+        // is this test process, which stays alive for the whole wait, so the
+        // only way out is the stop.
+        let mut shared = engine(&[0], 0, true);
+        shared.pid = std::process::id();
+        let shared = Arc::new(shared);
+        let holding = {
+            let shared = Arc::clone(&shared);
+            std::thread::spawn(move || {
+                matches!(hold_after_lost_copies(&shared), ExitReason::Stopped)
+            })
+        };
+        loop {
+            if shared
+                .capture_worker
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_some()
+            {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        shared.shutdown.store(true, Ordering::Relaxed);
+        wake_capture(&shared);
+        assert!(
+            holding
+                .join()
+                .expect("the hold thread died instead of ending"),
+            "the hold ended for a reason other than the stop"
+        );
+    }
+
+    #[test]
+    fn a_zero_block_align_or_sample_rate_never_reaches_the_ring_arithmetic() {
+        // Trims, top-ups and ring bounds all divide by one of the two; a zero
+        // panics on the render thread, so the format is refused at the start.
+        assert!(validate_mix_format(8, 48_000).is_ok());
+        assert!(validate_mix_format(0, 48_000).is_err());
+        assert!(validate_mix_format(8, 0).is_err());
     }
 
     #[test]
