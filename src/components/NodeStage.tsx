@@ -277,8 +277,18 @@ export function NodeStage() {
   /** Programmes feeding sound *into* the hub, as sessions. */
   const feeders = useMemo(() => {
     if (pid === undefined) return [];
+    // A feed is stored under — and aimed at — the program's lowest pid, while
+    // the board opens on whichever process the list offered: the same address
+    // `programEntryOf` resolves for the feeds going out, read from this side.
+    // Matching the bare pid here left a browser's sibling show no feeder at all
+    // — the wire, its card and the hub's in-pin were simply missing.
+    const hubExe = sessions.find((s) => s.pid === pid)?.exe_name.toLowerCase();
+    if (hubExe === undefined) return [];
+    const answersForHub = (targetPid: number): boolean =>
+      targetPid === pid ||
+      sessions.find((s) => s.pid === targetPid)?.exe_name.toLowerCase() === hubExe;
     return Object.entries(feeds)
-      .filter(([, targets]) => targets.includes(pid))
+      .filter(([, targets]) => targets.some(answersForHub))
       .map(([sourcePid]) => sessions.find((s) => s.pid === Number(sourcePid)))
       .filter((s) => s !== undefined);
   }, [feeds, sessions, pid]);
@@ -592,29 +602,40 @@ export function NodeStage() {
             height={height}
             className="pointer-events-none absolute inset-0"
           >
-            {wires.map((wire) => (
-              <path
-                key={wire.key}
-                data-wire={wire.key.startsWith('dev:') ? `${pid}:${wire.key.slice(4)}` : undefined}
-                data-live={wire.live ? 'true' : undefined}
-                d={wire.d}
-                // A proposal wire draws itself once, out of the hub's pin; the
-                // `pathLength` normalization is what lets one fixed dasharray
-                // cover a path of any shape. A flowing wire never carries the
-                // attribute — a normalized length would rescale the flow's own
-                // dash pattern into a solid line — so it leaves the moment the
-                // route lands, together with the class.
-                pathLength={wire.live ? undefined : 1}
-                // `live` is the route carrying sound right now, and that alone
-                // is what the moving dash reports. `lit` is the cursor, and only
-                // brightens the line: gating the flow on it made the animation
-                // unreachable in the steady state it describes, because a wire
-                // you are not hovering over was a still line even while playing.
-                className={`nwire ${wire.live ? 'stage-flow' : 'stage-draw'} ${
-                  lit(wire.key) ? 'lit' : ''
-                }`}
-              />
-            ))}
+            {wires.map((wire) => {
+              // The draw-in is a proposal's own mark, so it is carried only
+              // while the plan is not yet the route. A settled route that
+              // merely went quiet — paused, or the window losing the gate — has
+              // to fall back to the steady line: swapping `stage-flow` for
+              // `stage-draw` restarts that keyframe, and every wire would then
+              // redraw itself as though it had just been proposed.
+              const proposed = !wire.live && !answered;
+              return (
+                <path
+                  key={wire.key}
+                  data-wire={
+                    wire.key.startsWith('dev:') ? `${pid}:${wire.key.slice(4)}` : undefined
+                  }
+                  data-live={wire.live ? 'true' : undefined}
+                  d={wire.d}
+                  // A proposal wire draws itself once, out of the hub's pin; the
+                  // `pathLength` normalization is what lets one fixed dasharray
+                  // cover a path of any shape. A flowing wire never carries the
+                  // attribute — a normalized length would rescale the flow's own
+                  // dash pattern into a solid line — so it leaves the moment the
+                  // route lands, together with the class.
+                  pathLength={proposed ? 1 : undefined}
+                  // `live` is the route carrying sound right now, and that alone
+                  // is what the moving dash reports. `lit` is the cursor, and only
+                  // brightens the line: gating the flow on it made the animation
+                  // unreachable in the steady state it describes, because a wire
+                  // you are not hovering over was a still line even while playing.
+                  className={`nwire ${
+                    wire.live ? 'stage-flow' : proposed ? 'stage-draw' : ''
+                  } ${lit(wire.key) ? 'lit' : ''}`}
+                />
+              );
+            })}
           </svg>
 
           {/* Feeders: the programmes sending sound into the hub. A click walks
@@ -832,6 +853,10 @@ export function NodeStage() {
                 onPromote={() => undefined}
                 onPrimaryPick={() => {
                   pickerReturnRef.current = document.activeElement as HTMLElement | null;
+                  // The two pickers are never open at once: opening this one
+                  // shuts the add picker, so a key or press always belongs to the
+                  // menu that is on screen.
+                  setPickerOpen(false);
                   setPrimaryPickerOpen((value) => !value);
                 }}
                 onInspect={() => setInspectorKey(`dev:${primaryDeviceId}`)}
@@ -850,6 +875,7 @@ export function NodeStage() {
             rows={copiesRows}
             empty={t('stage.groupCopiesEmpty')}
             onScroll={setCopyScroll}
+            resetKey={pid}
             revealIndex={revealIndex}
             onRevealed={clearReveal}
             headerAction={
@@ -860,6 +886,8 @@ export function NodeStage() {
                 title={t('stage.addTargetTitle')}
                 onClick={(event) => {
                   pickerReturnRef.current = event.currentTarget;
+                  // As above: one picker at a time.
+                  setPrimaryPickerOpen(false);
                   setPickerOpen((value) => !value);
                 }}
                 className="pressable flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] leading-none text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none"
@@ -1103,6 +1131,7 @@ function Panel({
   empty,
   headerAction,
   onScroll,
+  resetKey,
   revealIndex,
   onRevealed,
   children,
@@ -1114,6 +1143,11 @@ function Panel({
   empty: string;
   headerAction?: React.ReactNode;
   onScroll?: (scrollTop: number) => void;
+  /** Changing this sends the panel back to its top. The scroll position lives
+   *  in the DOM, where no parent state can reach it: a programme switch resets
+   *  the wires' scroll and leaves the rows where they were, so every wire ends
+   *  up pointing at the place its row used to hold. */
+  resetKey?: string | number;
   /** One-shot: the row index to bring into view; handed back via
    *  `onRevealed` once the panel has done its single scroll. */
   revealIndex?: number | null;
@@ -1126,10 +1160,24 @@ function Panel({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // When the content or the room changes, the browser clamps the scroll itself;
   // read the clamped value back so a hint does not stay lit over a panel that
-  // has just come to rest at its new bottom.
+  // has just come to rest at its new bottom — and report it too, so the wires
+  // that ride the parent's `copyScroll` do not keep pointing where the rows were
+  // before the clamp.
   useEffect(() => {
-    setScrollTop(scrollRef.current?.scrollTop ?? 0);
-  }, [rows, bodyHeight]);
+    const clamped = scrollRef.current?.scrollTop ?? 0;
+    setScrollTop(clamped);
+    onScroll?.(clamped);
+  }, [rows, bodyHeight, onScroll]);
+  // A new programme on the hub means a new list of rows, and the panel starts
+  // at its top for it — the DOM's own scroll is reset here, because the parent
+  // can reset only the number it draws wires from.
+  useEffect(() => {
+    if (resetKey === undefined) return;
+    const el = scrollRef.current;
+    if (el !== null) el.scrollTop = 0;
+    setScrollTop(0);
+    onScroll?.(0);
+  }, [resetKey]);
   // A destination that has just joined the plan may have landed below the cut:
   // one instant scroll brings its row fully into view — the row's own entrance
   // spring carries the "it arrived" moment, and the wire draws in after the
@@ -1381,6 +1429,9 @@ function DeviceRow({
         <button
           type="button"
           title={t('stage.removeTarget', { name: deviceName })}
+          // The glyph is the picture, not the name: read as text it is a
+          // multiplication sign, so the action has to be said.
+          aria-label={t('stage.removeTarget', { name: deviceName })}
           onClick={onRemove}
           className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
         >
@@ -1582,6 +1633,7 @@ function FeedRow({
       <button
         type="button"
         title={t('stage.removeFeed', { name: targetName })}
+        aria-label={t('stage.removeFeed', { name: targetName })}
         onClick={onRemove}
         className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error"
       >

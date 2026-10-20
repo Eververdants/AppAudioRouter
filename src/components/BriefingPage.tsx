@@ -175,7 +175,7 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
     }
     const allExes = new Set(sessions.map((session) => session.exe_name.toLowerCase()));
     return { cards, following: allExes.size - redirectedExes.size };
-  }, [sessions, routedPids, feeds, nameById, feedCarrier]);
+  }, [sessions, routedPids, feeds, nameById, feedCarrier, t]);
 
   // Changes staged on the board that have not landed: the one thing this page
   // cannot show, because the page reports what is happening and those are not.

@@ -83,6 +83,11 @@ export function SourceLevelDial({
 
   return (
     <ScrubReadout
+      // The number is the program's, and so is everything mid-gesture: the
+      // field keeps a typed draft and a wheel step waiting for its quiet
+      // period locally. Without this the hub swapping programmes would hand
+      // that pending figure to the *next* program's `onCommit`.
+      key={exeName}
       value={committed}
       min={0}
       max={SOURCE_LEVEL_MAX}
