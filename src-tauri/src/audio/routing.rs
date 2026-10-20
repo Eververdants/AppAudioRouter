@@ -1116,9 +1116,10 @@ async fn set_process_default_endpoint_flow(
                 .into_iter()
                 .map(HSTRING::from)
                 .collect();
-            let mut ok = 0;
+            let mut applied: Vec<i32> = Vec::new();
             let mut last_err: Option<windows::core::HRESULT> = None;
-            for &r in role_values(role) {
+            let wanted = role_values(role);
+            for &r in wanted {
                 // One role per class candidate: the first form the service
                 // accepts is the endpoint's own registration, and a class it
                 // rejects is left for the next candidate rather than failing
@@ -1126,25 +1127,45 @@ async fn set_process_default_endpoint_flow(
                 for wrapped in &candidates {
                     let hr = policy.set_persisted_default(pid, data_flow, r, wrapped);
                     if hr.is_ok() {
-                        ok += 1;
+                        applied.push(r);
                         break;
                     }
                     last_err = Some(hr);
                 }
-            }
-            if ok == 0 {
-                let hr = last_err.unwrap();
-                return Err(AudioError::Api(format!(
-                    "SetPersistedDefaultAudioEndpoint failed: 0x{:08X}",
-                    hr.0
-                )));
             }
             let what = if data_flow == E_CAPTURE {
                 "capture"
             } else {
                 "render"
             };
-            info!("pinned PID {pid} {what} endpoint to device {device_id} (roles ok: {ok})");
+            if applied.len() != wanted.len() {
+                // Half a pin is not a route. Reported as a success it would
+                // leave the roles that failed on whatever the program played
+                // before — the board says one device, the sound comes out of
+                // another — and as a plain failure it would leave the roles that
+                // landed with nothing on our books pointing at them, because a
+                // caller only books a pin it was told it got. So drop the roles
+                // this call wrote, then report the refusal.
+                for &r in &applied {
+                    let back = policy.clear_persisted_default(pid, data_flow, r);
+                    if back.is_err() {
+                        let code = format!("0x{:08X}", back.0);
+                        log::warn!(
+                            "could not drop the partial {what} pin of PID {pid} (role {r}): {code}"
+                        );
+                    }
+                }
+                // `applied` coming up short means some role failed every
+                // candidate, so a code was recorded for it.
+                let hr = last_err.unwrap();
+                return Err(AudioError::Api(format!(
+                    "SetPersistedDefaultAudioEndpoint failed: 0x{:08X} (roles applied: {} of {})",
+                    hr.0,
+                    applied.len(),
+                    wanted.len()
+                )));
+            }
+            info!("pinned PID {pid} {what} endpoint to device {device_id}");
             Ok(())
         })();
 

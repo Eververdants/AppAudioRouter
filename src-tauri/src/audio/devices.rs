@@ -120,15 +120,23 @@ fn device_info(device: &IMMDevice) -> Result<AudioDevice, AudioError> {
             .map_err(|e| AudioError::Api(format!("OpenPropertyStore({id}) failed: {e}")))?
     };
 
-    // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT.
-    let friendly = unsafe {
-        props
-            .GetValue(&PKEY_DEVICE_FRIENDLY_NAME)
-            .map_err(|e| AudioError::Api(format!("GetValue(FriendlyName) for {id} failed: {e}")))?
+    // A name the service will not hand over is not a device that cannot be
+    // routed: the id is already in hand, and dropping the entry here would hide
+    // a working endpoint from the list — with a live route on it, the frontend
+    // would read that as the device having been unplugged. Name it by its id,
+    // the same fallback a non-string value gets below.
+    let name = match unsafe {
+        // SAFETY: GetValue with PKEY_Device_FriendlyName returns a PROPVARIANT
+        // this value owns; it is cleared when it goes out of scope at the end of
+        // the arm.
+        props.GetValue(&PKEY_DEVICE_FRIENDLY_NAME)
+    } {
+        Ok(friendly) => extract_friendly_name(&friendly, &id),
+        Err(e) => {
+            warn!("friendly name of {id} unreadable; listing it by id: {e}");
+            id.clone()
+        }
     };
-
-    // Extract the string from the PROPVARIANT.
-    let name = extract_friendly_name(&friendly, &id);
     Ok(AudioDevice { id, name })
 }
 
@@ -160,17 +168,25 @@ pub fn get_default_render_device() -> Result<AudioDevice, AudioError> {
 }
 
 /// Extract the friendly name string from a PROPVARIANT.
+///
+/// Any answer that is not a usable string — another type, or an empty name —
+/// falls back to `fallback`, so a device never reaches the list nameless.
 fn extract_friendly_name(var: &windows::core::PROPVARIANT, fallback: &str) -> String {
     // Access the inner imp type via as_raw().
     // SAFETY: Accessing union field requires unsafe.
     let inner = var.as_raw();
     let vt = unsafe { inner.Anonymous.Anonymous.vt };
     const VT_LPWSTR: u16 = 31; // VARENUM::VT_LPWSTR
-    if vt == VT_LPWSTR {
+    let name = if vt == VT_LPWSTR {
         // SAFETY: We verified the type; pwszVal is valid.
         let pwstr_ptr = unsafe { inner.Anonymous.Anonymous.Anonymous.pwszVal };
         crate::audio::pwstr_to_string(&windows::core::PWSTR(pwstr_ptr))
     } else {
+        String::new()
+    };
+    if name.is_empty() {
         fallback.to_string()
+    } else {
+        name
     }
 }

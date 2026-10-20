@@ -475,7 +475,7 @@ fn sync(
     watched_managers: &mut HashMap<String, IAudioSessionManager2>,
     watched_sessions: &mut HashMap<String, WatchedSession>,
 ) {
-    let Ok(devices) = active_render_devices(enumerator) else {
+    let Ok((devices, endpoints_are_all_named)) = active_render_devices(enumerator) else {
         return;
     };
 
@@ -583,6 +583,20 @@ fn sync(
         }
     }
 
+    if !endpoints_are_all_named {
+        // One endpoint could not be read out of the collection, so an id
+        // missing from `live_devices` may be that failed read rather than a
+        // removal. Assume what is still watched is still there: those endpoints
+        // were not walked either, so the prune keeps their watchers, and the
+        // next pass decides for real.
+        live_devices.extend(watched_managers.keys().cloned());
+        live_devices.extend(
+            watched_sessions
+                .values()
+                .map(|watched| watched.device_id.clone()),
+        );
+    }
+
     prune_watchers(
         session_client,
         sounding,
@@ -650,8 +664,16 @@ struct DeviceRef {
     raw: IMMDevice,
 }
 
-/// Enumerate active render endpoints with their ids.
-fn active_render_devices(enumerator: &IMMDeviceEnumerator) -> Result<Vec<DeviceRef>, ()> {
+/// Enumerate active render endpoints with their ids, and say whether the list
+/// names every endpoint the audio service reported.
+///
+/// One entry whose `Item` or `GetId` call failed is skipped rather than costing
+/// the whole walk: the same hotplug race is skipped in `devices.rs` and
+/// `sessions.rs`, and abandoning the walk here would leave the sessions of every
+/// *other* device unwatched for the rest of the run — a new program never told
+/// about, an expired one never dropped. The cost is that a skipped entry cannot
+/// be told apart from a removed one, which is what the flag is for.
+fn active_render_devices(enumerator: &IMMDeviceEnumerator) -> Result<(Vec<DeviceRef>, bool), ()> {
     // SAFETY: eRender + DEVICE_STATE_ACTIVE are valid params.
     let Ok(collection) = (unsafe { enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) })
     else {
@@ -661,17 +683,26 @@ fn active_render_devices(enumerator: &IMMDeviceEnumerator) -> Result<Vec<DeviceR
         return Err(());
     };
     let mut devices = Vec::with_capacity(count as usize);
+    let mut complete = true;
     for i in 0..count {
         // SAFETY: i is within [0, count).
-        let device = (unsafe { collection.Item(i) }).map_err(|_| ())?;
+        let Ok(device) = (unsafe { collection.Item(i) }) else {
+            warn!("session watch skipped device {i}: Item failed");
+            complete = false;
+            continue;
+        };
         // SAFETY: GetId returns a PWSTR copied out and freed below.
-        let pwstr = (unsafe { device.GetId() }).map_err(|_| ())?;
+        let Ok(pwstr) = (unsafe { device.GetId() }) else {
+            warn!("session watch skipped device {i}: GetId failed");
+            complete = false;
+            continue;
+        };
         let id = crate::audio::pwstr_to_string(&pwstr);
         // SAFETY: balances GetId's allocation.
         unsafe { CoTaskMemFree(Some(pwstr.0 as *const _)) };
         devices.push(DeviceRef { id, raw: device });
     }
-    Ok(devices)
+    Ok((devices, complete))
 }
 
 /// Activate the session manager of one device.
