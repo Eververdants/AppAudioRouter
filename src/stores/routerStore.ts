@@ -593,6 +593,19 @@ const feedRestoreDecided = new Set<string>();
  */
 let reconcileFlight = 0;
 
+/** Discard the reply of every reconciliation still in flight.
+ *
+ * `reconcileFlight` only compares reconciliations with each other, but a stop
+ * is a mutation of the same picture: a reply asked for before it lands carries
+ * the engine that has just been taken down, and writing that back would put the
+ * badge and its generation on a route nothing is duplicating any more — which
+ * then swallows every later event as a stale one. A stop therefore retires the
+ * outstanding ask rather than asking again: stopping starts no engine, and the
+ * next pass (a notification, the next route) re-reads the whole list anyway. */
+function invalidateReconciliation(): void {
+  reconcileFlight += 1;
+}
+
 /**
  * Everything that writes or clears an executable's endpoint assignment, one at
  * a time.
@@ -1169,8 +1182,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // churn the array the stage's role words are keyed against.
     const index = selectedDeviceIds.indexOf(deviceId);
     if (index <= 0) return;
+    // Moving the seat is the user's own staging, exactly like `setPrimaryDevice`
+    // and `appendDeviceTarget`: the plan stops being the app's derived guess, so
+    // a refresh must not re-derive the seat back from the live route under it.
     set({
       selectedDeviceIds: [deviceId, ...selectedDeviceIds.filter((id) => id !== deviceId)],
+      deviceSelectionPrefilled: false,
     });
   },
 
@@ -1256,10 +1273,26 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       }
     });
     if (Object.keys(restored).length === 0) return;
-    set((s) => ({
-      routedPids: { ...s.routedPids, ...restored },
-      engineGenerations: { ...s.engineGenerations, ...generations },
-    }));
+    set((s) => {
+      const routedPids = { ...s.routedPids };
+      const engineGenerations = { ...s.engineGenerations };
+      for (const [pidKey, ids] of Object.entries(restored)) {
+        const pid = Number(pidKey);
+        // Something claimed this program while the restore was in flight — the
+        // user applied a route, an undo put the old devices back, a sibling
+        // landed one. That route owns the badge and the engine identity: the
+        // remembered list written over it would name devices the engine is not
+        // playing, and wearing this generation would make every later event of
+        // the live engine read as stale — the same reason the stops below merge
+        // rather than restore their snapshot.
+        if (programEntryOf(s.sessions, routedPids, pid) !== undefined) continue;
+        if (engineGenerations[pid] !== undefined) continue;
+        routedPids[pid] = ids;
+        const generation = generations[pid];
+        if (generation !== undefined) engineGenerations[pid] = generation;
+      }
+      return { routedPids, engineGenerations };
+    });
     // A restored route starts an engine just like a manual one, and the boot
     // reconciliation ran alongside this pass rather than after it — so without
     // this, routes restored at launch would carry no reading until the user
@@ -1269,7 +1302,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
 
   forgetRememberedRoute: async (exeName) => {
     const previous = get().rememberedRoutes;
-    set({ rememberedRoutes: previous.filter((entry) => entry.exeName !== exeName) });
+    // Matched on the lowercased name like every other read of this memory — the
+    // backend forgets case-insensitively, so a spelling-sensitive filter here
+    // would leave the row standing for a route the file no longer carries, and
+    // the next apply would write it straight back.
+    const key = exeName.toLowerCase();
+    set({ rememberedRoutes: previous.filter((entry) => entry.exeName.toLowerCase() !== key) });
     try {
       await api.clearRoute(exeName);
       get().addLog(i18next.t('log.rememberedRouteCleared', { process: exeName }), 'info');
@@ -1367,6 +1405,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       ),
       feedUndo: { sourcePid: canonicalSource, targetPid: canonicalTarget, added: true },
     }));
+    // Claimed *before* the ask, like the restore's own attempts: the pinning
+    // itself is a Core Audio change, and the refresh it provokes runs the feed
+    // restore over the rule this add has already written — unclaimed, it
+    // delivers the same pair a second time and logs a feed the user just added
+    // as restored. Only when the backend can actually deliver, or a rule that
+    // came back suspended would never be tried again once its reason clears.
+    const decidedKey = `${canonicalSource}|${target.exe_name.toLowerCase()}`;
+    const deliverable =
+      feedLiveness(canonicalSource, get().feedCarrier, get().routedPids, get().sessions) === 'live';
+    if (deliverable) feedRestoreDecided.add(decidedKey);
     try {
       const outcome = await api.setFeedTarget(
         canonicalSource,
@@ -1374,12 +1422,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         canonicalTarget,
         target.exe_name,
       );
+      // Not delivered after all: hand the pair back to the restore pass, which
+      // runs the moment the reason stops holding (the carrier gets configured,
+      // or the source's device route stops). Only a claim this add made.
+      if (deliverable && !outcome.delivered) feedRestoreDecided.delete(decidedKey);
       if (outcome.delivered) {
-        // The backend pinned both ends, so a later restore pass has nothing
-        // to deliver here: claimed like the restore's own attempts, or the
-        // next session refresh would pin the same endpoints again and log it
-        // as a restoration of a feed the user added minutes ago.
-        feedRestoreDecided.add(`${canonicalSource}|${target.exe_name.toLowerCase()}`);
         get().addLog(
           i18next.t('log.feedSet', { source: source.exe_name, target: target.exe_name }),
           'success',
@@ -1400,6 +1447,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     } catch (e) {
       // The backend refused the rule: roll the whole optimistic write back, so
       // the UI never shows a wire the audio service does not know about.
+      if (deliverable) feedRestoreDecided.delete(decidedKey);
       set((s) => {
         const nextFeeds = { ...s.feeds };
         const remaining = (nextFeeds[canonicalSource] ?? []).filter(
@@ -1943,8 +1991,19 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     autoRestoreDecided.add(pid);
     const previousGeneration = get().engineGenerations[pid] ?? 0;
     const process = session?.exe_name ?? `PID ${pid}`;
+    // A route is the program's but is held by one of its processes, and the
+    // restore pass tries every executable at its *lowest* pid: claiming only
+    // this pid let a route stopped from a sibling come straight back on the
+    // program's own lowest process at the next refresh.
+    const stoppedExe = session?.exe_name.toLowerCase();
+    if (stoppedExe !== undefined) {
+      for (const sibling of get().sessions) {
+        if (sibling.exe_name.toLowerCase() === stoppedExe) autoRestoreDecided.add(sibling.pid);
+      }
+    }
     try {
       // Optimistic: reflect the stop immediately so the UI feels instant.
+      invalidateReconciliation();
       set((s) => {
         const routedPids = { ...s.routedPids };
         delete routedPids[pid];
@@ -1958,7 +2017,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         // sibling of the holder. Every process of this executable then leaves
         // the selection with the route — leaving one behind would keep the
         // board showing a plan for a route that has just stopped.
-        const stoppedExe = session?.exe_name.toLowerCase();
         const selectedPids = s.selectedPids.filter(
           (p) =>
             p !== pid &&
@@ -2024,14 +2082,25 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // As with a single stop: the offer describes routes the user is taking apart
     // by hand right now, so it is not an offer any more.
     set({ undoSnapshot: null });
-    // Same rule as a single stop: none of these may be restored under the user.
-    for (const pid of pids) autoRestoreDecided.add(pid);
     const names = new Map(get().sessions.map((s) => [s.pid, s.exe_name] as const));
+    // Same rule as a single stop: none of these may be restored under the user —
+    // and claimed per executable, because the restore pass asks the lowest pid
+    // of a program, which is not necessarily the one holding its route.
+    const stoppedPrograms = new Set<string>();
+    for (const pid of pids) {
+      autoRestoreDecided.add(pid);
+      const exe = names.get(pid)?.toLowerCase();
+      if (exe !== undefined) stoppedPrograms.add(exe);
+    }
+    for (const [pid, name] of names) {
+      if (stoppedPrograms.has(name.toLowerCase())) autoRestoreDecided.add(pid);
+    }
     // Optimistic: assume every stop succeeds, then put back the ones that
     // didn't. Failed stops must keep their route live rather than desyncing
     // the UI from an engine that is still duplicating.
     const snapshot = { ...get().routedPids };
     const generationSnapshot = { ...get().engineGenerations };
+    invalidateReconciliation();
     set({ routedPids: {}, engineGenerations: {} });
     const results = await Promise.allSettled(pids.map((pid) => api.stopRoute(pid)));
     const failed: number[] = [];
@@ -2227,8 +2296,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       );
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
-      // keeps matching what the engine actually applies and persists.
+      // keeps matching what the engine actually applies and persists. Only
+      // while this is still the number on screen: the step buttons fire without
+      // waiting, so a later click can have restated this device's share while
+      // this write was in flight, and that one stands.
       set((s) => {
+        if ((s.deviceVolumes[deviceId] ?? 100) !== percent) return {};
         const deviceVolumes = { ...s.deviceVolumes };
         if (current >= 100) {
           delete deviceVolumes[deviceId];
@@ -2325,8 +2398,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t('log.sourceVolumeSet', { process: exeName, n: percent }), 'info');
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
-      // keeps matching what the engine actually applies and persists.
+      // keeps matching what the engine actually applies and persists. Only
+      // while this is still the number on screen: the dial commits without
+      // waiting, so a later one can have restated this program's level while
+      // this write was in flight, and that one stands.
       set((s) => {
+        if ((s.sourceVolumes[exeName] ?? 100) !== percent) return {};
         const sourceVolumes = { ...s.sourceVolumes };
         if (current === 100) {
           delete sourceVolumes[exeName];
@@ -2446,8 +2523,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       return true;
     } catch (e) {
       // The backend rejected the value; undo the optimistic update so the UI
-      // keeps matching what the engine actually applies and persists.
+      // keeps matching what the engine actually applies and persists. Only while
+      // this is still the number on screen: −/+ fires without waiting, so a later
+      // click can have restated this device's delay while this write was in
+      // flight, and that one stands.
       set((s) => {
+        if ((s.deviceDelays[deviceId] ?? 0) !== next) return {};
         const deviceDelays = { ...s.deviceDelays };
         if (current === 0) {
           delete deviceDelays[deviceId];

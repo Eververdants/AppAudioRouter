@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import type { AudioDevice, AudioSession, ResetOutcome, StopOutcome } from '@/lib/types';
+import type {
+  AudioDevice,
+  AudioSession,
+  FeedOutcome,
+  ResetOutcome,
+  StopOutcome,
+} from '@/lib/types';
 import { feedLiveness, useRouterStore } from './routerStore';
 
 /**
@@ -56,6 +62,17 @@ interface Backend {
   stopOutcomes: Record<number, Partial<StopOutcome>>;
   /** What `reset_pinned_endpoints` answers. */
   resetOutcome: ResetOutcome;
+  /** When set, the `apply_route` calls made with `remember: false` — the restore
+   * pass's own — are held until it resolves, so a test can keep a restored
+   * route in the air while the user routes the same program over it. */
+  holdRestore: Promise<void> | null;
+  /** When set, `set_feed_target` answers no earlier than this resolves: the
+   * window in which a feed's own pinning has not been acknowledged yet. */
+  holdFeed: Promise<void> | null;
+  /** When set, `get_active_duplications` answers — from the picture it took at
+   * call time — no earlier than this resolves: the window in which a store
+   * mutation can land after the ask but before its reply. */
+  holdActive: Promise<void> | null;
 }
 
 function installBackend(overrides: Partial<Backend> = {}): Backend {
@@ -75,6 +92,9 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
     fail: () => false,
     stopOutcomes: {},
     resetOutcome: { released: 0, still_pinned: [], still_pinned_devices: [] },
+    holdRestore: null,
+    holdFeed: null,
+    holdActive: null,
     ...overrides,
   };
 
@@ -101,13 +121,17 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         backend.routes[pid] = deviceIds;
         // The real command starts an engine only when there are copies; a
         // single-device route is just the per-app endpoint and reports 0.
-        if (deviceIds.length <= 1) {
+        let reply = 0;
+        if (deviceIds.length > 1) {
+          backend.generation += 1;
+          backend.routeGenerations[pid] = backend.generation;
+          reply = backend.generation;
+        } else {
           delete backend.routeGenerations[pid];
-          return 0;
         }
-        backend.generation += 1;
-        backend.routeGenerations[pid] = backend.generation;
-        return backend.generation;
+        return backend.holdRestore !== null && args.remember === false
+          ? backend.holdRestore.then(() => reply)
+          : reply;
       }
       case 'stop_route': {
         const pid = args.pid as number;
@@ -120,13 +144,13 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
           ...backend.stopOutcomes[pid],
         };
       }
-      case 'get_active_duplications':
+      case 'get_active_duplications': {
         // The real command lists *engines*, so single-device routes — which
         // have none — never appear here. The real contract is a parallel array
         // matching deviceIds, and the primary (index 0) reports `null` —
         // Windows plays it itself, there is no stream of ours to measure. Same
         // shape the e2e bridge fakes.
-        return Object.entries(backend.routes)
+        const reply = Object.entries(backend.routes)
           .filter(([, deviceIds]) => deviceIds.length > 1)
           .map(([pid, deviceIds]) => ({
             pid: Number(pid),
@@ -134,6 +158,8 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
             deviceIds,
             latencyMs: deviceIds.map((_, index) => (index === 0 ? null : 20)),
           }));
+        return backend.holdActive === null ? reply : backend.holdActive.then(() => reply);
+      }
       case 'get_remembered_routes':
         return backend.remembered;
       case 'list_capture_devices':
@@ -154,10 +180,11 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         if (!backend.feeds.some(([s2, t]) => s2 === sourceExe && t === targetExe)) {
           backend.feeds = [...backend.feeds, [sourceExe, targetExe]];
         }
-        if (backend.carrier.render === null || backend.carrier.capture === null) {
-          return { delivered: false, reason: 'no_carrier' };
-        }
-        return { delivered: true, reason: null };
+        const outcome: FeedOutcome =
+          backend.carrier.render === null || backend.carrier.capture === null
+            ? { delivered: false, reason: 'no_carrier' }
+            : { delivered: true, reason: null };
+        return backend.holdFeed === null ? outcome : backend.holdFeed.then(() => outcome);
       }
       case 'remove_feed_target': {
         const source = backend.sessions.find((s2) => s2.pid === args.sourcePid)?.exe_name ?? '';
@@ -171,7 +198,11 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         return [];
       }
       case 'clear_route':
-        backend.remembered = backend.remembered.filter(([name]) => name !== args.exeName);
+        // The real `remove_route` forgets case-insensitively: the memory is keyed
+        // by image name, and an image name carries whatever case the launch used.
+        backend.remembered = backend.remembered.filter(
+          ([name]) => name.toLowerCase() !== (args.exeName as string).toLowerCase(),
+        );
         return null;
       case 'forget_previous_settings':
         backend.remembered = [];
@@ -249,7 +280,7 @@ function reset(overrides: Partial<StoreState> = {}): void {
     undoSnapshot: null,
     logs: [],
     applying: false,
-    error: null,
+    errorNotice: null,
     autoRemember: true,
     closeToTray: false,
     autostart: false,
@@ -567,6 +598,34 @@ describe('process and device selection', () => {
     state().promoteDevice('headphones');
     expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
   });
+
+  it('freezes the plan it just promoted, so a refresh cannot undo the seat', async () => {
+    // Promoting is the user's own staging, not the app's guess: the plan must
+    // stop being derived, or the next device refresh would re-derive the seat
+    // from the live route and quietly move it back under the user.
+    const backend = installBackend({ devices: [SPEAKERS, TV] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC],
+      selectedPids: [MUSIC.pid],
+      selectedDeviceIds: ['speakers', 'tv'],
+      routedPids: { [MUSIC.pid]: ['speakers', 'tv'] },
+      engineGenerations: { [MUSIC.pid]: 1 },
+      deviceSelectionPrefilled: true,
+      defaultDeviceId: 'speakers',
+    });
+
+    state().promoteDevice('tv');
+    expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
+    expect(state().deviceSelectionPrefilled).toBe(false);
+
+    backend.devices = [SPEAKERS, TV];
+    await state().refreshDevices(true);
+
+    // The live route still runs [speakers, tv], but the seat the user moved
+    // stays where they put it.
+    expect(state().selectedDeviceIds).toEqual(['tv', 'speakers']);
+  });
 });
 
 describe('applyRoute', () => {
@@ -863,6 +922,39 @@ describe('stopRoute', () => {
 
     expect(lastLog()?.level).toBe('error');
     expect(lastLog()?.message).toContain('music.exe');
+  });
+
+  it('does not let a reconciliation asked before the stop put the route back', async () => {
+    // `get_active_duplications` is asked in one breath and committed in another,
+    // and its reply pictures the engines as they were at the ask. A stop landing
+    // inside that window would be written over: the badge and the generation of
+    // an engine that no longer exists, which then swallows every event the next
+    // engine sends as stale.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const PLAYER: AudioSession = { pid: 8301, exe_name: 'reconciled.exe' };
+    installBackend({
+      sessions: [PLAYER],
+      routes: { [PLAYER.pid]: ['speakers', 'tv'] },
+      routeGenerations: { [PLAYER.pid]: 3 },
+      holdActive: gate,
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [PLAYER],
+      routedPids: { [PLAYER.pid]: ['speakers', 'tv'] },
+      engineGenerations: { [PLAYER.pid]: 3 },
+    });
+
+    const reconciling = state().reconcileActiveDuplications();
+    await state().stopRoute(PLAYER.pid);
+    release();
+    await reconciling;
+
+    expect(state().routedPids[PLAYER.pid]).toBeUndefined();
+    expect(state().engineGenerations[PLAYER.pid]).toBeUndefined();
   });
 });
 
@@ -1374,6 +1466,100 @@ describe('remembered routes', () => {
     expect(state().routedPids[YOUNGER.pid]).toBeUndefined();
     expect(state().routedPids[OWNER.pid]).toEqual(['tv']);
   });
+
+  it('forgets the memory whatever spelling the row carries', async () => {
+    // The backend clears case-insensitively and the memory is matched that way
+    // everywhere else in the store; a spelling-sensitive filter left the row on
+    // the settings list for a route the file had already dropped — and the next
+    // apply wrote it straight back.
+    const backend = installBackend({ remembered: [['Music.exe', ['tv']]] });
+    reset({
+      devices: [SPEAKERS, TV],
+      rememberedRoutes: [{ exeName: 'Music.exe', deviceIds: ['tv'] }],
+    });
+
+    await state().forgetRememberedRoute('music.exe');
+
+    expect(state().rememberedRoutes).toEqual([]);
+    expect(backend.remembered).toEqual([]);
+  });
+
+  it('counts a stop from a sibling as a stop of the whole program', async () => {
+    // The stop is claimed by pid, but the restore pass asks each executable at
+    // its *lowest* pid — and a route is the program's, held by whichever process
+    // landed it. Stopping the higher sibling and claiming only that pid left the
+    // program's own lowest process unclaimed, so the next refresh put the route
+    // the user just took off straight back under them.
+    const LOWER: AudioSession = { pid: 8101, exe_name: 'stopped-high.exe' };
+    const HOLDER: AudioSession = { pid: 8102, exe_name: 'stopped-high.exe' };
+    const backend = installBackend({ sessions: [LOWER, HOLDER] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [LOWER, HOLDER],
+      routedPids: { [HOLDER.pid]: ['tv'] },
+      rememberedRoutes: [{ exeName: 'stopped-high.exe', deviceIds: ['tv'] }],
+      autoRemember: true,
+    });
+
+    await state().stopRoute(HOLDER.pid);
+    await state().restoreRememberedRoutes();
+
+    expect(backend.calls.filter((c) => c.cmd === 'apply_route')).toHaveLength(0);
+    expect(state().routedPids).toEqual({});
+  });
+
+  it('counts a batch stop as a stop of every program it took down', async () => {
+    const LOWER: AudioSession = { pid: 8111, exe_name: 'stopped-batch.exe' };
+    const HOLDER: AudioSession = { pid: 8112, exe_name: 'stopped-batch.exe' };
+    const backend = installBackend({ sessions: [LOWER, HOLDER] });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [LOWER, HOLDER],
+      routedPids: { [HOLDER.pid]: ['tv'] },
+      rememberedRoutes: [{ exeName: 'stopped-batch.exe', deviceIds: ['tv'] }],
+      autoRemember: true,
+    });
+
+    await state().stopAllRoutes();
+    await state().restoreRememberedRoutes();
+
+    expect(backend.calls.filter((c) => c.cmd === 'apply_route')).toHaveLength(0);
+    expect(state().routedPids).toEqual({});
+  });
+
+  it('lets a route the user applied win over a restore that answers late', async () => {
+    // The restore picks its targets, then awaits the backend — and the pinning
+    // itself raises a Core Audio change, so a refresh (or a hand route) lands
+    // inside that window. Committing the pre-await picture over the newer route
+    // would show devices the engine is not playing and, worse, put the restore's
+    // generation on the live engine, so every event it later sends reads stale.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const LATE: AudioSession = { pid: 8121, exe_name: 'late-restore.exe' };
+    const backend = installBackend({ sessions: [LATE], holdRestore: gate });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [LATE],
+      rememberedRoutes: [{ exeName: 'late-restore.exe', deviceIds: ['tv'] }],
+      autoRemember: true,
+      selectedPids: [LATE.pid],
+      selectedDeviceIds: ['speakers'],
+      defaultDeviceId: 'speakers',
+    });
+
+    const restoring = state().restoreRememberedRoutes();
+    // Both routes are single-device, so neither has an engine to reconcile them
+    // back: the badge is the store's own to get right.
+    await state().applyRoute();
+    release();
+    await restoring;
+
+    expect(state().routedPids[LATE.pid]).toEqual(['speakers']);
+    const applied = backend.calls.filter((c) => c.cmd === 'apply_route');
+    expect(applied[applied.length - 1]?.args).toMatchObject({ deviceIds: ['speakers'] });
+  });
 });
 
 describe('settings and log', () => {
@@ -1464,6 +1650,42 @@ describe('settings and log', () => {
     expect(backend.calls.some((c) => c.cmd === 'apply_route')).toBe(false);
     expect(state().routedPids[1001]).toEqual(['speakers', 'headphones']);
     expect(state().deviceDelays.speakers).toBe(120);
+  });
+
+  it('leaves a newer share standing when an older click is refused', async () => {
+    // Same shape as the primary volume above: the copy's share stepper fires
+    // without waiting, so an older rejection rolling back over a newer accepted
+    // value would leave the board naming a level the engine is not applying.
+    installBackend({ fail: (cmd, args) => cmd === 'set_device_volume' && args.percent === 60 });
+    reset({ devices: [SPEAKERS, TV] });
+
+    const older = state().setDeviceVolume('tv', 60);
+    await state().setDeviceVolume('tv', 55);
+    await older;
+
+    expect(state().deviceVolumes.tv).toBe(55);
+  });
+
+  it('leaves a newer level standing when an older commit is refused', async () => {
+    installBackend({ fail: (cmd, args) => cmd === 'set_source_volume' && args.percent === 300 });
+    reset({ devices: [SPEAKERS], sessions: [MUSIC] });
+
+    const older = state().setSourceVolume('music.exe', 300);
+    await state().setSourceVolume('music.exe', 250);
+    await older;
+
+    expect(state().sourceVolumes['music.exe']).toBe(250);
+  });
+
+  it('leaves a newer delay standing when an older click is refused', async () => {
+    installBackend({ fail: (cmd, args) => cmd === 'set_device_delay' && args.delayMs === 30 });
+    reset({ devices: [SPEAKERS, TV] });
+
+    const older = state().setDeviceDelayValue('tv', 30);
+    await state().setDeviceDelayValue('tv', 40);
+    await older;
+
+    expect(state().deviceDelays.tv).toBe(40);
   });
 
   it('persists the auto-remember switch', () => {
@@ -1705,6 +1927,65 @@ describe('feeds', () => {
       ]),
     ).toBe('suspended');
   });
+
+  it('claims a feed the moment it asks, so the refresh its pinning causes cannot pin it twice', async () => {
+    // Pinning both ends is itself a Core Audio change: the notification it
+    // raises runs the feed restore while the add's own reply is still in the
+    // air. Claiming only when the reply arrives left that pass free to deliver
+    // the same rule again and log a feed the user just made as restored.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const SOURCE: AudioSession = { pid: 8201, exe_name: 'held-source.exe' };
+    const TARGET: AudioSession = { pid: 8202, exe_name: 'held-target.exe' };
+    const backend = installBackend({
+      sessions: [SOURCE, TARGET],
+      carrier: { render: 'cable-in', capture: 'cable-out' },
+      holdFeed: gate,
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [SOURCE, TARGET],
+      feedCarrier: { render: 'cable-in', capture: 'cable-out' },
+    });
+
+    const adding = state().addFeed(SOURCE.pid, TARGET.pid);
+    const restoring = state().restoreRememberedFeeds();
+    release();
+    await Promise.all([adding, restoring]);
+
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(1);
+    expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
+  });
+
+  it('hands a feed that came back undelivered back to the restore pass', async () => {
+    // The claim is only for a delivery. A rule that could not move has to stay
+    // restorable, or the pass that runs when its reason clears (the carrier
+    // gets paired, the source's route stops) would walk past it forever.
+    const SOURCE: AudioSession = { pid: 8211, exe_name: 'suspended-source.exe' };
+    const TARGET: AudioSession = { pid: 8212, exe_name: 'suspended-target.exe' };
+    const backend = installBackend({
+      sessions: [SOURCE, TARGET],
+      carrier: { render: null, capture: null },
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [SOURCE, TARGET],
+      feedCarrier: { render: null, capture: null },
+    });
+
+    await state().addFeed(SOURCE.pid, TARGET.pid);
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(1);
+
+    backend.carrier = { render: 'cable-in', capture: 'cable-out' };
+    await state().loadFeedCarrier();
+    // The restore rides the assignment queue behind the carrier read.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(2);
+    expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
+  });
 });
 
 describe('missing icons', () => {
@@ -1794,6 +2075,34 @@ describe('stop of every route', () => {
 
     expect(state().selectedPids).toEqual([GAME.pid]);
     expect(state().selectedDeviceIds).toEqual(['speakers', 'tv']);
+  });
+
+  it('does not let a reconciliation asked before the batch stop put them all back', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const PLAYER: AudioSession = { pid: 8311, exe_name: 'reconciled-batch.exe' };
+    installBackend({
+      sessions: [PLAYER],
+      routes: { [PLAYER.pid]: ['speakers', 'tv'] },
+      routeGenerations: { [PLAYER.pid]: 2 },
+      holdActive: gate,
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [PLAYER],
+      routedPids: { [PLAYER.pid]: ['speakers', 'tv'] },
+      engineGenerations: { [PLAYER.pid]: 2 },
+    });
+
+    const reconciling = state().reconcileActiveDuplications();
+    await state().stopAllRoutes();
+    release();
+    await reconciling;
+
+    expect(state().routedPids).toEqual({});
+    expect(state().engineGenerations).toEqual({});
   });
 
   it('does not report a batch as pinned when a sibling in it holds the device', async () => {
