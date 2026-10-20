@@ -1,5 +1,17 @@
 /** Delay compensation helpers, shared by the delay panel and the settings page. */
 
+import { DELAY_MAX_MS, LATENCY_TARGET_MS } from './types';
+
+/**
+ * The two delay literals live in `lib/types.ts` with every other wire constant,
+ * because each one has a Rust twin and nothing binds the two halves:
+ * `DELAY_MAX_MS` ↔ `config::DELAY_MAX_MS`, `LATENCY_TARGET_MS` ↔ the same name
+ * in `audio::duplication`. Re-exported here so the delay panel and the wizard
+ * keep importing them from the module they read everything else from; the
+ * numbers themselves are pinned by `types.test.ts`.
+ */
+export { DELAY_MAX_MS, LATENCY_TARGET_MS };
+
 /**
  * Step sizes (milliseconds) offered by the settings. 10 ms is the default:
  * finer than that is below what matters for aligning two devices, and the
@@ -14,23 +26,6 @@ const DELAY_STEP_MAX_MS = 1000;
 /** localStorage key holding the preferred step, next to the aar-theme /
  * aar-language keys written by the boot script. */
 export const DELAY_STEP_STORAGE_KEY = 'aar-delay-step';
-
-/**
- * Hard ceiling for one device's delay, in milliseconds, mirrored from Rust's
- * `config::DELAY_MAX_MS` (the two are literals with nothing binding them —
- * change one, change the other). There is no user-configurable range any
- * more; this is only the rail the engine's ring buffers are sized to.
- */
-export const DELAY_MAX_MS = 10_000;
-
-/**
- * The pipeline depth every mirror holds between the capture tap and playback,
- * in milliseconds — mirrored from `duplication.rs`'s `LATENCY_TARGET_MS`
- * (two literals with nothing binding them; change one, change the other).
- * The calibration wizard subtracts it: a copy's compensation is the measured
- * latency difference minus this pipeline, which the copy would carry anyway.
- */
-export const LATENCY_TARGET_MS = 100;
 
 /** Clamp a step to the accepted bounds, rounded to whole milliseconds. */
 export function clampStep(ms: number): number {

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import * as api from './invoke';
@@ -152,6 +154,26 @@ describe('invoke wrappers', () => {
     await expect(api.stopRoute(1)).rejects.toThrow('device not found');
   });
 
+  it('hands on a rejection that is a bare string, because Rust answers Err(String)', async () => {
+    // The shape the product actually produces: every command in `commands.rs`
+    // is `Result<T, String>`, and Tauri rejects with the serialized Err value —
+    // a string, not an `Error`. `invoke` does not wrap it, so the only way a
+    // caller can report "device not found" is to stringify what it got; reading
+    // `.message` off it would be `undefined`, and the wrapper must not pretend
+    // otherwise by laundering the value into an Error of its own.
+    mockIPC(() => {
+      throw 'device not found';
+    });
+
+    await expect(api.applyRoute(1, 'music.exe', ['gone'], true)).rejects.toBe('device not found');
+    await expect(api.setDeviceDelay('tv', 5)).rejects.toBe('device not found');
+    // ...and a caller that formats it does get the sentence back.
+    const reported = await api
+      .applyRoute(1, 'music.exe', ['gone'], true)
+      .catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+    expect(reported).toBe('device not found');
+  });
+
   it('resolves the fire-and-forget commands without a value', async () => {
     const seen: string[] = [];
     mockIPC((cmd) => {
@@ -182,4 +204,40 @@ describe('invoke wrappers', () => {
       'align_source_levels',
     ]);
   });
+
+  it('asks for nothing the backend has not registered', () => {
+    // The half of the wire contract `mockIPC` cannot see: the mock answers *any*
+    // name, so a command renamed or deleted in `commands.rs` passes every test
+    // above and fails only in the user's face. And `tsc` cannot see it either —
+    // a command name is a string, not a type. So read the Rust file and require
+    // every name this module asks for to be a registered command.
+    //
+    // The other direction — a registered command nobody asks for — is a dead
+    // command rather than a crash, and is reported by review, not pinned here:
+    // the list moves while the backend is being cleaned.
+    const root = process.cwd().replace(/\\/g, '/');
+    const rust = readFileSync(`${root}/src-tauri/src/commands.rs`, 'utf8');
+    const registered = new Set(
+      [
+        ...rust.matchAll(/#\[tauri::command\][\s\S]{0,220}?pub\s+(?:async\s+)?fn\s+([a-z_0-9]+)/g),
+      ].map((found) => found[1] as string),
+    );
+    expect(registered.size).toBeGreaterThan(30);
+
+    const asked = commandsAskedFor();
+    expect(asked.length).toBeGreaterThan(30);
+    // Nothing asked for that the backend does not answer.
+    expect(asked.filter((name) => !registered.has(name))).toEqual([]);
+    // And no command is asked for twice under two wrappers — a duplicate would
+    // hide a rename of the other one.
+    expect(new Set(asked).size).toBe(asked.length);
+  });
 });
+
+/** Every command name `invoke.ts` asks the backend for, in source order. */
+function commandsAskedFor(): string[] {
+  const source = readFileSync(`${process.cwd().replace(/\\/g, '/')}/src/lib/invoke.ts`, 'utf8');
+  return [...source.matchAll(/invoke(?:<[^>]*>)?\(\s*'([a-z_0-9]+)'/g)].map(
+    (found) => found[1] as string,
+  );
+}

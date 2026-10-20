@@ -23,7 +23,59 @@ export interface AudioSession {
   playing?: boolean;
 }
 
-export type Role = 'all' | 'console' | 'multimedia' | 'communications';
+/**
+ * ## The paired literals
+ *
+ * These five numbers exist twice in this repository — once in TypeScript here,
+ * once in Rust — with **nothing binding the two halves**: no import, no code
+ * generation, no shared header. `tsc` and `cargo check` cannot see each other,
+ * so a drift only shows up as a value the backend silently rejects, or a range
+ * the UI lets a user type into that the engine is not sized for.
+ *
+ * They therefore live here, in the contract layer, and nowhere else in `src/`;
+ * `types.test.ts` asserts each one against the Rust source text, so a drift on
+ * either side fails a test rather than waits for a human to read two languages.
+ * Change one, change the Rust one, and the test names the file.
+ */
+
+/** Upper bound of a program's own level (`set_source_volume`), in percent —
+ * about +12 dB, past which the noise floor rises with the signal. 100 is the
+ * audio as the program produced it, so this is the *top* of an axis whose
+ * middle is the neutral value — not a volume the user can reach in the mixer.
+ *
+ * Mirrors Rust's `config::SOURCE_VOLUME_MAX`. */
+export const SOURCE_LEVEL_MAX = 400;
+
+/**
+ * Bounds of the **primary volume** axis (a program's session volume, percent),
+ * the range `set_primary_volume` accepts and the primary-volume stepper clamps
+ * to. Not the source-level axis (0–[`SOURCE_LEVEL_MAX`]) and not the device-share
+ * axis (0–100): this one floor is 5, because a session volume of 0 is true
+ * silence no mirror gain can undo.
+ *
+ * `PRIMARY_VOLUME_MIN` mirrors Rust's `config::PRIMARY_VOLUME_MIN_PERCENT` and
+ * `PRIMARY_VOLUME_MAX` its `SOURCE_VOLUME_NEUTRAL` — the ceiling of this axis
+ * is the *neutral* value of the source-level one, which is why the two pairs
+ * share a Rust constant and must not be edited as one.
+ */
+export const PRIMARY_VOLUME_MIN = 5;
+export const PRIMARY_VOLUME_MAX = 100;
+
+/**
+ * Hard ceiling for one device's delay compensation, in milliseconds, mirrored
+ * from Rust's `config::DELAY_MAX_MS`. There is no user-configurable range any
+ * more; this is only the rail the engine's ring buffers are sized to, so a
+ * larger value here without the Rust one is a delay the engine cannot hold.
+ */
+export const DELAY_MAX_MS = 10_000;
+
+/**
+ * The pipeline depth every mirror holds between the capture tap and playback,
+ * in milliseconds — mirrored from `audio::duplication`'s `LATENCY_TARGET_MS`.
+ * The calibration wizard subtracts it: a copy's compensation is the measured
+ * latency difference minus this pipeline, which the copy would carry anyway.
+ */
+export const LATENCY_TARGET_MS = 100;
 
 export interface LogEntry {
   id: number;
@@ -97,20 +149,6 @@ export type DeviceDelay = [deviceId: string, delayMs: number];
  * program's own volume, and none of it is stored by Windows.
  */
 export type SourceVolume = [exeName: string, percent: number];
-
-/**
- * Bounds of the **primary volume** axis (a program's session volume, percent),
- * the range `set_primary_volume` accepts and the primary-volume stepper clamps
- * to. Not the source-level axis (0–400) and not the device-share axis (0–100):
- * this one floor is 5, because a session volume of 0 is true silence no mirror
- * gain can undo.
- *
- * `PRIMARY_VOLUME_MIN` mirrors Rust's `config::PRIMARY_VOLUME_MIN_PERCENT` and
- * `PRIMARY_VOLUME_MAX` its `SOURCE_VOLUME_NEUTRAL` ceiling — the two sides are
- * literals with nothing binding them, so change one, change the other.
- */
-export const PRIMARY_VOLUME_MIN = 5;
-export const PRIMARY_VOLUME_MAX = 100;
 
 /** What one run of the level alignment did. */
 export interface AlignOutcome {
