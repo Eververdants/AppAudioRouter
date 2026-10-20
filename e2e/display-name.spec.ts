@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { appRow, emit, hub, openApp, setSessions } from './fixtures';
+import { appRow, callsFor, emit, hub, openApp, setSessions } from './fixtures';
 
 /**
  * The display layer a person reads: the window's name leads, the executable
@@ -24,6 +24,15 @@ test.describe('display names', () => {
 
     await appRow(page, 'music.exe').click();
     await expect(hub(page)).toContainText('Music Player');
+
+    // The name is a display layer only: what the route is written under — and
+    // with it the memory, the levels and the endpoint record — is the exe. If a
+    // window title ever reached that argument, the route would survive the next
+    // tab switch exactly as long as the title did.
+    await hub(page).click();
+    const applied = await callsFor(page, 'apply_route');
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.args).toMatchObject({ pid: 1001, exeName: 'music.exe' });
   });
 
   test('a program without a display name reads as it always has', async ({ page }) => {
@@ -57,9 +66,7 @@ test.describe('display names', () => {
     });
     await appRow(page, 'music.exe').click();
 
-    await setSessions(page, [
-      { pid: 1001, exe_name: 'music.exe', display_name: 'Now Playing: X' },
-    ]);
+    await setSessions(page, [{ pid: 1001, exe_name: 'music.exe', display_name: 'Now Playing: X' }]);
     await emit(page, 'audio-changed', { devices: false, sessions: true });
 
     await expect(hub(page)).toContainText('Now Playing:');

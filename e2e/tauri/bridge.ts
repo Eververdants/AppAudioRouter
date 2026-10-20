@@ -70,8 +70,25 @@ export interface BridgeHandle {
   resetCalls: () => void;
 }
 
+/** The IPC surface `@tauri-apps/api/core` looks for on the global. The package
+ *  ships no type for it — the unit tests reach it through `unknown` — so the
+ *  fake declares the members it fills in, and its own assignment is checked. */
+interface TauriInternals {
+  metadata: {
+    currentWindow: { label: string };
+    currentWebview: { windowLabel: string; label: string };
+  };
+  invoke: (cmd: string, args: Record<string, unknown> | undefined) => unknown;
+  transformCallback: (callback: (data: unknown) => void) => number;
+  unregisterCallback: (id: number) => void;
+  runCallback: (id: number, data: unknown) => void;
+  callbacks: Map<number, (data: unknown) => void>;
+  convertFileSrc: (path: string) => string;
+}
+
 declare global {
   interface Window {
+    __TAURI_INTERNALS__: TauriInternals;
     __AAR__?: BridgeHandle & { state: BridgeState & Record<string, unknown> };
     /** The shell's answer to `document.hasFocus()`, pinned so a spec does not
      *  depend on which parallel worker happened to hold focus. `setFocused`
@@ -93,6 +110,9 @@ function tauriBridge(initial: BridgeState): void {
     routes: {} as Record<string, string[]>,
     /** Per-route engine generation, as `apply_route` handed it out. */
     routeGenerations: {} as Record<string, number>,
+    /** Which engines have reported `duplication-ready`, so their mirrors have
+     *  a latency reading to hand back. A fresh engine does not yet. */
+    readyPids: {} as Record<string, boolean>,
     calls: [] as { cmd: string; args: Record<string, unknown> }[],
     generation: 0,
     failing: [] as string[],
@@ -130,7 +150,8 @@ function tauriBridge(initial: BridgeState): void {
       }
       case 'get_default_device':
         return (
-          state.devices.find((d: BridgeDevice) => d.id === state.defaultDeviceId) ?? state.devices[0]
+          state.devices.find((d: BridgeDevice) => d.id === state.defaultDeviceId) ??
+          state.devices[0]
         );
       case 'apply_route': {
         const pid = String(payload.pid);
@@ -140,29 +161,36 @@ function tauriBridge(initial: BridgeState): void {
         // single-device route is just the per-app endpoint and reports 0.
         if (deviceIds.length <= 1) {
           delete state.routeGenerations[pid];
+          delete state.readyPids[pid];
           return 0;
         }
         state.generation += 1;
         state.routeGenerations[pid] = state.generation;
+        // A new engine has not opened its mirrors yet, so it has no reading to
+        // report until it says it is ready.
+        delete state.readyPids[pid];
         return state.generation;
       }
       case 'stop_route':
         delete state.routes[String(payload.pid)];
         delete state.routeGenerations[String(payload.pid)];
+        delete state.readyPids[String(payload.pid)];
         return { released: true, pinned_device: null, sibling_held: false };
       case 'get_active_duplications':
         // The real command lists *engines*, so single-device routes — which
         // have none — never appear here. Parallel arrays, same order as the
         // real engine reports them: the primary has no stream of ours to ask,
         // so its entry is `null` — the same "not measured" the real backend
-        // sends for it.
+        // sends for it, and for the copies too until `duplication-ready`.
         return Object.entries(state.routes)
           .filter(([, deviceIds]) => deviceIds.length > 1)
           .map(([pid, deviceIds]) => ({
             pid: Number(pid),
             generation: state.routeGenerations[pid] ?? 0,
             deviceIds,
-            latencyMs: deviceIds.map((_, index) => (index === 0 ? null : 20)),
+            latencyMs: deviceIds.map((_, index) =>
+              index === 0 || state.readyPids[pid] !== true ? null : 20,
+            ),
           }));
       case 'get_remembered_routes':
         return state.remembered;
@@ -184,11 +212,18 @@ function tauriBridge(initial: BridgeState): void {
         if (!state.feeds.some(([s, t]: [string, string]) => s === sourceExe && t === targetExe)) {
           state.feeds = [...state.feeds, [sourceExe, targetExe]];
         }
-        // The fake delivers every rule once a pair is configured; the blocked
-        // cases (no carrier, a routed source) are driven by the state itself.
-        const configured =
-          state.feedCarrier.render !== null && state.feedCarrier.capture !== null;
+        const configured = state.feedCarrier.render !== null && state.feedCarrier.capture !== null;
         if (!configured) return { delivered: false, reason: 'no_carrier' };
+        // A device route owns the source's one per-app render slot, and the
+        // audio service stores that assignment per executable — so a sibling's
+        // route holds it too. The rule is recorded either way, but it carries
+        // no sound until that route stops: `PinnedRoutes` answers the same way.
+        const heldByARoute = state.sessions.some(
+          (s: BridgeSession) =>
+            s.exe_name.toLowerCase() === sourceExe.toLowerCase() &&
+            (state.routes[String(s.pid)] ?? []).length > 0,
+        );
+        if (heldByARoute) return { delivered: false, reason: 'source_routed' };
         return { delivered: true, reason: null };
       }
       case 'remove_feed_target': {
@@ -212,7 +247,9 @@ function tauriBridge(initial: BridgeState): void {
         return [];
       }
       case 'clear_route':
-        state.remembered = state.remembered.filter(([name]: [string, string[]]) => name !== payload.exeName);
+        state.remembered = state.remembered.filter(
+          ([name]: [string, string[]]) => name !== payload.exeName,
+        );
         return null;
       case 'get_device_delays':
         return state.delays;
@@ -278,7 +315,10 @@ function tauriBridge(initial: BridgeState): void {
       case 'plugin:event|unlisten': {
         const event = String(payload.event);
         const id = Number(payload.eventId);
-        listeners.set(event, (listeners.get(event) ?? []).filter((entry) => entry !== id));
+        listeners.set(
+          event,
+          (listeners.get(event) ?? []).filter((entry) => entry !== id),
+        );
         return null;
       }
       case 'plugin:window|is_visible':
@@ -311,7 +351,7 @@ function tauriBridge(initial: BridgeState): void {
     },
     callbacks,
     convertFileSrc: (path: string) => path,
-  } as unknown as typeof window.__TAURI_INTERNALS__;
+  };
 
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener() {},
@@ -322,6 +362,13 @@ function tauriBridge(initial: BridgeState): void {
     calls: () => state.calls,
     callsFor: (cmd: string) => state.calls.filter((call) => call.cmd === cmd),
     emit: (event: string, payload: unknown) => {
+      // The engine's own ready signal is also the moment its mirrors have a
+      // latency to report, so the scripted graph takes it the way the real
+      // notification thread sends it — before this, the reading does not exist.
+      if (event === 'duplication-ready') {
+        const data = payload as { pid?: unknown };
+        if (typeof data?.pid === 'number') state.readyPids[String(data.pid)] = true;
+      }
       for (const id of listeners.get(event) ?? []) {
         callbacks.get(id)?.({ event, id: 0, payload });
       }
@@ -355,11 +402,23 @@ export async function installBridge(page: Page, state: BridgeState): Promise<voi
   // to what a spec asserts. The gate's three conditions stay the app's business;
   // here the focus half is pinned so the flow tests only depend on the events
   // they themselves emit.
+  //
+  // The language is pinned for the same reason: the app picks it from
+  // `navigator.language`, so every string these specs match on would come out in
+  // the machine's own language — a zh-CN box would fail the whole suite on text
+  // that has nothing to do with what any of them tests.
   await page.addInitScript(() => {
     window.__AAR_WINDOW_FOCUSED__ = true;
     Object.defineProperty(document, 'hasFocus', {
       value: () => window.__AAR_WINDOW_FOCUSED__ !== false,
     });
+    try {
+      // Key shared with `src/i18n/index.ts`; unreadable storage (the about:blank
+      // this also runs on) just falls back to the system language.
+      localStorage.setItem('aar-language', 'en');
+    } catch {
+      /* nothing to do: the specs then read whatever the box speaks */
+    }
   });
   await page.addInitScript(tauriBridge, state);
 }

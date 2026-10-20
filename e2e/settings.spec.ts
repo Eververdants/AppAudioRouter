@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { callsFor, emit, openApp, setDevices } from './fixtures';
+import { callsFor, emit, openApp, setDevices, setFailing } from './fixtures';
 import type { BridgeDevice } from './tauri/bridge';
 
 /**
@@ -33,9 +33,12 @@ async function openCarrierPicker(page: import('@playwright/test').Page) {
 }
 
 /** The row the trigger names with `aria-activedescendant`. */
-async function highlighted(page: import('@playwright/test').Page, combo: {
-  getAttribute(name: string): Promise<string | null>;
-}) {
+async function highlighted(
+  page: import('@playwright/test').Page,
+  combo: {
+    getAttribute(name: string): Promise<string | null>;
+  },
+) {
   const activeId = await combo.getAttribute('aria-activedescendant');
   expect(activeId, 'an open combobox names the row it is on').not.toBeNull();
   return page.locator(`[id="${activeId}"]`);
@@ -66,9 +69,7 @@ test('the carrier picker scrolls the keyboard highlight into view', async ({ pag
   expect(firstBox!.y).toBeGreaterThanOrEqual(firstMenu!.y - 1);
 });
 
-test('a device list that shrinks under an open picker leaves a row to choose', async ({
-  page,
-}) => {
+test('a device list that shrinks under an open picker leaves a row to choose', async ({ page }) => {
   await openApp(page, { devices: MANY_DEVICES, defaultDeviceId: 'dev-0' });
   const combo = await openCarrierPicker(page);
 
@@ -112,10 +113,12 @@ test('the about section keeps the two ways back to an explanation', async ({ pag
   await page.getByRole('button', { name: 'About' }).click();
 
   await page.getByRole('button', { name: 'Show the tour' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Welcome to App Audio Router' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome to App Audio Router' })).toBeVisible();
   await page.getByRole('button', { name: 'Skip the tour' }).click();
+
+  // Leaving by `Skip` acknowledges the notice exactly like finishing it, or the
+  // same four steps would walk the user through on every later launch.
+  expect(await callsFor(page, 'ack_startup_notice')).toHaveLength(1);
 
   // The tour replaces the work area, so the page under it starts from its
   // first section on the way back — the same thing leaving for the board has
@@ -123,4 +126,17 @@ test('the about section keeps the two ways back to an explanation', async ({ pag
   await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
   await page.getByRole('button', { name: 'About' }).click();
   await expect(page.getByRole('button', { name: 'Open the documentation' })).toBeVisible();
+
+  // The frontend hands over a key and nothing else: the URL is an allowlist on
+  // the Rust side, so a pressed link can never be made to open somewhere else.
+  await page.getByRole('button', { name: 'Open the documentation' }).click();
+  const opened = await callsFor(page, 'open_help_page');
+  expect(opened).toHaveLength(1);
+  expect(opened[0]?.args).toEqual({ key: 'readme' });
+
+  // And a browser that will not take it is told, not swallowed: this is a thing
+  // the user just asked for that did not happen.
+  await setFailing(page, ['open_help_page']);
+  await page.getByRole('button', { name: 'Open the documentation' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
 });

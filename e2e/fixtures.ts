@@ -31,10 +31,10 @@ export async function callsFor(page: Page, cmd: string) {
 
 /** Push a backend event into the running app. */
 export async function emit(page: Page, event: string, payload: unknown): Promise<void> {
-  await page.evaluate(
-    ([name, data]) => window.__AAR__?.emit(name, data),
-    [event, payload] as [string, unknown],
-  );
+  await page.evaluate(([name, data]) => window.__AAR__?.emit(name, data), [event, payload] as [
+    string,
+    unknown,
+  ]);
 }
 
 export async function setSessions(page: Page, sessions: BridgeSession[]): Promise<void> {

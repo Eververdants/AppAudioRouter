@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { addDevice, appRow, hub, tuneButton } from './fixtures';
-import { installBridge } from './tauri/bridge';
+import { addDevice, appRow, changePrimary, hub, tuneButton } from './fixtures';
+import { installBridge, type BridgeState } from './tauri/bridge';
 
 /**
  * The two README screenshots, captured from the app itself.
@@ -29,14 +29,16 @@ test.skip(
 /** One programme routed to three devices at once — the case the stage is for,
  *  and the only one in which a delay or a level has anything to act on: the
  *  copies carry the numbered badges that open the tuning strip. Chrome goes to
- *  the digital output as well, so the rail shows two programmes with somewhere
+ *  the built-in speakers as well, so the rail shows two programmes with somewhere
  *  to be. The rest of the hardware is deliberately not part of any route, so
  *  the shot also shows where the plan stops and the dashed "add destination"
  *  card begins. Both routed programmes are marked as playing, because that is
  *  the resting truth when music is on: the wires carry their moving dash. The list is filled out to a plausible desktop rather
  *  than trimmed to two rows: a screenshot that is nine tenths empty reads as a
- *  broken layout, not as a quiet one. */
-const STATE = {
+ *  broken layout, not as a quiet one. Typed as `BridgeState` so a field added to
+ *  the fake cannot be quietly missing here — an absent `primaryVolumes` made the
+ *  boot read throw, and nothing in a skipped file would ever have said so. */
+const STATE: BridgeState = {
   devices: [
     { id: 'bt', name: 'WH-1000XM5' },
     { id: 'hdmi', name: 'HDMI output' },
@@ -65,9 +67,8 @@ const STATE = {
     ['hdmi', 70],
     ['usb', 85],
   ],
-  sourceVolumes: [
-    ['Music.exe', 80],
-  ],
+  sourceVolumes: [['Music.exe', 80]],
+  primaryVolumes: [],
   captureDevices: [{ id: 'cable-out', name: 'CABLE Output (VB-Audio)' }],
   feedCarrier: { render: 'spdif', capture: 'cable-out' },
   feeds: [] as [string, string][],
@@ -82,20 +83,22 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
     await expect(page.getByText('Music.exe').first()).toBeVisible();
 
-    // Selecting the app stages the system default device, which is a guess the
-    // app made — so the first click on another device replaces it rather than
-    // adding to it, and every click after that adds. Two wired outputs and the
-    // headset, which is what puts a delay and a level under the two copies.
+    // Selecting the programme stages the system default device as the seat, so
+    // the shot's route is the headset plus the two wired outputs it is copied
+    // to — which is what puts a delay and a share under the two copies. Only
+    // the dashed card adds, and it never lists a device the plan already holds
+    // (nor the carrier's playback side, 'spdif'), so every name below is one
+    // that the picker really hands out.
     await appRow(page, 'Music.exe').click();
     await addDevice(page, 'HDMI output');
-    await addDevice(page, 'WH-1000XM5');
     await addDevice(page, 'USB headphones');
     await hub(page).click();
 
-    // A second programme to a second output, so the rail shows two of them with
-    // somewhere to be rather than one.
+    // A second programme, on one output of its own, so the rail shows two of
+    // them with somewhere to be rather than one. Named through the seat's
+    // picker: it replaces the staged guess instead of piling a copy on it.
     await appRow(page, 'chrome.exe').click();
-    await addDevice(page, 'Digital Audio (S/PDIF)');
+    await changePrimary(page, 'WH-1000XM5', 'Speakers (Realtek)');
     await hub(page).click();
 
     // Back to the three-device programme with one copy's strip open: the shot

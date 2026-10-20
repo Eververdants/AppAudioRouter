@@ -9,6 +9,7 @@ import {
   openApp,
   railRow,
   resetCalls,
+  stopAllRail,
 } from './fixtures';
 
 /**
@@ -24,12 +25,15 @@ import {
 /** Add one programme's input as a destination, through the dashed card. */
 async function addFeedTarget(page: import('@playwright/test').Page, process: string) {
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
-  await page.getByRole('menuitem', { name: `${process}'s input` }).click();
+  // Scoped to the menu: the change-primary picker can still be mid-exit when
+  // this opens, and both lists carry the same programme names.
+  await page
+    .getByRole('menu', { name: 'Add destination' })
+    .getByRole('menuitem', { name: `${process}'s input` })
+    .click();
 }
 
-test('a programme can be sent into another programmé’s input, and taken back', async ({
-  page,
-}) => {
+test('a programme can be sent into another programmé’s input, and taken back', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
@@ -121,9 +125,39 @@ test('a device route and a feed sit on the same board', async ({ page }) => {
   await expect(feedRow(page, 1002)).toBeVisible();
 });
 
+test('a feed from a routed programme is held, and carries sound again when the route stops', async ({
+  page,
+}) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+  await hub(page).click();
+
+  await addFeedTarget(page, 'game.exe');
+
+  // The rule is recorded all the same, but the program's one render slot already
+  // plays a device, so nothing moves into the target's input — and the card says
+  // which of the two silences this is rather than drawing a wire that carries none.
+  await expect(feedRow(page, 1002)).toContainText('Held');
+  expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
+
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await expect(
+    page.getByText('recorded, held while music.exe is routed to a device'),
+  ).toBeVisible();
+  await page.getByRole('tab', { name: 'Routing' }).click();
+
+  // Freeing the slot re-opens the rule that was never un-made: the device route
+  // and the feed are two separate books, and stopping one leaves the other alone.
+  // Stopping takes the programme off the stage with it (the selection belongs to
+  // the route), so the row is read from the board it lands back on.
+  await stopAllRail(page).click();
+  await stopAllRail(page).click();
+  await appRow(page, 'music.exe').click();
+  await expect(feedRow(page, 1002)).toContainText('Send in');
+});
+
 /** The carrier's playback side as the machine names it. */
 const CARRIER = 'CABLE Input (VB-Audio Virtual Cable)';
-
 /**
  * The carrier is a pipe, not an output.
  *

@@ -208,7 +208,9 @@ test('the primary tunes the volume of the programme; the copy keeps its own two'
   // Stepping the primary's volume talks to the backend per *programme* —
   // music.exe, not per device — because it is the session volume that moves.
   await tuneButton(page, 'TV').click();
-  await tunerStrip(page).getByRole('button', { name: /quieter/ }).click();
+  await tunerStrip(page)
+    .getByRole('button', { name: /quieter/ })
+    .click();
   const applied = await callsFor(page, 'set_primary_volume');
   expect(applied).toHaveLength(1);
   expect(applied[0]?.args).toMatchObject({ exeName: 'music.exe', percent: 95 });
@@ -299,14 +301,28 @@ test('a route may never be left with nowhere to play', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
-  // The only device in the plan is the primary row: it carries no ✕ at all,
-  // and its name opens the change-primary picker instead of toggling the
-  // device out — a programme whose sound goes nowhere is not a state this app
-  // offers, and there is no way back from it that does not involve the system
-  // default anyway.
-  await expect(deviceRowShell(page, 'Speakers').getByRole('button', { name: '✕' })).toHaveCount(0);
-  // The plan still holds the one device the app staged.
+  // Only the copies carry a way out. The seat's name opens the change-primary
+  // picker instead of toggling the device out — a programme whose sound goes
+  // nowhere is not a state this app offers, and there is no way back from it
+  // that does not involve the system default anyway.
+  const removeButtons = page
+    .locator('main [data-device-row]')
+    .getByRole('button', { name: /from the plan$/ });
+  await expect(removeButtons).toHaveCount(0);
   await expect(hub(page)).toHaveAttribute('aria-label', /through Speakers/);
+
+  // And that zero is a guard rather than an empty selector: the copy added below
+  // is found by this very locator, so pressing it is what shows the seat has no
+  // such button — the guard lives in `NodeStage`'s `toggleTarget`, and the row
+  // going away is the only evidence that the plan still holds one device.
+  await addDevice(page, 'TV');
+  await expect(removeButtons).toHaveCount(1);
+  await removeButtons.click();
+  await expect(deviceRowShell(page, 'TV')).toHaveCount(0);
+  await expect(deviceRowShell(page, 'Speakers')).toBeVisible();
+  await expect(removeButtons).toHaveCount(0);
+  await expect(hub(page)).toHaveAttribute('aria-label', /through Speakers/);
+  expect(await callsFor(page, 'apply_route')).toHaveLength(0);
 });
 
 test('a routed app can be sent back to the system default from the toast', async ({ page }) => {
@@ -345,7 +361,9 @@ test('the routed capsule expands to every routed programme and opens its board',
 
   // A row's name is the door to that programme's own board, where its levers
   // live — the capsule stops routes, it does not tune them.
-  await routedRow(page, 1001).getByRole('button', { name: /music.exe/ }).click();
+  await routedRow(page, 1001)
+    .getByRole('button', { name: /music.exe/ })
+    .click();
   await expect(hub(page)).toContainText('music.exe');
   await expect(routedPanel(page)).toHaveCount(0);
 });
@@ -465,9 +483,7 @@ test('the board’s picker answers the arrow keys', async ({ page }) => {
   // the button the menu came out of.
   await expect(device).toBeFocused();
   await page.keyboard.press('Escape');
-  await expect(
-    page.locator('main').getByRole('button', { name: 'Add destination' }),
-  ).toBeFocused();
+  await expect(page.locator('main').getByRole('button', { name: 'Add destination' })).toBeFocused();
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
 
   await device.focus();
@@ -625,6 +641,54 @@ test('a programme still sounds when a sibling process makes the sound', async ({
   await expect(hub(page)).toContainText('Playing');
 });
 
+test('an executable with two processes is asked for one icon', async ({ page }) => {
+  await openApp(page, {
+    sessions: [
+      { pid: 1001, exe_name: 'music.exe' },
+      { pid: 1003, exe_name: 'music.exe' },
+    ],
+  });
+
+  // Wait for the pixels to land, not for the first ask: the ask is fire-and-forget
+  // after the list, and a data URL is final — so once the tile is filled, every
+  // ask this pass meant to make has been made.
+  await expect(railRow(page, 1001).locator('img')).toBeVisible();
+  await expect(railRow(page, 1003).locator('img')).toBeVisible();
+
+  // One ask per executable, from the first session's pid — asking per session is
+  // how a sibling dying mid-ask wrote `null` over the good answer for all of them.
+  const asked = (await callsFor(page, 'get_process_icon')).map((call) => call.args.pid);
+  expect(new Set(asked).size).toBe(1);
+  expect(asked[0]).toBe(1001);
+});
+
+test('a copy’s measured delay arrives with its engine, not before', async ({ page }) => {
+  await openApp(page);
+  await appRow(page, 'music.exe').click();
+  await changePrimary(page, 'Speakers', 'TV');
+  await addDevice(page, 'Speakers');
+  await hub(page).click();
+
+  await tuneButton(page, 'Speakers').click();
+  const delayRow = tunerStrip(page).locator('div[title]').filter({ hasText: 'Delay' });
+  // `apply_route` answers before the mirrors are open, so there is nothing to
+  // report yet — an invented 0 would read as "this one is already aligned".
+  await expect(delayRow).not.toHaveAttribute('title', /Measured/);
+
+  // The engine's fourth event is the only moment its readings exist; nothing
+  // else asks again, and nothing here polls.
+  await emit(page, 'duplication-ready', { pid: 1001, generation: 1 });
+  await expect(delayRow).toHaveAttribute('title', /Measured 20 ms/);
+
+  // The seat is played by Windows itself: there is no stream of ours there to
+  // measure, so its strip never carries a reading — not even after the engine
+  // reported one for its own devices. The panel is first proven to be the
+  // primary's own, so the absence below is not the absence of the strip.
+  await tuneButton(page, 'TV').click();
+  await expect(tunerStrip(page).getByText('Primary volume')).toBeVisible();
+  await expect(tunerStrip(page).locator('div[title]')).not.toHaveAttribute('title', /Measured/);
+});
+
 test('a plan that is not the route has nothing flowing through it', async ({ page }) => {
   await openApp(page);
 
@@ -690,18 +754,18 @@ test('the status page shows where everything is going, as a picture', async ({ p
   await expect(page.getByText('Every sound follows the system default device')).toBeVisible();
 
   // A route changes the answer: a row per programme, its destinations as chips
-  // wearing the role words.
+  // wearing the role words. Scoped to that programme's card: the rail writes
+  // "Speakers" and the board writes "Main" too, and a page-wide `first()`
+  // would be satisfied by whichever of those the document happens to hold.
   await page.getByRole('tab', { name: 'Routing' }).click();
   await appRow(page, 'music.exe').click();
   await hub(page).click();
   await page.getByRole('tab', { name: 'Status' }).click();
-  await expect(page.getByText('Main', { exact: true })).toBeVisible();
-  await expect(page.getByText('Speakers').first()).toBeVisible();
+  const card = page.locator('[data-briefing-card="music.exe"]');
+  await expect(card.getByText('Speakers')).toBeVisible();
+  await expect(card.getByText('Main', { exact: true })).toBeVisible();
 
   // The name is a door back to that programme's own board.
   await page.getByRole('button', { name: "Open music.exe's board" }).click();
-  await expect(page.getByRole('tab', { name: 'Routing' })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await expect(page.getByRole('tab', { name: 'Routing' })).toHaveAttribute('aria-selected', 'true');
 });
