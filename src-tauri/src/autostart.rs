@@ -112,23 +112,91 @@ pub fn is_enabled() -> Result<bool, String> {
     Ok(stored_command()?.is_some())
 }
 
+/// What reading the startup entry back after a write said about that write.
+#[derive(Debug, PartialEq, Eq)]
+enum ReadBack {
+    /// The entry now holds exactly what the write intended.
+    Matches,
+    /// The entry holds something else: a group policy, or another program.
+    Different(String),
+    /// The entry is not there, though the write meant to put it there.
+    Absent,
+    /// The entry could not be read, so the write is confirmed neither way.
+    Unreadable(String),
+}
+
+/// Compare a re-read of the entry with what the write was meant to leave behind.
+///
+/// `wanted` is the command line for a registration, `None` for a removal. Kept
+/// apart from the registry calls so the verdict can be tested without touching
+/// anyone's real startup entries.
+fn judge_read_back(wanted: Option<&str>, seen: Result<Option<String>, String>) -> ReadBack {
+    match seen {
+        Ok(Some(found)) => match wanted {
+            Some(command) if found == command => ReadBack::Matches,
+            // Something else owns that name now; saying "registered" about it
+            // would be a lie either way, so the text is handed back.
+            _ => ReadBack::Different(found),
+        },
+        Ok(None) => {
+            if wanted.is_none() {
+                ReadBack::Matches
+            } else {
+                ReadBack::Absent
+            }
+        }
+        Err(e) => ReadBack::Unreadable(e),
+    }
+}
+
+/// Turn the verdict into the answer `set_enabled` gives the settings switch.
+///
+/// An unreadable result is the one case that is not a failure: the registry call
+/// itself reported success, and a second call that cannot confirm it must not
+/// make the switch snap back and blame the user for a write that landed. It does
+/// get said out loud, because from here on the entry is unverified.
+fn confirm_write(wanted: Option<&str>, seen: Result<Option<String>, String>) -> Result<(), String> {
+    match judge_read_back(wanted, seen) {
+        ReadBack::Matches => Ok(()),
+        // Only a registration can reach this arm: an absent entry after a
+        // removal is the requested end state, and is judged `Matches`.
+        ReadBack::Absent => Err("the startup entry was gone again after being written".to_string()),
+        ReadBack::Different(found) => Err(match wanted {
+            Some(command) => {
+                format!("the startup entry says {found} after being written as {command}")
+            }
+            None => format!("the startup entry is still registered after removal: {found}"),
+        }),
+        ReadBack::Unreadable(e) => {
+            warn!("could not confirm the startup entry after writing it: {e}");
+            Ok(())
+        }
+    }
+}
+
 /// Register or unregister this app as a logon startup.
+///
+/// The answer is what the registry holds afterwards, not what the write call
+/// reported: this value is the whole truth about the settings switch, and a
+/// success that did not land would leave the switch pointing at a startup that
+/// never happens.
 pub fn set_enabled(enabled: bool) -> Result<(), String> {
     if !enabled {
         // SAFETY: the key/value are static wide literals; deleting a value that
         // is not there is exactly the requested end state.
         let status = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, SUBKEY, VALUE_NAME) };
-        return if status == ERROR_FILE_NOT_FOUND {
-            Ok(())
-        } else {
-            win32_result(status, "RegDeleteKeyValueW")
-        };
+        if status != ERROR_FILE_NOT_FOUND {
+            win32_result(status, "RegDeleteKeyValueW")?;
+        }
+        return confirm_write(None, stored_command());
     }
 
     let command = our_command()?;
     let wide: Vec<u16> = command.encode_utf16().chain(std::iter::once(0)).collect();
     // SAFETY: `wide` outlives the call and its length is passed in bytes;
-    // RegSetKeyValueW creates the subkey when missing.
+    // RegSetKeyValueW creates the subkey when missing. Only this app's own
+    // value name under HKCU\...\Run is ever written — never HKLM, never a
+    // sibling value, and the key itself is never deleted.
     let status = unsafe {
         RegSetKeyValueW(
             HKEY_CURRENT_USER,
@@ -139,7 +207,8 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
             (wide.len() * std::mem::size_of::<u16>()) as u32,
         )
     };
-    win32_result(status, "RegSetKeyValueW")
+    win32_result(status, "RegSetKeyValueW")?;
+    confirm_write(Some(&command), stored_command())
 }
 
 /// Re-point the startup value at this executable when it no longer matches.
@@ -172,7 +241,97 @@ pub fn repair_if_drifted() {
     }
 }
 
+/// Whether an argument list carries the silent-launch flag.
+///
+/// Split out from [`is_silent_launch`] so the rule can be tested against a
+/// command line of choice instead of against this process's own.
+fn has_hidden_flag<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter().any(|arg| arg.as_ref() == HIDDEN_ARG)
+}
+
 /// True when Windows launched this instance at logon rather than the user.
+///
+/// The first argument is the executable itself, so it is skipped: a path that
+/// ends in `--hidden` is a folder name, not a flag.
 pub fn is_silent_launch() -> bool {
-    std::env::args().skip(1).any(|arg| arg == HIDDEN_ARG)
+    has_hidden_flag(std::env::args().skip(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The startup entry the registry must hold for a logon launch to happen.
+    #[test]
+    fn the_registered_command_line_quotes_the_executable_and_adds_the_flag() {
+        let ours = our_command().expect("this test process has an executable path");
+        assert!(
+            ours.starts_with('"'),
+            "a path with spaces would be split by the Run key: {ours}"
+        );
+        assert!(
+            ours.ends_with(HIDDEN_ARG),
+            "a logon launch that shows its window is not a background one: {ours}"
+        );
+    }
+
+    #[test]
+    fn the_hidden_flag_is_read_from_the_arguments_after_the_program() {
+        assert!(has_hidden_flag(["--hidden"]));
+        assert!(has_hidden_flag(["some", "--hidden", "other"]));
+        assert!(!has_hidden_flag(["--Hidden"]));
+        assert!(!has_hidden_flag(Vec::<String>::new()));
+        // The program itself is never an argument, so a directory called
+        // `--hidden` cannot make a normal launch go silent.
+        assert!(!has_hidden_flag(["C:\\--hidden\\App.exe"]));
+    }
+
+    /// The switch describes the registry, so a write is only done once the
+    /// registry says so.
+    #[test]
+    fn a_written_entry_is_confirmed_by_reading_it_back() {
+        let ours = "\"C:\\Program Files\\App.exe\" --hidden";
+        assert_eq!(
+            confirm_write(Some(ours), Ok(Some(ours.to_string()))),
+            Ok(()),
+            "the entry says what it was written to say"
+        );
+        assert_eq!(
+            confirm_write(None, Ok(None)),
+            Ok(()),
+            "a removal is confirmed by an absent entry"
+        );
+    }
+
+    #[test]
+    fn an_entry_that_did_not_take_the_write_is_reported_as_a_failure() {
+        let ours = "\"C:\\App.exe\" --hidden";
+        let stale = "\"C:\\Old\\App.exe\" --hidden";
+        let err = confirm_write(Some(ours), Ok(Some(stale.to_string())))
+            .expect_err("a stale entry is not our registration");
+        assert!(err.contains(stale) && err.contains(ours), "{err}");
+
+        let err = confirm_write(Some(ours), Ok(None)).expect_err("nothing was written");
+        assert!(err.contains("gone again"), "{err}");
+
+        // And a removal that left the value standing is not "unregistered".
+        let err = confirm_write(None, Ok(Some(stale.to_string())))
+            .expect_err("the entry outlived its own removal");
+        assert!(err.contains("still registered"), "{err}");
+    }
+
+    /// A failed *confirmation* is not a failed write: the switch would snap back
+    /// and blame the user for something the registry may well have accepted.
+    #[test]
+    fn an_unreadable_entry_is_a_warning_rather_than_a_refused_write() {
+        assert_eq!(
+            confirm_write(Some("\"C:\\App.exe\" --hidden"), Err("denied".to_string())),
+            Ok(()),
+            "the write itself reported success"
+        );
+    }
 }

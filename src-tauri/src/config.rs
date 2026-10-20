@@ -110,11 +110,21 @@ impl RouteMap {
     /// The surviving spelling is the one that sorts first, so a fold does not
     /// depend on the map's iteration order; its targets are the first non-empty
     /// list remembered under any of the variants.
-    fn consolidate_case_variants(&mut self) {
+    ///
+    /// Two spellings that remember *different* devices cannot both survive: one
+    /// executable has one remembered route, and the head of a device list is its
+    /// primary output, so gluing two lists together would invent a route with a
+    /// primary nobody chose. The first sort keeps its own and the other is
+    /// dropped — but a route the user set is not something to drop quietly, so
+    /// every dropped list comes back in the return value for the caller to name
+    /// in the log. Empty lists are never reported: forgetting is a state, not a
+    /// lost route.
+    fn consolidate_case_variants(&mut self) -> Vec<(String, Vec<String>)> {
         let mut names: Vec<String> = self.routes.keys().cloned().collect();
         names.sort();
         let mut folded: Vec<(String, DeviceList)> = Vec::new();
         let mut seen: HashMap<String, usize> = HashMap::new();
+        let mut dropped: Vec<(String, Vec<String>)> = Vec::new();
         for name in names {
             let Some(list) = self.routes.remove(&name) else {
                 continue;
@@ -123,8 +133,12 @@ impl RouteMap {
                 Some(index) => {
                     // A later variant only supplies targets when the spelling
                     // that survived remembered none: an empty list is no route.
-                    if folded[index].1 .0.is_empty() && !list.0.is_empty() {
-                        folded[index].1 = list;
+                    if folded[index].1 .0.is_empty() {
+                        if !list.0.is_empty() {
+                            folded[index].1 = list;
+                        }
+                    } else if !list.0.is_empty() {
+                        dropped.push((name, list.0));
                     }
                 }
                 None => {
@@ -134,6 +148,7 @@ impl RouteMap {
             }
         }
         self.routes = folded.into_iter().collect();
+        dropped
     }
 }
 
@@ -157,7 +172,18 @@ impl RouteConfig {
             .join("route-memory.json");
 
         let mut map: RouteMap = read_or_default(&path);
-        map.consolidate_case_variants();
+        // One program, one remembered route — and a route this fold had to give
+        // up is the user's work, so it is named rather than silently lost. The
+        // file on disk keeps both spellings until something writes either of
+        // them, so this line is the only trace a user has of where the route they
+        // set went.
+        for (spelling, devices) in map.consolidate_case_variants() {
+            warn!(
+                "route memory holds {spelling} a second time with different devices \
+                 ({devices:?}); one executable can keep only one remembered route, so \
+                 this one was dropped and the spelling that sorts first was kept"
+            );
+        }
 
         Ok(Self {
             inner: Mutex::new(RouteConfigInner { path, map }),
@@ -1079,10 +1105,17 @@ impl AppSettingsInner {
 /// Serialize `value` as pretty JSON and write it to `path`, creating parent
 /// directories as needed.
 ///
-/// The write is atomic: the content lands in a same-directory `.tmp` file first,
-/// then that file is renamed over the target. A crash mid-write can therefore
-/// leave the stale `.tmp` behind, but never a half-written config — renaming
-/// within one directory is atomic on all supported filesystems.
+/// The write is atomic and durable in that order: the content lands in a
+/// same-directory `.tmp` file, that file is pushed to the disk, and only then is
+/// it renamed over the target. Renaming within one directory is atomic on all
+/// supported filesystems, so a crash never leaves a half-written config; the
+/// flush is what keeps the *power* from doing the same. Without it the rename can
+/// reach the disk before the bytes do, and the machine comes back to a target
+/// file that exists and is empty — which `read_or_default` answers with a warning
+/// and the defaults, so the user's remembered routes, delays and levels are gone
+/// while the file that used to hold them looks untouched. Configs are written on
+/// user actions, not in any hot path, so the extra flush is paid where nobody
+/// hears it.
 pub(crate) fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create_dir_all failed: {e}"))?;
@@ -1090,13 +1123,26 @@ pub(crate) fn persist_json<T: Serialize>(path: &std::path::Path, value: &T) -> R
     let content =
         serde_json::to_string_pretty(value).map_err(|e| format!("serialize failed: {e}"))?;
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, content).map_err(|e| format!("write config failed: {e}"))?;
+    write_and_sync(&tmp, &content).map_err(|e| format!("write config failed: {e}"))?;
     fs::rename(&tmp, path).map_err(|e| {
         // Best-effort cleanup of the temp file; the real error is the rename.
         let _ = fs::remove_file(&tmp);
         format!("commit config failed: {e}")
     })?;
     Ok(())
+}
+
+/// Write the whole of `content` to `path` and wait for the disk to have it.
+///
+/// `sync_all` is `FlushFileBuffers` on Windows: it asks the volume, not just the
+/// cache manager. A path already holding a file is replaced, and a write that
+/// fails part way leaves only the `.tmp` — never the target.
+fn write_and_sync(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = fs::File::create(path)?;
+    file.write_all(content.as_bytes())?;
+    file.flush()?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -1248,13 +1294,25 @@ mod tests {
         assert_eq!(map.feeds["chrome.exe"], vec!["audacity.exe".to_string()]);
     }
 
+    /// The routes still on the book, sorted, so two folds can be compared
+    /// whatever order the map happens to iterate in.
+    fn listed_routes(map: &RouteMap) -> Vec<(String, Vec<String>)> {
+        let mut listed: Vec<(String, Vec<String>)> = map
+            .routes
+            .iter()
+            .map(|(name, list)| (name.clone(), list.0.clone()))
+            .collect();
+        listed.sort();
+        listed
+    }
+
     #[test]
     fn one_program_with_two_spellings_on_file_keeps_one_route() {
         let mut map: RouteMap = serde_json::from_str(
             r#"{"routes": {"Chrome.exe": ["{0.0.0.00000000}.{a}"], "chrome.exe": ["{0.0.0.00000000}.{b}"], "game.exe": []}}"#,
         )
         .unwrap();
-        map.consolidate_case_variants();
+        let dropped = map.consolidate_case_variants();
         assert_eq!(map.routes.len(), 2, "one program, one entry");
         assert!(!map.routes.contains_key("chrome.exe"));
         assert_eq!(
@@ -1262,13 +1320,56 @@ mod tests {
             vec!["{0.0.0.00000000}.{a}".to_string()],
             "the spelling that sorts first survives with its own targets"
         );
+        // And the route that had to go is handed to the caller to name in the
+        // log, because "the memory folded them together" is not the same as
+        // "the memory lost one on the floor".
+        assert_eq!(
+            dropped,
+            vec![(
+                "chrome.exe".to_string(),
+                vec!["{0.0.0.00000000}.{b}".to_string()]
+            )]
+        );
         // A survivor that remembered nothing is no route to keep: the variant
         // behind it has the targets the user set.
         let mut map: RouteMap =
             serde_json::from_str(r#"{"routes": {"A.exe": [], "a.exe": ["device"]}}"#).unwrap();
-        map.consolidate_case_variants();
+        assert!(map.consolidate_case_variants().is_empty());
         assert_eq!(map.routes.len(), 1);
         assert_eq!(map.routes["A.exe"].0, vec!["device".to_string()]);
+    }
+
+    /// A fold that reports a lost route has to report only that: a variant whose
+    /// devices merely filled the empty survivor is not a route the user lost, and
+    /// folding the file the fold produced has to read the same way on the next
+    /// start — a memory that changes shape each boot is not a memory.
+    #[test]
+    fn the_route_fold_reports_only_a_route_it_truly_lost_and_repeats_itself() {
+        let mut map: RouteMap = serde_json::from_str(
+            r#"{"routes": {"A.exe": [], "a.exe": ["device-1"], "B.exe": ["device-2"], "b.EXE": ["device-3"]}}"#,
+        )
+        .unwrap();
+        let dropped = map.consolidate_case_variants();
+        assert_eq!(
+            dropped,
+            vec![("b.EXE".to_string(), vec!["device-3".to_string()])],
+            "a variant that only filled an empty survivor is no loss"
+        );
+        let first = listed_routes(&map);
+        assert_eq!(
+            first,
+            vec![
+                ("A.exe".to_string(), vec!["device-1".to_string()]),
+                ("B.exe".to_string(), vec!["device-2".to_string()]),
+            ]
+        );
+        let json = serde_json::to_string(&map).unwrap();
+        let mut again: RouteMap = serde_json::from_str(&json).unwrap();
+        assert!(
+            again.consolidate_case_variants().is_empty(),
+            "a folded file has nothing left to fold"
+        );
+        assert_eq!(listed_routes(&again), first);
     }
 
     #[test]
@@ -1287,6 +1388,65 @@ mod tests {
             map.feeds["Chrome.exe"],
             vec!["obs64.exe".to_string(), "audacity.exe".to_string()]
         );
+    }
+
+    /// The feed fold is the one that can be lossless — every target of every
+    /// spelling survives, whichever case it was written in — and it has to reach
+    /// the same file whatever order it is handed the entries in, so a second load
+    /// of its own output changes nothing.
+    #[test]
+    fn the_feed_fold_keeps_every_target_and_repeats_itself() {
+        let mut map: FeedMap = serde_json::from_str(
+            r#"{"feeds": {"Chrome.exe": ["obs64.exe"], "CHROME.EXE": [], "chrome.exe": ["audacity.exe", "OBS64.EXE"]}}"#,
+        )
+        .unwrap();
+        map.consolidate_case_variants();
+        assert_eq!(map.feeds.len(), 1, "three spellings, one source");
+        let mut targets = map.feeds["CHROME.EXE"].clone();
+        targets.sort();
+        assert_eq!(
+            targets,
+            vec!["audacity.exe".to_string(), "obs64.exe".to_string()],
+            "a target listed under two spellings is one rule, not two"
+        );
+        let json = serde_json::to_string(&map).unwrap();
+        let mut again: FeedMap = serde_json::from_str(&json).unwrap();
+        again.consolidate_case_variants();
+        assert_eq!(serde_json::to_string(&again).unwrap(), json);
+    }
+
+    /// A config write publishes a whole file or nothing. The rename is what makes
+    /// it atomic; the flush before it is what keeps a power loss from publishing
+    /// an empty target whose defaults would then be read back as the user's
+    /// settings. What a test can pin here is the shape of the published file: the
+    /// whole content, parseable, with no `.tmp` left beside it to be mistaken for
+    /// a half-write.
+    #[test]
+    fn a_config_write_publishes_the_whole_file_and_leaves_no_temporary() {
+        let dir = std::env::temp_dir().join(format!("aar-persist-{}", std::process::id()));
+        let path = dir.join("route-memory.json");
+        let mut map = RouteMap::default();
+        map.routes.insert(
+            "game.exe".to_string(),
+            DeviceList(vec!["device".to_string()]),
+        );
+
+        persist_json(&path, &map).unwrap();
+
+        let written = fs::read_to_string(&path).unwrap();
+        let back: RouteMap = serde_json::from_str(&written).unwrap();
+        assert_eq!(back.routes["game.exe"].0, vec!["device".to_string()]);
+        assert!(
+            !dir.join("route-memory.tmp").exists(),
+            "the temporary goes with the rename"
+        );
+        // Writing over a file that already exists replaces it whole.
+        map.routes
+            .insert("other.exe".to_string(), DeviceList(vec!["b".to_string()]));
+        persist_json(&path, &map).unwrap();
+        let back: RouteMap = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back.routes.len(), 2);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

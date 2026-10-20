@@ -123,11 +123,19 @@ impl InstallProbe {
     }
 
     /// The version recorded by an earlier launch of this file's app.
+    ///
+    /// A blank is not a record. Answering "which version ran here" with an empty
+    /// string would put nothing on the upgrade screen, and a record that says
+    /// nothing must not be allowed to vouch for itself — the machine falls back
+    /// to the evidence of its own directories, which is the conservative answer.
     fn recorded_version(&self) -> Option<String> {
         let path = self.app_dir.as_ref()?.join(STATE_FILE);
         let content = std::fs::read_to_string(path).ok()?;
         let state: StateFile = serde_json::from_str(&content).ok()?;
-        state.last_version
+        state
+            .last_version
+            .map(|seen| seen.trim().to_string())
+            .filter(|seen| !seen.is_empty())
     }
 
     /// Whether any version of this app has run on this machine.
@@ -209,7 +217,16 @@ pub struct StartupNoticeState {
 impl StartupNoticeState {
     /// Decide this launch's notice straight from the probe, with no override.
     pub fn new(identifier: &str, current_version: &str) -> Self {
-        let probe = InstallProbe::new(identifier);
+        Self::from_probe(InstallProbe::new(identifier), current_version)
+    }
+
+    /// The state for a probe chosen by the caller.
+    ///
+    /// What `new` does with this machine's directories, done to any directories:
+    /// the notice is decided from the record on disk, so this is the seam that
+    /// lets a test aim the record at a temporary folder and ask whether the tour
+    /// is offered twice.
+    pub fn from_probe(probe: InstallProbe, current_version: &str) -> Self {
         let notice = probe.notice(current_version);
         Self {
             probe,
@@ -405,6 +422,74 @@ mod tests {
         assert_eq!(notice.kind, NoticeKind::Upgrade);
         assert_eq!(notice.previous_version, None);
         assert!(notice.leftover_endpoints);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A record that names no version is no record. It must not be allowed to
+    /// vouch for itself as a newer-than-the-tour predecessor: the machine falls
+    /// back to the evidence of its own directories, which asks the conservative
+    /// question instead of putting a blank version on the screen.
+    #[test]
+    fn a_blank_record_does_not_vouch_for_itself() {
+        let dir = std::env::temp_dir().join("aar-install-probe-blank");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(STATE_FILE), r#"{"last_version":"  "}"#).unwrap();
+        let notice = probe(Some(dir.clone()), None)
+            .notice("2.3.0")
+            .expect("a machine with our files on it is asked, not welcomed as new");
+        assert_eq!(notice.kind, NoticeKind::Upgrade);
+        assert_eq!(notice.previous_version, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The promise the record exists for, checked against the file rather than
+    /// against the code: the tour is shown, the user answers it, and the answer
+    /// is on disk — so the next launch of the same version has nothing to ask.
+    #[test]
+    fn the_tour_is_offered_once_because_the_ack_writes_the_record() {
+        let dir = std::env::temp_dir().join("aar-install-state-ack");
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = StartupNoticeState::from_probe(probe(Some(dir.clone()), None), "2.3.0");
+        assert!(state.notice().is_some(), "an empty machine is walked in");
+        state
+            .ack()
+            .expect("the record lands in the app's own directory");
+        assert!(state.notice().is_none(), "an answered tour stays answered");
+        let again = StartupNoticeState::from_probe(probe(Some(dir.clone()), None), "2.3.0");
+        assert!(
+            again.notice().is_none(),
+            "the record on disk is what keeps the tour from coming back"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A tour whose record could not be written ends for this launch (the user
+    /// answered it, and a window stuck on a dismissed tour is worse than a repeat
+    /// question), but the next launch asks again rather than pretending this
+    /// machine was ever walked through.
+    #[test]
+    fn an_ack_that_could_not_be_written_is_reported_and_not_adopted() {
+        let dir = std::env::temp_dir().join("aar-install-state-blocked");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file where the record's directory would have to be: the write fails.
+        std::fs::write(dir.join("blocker"), b"x").unwrap();
+        let blocked = dir.join("blocker").join("roaming");
+        let state = StartupNoticeState::from_probe(probe(Some(blocked.clone()), None), "2.3.0");
+        assert!(state.notice().is_some());
+        state
+            .ack()
+            .expect_err("the record has nowhere to go, and says so");
+        assert!(
+            state.notice().is_none(),
+            "the window is not left on a tour the user already closed"
+        );
+        let again = StartupNoticeState::from_probe(probe(Some(blocked), None), "2.3.0");
+        assert!(
+            again.notice().is_some(),
+            "an unrecorded answer is asked again, never reported as kept"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
