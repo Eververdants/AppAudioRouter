@@ -53,6 +53,14 @@ const MIN_ROUNDS = 3;
 /** Hard cap on rounds per run, extensions included. */
 const MAX_ROUNDS = 6;
 
+/** What `Tab` may land on inside the dialog, in DOM order.
+ *  `aria-modal` hides the page behind this dialog from assistive tech, but it
+ *  does nothing to the tab order: without a trap the walk simply continues into
+ *  the settings page and the stage under it, and a timed measurement spent
+ *  hunting for a control the dialog is covering is a burst not heard. */
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /** Lead silence before a round-robin burst, drawn per call from this span.
  * The backend randomizes the gap within a run; drawing the lead per call
  * keeps the pace unpredictable across the whole session. */
@@ -149,14 +157,24 @@ export function DelayCalibration({
    *  is a timed one — every second spent hunting for the button is a burst not
    *  heard. */
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  /** The tap target, so the measurement screen starts with the key on it. */
+  const tapRef = useRef<HTMLButtonElement | null>(null);
 
+  // Every screen replaces the controls the focus was sitting on — 开始测量
+  // unmounts, the failure panel and the tap button trade places — and a focused
+  // element that leaves the DOM drops the caret to the document root, where the
+  // next `Tab` walks straight out of a dialog that says `aria-modal`. So the
+  // key is handed back to the dialog on each change of screen, and straight to
+  // the tap button when a round is actually being answered (which is also what
+  // makes `Space`/`Enter` tap, as the wizard promises).
   useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
+    if (step === 'measure' && failure === null) tapRef.current?.focus();
+    else dialogRef.current?.focus();
+  }, [step, failure]);
 
   const deviceName = useCallback(
-    (id: string) => devices.find((d) => d.id === id)?.name ?? id,
-    [devices],
+    (id: string) => devices.find((d) => d.id === id)?.name ?? t('routed.deviceGone'),
+    [devices, t],
   );
 
   const formatList = useCallback(
@@ -216,7 +234,17 @@ export function DelayCalibration({
             leadMs: LEAD_MIN_MS + Math.floor(Math.random() * LEAD_SPREAD_MS),
             tailMs: CALL_TAIL_MS,
           });
-          if (!alive()) return;
+          if (!alive()) {
+            // The command landed *after* the wizard walked out: the Escape or
+            // the unmount already sent its cancel, and that one found nothing
+            // running, because this call was still in flight. So the burst the
+            // backend had not yet started is now playing into a dialog that no
+            // longer exists — this is the second cancel, the one that reaches
+            // it. A Rust-side generation check would be the sturdier answer;
+            // nothing here can promise the order of the two commands.
+            void calibrationCancel().catch(() => undefined);
+            return;
+          }
         }
       }
       if (!alive()) return;
@@ -347,11 +375,52 @@ export function DelayCalibration({
       // them: standing down here is what leaves that press theirs.
       if (isEditableTarget(e.target)) return;
       e.stopPropagation();
+      // Stop the walk *and* the sound: `cancelRun` is the only thing between a
+      // burst and a dialog nobody can reach, and `onClose` unmounts this one —
+      // whose cleanup can only cancel what the backend is already playing at
+      // that moment (a `calibration_start` still in flight is handled where it
+      // is awaited, not here).
       cancelRun();
       onClose();
     },
     [cancelRun, onClose],
   );
+
+  // The tab trap. A dialog that declares `aria-modal` still has to hold the tab
+  // order itself: the marker only tells assistive tech to ignore the rest of the
+  // document, and `Tab` keeps walking through it. Registered while the dialog is
+  // mounted and nowhere else, exactly like the Escape path beside it.
+  const trapTab = useCallback((event: KeyboardEvent) => {
+    if (event.key !== 'Tab') return;
+    const container = dialogRef.current;
+    if (container === null) return;
+    const items = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+      (item) => item.getClientRects().length > 0,
+    );
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (first === undefined || last === undefined) {
+      // Nothing to walk: a screen with no control yet (the rows are still
+      // arriving). Staying put is the honest answer, not letting the key out.
+      event.preventDefault();
+      container.focus();
+      return;
+    }
+    const active = document.activeElement;
+    const index = active instanceof HTMLElement ? items.indexOf(active) : -1;
+    if (index === -1) {
+      // The caret sits on the dialog surface itself, or has already slipped
+      // behind it (an element under the pointer while it unmounted): pull it
+      // back to the end or the start of the row it should have been on.
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    const atEdge = event.shiftKey ? index === 0 : index === items.length - 1;
+    if (!atEdge) return;
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  }, []);
 
   useEffect(() => {
     // The settings page stands down for Escape while this wizard is open (the
@@ -359,9 +428,13 @@ export function DelayCalibration({
     // Capture phase, and the key is consumed: the toast's undo offer lives one
     // bubble-phase listener away, and a bubble-phase `stopPropagation` on the
     // same node cannot keep the key from it — only arriving first can.
-    window.addEventListener('keydown', handleEscape, true);
-    return () => window.removeEventListener('keydown', handleEscape, true);
-  }, [handleEscape]);
+    const onKey = (event: KeyboardEvent) => {
+      trapTab(event);
+      handleEscape(event);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [handleEscape, trapTab]);
 
   /**
    * The values the results screen shows, from the measured offsets.
@@ -525,6 +598,7 @@ export function DelayCalibration({
             {failure === null ? (
               <>
                 <motion.button
+                  ref={tapRef}
                   type="button"
                   whileTap={{ scale: 0.985 }}
                   transition={SPRING_TAP}

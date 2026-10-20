@@ -116,8 +116,11 @@ function RememberedChip({
 }) {
   const { t } = useTranslation();
   const label = t('settings.forgetRoute', { process: entry.exeName });
+  // A remembered device that is not on the list is a device that left, and the
+  // tooltip says so: an endpoint id in a sentence nobody can read is the same
+  // GUID-on-screen the capsule and the 「现状」 page were called out for.
   const target = entry.deviceIds
-    .map((id) => devices.find((device) => device.id === id)?.name ?? id)
+    .map((id) => devices.find((device) => device.id === id)?.name ?? t('routed.deviceGone'))
     .join(' · ');
   return (
     <motion.span
@@ -314,9 +317,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   // back to the control that opened it, not to the top of the window.
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const calibrateButtonRef = useRef<HTMLButtonElement | null>(null);
+  // The page's own exit, kept as the fallback landing spot for a keyboard that
+  // has just been turned out of a dialog whose opener can no longer take it.
+  const backRef = useRef<HTMLButtonElement | null>(null);
   // What the last "reset per-app output" press cleared, so the press has an
   // answer of its own instead of only a line in another tab.
   const [resetOutcome, setResetOutcome] = useState<ResetOutcome | null>(null);
+  // Whether that press is still being answered.
+  const [resetBusy, setResetBusy] = useState(false);
   // The section that is already on the paper when the page opens lands in
   // place; only a *change* of section plays the arrival. A ref rather than
   // state: it is read on the section's own mount, so it has to be a value that
@@ -410,6 +418,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
       >
         <button
           type="button"
+          ref={backRef}
           onClick={onBack}
           className="pressable mb-2 flex items-center gap-1.5 self-start rounded-ctl px-2 py-1.5 text-[11px] font-medium text-text-muted outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
         >
@@ -537,12 +546,21 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     <ConfirmButton
                       label={t('settings.resetEndpointsAction')}
                       confirmLabel={t('settings.resetEndpointsConfirm')}
+                      // One wipe at a time: the walk releases every assignment on
+                      // the machine, and a second press while the first is still
+                      // answering would race it for the same processes — and pay
+                      // for a second set of failures. The tour guards its own copy
+                      // of this action the same way.
+                      disabled={resetBusy}
                       onConfirm={() => {
-                        void resetPinnedEndpoints().then((outcome) => {
-                          // A refusal is the toast's; what belongs here is the
-                          // count, so the press is not mistaken for a no-op.
-                          if (outcome !== null) setResetOutcome(outcome);
-                        });
+                        setResetBusy(true);
+                        void resetPinnedEndpoints()
+                          .then((outcome) => {
+                            // A refusal is the toast's; what belongs here is the
+                            // count, so the press is not mistaken for a no-op.
+                            if (outcome !== null) setResetOutcome(outcome);
+                          })
+                          .finally(() => setResetBusy(false));
                       }}
                     />
                     {resetOutcome !== null && (
@@ -580,6 +598,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                         title={t('settings.feedCarrierRenderHint')}
                         value={feedCarrier.render ?? ''}
                         options={carrierOptions}
+                        missingLabel={t('routed.deviceGone')}
                         onChange={(next) =>
                           void setFeedCarrier(next === '' ? null : next, feedCarrier.capture)
                         }
@@ -816,7 +835,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           devices={devices}
           onClose={() => {
             setCalibrationOpen(false);
-            calibrateButtonRef.current?.focus();
+            // The key goes back to the button that opened the dialog — unless
+            // that button has since been switched off (both devices left while
+            // the wizard was up, and its own gate is `devices.length < 2`):
+            // `focus()` on a disabled control does nothing, and the caret would
+            // be left at the document root, where the next Tab starts the whole
+            // window over again. The back button is always there and always able.
+            const opener = calibrateButtonRef.current;
+            if (opener !== null && !opener.disabled) opener.focus();
+            else backRef.current?.focus();
           }}
         />
       )}
