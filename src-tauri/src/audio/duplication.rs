@@ -116,6 +116,17 @@ const SOURCE_IDLE_MS: u64 = 1_500;
 /// wakeup that never arrives can hold audio back, so it is short enough that a
 /// missed one is heard as a stutter rather than as a gap.
 const PARK_POLL: Duration = Duration::from_millis(250);
+/// How long [`DuplicationManager::stop`] waits for a start that is still in
+/// flight before it refuses that start the seat instead.
+///
+/// The wait has to be bounded *and* have an answer: every slow step of a start
+/// is a COM round trip, and a hung `AudioSrv` makes those calls never return.
+/// An open-ended wait would then hold the stop's blocking-pool thread — and the
+/// route the user just asked to be stopped — open for the rest of the session,
+/// which is worse than the race the wait was added for. Five seconds is the
+/// ceiling this module already pays for an activation that never answers
+/// (`ACTIVATION_TIMEOUT`); past it the outcome is defined rather than pending.
+const START_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Generations handed out to engines so a stale thread can never unregister a
 /// newer engine that replaced it for the same PID.
@@ -825,52 +836,136 @@ pub struct ActiveRoute {
 /// `stop_route` landing between a start's eviction and its insertion removes
 /// nothing, and the insertion then RESURRECTS an engine with no route — the
 /// mirrors keep playing while the board shows nothing.
+///
+/// The wait is bounded (see [`START_SETTLE_TIMEOUT`]) and its timeout has a
+/// defined outcome: the stop leaves a *ticket* on the pid, and every start that
+/// was already in flight refuses the seat when it reaches its insertion. Between
+/// the ticket and the eviction the invariant holds either way — a start that
+/// seated before the ticket was written is removed by that eviction, and one
+/// that reaches the insertion after it withdraws — so a `stop` that returns
+/// means no engine is or will be seated, whether or not it had to wait.
 #[derive(Default)]
 struct StartRegistry {
-    /// pid → starts in flight for it: evicted the incumbent, not yet landed
-    /// (or withdrew) their engine. More than one because two `apply_route`s
-    /// for the same pid can overlap; the pid stays claimed until both settle.
-    counts: Mutex<HashMap<u32, u32>>,
+    /// Counts and tickets together with the sequence they are compared against:
+    /// one lock, so a ticket's boundary covers exactly the starts begun before
+    /// it was written.
+    ledger: Mutex<StartLedger>,
     /// Notified on every decrement, so a waiting `stop` cannot sleep past
     /// the start it waits for.
     landed: Condvar,
 }
 
+/// What [`StartRegistry`] keeps under its lock.
+#[derive(Default)]
+struct StartLedger {
+    /// pid → its in-flight starts. More than one because two `apply_route`s for
+    /// the same pid can overlap; the pid stays claimed until both settle.
+    entries: HashMap<u32, StartEntry>,
+    /// Monotonic start sequence, handed out under this lock.
+    sequence: u64,
+}
+
+/// One pid's in-flight starts and the stop ticket they must honour.
+#[derive(Default)]
+struct StartEntry {
+    /// Starts that have evicted the incumbent and not yet landed (or withdrawn).
+    count: u32,
+    /// Sequence boundary written by a stop that gave up waiting: a start whose
+    /// own sequence is below it must withdraw instead of seating. Zero is
+    /// "nobody is waiting", which no sequence can be below.
+    ticket: u64,
+}
+
 impl StartRegistry {
-    /// Count one more in-flight start for `pid`. Called while the caller holds
-    /// the `engines` lock — that pairing is what makes the eviction and the
-    /// registration one step no `stop` can slip between.
-    fn begin(&self, pid: u32) {
-        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
-        let count = counts.entry(pid).or_insert(0);
-        *count = count.saturating_add(1);
+    /// Count one more in-flight start for `pid` and return its sequence. Called
+    /// while the caller holds the `engines` lock — that pairing is what makes
+    /// the eviction and the registration one step no `stop` can slip between.
+    fn begin(&self, pid: u32) -> u64 {
+        let mut ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
+        ledger.sequence = ledger.sequence.saturating_add(1);
+        let entry = ledger.entries.entry(pid).or_default();
+        entry.count = entry.count.saturating_add(1);
+        ledger.sequence
     }
 
     /// One fewer. The notify is unconditional: a waiter for another pid
     /// re-checks its own entry and sleeps again, and losing this one's wake
-    /// would strand a `stop` past a start that already landed.
+    /// would strand a `stop` past a start that already landed. Dropping the
+    /// entry at zero drops its ticket with it, so a refusal cannot outlive the
+    /// starts it was written for and never reaches the next route.
     fn clear(&self, pid: u32) {
-        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(count) = counts.get_mut(&pid) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                counts.remove(&pid);
-            }
+        let mut ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = ledger.entries.get_mut(&pid) {
+            entry.count = entry.count.saturating_sub(1);
+        }
+        if ledger
+            .entries
+            .get(&pid)
+            .is_some_and(|entry| entry.count == 0)
+        {
+            ledger.entries.remove(&pid);
         }
         self.landed.notify_all();
     }
 
-    /// Sleep until `pid` has no start in flight. The caller's removal then
-    /// sees whatever that start landed — or nothing, if it withdrew, in which
-    /// case it retires nothing too. A stop arriving before any start registered
-    /// does not wait: honoring it over a *later* apply is the frontend's
+    /// Sleep until `pid` has no start in flight, at most `budget`.
+    ///
+    /// `true`: the starts settled, and the caller's removal then sees whatever
+    /// they landed — or nothing, if they withdrew. `false`: the budget ran out,
+    /// every start already begun has been ticketed, and the caller must remove
+    /// what it can and let the ticket deal with the rest.
+    ///
+    /// A stop arriving before any start registered does not wait and tickets
+    /// nothing: honoring a stop over a *later* apply is the frontend's
     /// ordering, and a route the user asked for after the stop has finished is
     /// simply the next word, not a resurrection.
-    fn wait_for_quiet(&self, pid: u32) {
-        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
-        while counts.contains_key(&pid) {
-            counts = self.landed.wait(counts).unwrap_or_else(|e| e.into_inner());
+    fn wait_for_quiet(&self, pid: u32, budget: Duration) -> bool {
+        let deadline = Instant::now() + budget;
+        let mut ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if !ledger.entries.contains_key(&pid) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                // Every start begun up to and including `sequence` was already
+                // in flight when this stop gave up; those, and only those, are
+                // refused the seat.
+                let boundary = ledger.sequence.saturating_add(1);
+                if let Some(entry) = ledger.entries.get_mut(&pid) {
+                    entry.ticket = entry.ticket.max(boundary);
+                }
+                return false;
+            }
+            let (guard, _waited) = self
+                .landed
+                .wait_timeout(ledger, deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|e| e.into_inner());
+            ledger = guard;
         }
+    }
+
+    /// Whether this start must give up the seat because a stop stopped waiting
+    /// for it. Called by the start under the `engines` lock, which is what makes
+    /// the refusal and the stop's eviction one ordering: either this sees the
+    /// ticket, or the eviction that wrote it finds the engine already seated.
+    fn should_withdraw(&self, pid: u32, sequence: u64) -> bool {
+        let ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
+        ledger
+            .entries
+            .get(&pid)
+            .is_some_and(|entry| sequence < entry.ticket)
+    }
+
+    /// Refuse the seat to every start in flight, for a caller that cannot wait
+    /// on any of them (the shutdown sweep, which runs while the app is closing).
+    /// Returns how many pids had a start to refuse.
+    fn ticket_all(&self) -> usize {
+        let mut ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
+        let boundary = ledger.sequence.saturating_add(1);
+        for entry in ledger.entries.values_mut() {
+            entry.ticket = entry.ticket.max(boundary);
+        }
+        ledger.entries.len()
     }
 }
 
@@ -881,6 +976,16 @@ impl StartRegistry {
 struct StartGuard<'a> {
     registry: &'a StartRegistry,
     pid: u32,
+    /// This start's own sequence, as handed out by [`StartRegistry::begin`].
+    sequence: u64,
+}
+
+impl StartGuard<'_> {
+    /// Whether a `stop` gave up waiting for this start, so taking the seat now
+    /// would resurrect the route that stop just answered for.
+    fn stop_arrived(&self) -> bool {
+        self.registry.should_withdraw(self.pid, self.sequence)
+    }
 }
 
 impl Drop for StartGuard<'_> {
@@ -893,7 +998,8 @@ impl Drop for StartGuard<'_> {
 pub struct DuplicationManager {
     engines: Mutex<HashMap<u32, Arc<EngineShared>>>,
     /// Starts that are between their eviction and their insertion (see
-    /// `StartRegistry`); `stop` waits this out, `begin_start` fills it.
+    /// `StartRegistry`); `stop` waits this out (and tickets it when the wait
+    /// runs out), `begin_start` fills it.
     starting: StartRegistry,
     /// Persisted per-device delay compensation values.
     delays: Arc<DelayConfig>,
@@ -1042,6 +1148,15 @@ impl DuplicationManager {
     /// worker, which cannot hold a `DuplicationManager` — and taking them is what
     /// keeps an engine's own teardown from writing the same value a second time.
     pub fn take_pending_session_volume_restores(&self) -> Vec<(u32, u32)> {
+        // Starts in flight first, and without waiting: this runs while the app is
+        // closing, so it cannot afford the bounded wait `stop` uses, and an engine
+        // that seats after the sweep below would claim a session volume that
+        // nobody is left to hand back — the mixer then remembers our route's
+        // value for the program's next launch. Ticketing refuses them the seat.
+        let refused = self.starting.ticket_all();
+        if refused > 0 {
+            warn!("{refused} duplication start(s) were refused the seat by the shutdown sweep");
+        }
         // Same shape as `update_primary_volume`: snapshot under the lock, do
         // the session writes outside of it.
         let engines: Vec<Arc<EngineShared>> = self
@@ -1147,10 +1262,11 @@ impl DuplicationManager {
     /// process-loopback activation runs on the engine thread and reports
     /// failures through the `duplication-stopped` event with reason `error`.
     ///
-    /// A stop that arrives while this is in flight is honored after the start
-    /// lands: the eviction below and the registration in `starting` happen in
-    /// one step under the `engines` lock, and [`stop`](Self::stop) waits that
-    /// registration out before it removes.
+    /// A stop that arrives while this is in flight is honored either way: the
+    /// eviction below and the registration in `starting` happen in one step
+    /// under the `engines` lock, and [`stop`](Self::stop) waits that registration
+    /// out before it removes — or, once [`START_SETTLE_TIMEOUT`] runs out,
+    /// tickets this start so the insertion below refuses the seat instead.
     pub fn start(
         &self,
         pid: u32,
@@ -1163,7 +1279,7 @@ impl DuplicationManager {
         // acquisition of `engines`. From here to the guard's drop at the end
         // of this function, a `stop` for this pid waits rather than removing
         // nothing and letting the insertion below resurrect what it stopped.
-        let _start_guard = self.begin_start(pid);
+        let start_guard = self.begin_start(pid);
         if mirror_device_ids.is_empty() {
             return Ok(0);
         }
@@ -1231,7 +1347,8 @@ impl DuplicationManager {
         });
 
         // Registering the engine is the moment two concurrent starts for the
-        // same PID are reconciled. `stop()` ran at the top of this method, but
+        // same PID are reconciled, and the moment a stop that stopped waiting
+        // refuses this one the seat. `stop()` ran at the top of this method, but
         // the COM work between there and here is slow enough that another
         // `start` can have slipped its own engine in: without this check the
         // loser is never told to shut down, its capture thread keeps writing
@@ -1239,6 +1356,19 @@ impl DuplicationManager {
         // twice while its threads run until the process exits.
         let losing = {
             let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+            if start_guard.stop_arrived() {
+                // A `stop` gave up waiting for this start (see
+                // `START_SETTLE_TIMEOUT`), so its answer already stands and this
+                // one must not seat the route the user just stopped. Checked
+                // under this lock, which is what makes the pair exhaustive: a
+                // start that got here before the ticket was written is removed
+                // by the eviction that follows the ticket. Nothing has been
+                // claimed and no thread has run yet, so withdrawing is clean —
+                // and the answer is the same one an empty mirror list gives:
+                // `0`, no engine.
+                warn!("the duplication start for PID {pid} withdrew: a stop arrived while it was working");
+                return Ok(0);
+            }
             if engines.get(&pid).map(|e| e.generation).unwrap_or(0) > shared.generation {
                 // A newer engine took the seat while this start did its COM work.
                 // This one never spawned a thread, so withdrawing it is clean —
@@ -1337,10 +1467,23 @@ impl DuplicationManager {
     /// removes what it inserted. Returning before that would let the stop
     /// remove nothing while an engine was mid-COM-work, and the late insertion
     /// would play a stopped route's audio to mirrors the board no longer shows.
-    /// The wait is bounded by one start's slow path (format probe and session
-    /// claim), and callers already run `stop` off the main thread.
+    ///
+    /// The wait is bounded by [`START_SETTLE_TIMEOUT`], because every slow step
+    /// of a start is a COM round trip and a wedged audio service never answers:
+    /// an open-ended wait here would hang the caller's command — and the route
+    /// it is trying to take down — for the rest of the session. Timing out has a
+    /// defined outcome rather than a pending one: the starts still in flight are
+    /// ticketed (they refuse the seat at their insertion) and anything that
+    /// landed before the ticket is removed by the eviction below. Either way,
+    /// once this returns no engine is or will be seated for `pid`.
     pub fn stop(&self, pid: u32) {
-        self.starting.wait_for_quiet(pid);
+        if !self.starting.wait_for_quiet(pid, START_SETTLE_TIMEOUT) {
+            warn!(
+                "a duplication start for PID {pid} has not settled in {:?}; it is refused the \
+                 seat rather than waited on",
+                START_SETTLE_TIMEOUT
+            );
+        }
         self.evict(pid);
     }
 
@@ -1366,13 +1509,24 @@ impl DuplicationManager {
     /// reconnect — seconds in which every command that wants `engines` would
     /// be queued behind us.
     fn begin_start(&self, pid: u32) -> StartGuard<'_> {
-        let incumbent = {
+        let (incumbent, sequence) = {
             let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
-            // Lock order: `engines` before `starting`, everywhere. The two
-            // `StartRegistry` methods that take only its own lock never reach
-            // for `engines`, and `volume_claim` is only ever a leaf.
-            self.starting.begin(pid);
-            engines.remove(&pid)
+            // Lock order: `engines` before `starting`, everywhere. Every
+            // `StartRegistry` call either holds `engines` first (`begin` here and
+            // `should_withdraw` at the insertion, both short and COM-free) or
+            // takes only its own lock and never reaches for `engines`
+            // (`clear`, `wait_for_quiet`, `ticket_all`) — and while a `stop`
+            // sleeps in `wait_for_quiet` it holds nothing at all, which is what
+            // lets the start it waits on finish and clear its own count. The
+            // teardown chain stays on the other side of that rule: `retire_engine`
+            // → `MirrorChannel::wake` / `wake_capture` → `restore_session_volume`
+            // takes only a worker lock, the capture worker's lock and
+            // `volume_claim`, and is reached from `evict`, `begin_start` and the
+            // insertion's loser only once `engines` has been released;
+            // `hold_after_lost_copies` takes the worker's lock alone.
+            // `volume_claim` is a leaf: it nests no lock, only COM.
+            let sequence = self.starting.begin(pid);
+            (engines.remove(&pid), sequence)
         };
         if let Some(shared) = incumbent {
             retire_engine(&shared);
@@ -1380,6 +1534,7 @@ impl DuplicationManager {
         StartGuard {
             registry: &self.starting,
             pid,
+            sequence,
         }
     }
 
@@ -3249,13 +3404,13 @@ mod tests {
         // whose route was already gone. The registry is what closes that window
         // — a waiter must not pass until the start has settled.
         let registry = Arc::new(StartRegistry::default());
-        registry.begin(7);
-        registry.begin(7); // two overlapping starts: one clear is not enough
+        let first = registry.begin(7);
+        let second = registry.begin(7); // two overlapping starts: one clear is not enough
         let (tx, rx) = std::sync::mpsc::channel();
         let waiting = {
             let registry = Arc::clone(&registry);
             std::thread::spawn(move || {
-                registry.wait_for_quiet(7);
+                registry.wait_for_quiet(7, START_SETTLE_TIMEOUT);
                 let _ = tx.send(());
             })
         };
@@ -3274,6 +3429,80 @@ mod tests {
             "the stop never woke when both starts had settled"
         );
         waiting.join().unwrap();
+        // Neither start was refused for a stop it did not have to wait on.
+        assert!(!registry.should_withdraw(7, first));
+        assert!(!registry.should_withdraw(7, second));
+    }
+
+    #[test]
+    fn a_stop_that_gives_up_refuses_the_seat_to_the_starts_it_waited_on() {
+        // The bounded half of the handshake. A start whose COM path never answers
+        // must not be able to hold `stop` — and so the stop's own command, and
+        // the endpoint release behind it — open forever. What the stop leaves
+        // behind instead is a ticket: the in-flight starts withdraw at their
+        // insertion, and the eviction that follows the ticket takes anything
+        // that landed first.
+        let registry = StartRegistry::default();
+        let in_flight = registry.begin(7);
+        assert!(!registry.wait_for_quiet(7, Duration::ZERO));
+        assert!(
+            registry.should_withdraw(7, in_flight),
+            "the start the stop gave up on was left free to seat"
+        );
+        // A route asked for after the stop is the next word, not the stopped
+        // one: it began above the boundary and keeps its seat.
+        let later = registry.begin(7);
+        assert!(
+            !registry.should_withdraw(7, later),
+            "a start begun after the ticket was refused for a stop it never raced"
+        );
+        registry.clear(7);
+        registry.clear(7);
+        // And the refusal dies with the starts it was written for: once the
+        // count drains there is nothing left to withdraw, forever.
+        assert!(registry.wait_for_quiet(7, Duration::ZERO));
+        let next = registry.begin(7);
+        assert!(!registry.should_withdraw(7, next));
+        registry.clear(7);
+    }
+
+    #[test]
+    fn a_stop_only_refuses_the_program_it_was_asked_about() {
+        // The ticket is per pid: a stop that gave up on one program must not be
+        // what makes another one's route play on nothing.
+        let registry = StartRegistry::default();
+        let other = registry.begin(9);
+        let waited_on = registry.begin(7);
+        assert!(!registry.wait_for_quiet(7, Duration::ZERO));
+        assert!(registry.should_withdraw(7, waited_on));
+        assert!(!registry.should_withdraw(9, other));
+        registry.clear(7);
+        registry.clear(9);
+    }
+
+    #[test]
+    fn the_shutdown_sweep_refuses_every_start_still_in_flight() {
+        // `take_pending_session_volume_restores` cannot wait on anything: the app
+        // is closing. Whatever it does not wait for has to be refused instead, or
+        // an engine seats after the last restore was collected and keeps the
+        // program at the route's loudness.
+        let registry = StartRegistry::default();
+        let first = registry.begin(7);
+        let second = registry.begin(8);
+        registry.begin(8);
+        assert_eq!(
+            registry.ticket_all(),
+            2,
+            "the sweep counted programs by start instead of by pid"
+        );
+        assert!(registry.should_withdraw(7, first));
+        assert!(registry.should_withdraw(8, second));
+        for pid in [7, 8] {
+            registry.clear(pid);
+            registry.clear(pid);
+        }
+        assert!(registry.wait_for_quiet(7, Duration::ZERO));
+        assert!(registry.wait_for_quiet(8, Duration::ZERO));
     }
 
     #[test]
