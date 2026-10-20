@@ -87,9 +87,16 @@ pub fn acquire(app: AppHandle) -> Option<SingleInstanceGuard> {
         // the owned handle exactly once.
         drop(unsafe { OwnedHandle::from_raw_handle(mutex.0) });
         if let Some(event) = &event {
-            // SAFETY: `event` is a valid handle; signaling it is infallible for
-            // the caller — a missed reveal costs nothing but a hidden window.
-            let _ = unsafe { SetEvent(HANDLE(event.as_raw_handle())) };
+            // SAFETY: `event` is a valid handle for this process's lifetime.
+            // A failure here is reported, not swallowed: this instance is about
+            // to exit, and a signal that did not land means the user clicked an
+            // icon and got nothing at all — the one answer a tray-only app is
+            // not allowed to give.
+            if let Err(e) = unsafe { SetEvent(HANDLE(event.as_raw_handle())) } {
+                log::warn!("another instance is running but could not be summoned: {e}");
+            }
+        } else {
+            log::warn!("another instance is running and there is no event to summon it with");
         }
         return None;
     }
@@ -126,17 +133,28 @@ fn spawn_reveal_watcher(event: OwnedHandle, app: AppHandle) {
             // SAFETY: `event` is owned by this thread and valid for every wait.
             let waited = unsafe { WaitForSingleObject(HANDLE(event.as_raw_handle()), INFINITE) };
             if waited != WAIT_OBJECT_0 {
-                return; // the event handle is gone; there is nothing left to wait on
+                // The event handle is gone; there is nothing left to wait on.
+                // Saying so matters: this retires the only path that can bring
+                // the window back from the tray, so every later launch of the
+                // app will look like a click that did nothing.
+                log::warn!(
+                    "the single-instance watcher stops waiting (wait returned {})",
+                    waited.0
+                );
+                return;
             }
-            log::info!("second launch detected; showing the window");
             let Some(window) = app.get_webview_window("main") else {
                 // The window is not there *yet* — a second launch racing this
                 // one's startup is exactly the case this event exists for — so
                 // keep waiting rather than retiring the watcher. An auto-reset
                 // event only wakes this loop when signalled, so this is not a
-                // spin even if the window never appears.
+                // spin even if the window never appears. The line says what
+                // happened rather than what was about to happen: nothing was
+                // shown on this pass.
+                log::info!("second launch arrived before this one's window; still waiting");
                 continue;
             };
+            log::info!("second launch detected; showing the window");
             crate::tray::reveal(&window);
         });
     if let Err(e) = spawned {

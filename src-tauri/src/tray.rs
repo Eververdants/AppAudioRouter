@@ -160,6 +160,8 @@ fn on_menu_event(app: &AppHandle, event: &MenuEvent) {
         OPEN_SETTINGS_ITEM => {
             if let Some(window) = app.get_webview_window("main") {
                 reveal(&window);
+            } else {
+                warn!("open-settings clicked while the main window was gone");
             }
             forward(app, "open-settings");
         }
@@ -170,7 +172,16 @@ fn on_menu_event(app: &AppHandle, event: &MenuEvent) {
 }
 
 /// Hand a menu click to the frontend, which owns the state it changes.
+///
+/// The click has no effect until the frontend is mounted and listening, and an
+/// emit with nobody on the other end still reports success — so a press during
+/// the first moments of startup is a click on nothing. That is worth a line: it
+/// is the only trace of a menu action that visibly did not happen.
 fn forward(app: &AppHandle, action: &'static str) {
+    if app.webview_windows().is_empty() {
+        warn!("could not deliver {TRAY_MENU_EVENT} ({action}): no window to ask");
+        return;
+    }
     if let Err(e) = app.emit(TRAY_MENU_EVENT, TrayMenuAction { action }) {
         warn!("could not deliver {TRAY_MENU_EVENT}: {e}");
     }
@@ -179,10 +190,13 @@ fn forward(app: &AppHandle, action: &'static str) {
 /// Show the window, or hide it if it is already on screen.
 fn toggle_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
+        warn!("the tray was clicked but the main window is gone");
         return;
     };
     if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
+        if let Err(e) = window.hide() {
+            warn!("could not hide the window: {e}");
+        }
     } else {
         reveal(&window);
     }
@@ -193,7 +207,13 @@ fn toggle_window(app: &AppHandle) {
 /// Also the path out of a logon launch that started hidden, so it un-minimizes:
 /// a window restored from the tray that stayed minimized would look broken.
 pub fn reveal(window: &tauri::WebviewWindow) {
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
+    if let Err(e) = window.show() {
+        warn!("could not show the window: {e}");
+    }
+    if let Err(e) = window.unminimize() {
+        warn!("could not unminimize the window: {e}");
+    }
+    if let Err(e) = window.set_focus() {
+        warn!("could not focus the window: {e}");
+    }
 }
