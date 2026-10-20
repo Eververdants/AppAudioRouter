@@ -1,6 +1,6 @@
 //! Audio device routing.
 //!
-//! Two channels, both verified on Windows 11 24H2 (build 26100):
+//! One channel, verified on Windows 11 24H2 (build 26100):
 //!
 //! 1. Per-app routing — the undocumented WinRT activatable class
 //!    `Windows.Media.Internal.AudioPolicyConfig` (implemented inside
@@ -39,12 +39,12 @@
 //!      by hand in the volume mixer. Releasing one process at a time covers
 //!      everything this app writes.
 //!
-//! 2. System-wide default — `CPolicyConfigClient` coclass with interface
-//!    `{4495581a-…}` (the object the OS volume mixer uses); vtable slot 13 is
-//!    `SetDefaultEndpoint(deviceId: PCWSTR, role: i32)`.
+//! There is deliberately no second channel: nothing here moves the *system*
+//! default device. The app's whole promise is per-program output, and a
+//! system-wide write is a machine-wide change no screen of this app offers.
 
 use log::info;
-use windows::core::{GUID, HSTRING, PCWSTR};
+use windows::core::{GUID, HSTRING};
 
 use crate::audio::AudioError;
 use crate::audio::Role;
@@ -109,6 +109,39 @@ fn hstring_handle(h: &HSTRING) -> isize {
 // ---------------------------------------------------------------------------
 // Per-app routing
 // ---------------------------------------------------------------------------
+
+/// Whether `pid` still names the process this book entry was written for.
+///
+/// With a captured witness this is the exact question: `process_is_running`
+/// compares the creation time, so a pid the kernel has since handed to another
+/// program answers `no`.
+///
+/// Without one it is not. `creation_time` of 0 means the process could not be
+/// opened when the entry was written — most often because it had already exited
+/// a moment after the write that got it routed — and `process_is_running` then
+/// judges only the exit code: *any* live process holding that pid would be read
+/// as ours, which is exactly the recycling this witness exists to prevent. Left
+/// as the answer, a stranger would speak for the entry: its executable hidden
+/// from the settings reset, its feeds suspended for good, its stale bookkeeping
+/// dropped before the assignment is handed back.
+///
+/// So the entry falls back to the next best witness, the executable name. The
+/// assignment the entry describes is stored per executable anyway, so a process
+/// of the same program still holds it and a process of another one does not; an
+/// entry that cannot even say whose it is has no witness at all and answers
+/// `no`, because the paths that ask all have a conservative reading of `no`.
+fn entry_process_is_ours(pid: u32, creation_time: u64, exe_name: &str) -> bool {
+    if creation_time != 0 {
+        return super::process_is_running(pid, creation_time);
+    }
+    if !super::process_is_running(pid, 0) {
+        return false;
+    }
+    if exe_name.is_empty() {
+        return false;
+    }
+    process_name_for_guard(pid).is_some_and(|name| name.eq_ignore_ascii_case(exe_name))
+}
 
 /// Release one reference to a raw COM object through its own vtable.
 ///
@@ -451,9 +484,6 @@ pub fn validate_device_id(device_id: &str) -> Result<(), AudioError> {
 
 fn role_values(role: Role) -> &'static [i32] {
     match role {
-        Role::Console => &[ROLE_CONSOLE],
-        Role::Multimedia => &[ROLE_MULTIMEDIA],
-        Role::Communications => &[ROLE_COMMUNICATIONS],
         Role::All => &[ROLE_CONSOLE, ROLE_MULTIMEDIA, ROLE_COMMUNICATIONS],
     }
 }
@@ -696,13 +726,15 @@ impl PinnedRoutes {
     /// and a suspended feed from ever resuming. The other direction — a live
     /// sibling read as dead — is what would take a running route's endpoint away,
     /// so the judgement is the process's own exit code and creation time rather
-    /// than the presence of an entry, and only entries naming this executable are
-    /// asked: one `OpenProcess` per sibling, not one per page of the book.
+    /// than the presence of an entry (or, for an entry written without a
+    /// creation time, its executable name — see [`entry_process_is_ours`]), and
+    /// only entries naming this executable are asked: one `OpenProcess` per
+    /// sibling, not one per page of the book.
     pub fn exe_routed_elsewhere(&self, pid: u32, exe_name: &str) -> bool {
         // Snapshot the candidates under the lock and judge them outside of it:
         // `process_is_running` opens a process, and no other path in this crate
         // does system calls while a route book is held.
-        let candidates: Vec<(u32, u64)> = {
+        let candidates: Vec<(u32, u64, String)> = {
             let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner
                 .iter()
@@ -711,15 +743,24 @@ impl PinnedRoutes {
                         && route.kind == PinKind::Route
                         && route.exe_name.eq_ignore_ascii_case(exe_name)
                 })
-                .map(|(other, route)| (*other, route.creation_time))
+                .map(|(other, route)| (*other, route.creation_time, route.exe_name.clone()))
                 .collect()
         };
         candidates
             .iter()
-            .any(|(other, created)| super::process_is_running(*other, *created))
+            .any(|(other, created, exe)| entry_process_is_ours(*other, *created, exe))
     }
 
-    /// The PIDs a live route of ours owns, whose assignments must be left alone.
+    /// The PIDs this book records as routes, whether or not their process still
+    /// runs — the kind of the entry, with no liveness witness.
+    ///
+    /// Exactly one question needs this shape and cannot use [`is_routed`]: the
+    /// stale sweep asks whether the entry it is about to drop *was* a route, so
+    /// that it can say the executable's render slot came free and resume the
+    /// feeds waiting on it. The entry it asks about names a process with no
+    /// session right now, so a witnessed answer would come back `no` every time
+    /// and no feed would ever resume. Anything else asking "is this routed"
+    /// wants [`is_routed`], and nothing else should read this list.
     pub fn routed_pids(&self) -> Vec<u32> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
@@ -749,10 +790,10 @@ impl PinnedRoutes {
             let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner
                 .get(&pid)
-                .map(|route| (route.kind, route.creation_time))
+                .map(|route| (route.kind, route.exe_name.clone(), route.creation_time))
         };
-        entry.is_some_and(|(kind, created)| {
-            kind == PinKind::Route && super::process_is_running(pid, created)
+        entry.is_some_and(|(kind, exe, created)| {
+            kind == PinKind::Route && entry_process_is_ours(pid, created, &exe)
         })
     }
 
@@ -855,11 +896,26 @@ impl PinnedRoutes {
         book.remove(&pid);
     }
 
-    /// Every feed source (render half) pin, as `(pid, exe_name)`.
+    /// Every feed source (render half) pin whose process still runs, as
+    /// `(pid, exe_name)`.
+    ///
+    /// A pin whose program is gone is not offered: its caller writes an endpoint
+    /// *through* the pid it names, so a recycled pid would have some other
+    /// program pointed at the carrier. The pin itself stays on the book — the
+    /// sweep drops it once the process table says so — so nothing is left out
+    /// here that a later path still needs.
     pub fn feed_source_pins(&self) -> Vec<(u32, String)> {
-        let book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
-        book.iter()
-            .map(|(pid, pin)| (*pid, pin.exe_name.clone()))
+        // Judged outside the book lock, like every other liveness question here.
+        let candidates: Vec<(u32, u64, String)> = {
+            let book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
+            book.iter()
+                .map(|(pid, pin)| (*pid, pin.creation_time, pin.exe_name.clone()))
+                .collect()
+        };
+        candidates
+            .into_iter()
+            .filter(|(pid, created, exe)| entry_process_is_ours(*pid, *created, exe))
+            .map(|(pid, _, exe)| (pid, exe))
             .collect()
     }
 
@@ -874,11 +930,12 @@ impl PinnedRoutes {
     /// the wrong witness: dropping on it would strand the assignments the pin
     /// is the only handle to, since `remove_feed_target` refuses to release
     /// without a pin and so would app exit. The process table decides instead,
-    /// with the creation time the pin recorded guarding against a recycled pid.
+    /// with the creation time the pin recorded guarding against a recycled pid
+    /// (and its executable name standing in when that time was never read).
     pub fn forget_dead_feed_pins(&self) {
         for book in [&self.feed_sources, &self.feed_targets] {
             let mut book = book.lock().unwrap_or_else(|e| e.into_inner());
-            book.retain(|pid, pin| super::process_is_running(*pid, pin.creation_time));
+            book.retain(|pid, pin| entry_process_is_ours(*pid, pin.creation_time, &pin.exe_name));
         }
     }
 }
@@ -1178,141 +1235,16 @@ async fn set_process_default_endpoint_flow(
 }
 
 // ---------------------------------------------------------------------------
-// System-wide default
+// System-wide default: deliberately not implemented
 // ---------------------------------------------------------------------------
-
-const CLSID_POLICY_CONFIG_CLIENT: GUID = GUID::from_values(
-    0x870af99c,
-    0x171d,
-    0x4f9e,
-    [0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9],
-);
-const IID_IPOLICY_CONFIG: GUID = GUID::from_u128(0x4495581a_01b9_4a8f_b05c_741a6c983d28);
-
-/// Wrapper around a raw `IPolicyConfig` COM pointer.
-struct PolicyConfig {
-    obj: *mut core::ffi::c_void,
-}
-
-#[allow(non_snake_case)]
-#[repr(C)]
-struct PolicyConfigVtable {
-    // IUnknown (slots 0-2)
-    QueryInterface: usize,
-    AddRef: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32,
-    Release: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32,
-    // Classic IPolicyConfig prefix (slots 3-14, layout of {f8679f50})
-    GetMixFormat: usize,        // 3
-    GetDeviceFormat: usize,     // 4
-    ResetDeviceFormat: usize,   // 5
-    SetDeviceFormat: usize,     // 6
-    GetProcessingPeriod: usize, // 7
-    SetProcessingPeriod: usize, // 8
-    GetSharingMode: usize,      // 9
-    SetSharingMode: usize,      // 10
-    GetPropertyValue: usize,    // 11
-    SetPropertyValue: usize,    // 12
-    SetDefaultEndpoint: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        PCWSTR, // device id
-        i32,    // ERole
-    ) -> windows::core::HRESULT, // 13
-    SetEndpointVisibility: usize, // 14
-                                // Extended slots (15+) are build-specific; never call them.
-}
-
-impl PolicyConfig {
-    /// Create the CPolicyConfigClient instance for the modern interface.
-    fn new() -> Result<Self, AudioError> {
-        #[link(name = "ole32")]
-        extern "system" {
-            fn CoCreateInstance(
-                rclsid: *const GUID,
-                punkouter: *mut core::ffi::c_void,
-                dwclscontext: u32,
-                riid: *const GUID,
-                ppv: *mut *mut core::ffi::c_void,
-            ) -> windows::core::HRESULT;
-        }
-        const CLSCTX_ALL: u32 = 0x1 | 0x2 | 0x4 | 0x10;
-        let mut ppv: *mut core::ffi::c_void = std::ptr::null_mut();
-        // SAFETY: registered coclass/interface pair; ppv released in Drop.
-        let hr = unsafe {
-            CoCreateInstance(
-                &CLSID_POLICY_CONFIG_CLIENT,
-                std::ptr::null_mut(),
-                CLSCTX_ALL,
-                &IID_IPOLICY_CONFIG,
-                &mut ppv,
-            )
-        };
-        if hr.is_err() {
-            return Err(AudioError::Api(format!(
-                "CoCreateInstance(IPolicyConfig) failed: 0x{:08X}",
-                hr.0
-            )));
-        }
-        Ok(Self { obj: ppv })
-    }
-
-    /// Access the object's vtable (double deref: object -> vtable pointer).
-    fn vtable(&self) -> &PolicyConfigVtable {
-        // SAFETY: COM objects start with a pointer to their vtable.
-        unsafe { &**(self.obj as *const *const PolicyConfigVtable) }
-    }
-
-    /// Set the system-wide default render endpoint for a role.
-    fn set_default_endpoint(&self, device_id: &str, role: i32) -> Result<(), AudioError> {
-        use std::os::windows::ffi::OsStrExt;
-        let dev_w: Vec<u16> = std::ffi::OsStr::new(device_id)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        // SAFETY: slot 13 signature verified against this interface; dev_w
-        // outlives the call.
-        let hr =
-            unsafe { (self.vtable().SetDefaultEndpoint)(self.obj, PCWSTR(dev_w.as_ptr()), role) };
-        if hr.is_err() {
-            return Err(AudioError::Api(format!(
-                "SetDefaultEndpoint failed: 0x{:08X}",
-                hr.0
-            )));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for PolicyConfig {
-    fn drop(&mut self) {
-        // SAFETY: Release balances the CoCreateInstance reference.
-        unsafe { (self.vtable().Release)(self.obj) };
-    }
-}
-
-/// Set the system default audio device (applies to apps using the default).
-pub async fn set_default_device(device_id: &str, role: Role) -> Result<(), AudioError> {
-    validate_device_id(device_id)?;
-    let device_id = device_id.to_string();
-    // Keep both routing channels off the main STA thread for consistency.
-    tokio::task::spawn_blocking(move || {
-        let com_owned = crate::audio::init_com()?;
-
-        let result = (|| -> Result<(), AudioError> {
-            let policy = PolicyConfig::new()?;
-            for &r in role_values(role) {
-                policy.set_default_endpoint(&device_id, r)?;
-            }
-            info!("set default device {device_id} (role={role:?})");
-            Ok(())
-        })();
-
-        crate::audio::uninit_com(com_owned);
-
-        result
-    })
-    .await
-    .map_err(|_| AudioError::Api("routing task failed".to_string()))?
-}
+//
+// Nothing on this side moves the *system* default endpoint. The app's promise is
+// per-program output, and the machine-wide write (`CPolicyConfigClient` /
+// `IPolicyConfig::SetDefaultEndpoint`, vtable slot 13) had no screen, no caller
+// and no undo: a command that could switch every program that follows the
+// default, behind the back of the user's own picker. It is removed rather than
+// left usable; if a system-wide switch is ever wanted, it has to arrive with the
+// UI, the log line and the undo that make it a deliberate act.
 
 #[cfg(test)]
 mod tests {
@@ -1345,10 +1277,104 @@ mod tests {
         assert!(!pins.is_routed(u32::MAX));
 
         pins.forget(live);
+        // The one thing `routed_pids` is for: a kind answer, whatever the process
+        // does now. The sweep reads this list to decide whether the entry it
+        // drops was a route whose render slot came free — the pid it asks about
+        // has no session by then, so `is_routed` could only ever answer `no`.
         assert_eq!(pins.routed_pids(), vec![u32::MAX]);
+        assert!(
+            !pins.is_routed(u32::MAX),
+            "and it is not read as a live route"
+        );
         let mut released = pins.take_all();
         released.sort();
         assert_eq!(released, vec![2, 3, u32::MAX]);
+    }
+
+    /// Put one entry on the book the way `mark` cannot: with no creation time,
+    /// which is what a process that could not be opened when it was written
+    /// leaves behind.
+    fn insert_without_a_witness(pins: &PinnedRoutes, pid: u32, exe_name: &str, kind: PinKind) {
+        let mut inner = pins.inner.lock().unwrap();
+        inner.insert(
+            pid,
+            PinnedRoute {
+                exe_name: exe_name.to_string(),
+                device_id: "device".to_string(),
+                kind,
+                creation_time: 0,
+            },
+        );
+    }
+
+    /// An entry written without a creation time has no exact witness, and
+    /// `process_is_running` then judges only the exit code: read that way, *any*
+    /// live process holding the pid is credited with the route — which is the
+    /// recycling the witness exists to prevent, arriving by a different road. It
+    /// must be credited only to the program the entry names, because the
+    /// assignment it speaks for is stored per executable.
+    #[test]
+    fn an_entry_without_a_witness_is_credited_only_to_the_program_it_names() {
+        let pins = PinnedRoutes::new();
+        let live = std::process::id();
+        let own_name = process_name_for_guard(live).expect("the test process can name itself");
+
+        insert_without_a_witness(&pins, live, &own_name, PinKind::Route);
+        assert!(
+            pins.is_routed(live),
+            "the same program running under that pid still holds the assignment"
+        );
+
+        // A different program that now answers to the pid is a stranger, however
+        // alive — and it must not speak for the executable's reset either.
+        insert_without_a_witness(&pins, live, "someone-else.exe", PinKind::Route);
+        assert!(!pins.is_routed(live), "a recycled pid is not our route");
+        assert!(!pins.exe_routed_elsewhere(999_999, "someone-else.exe"));
+
+        // An entry that cannot even say whose it is has no witness at all.
+        insert_without_a_witness(&pins, live, "", PinKind::Route);
+        assert!(!pins.is_routed(live));
+    }
+
+    /// A suspended feed is resumed by writing an endpoint **through** the pid its
+    /// pin names. Offering a pin whose process is gone would point whatever
+    /// process holds that pid now at the carrier — an unrelated program made
+    /// silent — so the list a resume walks carries only pins that still speak for
+    /// a live process. The pin itself stays on the book: the sweep forgets it and
+    /// exit cleanup still walks it.
+    #[test]
+    fn a_feed_pin_of_a_gone_process_is_not_offered_for_resume() {
+        let pins = PinnedRoutes::new();
+        let live = std::process::id();
+        pins.mark_feed(live, "sender.exe", "carrier-render");
+        pins.mark_feed(u32::MAX, "gone.exe", "carrier-render");
+
+        let listed = pins.feed_source_pins();
+        assert!(
+            listed.contains(&(live, "sender.exe".to_string())),
+            "a pin whose process runs is offered"
+        );
+        assert!(
+            !listed.iter().any(|(pid, _)| *pid == u32::MAX),
+            "a pin whose process is gone is not"
+        );
+        assert!(
+            pins.take_all().contains(&u32::MAX),
+            "and it is still on the book to be handed back"
+        );
+    }
+
+    /// Every device id crosses the frontend boundary, and only some of them ever
+    /// reach a COM call: the delay and share of a device are keys of a config
+    /// file this app reads back for as long as it lives. Blank and absurd values
+    /// are refused at the same bound for both.
+    #[test]
+    fn a_device_key_is_refused_when_blank_or_absurd() {
+        assert!(validate_device_id("").is_err());
+        assert!(validate_device_id(&"x".repeat(1025)).is_err());
+        assert!(
+            validate_device_id("{0.0.0.00000000}.{1c1b1e0d-e0e3-41de-915c-5db74e4b693a}").is_ok()
+        );
     }
 
     /// A route that died with its process stops holding the executable's

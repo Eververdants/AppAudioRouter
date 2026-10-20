@@ -184,16 +184,18 @@ pub struct AudioSession {
     pub playing: bool,
 }
 
-/// Role for default endpoint selection.
+/// Which ERole values a per-app assignment is written under.
+///
+/// One variant, because there is one behaviour: every write this app makes
+/// covers console, multimedia and communications together — the same set the
+/// volume mixer's per-app output choice applies, and a half set is a program
+/// that plays out of two devices depending on what it is playing. The per-role
+/// choices were only ever reachable through the system-wide default command, and
+/// that command is gone; this enum grows its arms back the day a per-role write
+/// has a screen to come from.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Role {
-    /// Applies to all roles (console + multimedia + communications).
+    /// All roles (console + multimedia + communications).
     #[default]
     All,
-    /// Games, system sounds, and other non-media audio.
-    Console,
-    /// Music, video, and other media playback.
-    Multimedia,
-    /// Voice chat, phone calls, and other communications.
-    Communications,
 }

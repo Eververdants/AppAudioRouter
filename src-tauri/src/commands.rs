@@ -136,15 +136,6 @@ fn exe_name_of(pid: u32) -> String {
     }
 }
 
-/// Set the system-wide default render device.
-#[tauri::command]
-pub async fn set_default_device(device_id: String, role: String) -> Result<(), String> {
-    info!("cmd: set_default_device device={device_id} role={role}");
-    audio::routing::set_default_device(&device_id, parse_role(&role))
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// Get the current system default render device.
 #[tauri::command]
 pub async fn get_default_device() -> Result<audio::AudioDevice, String> {
@@ -188,6 +179,16 @@ pub async fn apply_route(
     // output. A remembered route read back from a hand-edited config is one way
     // to arrive here, so the check belongs at the boundary.
     let device_ids = dedupe_device_ids(device_ids);
+    // Every id in the list crosses into COM, just not all through the same door:
+    // the head is validated inside the endpoint write below, the rest are opened
+    // by the engine as mirrors and never pass through it. A blank or absurd id
+    // among the copies would be a route the board draws and no device answers,
+    // so the whole list is checked here, at the boundary, before anything is
+    // written and before any pin is booked.
+    for (index, device_id) in device_ids.iter().enumerate() {
+        audio::routing::validate_device_id(device_id)
+            .map_err(|e| format!("device {} of this route is not usable: {e}", index + 1))?;
+    }
 
     // Primary: the OS-native per-app endpoint.
     audio::routing::set_process_default_device(&device_ids[0], pid, audio::Role::All)
@@ -488,10 +489,12 @@ async fn resume_suspended_feeds(exe: &str, pins: &PinnedRoutes) {
         if !feed_exe.eq_ignore_ascii_case(exe) {
             continue;
         }
-        // Asked with the liveness witness rather than from the book's route
-        // entries: an entry whose process exited — or whose pid the kernel has
-        // since handed to another program — holds nothing, and a feed that waits
-        // on one waits for good, because nothing sweeps that pid any more.
+        // `feed_source_pins` hands out only the pins that still speak for a live
+        // process, so nothing below can write an endpoint through a pid the
+        // kernel has since handed on. What is left to decide is whether the
+        // render slot is still held by a route — and that is asked with the same
+        // witness, because an entry whose process exited holds nothing, and a
+        // feed that waits on one waits for good.
         if pins.is_routed(feed_pid) {
             continue;
         }
@@ -656,6 +659,16 @@ pub async fn reset_pinned_endpoints(
 /// stop would, so the feeds that were waiting on it are resumed here too.
 ///
 /// Returns the executable names that were released, for the log.
+///
+/// A program this sweep could not hand back is logged, not surfaced, and that is
+/// the reporting rule on purpose: both of this command's callers are housekeeping
+/// rather than a request — the session refresh that notices a routed program has
+/// gone, and the startup pass that runs just before the restores — so the rule
+/// "a failure the user just caused goes to the user" does not reach it. An `Err`
+/// would be worse than the log line, not better: the frontend swallows this
+/// answer whole, so a refusal turned into an error loses the names that *were*
+/// released too. The user-initiated cleanup is [`reset_pinned_endpoints`], and
+/// that one answers with what is still pinned and on which device.
 #[tauri::command]
 pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<String>, String> {
     let pinned = pins.snapshot();
@@ -765,11 +778,15 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
                     .collect::<Vec<_>>()
                     .join("; ");
                 warn!("the sweep left {exe_name} pinned through PID {relaunched_pid}: {reason}");
-                not_released.push(exe_name);
+                if !not_released.contains(&exe_name) {
+                    not_released.push(exe_name);
+                }
             }
             Err(e) => {
                 warn!("the sweep could not ask about {exe_name}: {e}");
-                not_released.push(exe_name);
+                if !not_released.contains(&exe_name) {
+                    not_released.push(exe_name);
+                }
             }
         }
     }
@@ -838,6 +855,12 @@ pub fn set_device_delay(
     duplications: State<'_, DuplicationManager>,
 ) -> Result<(), String> {
     info!("cmd: set_device_delay device={device_id} delay={delay_ms}ms");
+    // The key is validated here even though a delay never reaches a COM call: it
+    // is the only handle to that device's tuning, and a blank or absurd key is an
+    // entry no enumeration can ever name, list back or clear. Same bound as the
+    // write path and the carrier picker, so the three of them cannot disagree
+    // about what a device id is.
+    audio::routing::validate_device_id(&device_id).map_err(|e| e.to_string())?;
     delays.set(&device_id, delay_ms)?;
     duplications.update_delay(&device_id, delay_ms);
     Ok(())
@@ -924,6 +947,9 @@ pub fn set_device_volume(
     if percent > 100 {
         return Err("volume out of range 0-100".to_string());
     }
+    // Same reason the delay key is checked: a share is stored under the device id
+    // and read back by it for as long as the file lives.
+    audio::routing::validate_device_id(&device_id).map_err(|e| e.to_string())?;
     volumes.set(&device_id, percent)?;
     duplications.update_volume(&device_id, percent);
     Ok(())
@@ -1064,15 +1090,6 @@ pub fn align_source_levels(
         left_alone,
         playing: audible,
     })
-}
-
-fn parse_role(role: &str) -> audio::Role {
-    match role {
-        "console" => audio::Role::Console,
-        "multimedia" => audio::Role::Multimedia,
-        "communications" => audio::Role::Communications,
-        _ => audio::Role::All,
-    }
 }
 
 /// Get all remembered routes as `(exe_name, device_ids)` pairs.
