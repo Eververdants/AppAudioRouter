@@ -4,12 +4,12 @@
  * per executable — decode, `putImageData`, re-encode as a data URL.
  */
 
-/** What `get_process_icon` returns: top-down RGBA rows, 4 bytes per pixel. */
-export interface ProcessIcon {
-  width: number;
-  height: number;
-  rgba: string;
-}
+import type { ProcessIcon } from './types';
+
+/** The payload shape lives in `lib/types.ts` with every other backend wire
+ * type; re-declared here, it was a second copy of one contract, with nothing
+ * binding the two halves when Rust changes it. */
+export type { ProcessIcon };
 
 /** Base64 → clamped bytes, ready for an `ImageData`. */
 export function decodeBase64(base64: string): Uint8ClampedArray<ArrayBuffer> {

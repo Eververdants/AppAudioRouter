@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
 
+/** The system's motion preference, or `null` when this host cannot answer. */
+function reducedMotionQuery(): MediaQueryList | null {
+  return typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
+}
+
 /**
  * Whether the board may move on its own.
  *
@@ -18,11 +25,17 @@ import { useEffect, useState } from 'react';
  * repaints at all. That is the hard constraint the flow was bought against —
  * the wake-up cost of an idle engine is already accounted for in the audio
  * path, and the board must not add its own on top while nobody is watching.
+ *
+ * A read that is missing goes the same way as a "no": this answers in the
+ * board's *first render*, where a TypeError is the whole routing screen going
+ * white, and guessing "yes" would buy a repaint nobody is watching.
  */
 function mayAnimate(): boolean {
   if (document.visibilityState !== 'visible') return false;
-  if (!document.hasFocus()) return false;
-  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (typeof document.hasFocus !== 'function' || !document.hasFocus()) return false;
+  const reduced = reducedMotionQuery();
+  if (reduced === null) return false;
+  return !reduced.matches;
 }
 
 export function useLiveness(): boolean {
@@ -30,16 +43,16 @@ export function useLiveness(): boolean {
 
   useEffect(() => {
     const update = () => setLive(mayAnimate());
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const reduced = reducedMotionQuery();
     document.addEventListener('visibilitychange', update);
     window.addEventListener('focus', update);
     window.addEventListener('blur', update);
-    reduced.addEventListener('change', update);
+    reduced?.addEventListener('change', update);
     return () => {
       document.removeEventListener('visibilitychange', update);
       window.removeEventListener('focus', update);
       window.removeEventListener('blur', update);
-      reduced.removeEventListener('change', update);
+      reduced?.removeEventListener('change', update);
     };
   }, []);
 
