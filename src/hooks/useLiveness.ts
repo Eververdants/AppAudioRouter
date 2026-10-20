@@ -48,6 +48,17 @@ export function useLiveness(): boolean {
     window.addEventListener('focus', update);
     window.addEventListener('blur', update);
     reduced?.addEventListener('change', update);
+    // Read the window again now that the listeners are attached.
+    //
+    // The state above was decided during *render*, and a render can be started
+    // long before it is committed (or thrown away). A window hidden in that gap
+    // would have announced itself with a `visibilitychange` nobody had
+    // subscribed to yet — and after it, nothing fires at all: the loop would
+    // stand on the board of a hidden window for the rest of the run, which is
+    // the exact repaint AGENTS.md forbids. Re-reading costs nothing when the
+    // answer is the same (React drops the update) and is the only way the gate
+    // can be closed on the frame it was mounted into.
+    update();
     return () => {
       document.removeEventListener('visibilitychange', update);
       window.removeEventListener('focus', update);

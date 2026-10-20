@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -21,6 +21,19 @@ const seen: boolean[] = [];
 
 function Probe() {
   seen.push(useLiveness());
+  return null;
+}
+
+/** Hides the window at commit — after the render pass answered, before the
+ *  passive effect that installs the listeners has run. Rendered before
+ *  `Probe`, so its layout effect lands first. */
+function Hider() {
+  useLayoutEffect(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+  }, []);
   return null;
 }
 
@@ -126,6 +139,41 @@ describe('useLiveness', () => {
     // whole routing screen going white, not a missing animation.
     environment({ hasFocusApi: false, matchMediaApi: false });
     expect(mount()).toBe(false);
+  });
+
+  it('closes the gate for a window hidden before it was ever mounted', () => {
+    // Not "open, then close": the answer is read in the render pass itself, so
+    // a hidden window never paints a frame of the flow it is not allowed to
+    // have. The app boots exactly this way — the window is created invisible.
+    environment({ visible: false });
+    mount();
+    expect(seen).not.toContain(true);
+    expect(seen[0]).toBe(false);
+  });
+
+  it('re-reads the window when it went away between the render and the listeners', () => {
+    // The gap the gate used to be able to fall through: the state was decided
+    // during render, the listeners arrive at commit, and a window that hid in
+    // between said so while nobody was subscribed. Nothing else fires — so the
+    // loop would stand on a hidden window for the rest of the run.
+    //
+    // A layout effect is the deterministic version of that gap: it runs at
+    // commit, after the render pass has answered and before the passive effect
+    // has attached anything.
+    environment({});
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    seen.length = 0;
+    act(() => {
+      root = createRoot(container as HTMLDivElement);
+      root?.render(
+        <>
+          <Hider />
+          <Probe />
+        </>,
+      );
+    });
+    expect(seen[seen.length - 1]).toBe(false);
   });
 
   it('stops listening when the component is gone', () => {
