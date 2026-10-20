@@ -117,6 +117,17 @@ const GROUP_GAP = 14;
 /** Vertical breathing room at the top and bottom of the feeders' column. */
 const COLUMN_MARGIN = 34;
 
+/** The smallest copies panel the board will draw at all: its hairlines and its
+ *  title row, with an empty body. A panel with no room left is never shrunk
+ *  below this — it stops with a row cut in half instead (see `peekBodyHeight`). */
+const COPIES_MIN_H = PANEL_BORDER * 2 + GROUP_HEADER_H;
+
+/** The shortest board that can still hold the whole destination column: the
+ *  primary panel, the gap, and the smallest copies panel there is. Below this
+ *  the column runs off the bottom edge, whatever `panelColumn` does with the
+ *  room it is given — see the note on `panelColumn`. */
+export const COLUMN_MIN_H = primaryPanelHeight() + GROUP_GAP + COPIES_MIN_H;
+
 /**
  * How tall a panel's body is for `rows` rows.
  *
@@ -179,6 +190,15 @@ export interface PanelColumn {
  * column in the middle, not a dashed box running to the floor — but never more
  * than what is left, so the stage still never scrolls: past that the panel
  * scrolls inside itself.
+ *
+ * The column does have a floor, and the sentence above used to claim it did
+ * not: the primary panel (90), the gap between the two (14) and the smallest
+ * copies panel the board draws at all (26 — its hairlines and title row, with a
+ * body of nothing) come to `COLUMN_MIN_H`. Below that, nothing keeps the column
+ * inside the board short of overlapping the panels, so the claim only holds from
+ * that height up — which the window cannot ask for: at its own `minHeight` the
+ * well still measures a few hundred. `stage.test.ts` pins the floor, so nobody
+ * has to re-derive it from those three literals again.
  */
 export function panelColumn(height: number, rows: number): PanelColumn {
   const primaryHeight = primaryPanelHeight();
@@ -192,11 +212,7 @@ export function panelColumn(height: number, rows: number): PanelColumn {
   // Content that fits takes its own height; one that does not stops with a row
   // cut in half, so the panel itself shows that there is more to scroll to.
   const copiesHeight =
-    wanted <= room
-      ? wanted
-      : PANEL_BORDER * 2 +
-        GROUP_HEADER_H +
-        peekBodyHeight(Math.max(0, room - PANEL_BORDER * 2 - GROUP_HEADER_H));
+    wanted <= room ? wanted : COPIES_MIN_H + peekBodyHeight(Math.max(0, room - COPIES_MIN_H));
   const top = Math.max(0, Math.round((height - primaryHeight - GROUP_GAP - copiesHeight) / 2));
   return {
     primaryY: top,
@@ -253,17 +269,47 @@ export function boardCentre(height: number): number {
   return height / 2;
 }
 
+/** The gap two feeder cards may be squeezed down to before they touch. */
+const FEEDER_MIN_GAP = 6;
+/** The pitch the feeders' column holds while there is room for it. */
+const FEEDER_COMFORT_PITCH = 78;
+/** The tightest pitch two feeder cards can take: a card plus that gap. The
+ *  column may be compressed to it, never past it. */
+const FEEDER_MIN_PITCH = MINI_H + FEEDER_MIN_GAP;
+
 /** Row distance for the feeders' column: comfortable while it fits, then
- *  compressed — never past the point where two cards would touch. */
-function feederDy(count: number, height: number): number {
+ *  compressed — never past the point where two cards would touch.
+ *
+ *  Exported because the cut has to be drawn where the cards are drawn: a caller
+ *  that fades or scrolls the column needs the same pitch the cards sit at, and
+ *  re-deriving it is how a wire and a row end up disagreeing. */
+export function feederPitch(count: number, height: number): number {
   if (count <= 1) return 0;
   const span = Math.max(0, height - COLUMN_MARGIN * 2 - MINI_H);
-  return Math.max(MINI_H + 6, Math.min(78, Math.floor(span / (count - 1))));
+  return Math.max(FEEDER_MIN_PITCH, Math.min(FEEDER_COMFORT_PITCH, Math.floor(span / (count - 1))));
+}
+
+/** How many feeder cards the column can hold before it leaves the board.
+ *
+ *  `feederPitch` stops compressing at [`FEEDER_MIN_PITCH`](58) — two cards that
+ *  are one gap apart are as close as they may be — so past this count the
+ *  column's own height, `(count - 1) * 58 + MINI_H`, exceeds the board and the
+ *  top and bottom cards hang off it. Nothing scrolls there and nothing fades:
+ *  the board is the only place a route is drawn, so the answer is a number the
+ *  column can show, not a claim that every feed fits.
+ *
+ *  Nine programs feeding one hub is a rare board, but it is a reachable one,
+ *  and `feederY` will happily place the ninth card off-screen. Whoever draws the
+ *  column owes it the same treatment the copies panel gets — a half-visible row
+ *  and a fading edge (AGENTS.md) — and this is the count to cut at. */
+export function feedersFitting(height: number): number {
+  if (height < MINI_H) return 0;
+  return Math.floor((height - MINI_H) / FEEDER_MIN_PITCH) + 1;
 }
 
 /** Where the feeders' card `index` of `count` sits (top edge, in px). */
 export function feederY(index: number, count: number, height: number): number {
-  const dy = feederDy(count, height);
+  const dy = feederPitch(count, height);
   const cy = boardCentre(height);
   return Math.round(cy + (index - (count - 1) / 2) * dy - MINI_H / 2);
 }

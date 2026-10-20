@@ -1,14 +1,20 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 import {
   BOARD_H,
+  COLUMN_MIN_H,
   GROUP_HEADER_H,
   GROUP_PAD,
   MINI_H,
   PANEL_BORDER,
+  PIN_D,
   ROW_GAP,
   ROW_H,
   alreadyApplied,
+  feederPitch,
   feederY,
+  feedersFitting,
   hubOutPort,
   nodePath,
   panelBodyHeight,
@@ -170,5 +176,66 @@ describe('board geometry', () => {
       expect(first).toBeGreaterThanOrEqual(0);
       expect(last + MINI_H).toBeLessThanOrEqual(BOARD_H);
     }
+  });
+
+  it('names the count of feeders the column can hold, and no more', () => {
+    // The loop above stops where the geometry does: the pitch compresses to a
+    // card plus its smallest gap and cannot go tighter, so past this count the
+    // column leaves the board — `feederY` will still place the ninth card, off
+    // the bottom edge. This is the number the column must cut at (half a card
+    // and a fading edge, the same answer the copies panel gives), so the limit
+    // is stated here rather than discovered by a user with nine programs
+    // feeding one.
+    const fits = feedersFitting(BOARD_H);
+    expect(fits).toBe(8);
+    const lastOf = feederY(fits - 1, fits, BOARD_H);
+    expect(lastOf + MINI_H).toBeLessThanOrEqual(BOARD_H);
+    const overflow = feederY(fits, fits + 1, BOARD_H);
+    expect(overflow + MINI_H).toBeGreaterThan(BOARD_H);
+    // Compressing has a floor, and it is a card plus its gap: a column of two
+    // that floor is reached is never tighter than that.
+    expect(feederPitch(2, BOARD_H)).toBeGreaterThanOrEqual(feederPitch(fits, BOARD_H));
+    expect(feederPitch(40, 200)).toBe(feederPitch(80, 200));
+    // An empty board holds nothing, and a board shorter than one card is not a
+    // board at all.
+    expect(feedersFitting(MINI_H - 1)).toBe(0);
+    expect(feedersFitting(MINI_H)).toBe(1);
+  });
+
+  it('keeps the column inside the board down to its own floor', () => {
+    // The floor is the primary panel, the gap and the smallest copies panel
+    // there is; `panelColumn` cannot fold the column below it, and the window
+    // cannot ask it to. Pinning the number keeps the claim on `panelColumn`
+    // honest — it holds for every height it can actually be handed.
+    expect(COLUMN_MIN_H).toBe(130);
+    for (const rows of [0, 1, 5, 40]) {
+      const column = panelColumn(COLUMN_MIN_H, rows);
+      expect(column.primaryY).toBe(0);
+      expect(column.copiesY + column.copiesHeight).toBeLessThanOrEqual(COLUMN_MIN_H);
+    }
+    // One pixel below it, and the column no longer fits: which is why the
+    // number is a floor and not a suggestion.
+    const below = panelColumn(COLUMN_MIN_H - 1, 0);
+    expect(below.copiesY + below.copiesHeight).toBeGreaterThan(COLUMN_MIN_H - 1);
+  });
+
+  it('hands the pin its size to the stylesheet, once', () => {
+    // A pin is placed by this file (`PIN_D`, through the ports) and painted by
+    // CSS. When the stylesheet held its own copy of 11px, the two could disagree
+    // by half a pixel and a wire would meet its row off-centre — the exact
+    // disagreement AGENTS.md says the geometry has one source for. So the size
+    // travels as one token, and this test is the binding between the token and
+    // the constant: change `PIN_D` without the stylesheet and this fails.
+    const css = readFileSync(`${process.cwd().replace(/\\/g, '/')}/src/styles/index.css`, 'utf8');
+    const declared = css.match(/--pin-d:\s*([0-9.]+)px/);
+    expect(declared?.[1]).toBe(String(PIN_D));
+    expect(declared?.[1]).toBe('11');
+    // ...and no rule is left free to carry its own copy of it.
+    expect(css).toMatch(/\.pin\s*\{[^}]*width:\s*var\(--pin-d\)/);
+    expect(css).toMatch(/\.pin-in\s*\{[^}]*left:\s*calc\(var\(--pin-d\) \/ -2\)/);
+    expect(css).toMatch(/\.pin-out\s*\{[^}]*right:\s*calc\(var\(--pin-d\) \/ -2\)/);
+    expect(css).not.toMatch(
+      /\.pin(?:-in|-out)?\s*\{[^}]*(?:width|height|left|right):\s*-?[0-9.]+px/,
+    );
   });
 });

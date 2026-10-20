@@ -37,6 +37,28 @@ describe('programEntryOf', () => {
     expect(programEntryOf([UPPER, LOWER], { 2101: ['tv'] }, 2102)).toBe(2101);
     expect(programEntryOf([UPPER, LOWER], { 2102: ['tv'] }, 2101)).toBe(2102);
   });
+
+  it('names the lowest pid when the keys are of mixed width', () => {
+    // `programEntryOf` walks the map's own key order and stops at the first
+    // sibling that answers, so the answer has to come out numeric: `999` before
+    // `1000`, where a string sort — or an insertion-order walk of a map built
+    // some other way — would hand the entry to the *larger* process and the
+    // board would show the route on a sibling the audio service never named.
+    // `Object.keys` does order integer-like keys ascending; this is the pin.
+    const sessions: AudioSession[] = [
+      { pid: 1000, exe_name: 'browser.exe' },
+      { pid: 999, exe_name: 'browser.exe' },
+      { pid: 1001, exe_name: 'browser.exe' },
+    ];
+    expect(programEntryOf(sessions, { 1000: ['tv'], 999: ['tv'] }, 1001)).toBe(999);
+    // And the whole-list pass agrees with the per-process one, whatever order
+    // the sessions arrive in: two holders of the same program, one answer.
+    expect(programOwners(sessions, { 1000: ['tv'], 999: ['tv'] })).toEqual({
+      999: 999,
+      1000: 999,
+      1001: 999,
+    });
+  });
 });
 
 describe('programOwners', () => {

@@ -6,6 +6,7 @@ import {
   isWindowMaximized,
   minimizeWindow,
   onWindowResized,
+  PAINT_WAIT_MS,
   revealMainWindow,
   toggleMaximizeWindow,
 } from './window';
@@ -61,6 +62,30 @@ describe('inside the Tauri shell', () => {
     await revealMainWindow();
     expect(calls).toContain('plugin:window|is_visible');
     expect(calls).toContain('plugin:window|show');
+  });
+
+  it('reveals the window when the compositor never produces a frame', async () => {
+    // A window created with `visible: false` has nothing to paint into, and a
+    // renderer that is not painting schedules no animation frames at all. The
+    // reveal waited for two of them unconditionally, so the promise simply hung:
+    // the window still came up, but only via Rust's watchdog — five seconds
+    // late, and without the focus this call also owes. The frame is a nicety;
+    // the reveal is the job.
+    const calls = withBackend((cmd) => (cmd === 'plugin:window|is_visible' ? false : null));
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 0);
+    vi.useFakeTimers();
+    try {
+      // Deliberately not awaited to completion: a regression here would leave
+      // the reveal pending forever, and a timed-out test would then carry its
+      // fake timers into the next one. The bound is what is being asserted, so
+      // the calls made by now are the whole answer.
+      void revealMainWindow();
+      await vi.advanceTimersByTimeAsync(PAINT_WAIT_MS + 50);
+      expect(calls).toContain('plugin:window|show');
+    } finally {
+      vi.useRealTimers();
+      raf.mockRestore();
+    }
   });
 
   it('leaves a window that is already visible alone', async () => {

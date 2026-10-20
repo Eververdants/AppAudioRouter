@@ -96,22 +96,57 @@ export async function onWindowResized(handler: () => void): Promise<() => void> 
   }
 }
 
+/** How long to wait for the first painted frame before revealing anyway.
+ *
+ * Two animation frames is the guarantee that the first commit actually reached
+ * the screen; it is not a guarantee that frames are being produced at all. A
+ * window created with `visible: false` has no reason to paint, and a renderer
+ * that is not painting does not schedule frames — an unbounded wait then hangs
+ * the reveal forever, and the only thing left is Rust's watchdog, which shows
+ * the window five seconds late and without the focus this call also owes. So
+ * the frame is worth waiting for *up to a moment*, and the reveal is worth more.
+ */
+export const PAINT_WAIT_MS = 250;
+
+/** Resolve after the next two frames, or after `PAINT_WAIT_MS`, whichever comes
+ * first. A host that cannot even schedule a frame is answered immediately. */
+function waitForFirstPaint(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, PAINT_WAIT_MS);
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    } catch {
+      finish();
+    }
+  });
+}
+
 /**
  * Reveals the main window.
  *
  * The window is created hidden (`"visible": false`) so the user never sees the
  * unstyled shell while the webview boots. The frontend calls this once it has
  * rendered; the two animation frames guarantee the first commit has actually
- * been painted, so the window appears fully formed. Rust keeps a watchdog that
- * shows the window anyway if this never runs.
+ * been painted, so the window appears fully formed — bounded by
+ * [`PAINT_WAIT_MS`](250), because a window that has never been shown may never
+ * produce a frame and the reveal must not hang on it. Rust keeps a watchdog that
+ * shows the window anyway if this never runs (`spawn_reveal_watchdog`, five
+ * seconds, and stood down for a `--hidden` logon launch); it is the reason a
+ * stalled reveal is a late window rather than no window, and it is not a reason
+ * to wait for one.
  */
 export async function revealMainWindow(): Promise<void> {
   const module = loadWindowModule();
   if (!module) return;
   try {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    });
+    await waitForFirstPaint();
     const { getCurrentWindow } = await module;
     const appWindow = getCurrentWindow();
     if (await appWindow.isVisible()) return;

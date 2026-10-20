@@ -60,6 +60,15 @@
   --type-mirror-rgb: 15 118 110;
   --type-idle-rgb: 148 163 184;
   --type-feed-rgb: 180 83 9;
+
+  /* Geometry mirror — the only non-colour token here, and it is here because
+     the board's sizes have exactly one source: `lib/stage.ts`. A pin is drawn
+     by CSS but *located* by the ports in stage.ts (`PIN_D`), and the wire that
+     meets it is computed from that same number, so the two halves must never
+     hold separate literals: a pin one pixel off its wire reads as a bug in the
+     routing, not in the stylesheet. `stage.test.ts` asserts this value against
+     `PIN_D`, so changing one without the other fails a test. */
+  --pin-d: 11px;
 }
 
 .dark {
@@ -215,22 +224,24 @@ input[type='number']::-webkit-inner-spin-button {
 
   /* A pin: the stub a wire plugs into. Centred on the edge it belongs to, so
      the wire that meets it ends exactly at that edge — which is what the ports
-     in lib/stage.ts answer with, to the half pixel. */
+     in lib/stage.ts answer with, to the half pixel. Its size is `--pin-d`
+     (= `PIN_D`) and its offset is half of that, taken from the same token: no
+     number in this block is allowed to be its own copy of the geometry. */
   .pin {
     position: absolute;
-    width: 11px;
-    height: 11px;
+    width: var(--pin-d);
+    height: var(--pin-d);
     border-radius: 4px;
     background: rgb(var(--text-muted-rgb) / 0.85);
     border: 1px solid var(--bg-primary);
   }
   .pin-in {
-    left: -5.5px;
+    left: calc(var(--pin-d) / -2);
     top: 50%;
     transform: translateY(-50%);
   }
   .pin-out {
-    right: -5.5px;
+    right: calc(var(--pin-d) / -2);
     top: 50%;
     transform: translateY(-50%);
   }
