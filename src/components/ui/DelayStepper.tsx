@@ -11,13 +11,13 @@ import { useDelayValue } from '@/hooks/useDelayValue';
  * The settings page is the only place this control appears; the board's tuning
  * dock steps the same delay through `setDeviceDelayValue` itself.
  *
- * ⚠️ The draft is the hook's business, and the hook holds it against the device
- * it was typed for. That is what makes this control safe to render without a
- * key: the settings rows happen to be keyed by id, but a control must not be
- * correct only because of how its caller renders it — one device removed above
- * this row, and device A's typed number used to be written onto device B. If the
- * hook ever stops binding the draft, the row that re-renders with a new
- * `deviceId` must drop the draft here instead; do not rely on the key again.
+ * Its rows happen to be keyed by device, and nothing here may depend on that.
+ * A draft belongs to the device it was typed for and `useDelayValue` holds that
+ * binding — every write goes to the draft's own device, and a draft from another
+ * one is invisible to this field — so a row that re-renders under a different
+ * `deviceId` cannot hand device A's typed number to device B. The invariant is
+ * the hook's and `useDelayValue.test.tsx` carries it, so there is no second
+ * guard here to keep in step.
  */
 export function DelayStepper({ deviceId, name }: { deviceId: string; name: string }) {
   const { t } = useTranslation();

@@ -68,14 +68,15 @@ export function Toast() {
   }, [errorNotice, held, dismissError]);
 
   // The card that is *this* notice, as opposed to the next one wearing the same
-  // slot. `raiseError` replaces the message and bumps the id, which remounts the
-  // card; a card that is removed under the pointer never reports that the pointer
-  // left it, so the `held` it set would stand for the new one as well — and a
-  // held card starts no countdown at all. One action that fails in several places
-  // at once (a wipe that refuses several stops) raises several notices in a row,
-  // so this is not a corner: the last failure would simply never go away. Same
-  // reasoning for the feed offer, whose key changes when the pair or the
-  // direction does.
+  // slot. A new notice bumps the id — the same sentence failing twice counts as
+  // a new one — and the bump remounts the card; a card removed under the pointer
+  // never reports that the pointer left it, so the `held` it set would stand for
+  // the new one as well, and a held card starts no countdown at all. An action
+  // that fails in several places still raises one card: the store batches it
+  // (`beginErrorBatch` / `endErrorBatch`) while every failure writes its own log
+  // line as it happens. Stacking them here would re-create the pile-up the batch
+  // replaced, with only the last one left standing. Same reasoning for the feed
+  // offer, whose key changes when the pair or the direction does.
   const errorId = errorNotice?.id ?? null;
   const feedKey =
     feedUndo === null
