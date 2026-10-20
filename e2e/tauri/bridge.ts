@@ -52,6 +52,34 @@ export interface BridgeState {
 /** Commands the fake backend should reject, by name. */
 export type FailingCommands = string[];
 
+/** One admitted run of the delay wizard's tone player, as
+ *  `commands::calibration_start` admits it: the parameters after
+ *  `audio::calibration`'s own clamps, and how the run ended. */
+export interface BridgeCalibrationRun {
+  /** The endpoint the burst was written to — the command's own argument. */
+  device: string;
+  reps: number;
+  leadMs: number;
+  tailMs: number;
+  /** Page-clock instant the run was admitted. */
+  startedAt: number;
+  /** Null while it is still playing. */
+  endedAt: number | null;
+  /** Ended because `calibration_cancel` was asked to. */
+  cancelled: boolean;
+}
+
+/** One `calibration-tone` marker the player emitted, with the run it belongs
+ *  to. The event's own payload stays `{ index, phase }`: only one run is ever
+ *  alive, so the real backend never names a device in it. */
+export interface BridgeToneMarker {
+  run: number;
+  device: string;
+  index: number;
+  phase: 'start' | 'end';
+  at: number;
+}
+
 /** What the page exposes for a test to read and drive. */
 export interface BridgeHandle {
   /** Every command the frontend sent, in order. */
@@ -68,6 +96,10 @@ export interface BridgeHandle {
   setFocused: (focused: boolean) => void;
   /** Forget the recorded calls, so a later assertion sees only new ones. */
   resetCalls: () => void;
+  /** Every calibration run the tone player admitted, in order. */
+  calibrationRuns: () => BridgeCalibrationRun[];
+  /** Every `calibration-tone` marker it played, with its page-clock instant. */
+  calibrationTones: () => BridgeToneMarker[];
 }
 
 /** The IPC surface `@tauri-apps/api/core` looks for on the global. The package
@@ -105,14 +137,54 @@ declare global {
  * `window`.
  */
 function tauriBridge(initial: BridgeState): void {
+  // The tone player's numbers, copied from `src-tauri/src/audio/calibration.rs`
+  // with the same names. They belong here rather than in the specs because the
+  // fake is what has to keep the schedule honest — a spec that invented its own
+  // timings would be testing a player that does not exist.
+  /** `TONE_BURST_MS`: how long one burst sounds. */
+  const TONE_BURST_MS = 800;
+  /** `TONE_REPS_DEFAULT` / `TONE_REPS_MAX`. */
+  const TONE_REPS_DEFAULT = 3;
+  const TONE_REPS_MAX = 6;
+  /** `LEAD_MS_DEFAULT` and the clamp bounds for caller-supplied lead and tail. */
+  const LEAD_MS_DEFAULT = 500;
+  const TAIL_MS_DEFAULT = 900;
+  const LEAD_MS_MIN = 100;
+  const LEAD_MS_MAX = 2000;
+  const TAIL_MS_MIN = 100;
+  const TAIL_MS_MAX = 2000;
+  /** `GAP_MIN_MS` / `GAP_MAX_MS`: the silence drawn before every burst. A fixed
+   *  rhythm would let the tapper anticipate the sound and bias the measurement,
+   *  which is the whole thing the wizard is measuring. */
+  const GAP_MIN_MS = 500;
+  const GAP_MAX_MS = 1200;
+  /** `WAIT_BACKSTOP_MS`: how long a cancelled run may linger. The real pump
+   *  wakes on the device's render event and at worst on this backstop, checking
+   *  the cancel flag on both exits; the fake has no render event, so this is the
+   *  ceiling on its own wake-ups too. */
+  const CANCEL_BACKSTOP_MS = 250;
+  /** `commands::calibration_start` validates the id before it admits anything. */
+  const MAX_DEVICE_ID_LEN = 1024;
+  /** `config::DELAY_MAX_MS`: a magnitude beyond it is refused, not clamped. */
+  const DELAY_MAX_MS = 10000;
+
   const state = {
     ...initial,
     routes: {} as Record<string, string[]>,
     /** Per-route engine generation, as `apply_route` handed it out. */
     routeGenerations: {} as Record<string, number>,
-    /** Which engines have reported `duplication-ready`, so their mirrors have
-     *  a latency reading to hand back. A fresh engine does not yet. */
-    readyPids: {} as Record<string, boolean>,
+    /** Which engine generation has reported `duplication-ready`, so its mirrors
+     *  have a latency reading to hand back. A fresh engine does not yet — and a
+     *  stale ready signal says nothing about the engine that replaced it. */
+    readyGenerations: {} as Record<string, number>,
+    /** The tone player's books: `CalibrationState`'s busy flag, the run it
+     *  admitted, and every marker it played. */
+    calibration: {
+      runs: [] as BridgeCalibrationRun[],
+      tones: [] as BridgeToneMarker[],
+      busy: false,
+      active: null as { cancelRequested: boolean } | null,
+    },
     calls: [] as { cmd: string; args: Record<string, unknown> }[],
     generation: 0,
     failing: [] as string[],
@@ -120,6 +192,143 @@ function tauriBridge(initial: BridgeState): void {
   const callbacks = new Map<number, (data: unknown) => void>();
   const listeners = new Map<string, number[]>();
   let nextCallbackId = 1;
+
+  /** Hand an event to everything subscribed to it, the way the notification
+   *  thread does. The engine's own ready signal is also the moment its mirrors
+   *  have a latency to report, so the scripted graph takes it here — before this
+   *  the reading does not exist, and only for the generation that reported. */
+  const deliver = (event: string, payload: unknown): void => {
+    if (event === 'duplication-ready') {
+      const data = (payload ?? {}) as { pid?: unknown; generation?: unknown };
+      if (typeof data.pid === 'number' && typeof data.generation === 'number') {
+        const pid = String(data.pid);
+        if (state.routeGenerations[pid] === data.generation) {
+          state.readyGenerations[pid] = data.generation;
+        }
+      }
+    }
+    for (const id of listeners.get(event) ?? []) {
+      callbacks.get(id)?.({ event, id: 0, payload });
+    }
+  };
+
+  const clampInt = (raw: unknown, fallback: number, min: number, max: number): number => {
+    const value = typeof raw === 'number' && Number.isFinite(raw) ? Math.trunc(raw) : fallback;
+    return Math.min(max, Math.max(min, value));
+  };
+
+  /**
+   * Admit one tone run and play its schedule, resolving when it is done.
+   *
+   * This is `calibration::play_test_tone`'s shape, not a friendlier stand-in:
+   * the id is validated first, then one run at a time is admitted, then the
+   * schedule is silence-lead, and per burst a drawn gap, the burst, and a tail —
+   * with `start` riding on the burst's first frame and `end` on its last, and
+   * the promise kept until the whole schedule has been written. The fake has no
+   * speaker, so a tap is the ear: what the markers say is exactly what the real
+   * player says about the bytes it wrote.
+   */
+  const startCalibration = (payload: Record<string, unknown>): Promise<void> => {
+    const books = state.calibration;
+    const device = typeof payload.deviceId === 'string' ? payload.deviceId : '';
+    if (device.length === 0) return Promise.reject(new Error('empty device id'));
+    if (device.length > MAX_DEVICE_ID_LEN) return Promise.reject(new Error('device id too long'));
+    // The next thing the real command does is `GetDevice`, which fails for an
+    // endpoint the machine does not have.
+    if (!state.devices.some((d: BridgeDevice) => d.id === device)) {
+      return Promise.reject(new Error('GetDevice failed: element not found (injected)'));
+    }
+    if (books.busy) {
+      return Promise.reject(new Error('a calibration run is already in progress'));
+    }
+
+    const reps = clampInt(payload.reps, TONE_REPS_DEFAULT, 1, TONE_REPS_MAX);
+    const leadMs = clampInt(payload.leadMs, LEAD_MS_DEFAULT, LEAD_MS_MIN, LEAD_MS_MAX);
+    const tailMs = clampInt(payload.tailMs, TAIL_MS_DEFAULT, TAIL_MS_MIN, TAIL_MS_MAX);
+
+    // Marker deadlines, in ms from the run's start: every burst is bracketed by
+    // a pair, and the run ends after the last tail.
+    const markers: { at: number; index: number; phase: 'start' | 'end' }[] = [];
+    let cursor = leadMs;
+    for (let rep = 0; rep < reps; rep += 1) {
+      cursor += GAP_MIN_MS + Math.floor(Math.random() * (GAP_MAX_MS - GAP_MIN_MS + 1));
+      markers.push({ at: cursor, index: rep, phase: 'start' });
+      cursor += TONE_BURST_MS;
+      markers.push({ at: cursor, index: rep, phase: 'end' });
+      cursor += tailMs;
+    }
+    const totalMs = cursor;
+
+    const run: BridgeCalibrationRun = {
+      device,
+      reps,
+      leadMs,
+      tailMs,
+      startedAt: performance.now(),
+      endedAt: null,
+      cancelled: false,
+    };
+    const runIndex = books.runs.push(run) - 1;
+    // `begin` clears the cancel flag for a fresh run — a flag that outlived its
+    // run would fail every later one at once. A per-run flag gets that for free.
+    const active = { cancelRequested: false };
+    books.busy = true;
+    books.active = active;
+
+    return new Promise<void>((resolve, reject) => {
+      let next = 0;
+      let timer = 0;
+      const finish = (cancelled: boolean) => {
+        window.clearTimeout(timer);
+        books.busy = false;
+        if (books.active === active) books.active = null;
+        run.endedAt = performance.now();
+        run.cancelled = cancelled;
+      };
+      const tick = () => {
+        if (active.cancelRequested) {
+          // The real pump returns `Api("calibration cancelled")` from the same
+          // check, and the wizard reads that string as its own doing.
+          finish(true);
+          reject(new Error('calibration cancelled'));
+          return;
+        }
+        const elapsed = performance.now() - run.startedAt;
+        while (next < markers.length && elapsed >= (markers[next] as { at: number }).at) {
+          const marker = markers[next] as { at: number; index: number; phase: 'start' | 'end' };
+          books.tones.push({
+            run: runIndex,
+            device,
+            index: marker.index,
+            phase: marker.phase,
+            at: performance.now(),
+          });
+          // `let _ = app.emit(...)`: the player writes bytes and cannot be
+          // disturbed by whoever in the webview failed to handle the marker. A
+          // throw that reached this loop would strand the run — the burst would
+          // never resolve, and the wizard would sit on the measure screen with
+          // neither a sound nor an error to explain it.
+          try {
+            deliver('calibration-tone', { index: marker.index, phase: marker.phase });
+          } catch (error) {
+            console.error('[calibration] a tone subscriber failed', error);
+          }
+          next += 1;
+        }
+        if (next >= markers.length && elapsed >= totalMs) {
+          finish(false);
+          resolve();
+          return;
+        }
+        const waitTo =
+          next < markers.length
+            ? (markers[next] as { at: number }).at - elapsed
+            : totalMs - elapsed;
+        timer = window.setTimeout(tick, Math.max(1, Math.min(waitTo, CANCEL_BACKSTOP_MS)));
+      };
+      tick();
+    });
+  };
 
   const invoke = (cmd: string, args: Record<string, unknown> | undefined): unknown => {
     const payload = args ?? {};
@@ -161,27 +370,28 @@ function tauriBridge(initial: BridgeState): void {
         // single-device route is just the per-app endpoint and reports 0.
         if (deviceIds.length <= 1) {
           delete state.routeGenerations[pid];
-          delete state.readyPids[pid];
+          delete state.readyGenerations[pid];
           return 0;
         }
         state.generation += 1;
         state.routeGenerations[pid] = state.generation;
         // A new engine has not opened its mirrors yet, so it has no reading to
         // report until it says it is ready.
-        delete state.readyPids[pid];
+        delete state.readyGenerations[pid];
         return state.generation;
       }
       case 'stop_route':
         delete state.routes[String(payload.pid)];
         delete state.routeGenerations[String(payload.pid)];
-        delete state.readyPids[String(payload.pid)];
+        delete state.readyGenerations[String(payload.pid)];
         return { released: true, pinned_device: null, sibling_held: false };
       case 'get_active_duplications':
         // The real command lists *engines*, so single-device routes — which
         // have none — never appear here. Parallel arrays, same order as the
         // real engine reports them: the primary has no stream of ours to ask,
         // so its entry is `null` — the same "not measured" the real backend
-        // sends for it, and for the copies too until `duplication-ready`.
+        // sends for it, and for the copies too until the engine whose
+        // generation reported `duplication-ready` is still the live one.
         return Object.entries(state.routes)
           .filter(([, deviceIds]) => deviceIds.length > 1)
           .map(([pid, deviceIds]) => ({
@@ -189,7 +399,9 @@ function tauriBridge(initial: BridgeState): void {
             generation: state.routeGenerations[pid] ?? 0,
             deviceIds,
             latencyMs: deviceIds.map((_, index) =>
-              index === 0 || state.readyPids[pid] !== true ? null : 20,
+              index === 0 || state.readyGenerations[pid] !== state.routeGenerations[pid]
+                ? null
+                : 20,
             ),
           }));
       case 'get_remembered_routes':
@@ -253,7 +465,27 @@ function tauriBridge(initial: BridgeState): void {
         return null;
       case 'get_device_delays':
         return state.delays;
-      case 'set_device_delay':
+      case 'set_device_delay': {
+        const deviceId = String(payload.deviceId);
+        const delayMs = Number(payload.delayMs);
+        // `DelayConfig::set`: 0 removes the entry, a magnitude past the hard
+        // bound is refused rather than clamped, and anything else is persisted
+        // so a later boot reads the same number back.
+        if (!Number.isFinite(delayMs)) return null;
+        if (Math.abs(delayMs) > DELAY_MAX_MS) {
+          throw new Error(`delay ${delayMs} ms is outside the supported ±${DELAY_MAX_MS} ms bound`);
+        }
+        const rest = state.delays.filter(([id]: [string, number]) => id !== deviceId);
+        state.delays = delayMs === 0 ? rest : [...rest, [deviceId, delayMs]];
+        return null;
+      }
+      case 'calibration_start':
+        return startCalibration(payload);
+      case 'calibration_cancel':
+        // `CalibrationState::cancel`: a flag the running worker reads between
+        // writes. With no worker alive it does nothing at all, and it does not
+        // reach the next run — `begin` would clear it first.
+        if (state.calibration.active !== null) state.calibration.active.cancelRequested = true;
         return null;
       case 'get_device_volumes':
         return state.volumes;
@@ -361,18 +593,7 @@ function tauriBridge(initial: BridgeState): void {
     state: state as unknown as BridgeState & Record<string, unknown>,
     calls: () => state.calls,
     callsFor: (cmd: string) => state.calls.filter((call) => call.cmd === cmd),
-    emit: (event: string, payload: unknown) => {
-      // The engine's own ready signal is also the moment its mirrors have a
-      // latency to report, so the scripted graph takes it the way the real
-      // notification thread sends it — before this, the reading does not exist.
-      if (event === 'duplication-ready') {
-        const data = payload as { pid?: unknown };
-        if (typeof data?.pid === 'number') state.readyPids[String(data.pid)] = true;
-      }
-      for (const id of listeners.get(event) ?? []) {
-        callbacks.get(id)?.({ event, id: 0, payload });
-      }
-    },
+    emit: deliver,
     setSessions: (sessions: BridgeSession[]) => {
       state.sessions = sessions;
     },
@@ -392,6 +613,8 @@ function tauriBridge(initial: BridgeState): void {
     resetCalls: () => {
       state.calls = [];
     },
+    calibrationRuns: () => state.calibration.runs,
+    calibrationTones: () => state.calibration.tones,
   };
 }
 

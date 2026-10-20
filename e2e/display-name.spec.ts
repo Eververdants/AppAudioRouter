@@ -76,8 +76,13 @@ test.describe('display names', () => {
     // title. The retitle is still a swap on stage — both layers moved.
     await expect(hub(page)).toHaveAttribute('aria-label', /Now Playing: X/);
     // The refresh behind the notification only logs when the list — pid and
-    // exe, deliberately not the display name — actually differs.
+    // exe, deliberately not the display name — actually differs. Routing first
+    // is what makes that absence mean something: a record panel that never
+    // wrote a line at all would pass it too, so the test asks for the line the
+    // action earned before it counts the line the retitle did not.
+    await hub(page).click();
     await page.getByRole('tab', { name: 'Activity' }).click();
+    await expect(page.getByText('Routed music.exe to Speakers')).toBeVisible();
     await expect(page.getByText('Session list changed')).toHaveCount(0);
   });
 });

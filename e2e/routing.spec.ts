@@ -682,11 +682,15 @@ test('a copy’s measured delay arrives with its engine, not before', async ({ p
 
   // The seat is played by Windows itself: there is no stream of ours there to
   // measure, so its strip never carries a reading — not even after the engine
-  // reported one for its own devices. The panel is first proven to be the
-  // primary's own, so the absence below is not the absence of the strip.
+  // reported one for its own devices. Counted first, because "no div carries
+  // Measured" is also true of a strip that renders no titled row at all: the
+  // primary's one row is the volume, and the delay row it has no place for is
+  // what the reading would have sat on.
   await tuneButton(page, 'TV').click();
   await expect(tunerStrip(page).getByText('Primary volume')).toBeVisible();
-  await expect(tunerStrip(page).locator('div[title]')).not.toHaveAttribute('title', /Measured/);
+  const primaryRows = tunerStrip(page).locator('div[title]');
+  await expect(primaryRows).toHaveCount(1);
+  await expect(primaryRows).not.toHaveAttribute('title', /Measured/);
 });
 
 test('a plan that is not the route has nothing flowing through it', async ({ page }) => {
