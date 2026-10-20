@@ -72,11 +72,71 @@ const LEAD_SPREAD_MS = 600;
  * would only be dead time between calls. */
 const CALL_TAIL_MS = 300;
 
+/** localStorage key holding the highest run token this webview has handed out,
+ * next to the aar-theme / aar-language / aar-delay-step keys. */
+const RUN_TOKEN_STORAGE_KEY = 'aar-calibration-run';
+
+/** The highest token minted so far by this page; see `mintRunToken`. */
+let lastRunToken = 0;
+
+/**
+ * The `run` identity of one wizard run — the number both `calibration_start` and
+ * `calibration_cancel` carry, and the only thing that tells the player's
+ * `begin` which of its two callers arrived first.
+ *
+ * It has to answer to exactly one run, ever: the player outlives the page, so a
+ * token reused by a *later* run — or by a page reloaded over a cancel mark the
+ * earlier page left — would either refuse a burst the user never called off or
+ * play one they did. `Date.now()` alone does not hold: two runs minted in the
+ * same millisecond share a token, and a reload landing inside the previous
+ * page's last millisecond hands that token straight back. So every token is the
+ * previous one plus one, seeded from the wall clock and left in storage —
+ * strictly increasing for this webview across reloads, and below
+ * `Number.MAX_SAFE_INTEGER` (so well inside the backend's `u64`) for as long as
+ * the epoch is measured in milliseconds.
+ */
+function mintRunToken(): number {
+  let previous = lastRunToken;
+  try {
+    const stored = Number(localStorage.getItem(RUN_TOKEN_STORAGE_KEY));
+    if (Number.isSafeInteger(stored) && stored > previous) previous = stored;
+  } catch {
+    /* storage may be unavailable; the wall-clock seed below still applies */
+  }
+  const next = Math.min(Number.MAX_SAFE_INTEGER, Math.max(previous, Date.now()) + 1);
+  lastRunToken = next;
+  try {
+    localStorage.setItem(RUN_TOKEN_STORAGE_KEY, String(next));
+  } catch {
+    /* nothing to persist: within this page the counter already holds */
+  }
+  return next;
+}
+
 /** Median of a non-empty list — the press the others agree with. */
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted[mid] ?? sorted[0] ?? 0;
+}
+
+/**
+ * A burst the backend stopped *under* the wizard rather than because this loop
+ * asked it to: the window went invisible and its cancellation reached the run
+ * before the loop did, or a newer generation refused this start outright.
+ *
+ * A stop the loop itself ordered never reaches the caller that reads this — it
+ * bumps `runId` first, so the run is already stale and stands down at the guard
+ * before it. So a message landing here while the loop is still the current one
+ * is a run nobody in the wizard meant to end: it is not a measurement worth a
+ * failure panel, but the dialog must not freeze on the measure screen either.
+ * The two strings are the backend's own (`calibration.rs` answers a burst it
+ * stopped mid-run with `"calibration cancelled"`, and `Refusal::Cancelled` — a
+ * start whose run the user had already called off — with
+ * `"calibration superseded (…)"`).
+ */
+function isStaleRunMessage(message: string): boolean {
+  return message.includes('calibration cancelled') || message.includes('calibration superseded');
 }
 
 /** Fisher–Yates on a copy: the round order rotates so no device is always
@@ -145,6 +205,10 @@ export function DelayCalibration({
   const measuring = useRef(false);
   /** One token per run; an async loop bails once its token goes stale. */
   const runId = useRef(0);
+  /** The same run's identity *as the backend knows it* — the `run` every start of
+   *  this run is stamped with and every cancel of it names. 0 (the backend's
+   *  `NO_RUN_TOKEN`) only while no run has been started. */
+  const runToken = useRef(0);
   /** The devices this calibration session covers, fixed at 开始测量. */
   const selectedRef = useRef<string[]>([]);
   /** Valid per-burst offsets collected per device so far. */
@@ -173,7 +237,7 @@ export function DelayCalibration({
   }, [step, failure]);
 
   const deviceName = useCallback(
-    (id: string) => devices.find((d) => d.id === id)?.name ?? t('routed.deviceGone'),
+    (id: string) => devices.find((d) => d.id === id)?.name ?? t('calibration.deviceGone'),
     [devices, t],
   );
 
@@ -203,88 +267,107 @@ export function DelayCalibration({
    * device per round. Rounds past MIN_ROUNDS play only the devices still
    * short of presses. `restrict` re-runs a subset after a no-press failure
    * while keeping everyone else's readings.
+   *
+   * `myToken` is this run's backend identity — taken at the call, never read
+   * back from the ref, because a newer run has already replaced it by the time a
+   * stale loop wakes.
    */
-  const runRounds = useCallback(async (myRun: number, restrict: string[] | null) => {
-    const alive = () => runId.current === myRun;
-    try {
-      for (let r = 0; r < MAX_ROUNDS; r += 1) {
-        const isExtension = r >= MIN_ROUNDS;
-        let batch = restrict ?? selectedRef.current;
-        if (isExtension) {
-          batch = batch.filter((id) => (repsRef.current[id]?.length ?? 0) < MIN_VALID);
-          if (batch.length === 0) break;
-        }
-        setExtending(isExtension);
-        setRound(r + 1);
-        for (const id of shuffled(batch)) {
-          if (!alive()) return;
-          currentDeviceRef.current = id;
-          setCurrentDevice(id);
-          // The burst that was sounding belongs to the device being left: a tap
-          // that arrives during the next device's lead silence answers nothing,
-          // and scoring it here would hand the previous device's timestamp to
-          // this one as a measurement.
-          markerStart.current = null;
-          // A re-run keeps what a device already has; the tally on screen says
-          // so rather than starting the count again under the user.
-          setTapped(repsRef.current[id]?.length ?? 0);
-          setSloppy(false);
-          await calibrationStart(id, {
-            reps: 1,
-            leadMs: LEAD_MIN_MS + Math.floor(Math.random() * LEAD_SPREAD_MS),
-            tailMs: CALL_TAIL_MS,
-          });
-          if (!alive()) {
-            // The command landed *after* the wizard walked out: the Escape or
-            // the unmount already sent its cancel, and that one found nothing
-            // running, because this call was still in flight. So the burst the
-            // backend had not yet started is now playing into a dialog that no
-            // longer exists — this is the second cancel, the one that reaches
-            // it. A Rust-side generation check would be the sturdier answer;
-            // nothing here can promise the order of the two commands.
-            void calibrationCancel().catch(() => undefined);
-            return;
+  const runRounds = useCallback(
+    async (myRun: number, myToken: number, restrict: string[] | null) => {
+      const alive = () => runId.current === myRun;
+      try {
+        for (let r = 0; r < MAX_ROUNDS; r += 1) {
+          const isExtension = r >= MIN_ROUNDS;
+          let batch = restrict ?? selectedRef.current;
+          if (isExtension) {
+            batch = batch.filter((id) => (repsRef.current[id]?.length ?? 0) < MIN_VALID);
+            if (batch.length === 0) break;
+          }
+          setExtending(isExtension);
+          setRound(r + 1);
+          for (const id of shuffled(batch)) {
+            if (!alive()) return;
+            currentDeviceRef.current = id;
+            setCurrentDevice(id);
+            // The burst that was sounding belongs to the device being left: a tap
+            // that arrives during the next device's lead silence answers nothing,
+            // and scoring it here would hand the previous device's timestamp to
+            // this one as a measurement.
+            markerStart.current = null;
+            // A re-run keeps what a device already has; the tally on screen says
+            // so rather than starting the count again under the user.
+            setTapped(repsRef.current[id]?.length ?? 0);
+            setSloppy(false);
+            await calibrationStart(id, {
+              reps: 1,
+              leadMs: LEAD_MIN_MS + Math.floor(Math.random() * LEAD_SPREAD_MS),
+              tailMs: CALL_TAIL_MS,
+              run: myToken,
+            });
+            if (!alive()) {
+              // The command landed *after* the wizard walked out. When the cancel
+              // named this run — every one of them does — the player had already
+              // refused the start that was still in flight, so this branch is the
+              // rarer one: a burst admitted before the cancel reached the pump,
+              // which then wrote out its schedule without seeing the flag. Ask once
+              // more, and name the run: an *unnamed* cancel over an idle player is
+              // read as an answer to the next start to arrive, and would eat the
+              // following run's first burst.
+              void calibrationCancel(myToken).catch(() => undefined);
+              return;
+            }
           }
         }
-      }
-      if (!alive()) return;
-      const noPresses = selectedRef.current.filter(
-        (id) => (repsRef.current[id]?.length ?? 0) === 0,
-      );
-      if (noPresses.length > 0) {
-        // The rounds played but some device heard no press worth keeping: let
-        // the user retry just those devices rather than writing a number
-        // nobody pressed for.
-        setFailure({ message: null, noPresses });
-        return;
-      }
-      const medians: Record<string, number> = {};
-      let best = -Infinity;
-      let baseline: string | null = null;
-      for (const id of selectedRef.current) {
-        const value = median(repsRef.current[id] ?? []);
-        medians[id] = value;
-        if (value > best) {
-          best = value;
-          baseline = id;
+        if (!alive()) return;
+        const noPresses = selectedRef.current.filter(
+          (id) => (repsRef.current[id]?.length ?? 0) === 0,
+        );
+        if (noPresses.length > 0) {
+          // The rounds played but some device heard no press worth keeping: let
+          // the user retry just those devices rather than writing a number
+          // nobody pressed for.
+          setFailure({ message: null, noPresses });
+          return;
         }
+        const medians: Record<string, number> = {};
+        let best = -Infinity;
+        let baseline: string | null = null;
+        for (const id of selectedRef.current) {
+          const value = median(repsRef.current[id] ?? []);
+          medians[id] = value;
+          if (value > best) {
+            best = value;
+            baseline = id;
+          }
+        }
+        setOffsets(medians);
+        setBaselineId(baseline);
+        setStep('result');
+      } catch (e: unknown) {
+        if (!alive()) return;
+        // A stop the loop did not order (see `isStaleRunMessage`) is not a failure
+        // to report — but returning here with the measure screen still up would
+        // freeze the dialog on a burst that no longer sounds, so hand it back to
+        // the selection screen, where 开始测量 is pressable again.
+        const message = String(e);
+        if (isStaleRunMessage(message)) {
+          setStep('select');
+          return;
+        }
+        setFailure({ message, noPresses: [] });
+      } finally {
+        if (alive()) measuring.current = false;
       }
-      setOffsets(medians);
-      setBaselineId(baseline);
-      setStep('result');
-    } catch (e: unknown) {
-      if (!alive()) return;
-      // A cancel the wizard itself asked for is not a failure to report.
-      if (String(e).includes('calibration cancelled')) return;
-      setFailure({ message: String(e), noPresses: [] });
-    } finally {
-      if (alive()) measuring.current = false;
-    }
-  }, []);
+    },
+    [],
+  );
 
   const beginMeasure = useCallback(() => {
     if (selectedIds.length < 2) return;
     runId.current += 1;
+    // A run the backend has never seen: the token it is stamped with from here on
+    // is what makes its own cancel precise.
+    runToken.current = mintRunToken();
     selectedRef.current = selectedIds;
     repsRef.current = {};
     measuring.current = true;
@@ -295,7 +378,7 @@ export function DelayCalibration({
     setOffsets({});
     setBaselineId(null);
     setStep('measure');
-    void runRounds(runId.current, null);
+    void runRounds(runId.current, runToken.current, null);
   }, [selectedIds, runRounds]);
 
   /** Re-runs after a no-press failure: only the silent devices play again,
@@ -304,10 +387,11 @@ export function DelayCalibration({
     const failed = failure?.noPresses ?? [];
     if (failed.length === 0) return;
     runId.current += 1;
+    runToken.current = mintRunToken();
     measuring.current = true;
     setFailure(null);
     setSloppy(false);
-    void runRounds(runId.current, failed);
+    void runRounds(runId.current, runToken.current, failed);
   }, [failure, runRounds]);
 
   // Tone markers arrive while a command is in flight; a tap is scored against
@@ -352,7 +436,11 @@ export function DelayCalibration({
     runId.current += 1;
     if (measuring.current) {
       measuring.current = false;
-      void calibrationCancel().catch(() => undefined);
+      // Named, so the player refuses the starts of *this* run only: an unnamed
+      // cancel that finds no burst sounding marks the generation instead, and the
+      // next run's first burst would be refused for a stop it had nothing to do
+      // with.
+      void calibrationCancel(runToken.current).catch(() => undefined);
     }
   }, []);
 
@@ -361,9 +449,29 @@ export function DelayCalibration({
   useEffect(() => {
     return () => {
       runId.current += 1;
-      if (measuring.current) void calibrationCancel().catch(() => undefined);
+      if (measuring.current) void calibrationCancel(runToken.current).catch(() => undefined);
     };
   }, []);
+
+  // Closing to tray does not unmount this dialog — React never tears a surface
+  // down for a hidden window — so without this listener the short tones keep
+  // playing into a window nobody can see, and the wizard stays frozen on a
+  // measure screen nobody can answer. Stopping it the way the on-screen 取消
+  // button does (cancel the run, back to the selection screen) leaves no burst
+  // running and 开始测量 pressable when the window comes back. Only a live run
+  // is worth stopping: the result screen and the idle selection screen hold no
+  // sound. A refusal the backend raises on its own is caught in `runRounds`, so
+  // the wizard is covered whether the hide is seen here or reported there.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'visible') return;
+      if (!measuring.current) return;
+      cancelRun();
+      setStep('select');
+    };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, [cancelRun]);
 
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
@@ -377,9 +485,9 @@ export function DelayCalibration({
       e.stopPropagation();
       // Stop the walk *and* the sound: `cancelRun` is the only thing between a
       // burst and a dialog nobody can reach, and `onClose` unmounts this one —
-      // whose cleanup can only cancel what the backend is already playing at
-      // that moment (a `calibration_start` still in flight is handled where it
-      // is awaited, not here).
+      // whose cleanup names the run, so a `calibration_start` still on its way is
+      // refused by the player instead of sounding into a dialog that is gone, and
+      // the loop that awaited it reads the refusal where it is awaited.
       cancelRun();
       onClose();
     },

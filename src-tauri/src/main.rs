@@ -121,30 +121,52 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // The close button is the one gesture that could take the running
-            // duplications down with it, so honour the preference before quitting.
+            // Two things happen here, and both are things the page cannot be
+            // trusted with: the close button's meaning, and a burst that must not
+            // outlive the window it was measured in.
             //
             // This cannot swallow a real quit: the tray's Quit goes through
             // `RunEvent::ExitRequested` and never closes a window, so the only
             // `CloseRequested` here is the user's ✕.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    // `try_state` rather than `state`: the window is created
-                    // before `setup` has managed the settings, and a missing
-                    // state would panic inside the close handler. With no
-                    // setting to read the preference keeps its default, which is
-                    // a close that really closes.
-                    let hide = window
-                        .app_handle()
-                        .try_state::<config::AppSettings>()
-                        .is_some_and(|settings| settings.close_to_tray());
-                    if hide {
-                        api.prevent_close();
-                        if let Err(e) = window.hide() {
-                            log::warn!("could not hide the window to the tray: {e}");
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    // The close button is the one gesture that could take the
+                    // running duplications down with it, so honour the preference
+                    // before quitting.
+                    if window.label() == "main" {
+                        // `try_state` rather than `state`: the window is created
+                        // before `setup` has managed the settings, and a missing
+                        // state would panic inside the close handler. With no
+                        // setting to read the preference keeps its default, which is
+                        // a close that really closes.
+                        let hide = window
+                            .app_handle()
+                            .try_state::<config::AppSettings>()
+                            .is_some_and(|settings| settings.close_to_tray());
+                        if hide {
+                            api.prevent_close();
+                            if let Err(e) = window.hide() {
+                                log::warn!("could not hide the window to the tray: {e}");
+                            } else {
+                                // Hiding is the half the page never sees: React
+                                // does not unmount for an invisible window, so
+                                // nothing would ever call `calibration_cancel` and
+                                // the delay wizard's tones would go on sounding from
+                                // a window the user believes is closed. Asked on the
+                                // Rust side, because it is the Rust side that knows
+                                // the window went away — and because a webview that
+                                // died cannot ask for anything.
+                                end_any_calibration(window.app_handle());
+                            }
                         }
                     }
                 }
+                WindowEvent::Destroyed => {
+                    // The other way a window stops being looked at, including a
+                    // webview that went down with the run still playing.
+                    end_any_calibration(window.app_handle());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -227,8 +249,28 @@ fn setup_failed(stage: &str, e: impl std::fmt::Display) -> Box<dyn std::error::E
 /// finds nothing left to do and returns without touching the audio service.
 fn on_run_event(app: &AppHandle, event: tauri::RunEvent) {
     match event {
-        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => release_pinned_routes(app),
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            // The tone player first, because it is one atomic store and the burst
+            // would otherwise keep the last fraction of a second of a measurement
+            // nobody is taking any more. It is never joined: the pump ends itself
+            // within one backstop interval, and the process out-ranking it is the
+            // same rule that keeps the audio service from holding the exit open.
+            end_any_calibration(app);
+            release_pinned_routes(app);
+        }
         _ => {}
+    }
+}
+
+/// End the delay wizard's burst if one is sounding, and say so if it was.
+///
+/// Kept off any lock and any wait: `calibration_cancel` is a store on an atomic,
+/// so calling it from the event loop — or from a window event the loop is inside —
+/// cannot deadlock against the player thread, which only ever reads the flag. The
+/// pump then ends itself within one backstop interval.
+fn end_any_calibration(app: &AppHandle) {
+    if audio::calibration::cancel_live_run(app) {
+        log::info!("the window cannot report it: ended the calibration burst in flight");
     }
 }
 

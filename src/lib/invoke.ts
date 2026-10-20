@@ -100,22 +100,31 @@ export async function setDeviceDelay(deviceId: string, delayMs: number): Promise
  * bracketed by `calibration-tone` events. The wizard's round-robin passes one
  * burst per call, a fresh random `leadMs` each time so the pace stays
  * unpredictable, and a short `tailMs` between calls; omitted values fall back
- * to the backend defaults. Resolves when the sequence is done. */
+ * to the backend defaults. Resolves when the sequence is done.
+ *
+ * `run` stamps the wizard's run identity, and it is what lets a start that
+ * arrives *after* that run's `calibrationCancel` be refused instead of sounding
+ * into a dialog the user already left. Omitted, the backend falls back to its
+ * coarser rule (a cancel that finds no burst playing refuses whatever start
+ * arrives next). Rejects with `calibration.rs`'s own words either way. */
 export async function calibrationStart(
   deviceId: string,
-  opts?: { reps?: number; leadMs?: number; tailMs?: number },
+  opts?: { reps?: number; leadMs?: number; tailMs?: number; run?: number },
 ): Promise<void> {
   await invoke('calibration_start', {
     deviceId,
     reps: opts?.reps,
     leadMs: opts?.leadMs,
     tailMs: opts?.tailMs,
+    run: opts?.run,
   });
 }
 
-/** Ask the running calibration to stop; its start command rejects shortly after. */
-export async function calibrationCancel(): Promise<void> {
-  await invoke('calibration_cancel');
+/** Ask the running calibration to stop; its start command rejects shortly after.
+ * `run` names the run the caller means, so only a start of *that* run is refused
+ * as stale; the burst that is sounding is stopped whichever run is named. */
+export async function calibrationCancel(run?: number): Promise<void> {
+  await invoke('calibration_cancel', { run });
 }
 
 /** Set a device's volume (percent, 0–100), live engines pick it up instantly. */

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LATENCY_TARGET_MS } from '../src/lib/types';
 import { callsFor, calibrationRuns, calibrationTones, openApp } from './fixtures';
+import type { BridgeCalibrationRefusal } from './tauri/bridge';
 
 /**
  * The delay-calibration wizard, measured against the fake tone player.
@@ -18,8 +19,13 @@ import { callsFor, calibrationRuns, calibrationTones, openApp } from './fixtures
  * `calibration.rs` clamps to, a gap drawn from the same span before every burst,
  * a marker pair bracketing exactly `TONE_BURST_MS`, a busy flag that admits one
  * run, and a cancel that makes the in-flight run reject with the player's own
- * words. Its clock is real, which is what makes this spec slow (~20 s) and
- * honest: there is no way to measure a latency without waiting for one.
+ * words. It also models `CalibrationState::begin`'s two staleness marks — a
+ * cancel naming a run refuses that run's start with `"calibration superseded"`,
+ * an unnamed one that finds no burst sounding refuses whatever start lands next —
+ * and holds the admission gate open so a spec can put a cancel inside the window
+ * the run token exists for. Its clock is real, which is what makes this spec slow
+ * (~20 s) and honest: there is no way to measure a latency without waiting for
+ * one.
  *
  * The ear is scripted, and it lives inside the page for that reason: a tap has
  * to land inside a 900 ms window, and routing it through the test runner would
@@ -291,4 +297,133 @@ test('the wizard measures both devices and writes the compensation between them'
     String(shown),
   );
   await expect(page.getByLabel('Delay compensation of TV in milliseconds')).toHaveValue('0');
+});
+
+/** Close the fake player's admission gate, or open it.
+ *
+ *  `calibration_start` is an async command: its `begin` runs when a runtime
+ *  worker polls the body, while the sync `calibration_cancel` is answered the
+ *  moment the IPC thread reads it. That hand-off is the only way a cancel can
+ *  outrank the start it was pressed against, and one thread cannot cross the two
+ *  by itself — so a held start sits between the wizard's `invoke` and the
+ *  player's admission until this opens the gate, and the spec says which of the
+ *  two landed first instead of racing for it. */
+async function holdStarts(page: Page, hold: boolean): Promise<void> {
+  await page.evaluate((next) => window.__AAR__?.holdCalibrationStarts(next), hold);
+}
+
+/** Starts the player refused, with the words it answered by. */
+async function refusalsOf(page: Page): Promise<BridgeCalibrationRefusal[]> {
+  return page.evaluate(() => window.__AAR__?.calibrationRefusals() ?? []);
+}
+
+/** The `run` the wizard's first start carried, and the one its first cancel
+ *  named — the pair the backend tells a stale start apart from a live burst. */
+async function startAndCancelTokens(page: Page): Promise<{ start: unknown; cancel: unknown }> {
+  const starts = await callsFor(page, 'calibration_start');
+  const cancels = await callsFor(page, 'calibration_cancel');
+  return { start: starts[0]?.args.run, cancel: cancels[0]?.args.run };
+}
+
+test('a start that lands after the wizard cancelled is refused, and the wizard starts over', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Delay compensation', exact: true }).click();
+  const dialog = await openWizard(page);
+  await pickBothDevices(dialog);
+
+  // The burst is asked for and not yet admitted: this is the window in which the
+  // user's 取消 reaches the player *first*.
+  await holdStarts(page, true);
+  await dialog.getByRole('button', { name: 'Start measuring' }).click();
+  await expect(dialog).toContainText(/Calibrating: (Speakers|TV)/);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  // The cancel named the run its start carries — that is all `begin` has to go
+  // on, and the only thing that keeps a later run's first burst playable.
+  const { start, cancel } = await startAndCancelTokens(page);
+  expect(typeof start).toBe('number');
+  expect(start).toBeGreaterThan(0);
+  expect(cancel).toBe(start);
+
+  // Nothing was admitted while the gate stood shut, so the 取消 found a silent
+  // player, and the start it was pressed against is the one now landing.
+  await holdStarts(page, false);
+  const refused = await refusalsOf(page);
+  expect(refused).toHaveLength(1);
+  expect(refused[0]?.token).toBe(start);
+  // The player's own words, which is what the wizard sorts its stale paths by.
+  expect(refused[0]?.message).toContain('calibration superseded');
+  // A refused start takes nothing: no run, no marker, no sound to be missed.
+  expect(await calibrationRuns(page)).toHaveLength(0);
+  expect(await calibrationTones(page)).toHaveLength(0);
+
+  // The wizard does not report a stop it ordered: the loop is already stale, so
+  // the refusal never becomes the failure panel and never reaches the toast.
+  await expect(dialog).not.toContainText('Measuring failed');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  // And it is not stuck: the screen is back on the selection, where 开始测量 is
+  // pressable, and the refusal spent the mark it was aimed at — a new run names
+  // a new token, and its burst is admitted and played.
+  await expect(dialog.getByRole('button', { name: 'Start measuring' })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Start measuring' }).click();
+  await page.waitForFunction(() => (window.__AAR__?.calibrationRuns() ?? []).length > 0);
+  const runs = await calibrationRuns(page);
+  expect(runs).toHaveLength(1);
+  expect(runs[0]?.token).not.toBe(start);
+  expect(runs[0]?.cancelled).toBe(false);
+  await page.waitForFunction(() => (window.__AAR__?.calibrationTones() ?? []).length > 0);
+  expect(await refusalsOf(page)).toHaveLength(1);
+});
+
+test('a refusal nobody in the wizard asked for is no error card, and its mark is spent', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Delay compensation', exact: true }).click();
+  const dialog = await openWizard(page);
+  await pickBothDevices(dialog);
+
+  await holdStarts(page, true);
+  await dialog.getByRole('button', { name: 'Start measuring' }).click();
+  await expect(dialog).toContainText(/Calibrating: (Speakers|TV)/);
+
+  // The shell's own stop — `main.rs`'s window teardown, which reaches
+  // `CalibrationState::cancel` with no run to name and finds the player silent.
+  // Nothing in the wizard knows about it: its loop is still the current one.
+  await page.evaluate(() => void window.__TAURI_INTERNALS__.invoke('calibration_cancel', {}));
+  const { start, cancel } = await startAndCancelTokens(page);
+  expect(start).toBeGreaterThan(0);
+  // The only cancel so far is the shell's, and it names no run.
+  expect(cancel).toBeUndefined();
+
+  await holdStarts(page, false);
+  const refused = await refusalsOf(page);
+  expect(refused).toHaveLength(1);
+  // The coarse rule answers for the one start a cancel over a silent player can
+  // only have been aiming at, and says it in the same words.
+  expect(refused[0]?.token).toBe(start);
+  expect(refused[0]?.message).toContain('calibration superseded');
+  expect(await calibrationRuns(page)).toHaveLength(0);
+
+  // A stop the loop did not order is not a measurement that failed: the wizard
+  // says nothing, and hands the screen back rather than freezing on a burst that
+  // will never sound.
+  await expect(dialog).not.toContainText('Measuring failed');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Start measuring' })).toBeEnabled();
+
+  // The mark is spent by that one refusal, so the next run plays — and the gate
+  // that measures is open again, which is what lets it.
+  await dialog.getByRole('button', { name: 'Start measuring' }).click();
+  await page.waitForFunction(() => (window.__AAR__?.calibrationTones() ?? []).length > 0);
+  const runs = await calibrationRuns(page);
+  expect(runs).toHaveLength(1);
+  expect(runs[0]?.token).not.toBe(start);
+  expect(runs[0]?.cancelled).toBe(false);
+  expect(await refusalsOf(page)).toHaveLength(1);
 });

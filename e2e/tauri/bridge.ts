@@ -58,6 +58,9 @@ export type FailingCommands = string[];
 export interface BridgeCalibrationRun {
   /** The endpoint the burst was written to — the command's own argument. */
   device: string;
+  /** The `run` token it was admitted under; `NO_RUN_TOKEN` when the caller
+   *  named none. */
+  token: number;
   reps: number;
   leadMs: number;
   tailMs: number;
@@ -67,6 +70,15 @@ export interface BridgeCalibrationRun {
   endedAt: number | null;
   /** Ended because `calibration_cancel` was asked to. */
   cancelled: boolean;
+}
+
+/** One start the tone player refused, with the words it answered by — the log
+ *  line `commands::calibration_start` writes for a run the user had already
+ *  called off, which is the only place a spec can see the crossing. */
+export interface BridgeCalibrationRefusal {
+  token: number;
+  message: string;
+  at: number;
 }
 
 /** One `calibration-tone` marker the player emitted, with the run it belongs
@@ -100,6 +112,18 @@ export interface BridgeHandle {
   calibrationRuns: () => BridgeCalibrationRun[];
   /** Every `calibration-tone` marker it played, with its page-clock instant. */
   calibrationTones: () => BridgeToneMarker[];
+  /** Every `calibration_start` the tone player refused, in order. */
+  calibrationRefusals: () => BridgeCalibrationRefusal[];
+  /** Hold the tone player's admission queue open, or drain it.
+   *
+   *  `calibration_start` is an async command: its body — the `begin` that admits
+   *  the run — is polled on a runtime worker, while the sync `calibration_cancel`
+   *  is answered at once. That hand-off is the whole reason a run token exists: a
+   *  cancel can be handled before the start it was pressed against has been
+   *  admitted. One thread cannot cross the two on its own, so a held start sits
+   *  between the wizard's `invoke` and the player's `begin` until the spec opens
+   *  the gate — the state the real backend is in while the command is in flight. */
+  holdCalibrationStarts: (hold: boolean) => void;
 }
 
 /** The IPC surface `@tauri-apps/api/core` looks for on the global. The package
@@ -163,6 +187,14 @@ function tauriBridge(initial: BridgeState): void {
    *  the cancel flag on both exits; the fake has no render event, so this is the
    *  ceiling on its own wake-ups too. */
   const CANCEL_BACKSTOP_MS = 250;
+  /** `NO_RUN_TOKEN`: what a caller that names no run sends — and, unlike a real
+   *  token, a number that may repeat, because it names nothing to match. */
+  const NO_RUN_TOKEN = 0;
+  /** `Refusal::Cancelled::message()` and `Refusal::Busy::message()`, word for
+   *  word: `DelayCalibration`'s `isStaleRunMessage` sorts one from the other by
+   *  these strings, so a paraphrase here would test a wizard that never fires. */
+  const SUPERSEDED_MESSAGE = 'calibration superseded (this run was cancelled before it started)';
+  const BUSY_MESSAGE = 'a calibration run is already in progress';
   /** `commands::calibration_start` validates the id before it admits anything. */
   const MAX_DEVICE_ID_LEN = 1024;
   /** `config::DELAY_MAX_MS`: a magnitude beyond it is refused, not clamped. */
@@ -177,13 +209,26 @@ function tauriBridge(initial: BridgeState): void {
      *  have a latency reading to hand back. A fresh engine does not yet — and a
      *  stale ready signal says nothing about the engine that replaced it. */
     readyGenerations: {} as Record<string, number>,
-    /** The tone player's books: `CalibrationState`'s busy flag, the run it
-     *  admitted, and every marker it played. */
+    /** The tone player's books: `CalibrationState`'s busy flag and its two
+     *  staleness marks, the runs it admitted, and every marker it played. */
     calibration: {
       runs: [] as BridgeCalibrationRun[],
       tones: [] as BridgeToneMarker[],
+      refusals: [] as BridgeCalibrationRefusal[],
       busy: false,
       active: null as { cancelRequested: boolean } | null,
+      /** `CalibrationState::cancelled_run`: the run the last named cancel aimed
+       *  at, which is the only start that mark may refuse. */
+      cancelledRun: NO_RUN_TOKEN,
+      /** `CalibrationState::stale_generation`: non-zero while an *unnamed* cancel
+       *  that found no burst playing waits for the start it can only have been
+       *  answering. */
+      staleGeneration: NO_RUN_TOKEN,
+      /** `CalibrationState::generation`: how many cancels the player has taken. */
+      cancelGeneration: 0,
+      /** Starts the worker has not polled yet — see `holdCalibrationStarts`. */
+      held: false,
+      queue: [] as (() => void)[],
     },
     calls: [] as { cmd: string; args: Record<string, unknown> }[],
     generation: 0,
@@ -217,18 +262,49 @@ function tauriBridge(initial: BridgeState): void {
     return Math.min(max, Math.max(min, value));
   };
 
+  /** `commands.rs`'s `run.unwrap_or(NO_RUN_TOKEN)`: a caller that names no run
+   *  sends nothing, and nothing is what the player's coarser rule answers to. */
+  const runTokenOf = (raw: unknown): number =>
+    typeof raw === 'number' && Number.isFinite(raw)
+      ? Math.max(NO_RUN_TOKEN, Math.trunc(raw))
+      : NO_RUN_TOKEN;
+
+  /**
+   * `CalibrationState::begin(run)`: admit one run, or say why it cannot start.
+   *
+   * The order is the player's, and every branch of it matters to a spec: the mark
+   * aimed at *this* run first, then the mark an unnamed cancel left for whoever
+   * comes next, then the busy flag — and a refusal spends only the mark it was
+   * aimed at, so a start that collides with a burst still sounding leaves another
+   * run's mark standing, and takes nothing itself.
+   */
+  const beginCalibrationRun = (token: number): string | null => {
+    const books = state.calibration;
+    if (token !== NO_RUN_TOKEN && books.cancelledRun === token) {
+      books.cancelledRun = NO_RUN_TOKEN;
+      return SUPERSEDED_MESSAGE;
+    }
+    if (books.staleGeneration !== NO_RUN_TOKEN) {
+      books.staleGeneration = NO_RUN_TOKEN;
+      return SUPERSEDED_MESSAGE;
+    }
+    if (books.busy) return BUSY_MESSAGE;
+    books.busy = true;
+    return null;
+  };
+
   /**
    * Admit one tone run and play its schedule, resolving when it is done.
    *
    * This is `calibration::play_test_tone`'s shape, not a friendlier stand-in:
-   * the id is validated first, then one run at a time is admitted, then the
+   * the id is validated first, then `begin` admits one run at a time, then the
    * schedule is silence-lead, and per burst a drawn gap, the burst, and a tail —
    * with `start` riding on the burst's first frame and `end` on its last, and
    * the promise kept until the whole schedule has been written. The fake has no
    * speaker, so a tap is the ear: what the markers say is exactly what the real
    * player says about the bytes it wrote.
    */
-  const startCalibration = (payload: Record<string, unknown>): Promise<void> => {
+  const admitCalibration = (payload: Record<string, unknown>): Promise<void> => {
     const books = state.calibration;
     const device = typeof payload.deviceId === 'string' ? payload.deviceId : '';
     if (device.length === 0) return Promise.reject(new Error('empty device id'));
@@ -238,8 +314,13 @@ function tauriBridge(initial: BridgeState): void {
     if (!state.devices.some((d: BridgeDevice) => d.id === device)) {
       return Promise.reject(new Error('GetDevice failed: element not found (injected)'));
     }
-    if (books.busy) {
-      return Promise.reject(new Error('a calibration run is already in progress'));
+    const token = runTokenOf(payload.run);
+    const refusal = beginCalibrationRun(token);
+    if (refusal !== null) {
+      // The real command writes one info line and returns the message: a refused
+      // start never took the slot, so it leaves no run and no marker behind.
+      books.refusals.push({ token, message: refusal, at: performance.now() });
+      return Promise.reject(new Error(refusal));
     }
 
     const reps = clampInt(payload.reps, TONE_REPS_DEFAULT, 1, TONE_REPS_MAX);
@@ -261,6 +342,7 @@ function tauriBridge(initial: BridgeState): void {
 
     const run: BridgeCalibrationRun = {
       device,
+      token,
       reps,
       leadMs,
       tailMs,
@@ -270,9 +352,9 @@ function tauriBridge(initial: BridgeState): void {
     };
     const runIndex = books.runs.push(run) - 1;
     // `begin` clears the cancel flag for a fresh run — a flag that outlived its
-    // run would fail every later one at once. A per-run flag gets that for free.
+    // run would fail every later one at once. A per-run flag gets that for free,
+    // and `begin` already took the busy flag: a refusal took nothing.
     const active = { cancelRequested: false };
-    books.busy = true;
     books.active = active;
 
     return new Promise<void>((resolve, reject) => {
@@ -329,6 +411,29 @@ function tauriBridge(initial: BridgeState): void {
       tick();
     });
   };
+
+  /**
+   * `calibration_start` as the page sees it: the command is answered by the
+   * player's admission, and a held player has not got round to it yet.
+   *
+   * The real command is `async`: `state.begin(run)` runs when a runtime worker
+   * polls the body, while the sync `calibration_cancel` is answered the moment
+   * the IPC thread reads it — which is how a cancel can outrank the very start it
+   * was pressed against, the race the run token exists to close. One thread
+   * cannot cross the two by itself, so while the gate is held a start waits here
+   * exactly where the real one waits in the queue: sent, not admitted.
+   */
+  const startCalibration = (payload: Record<string, unknown>): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const admit = () => {
+        admitCalibration(payload).then(resolve, reject);
+      };
+      if (state.calibration.held) {
+        state.calibration.queue.push(admit);
+        return;
+      }
+      admit();
+    });
 
   const invoke = (cmd: string, args: Record<string, unknown> | undefined): unknown => {
     const payload = args ?? {};
@@ -481,12 +586,27 @@ function tauriBridge(initial: BridgeState): void {
       }
       case 'calibration_start':
         return startCalibration(payload);
-      case 'calibration_cancel':
-        // `CalibrationState::cancel`: a flag the running worker reads between
-        // writes. With no worker alive it does nothing at all, and it does not
-        // reach the next run — `begin` would clear it first.
-        if (state.calibration.active !== null) state.calibration.active.cancelRequested = true;
+      case 'calibration_cancel': {
+        // `CalibrationState::cancel(run)`. The flag always reaches the burst that
+        // is sounding, and it only ends *that* run — `begin` would clear it for
+        // the next one, so a per-run flag gets the same outcome for free. What the
+        // run decides is what may still *begin*: a named cancel records the run it
+        // aimed at (precise: only a start of that run is refused), and an unnamed
+        // one that finds nothing admitted can only have been answering a start
+        // still in the queue, so it marks the generation and the next start to
+        // land eats the refusal. The mark is spent by that one refusal, so no run
+        // is refused twice for a stop nobody asked for.
+        const books = state.calibration;
+        const token = runTokenOf(payload.run);
+        books.cancelGeneration += 1;
+        if (token === NO_RUN_TOKEN) {
+          if (!books.busy) books.staleGeneration = books.cancelGeneration;
+        } else {
+          books.cancelledRun = token;
+        }
+        if (books.active !== null) books.active.cancelRequested = true;
         return null;
+      }
       case 'get_device_volumes':
         return state.volumes;
       case 'set_device_volume':
@@ -615,6 +735,16 @@ function tauriBridge(initial: BridgeState): void {
     },
     calibrationRuns: () => state.calibration.runs,
     calibrationTones: () => state.calibration.tones,
+    calibrationRefusals: () => state.calibration.refusals,
+    holdCalibrationStarts: (hold: boolean) => {
+      const books = state.calibration;
+      books.held = hold;
+      if (hold) return;
+      // Drain in arrival order: the queued commands are polled by the runtime in
+      // the order they were sent, and the busy flag admits one of them.
+      const waiting = books.queue.splice(0, books.queue.length);
+      for (const admit of waiting) admit();
+    },
   };
 }
 
