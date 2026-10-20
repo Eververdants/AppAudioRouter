@@ -150,21 +150,25 @@ AppAudioRouter/
 
 **端点分配**（[background.md](docs/agents/background.md)）
 - 写端点的路径必须三步闭环：**写 → 登记 `PinnedRoutes` → 停止时归还**；四条归还路径（停止 / 退出 / 清扫 / 重置）缺一不可。
-- 槽 27 `ClearAll...` **禁止使用**；清除后必须读回校验，Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
+- 清除只走槽 25 的 null HSTRING（按 pid 一条一条清，才能读回校验）；槽 27 `ClearAll...` **禁止使用**——它不经 pid、清完也逐条核对不了。
+  ⚠️ 但**别把它写成"只有 ClearAll 会碰到用户手设的分配"**：本应用的「重置每应用音频输出」同样分不出谁写的——它把每个挂着音频会话、又没有被本应用路由的程序（含同 exe 的兄弟）渲染与捕获两条流一起放开，里面**包含用户在音量合成器里手设的那些**。文案与验收条目都必须按这个口径说，不许暗示它是外科手术（见 [background.md](docs/agents/background.md)）。
+- 清除后必须读回校验，Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
 - 系统关键进程只在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的入口）被拦住，别开第二条 COM 写入路径。
 
 **刷新与引擎**（[background.md](docs/agents/background.md)）
-- **全项目没有轮询定时器**：列表靠 `audio-changed`（COM 回调）；对齐是一次性动作；延迟读数靠 `reconcileActiveDuplications()` 在事件点重建——**每条新起引擎的路径都要跟一次**。
+- **全项目没有轮询定时器**：列表靠 `audio-changed`（COM 回调）；对齐是一次性动作；延迟读数靠 `reconcileActiveDuplications()` 在事件点重建——**每一条改动引擎生死的路径都要跟一次**，包括"以为会起、结果一台都没落地"那条（完整调用点清单见 [background.md](docs/agents/background.md)）。
 - **COM 指针只能活在通知线程**（MTA 独占，禁止 `unsafe impl Send`）。
 - 源静默后**停放**镜像客户端，不许退回「一直写静音」（风扇投诉的来源）；新增停放点必须在被唤醒侧接 `wake()`；每处等待都要能说出自己是被什么唤醒的。
 
 **音量与延迟**（[state.md](docs/agents/state.md)）
 - 两个音量轴不许混：**设备份额**（副本响度，只能衰减）≠ **主输出音量**（会话音量 5–100，停止/退出时归还原值）。禁止绕过 `update_primary_volume` 写会话音量、给未路由的程序调会话音量、拿会话音量做设备间平衡。
 - 控件按角色出现，结构说了算：主输出没有延迟行、单设备路由没有任何控件，「变淡地画」也算违规；`lib/engineRole.ts` 已删，别搬回来。
-- 成对字面量改一处必须改另一处（两边没有任何东西绑住，全部**以代码为准**，别照本条去猜位置）：
-  `SOURCE_LEVEL_MAX`(TS) ↔ `SOURCE_VOLUME_MAX`(Rust, 400)、`PRIMARY_VOLUME_MIN`(TS) ↔ `PRIMARY_VOLUME_MIN_PERCENT`(Rust, 5)、
-  `PRIMARY_VOLUME_MAX`(TS) ↔ `SOURCE_VOLUME_NEUTRAL`(Rust, 100)、`DELAY_MAX_MS`(TS `lib/delay.ts`) ↔ `config::DELAY_MAX_MS`(Rust, 10000)、
-  `LATENCY_TARGET_MS`(TS `lib/delay.ts`) ↔ `duplication.rs` 同名常量（100）。
+- 成对字面量**只有 `src/lib/types.ts` 一个家**，别再"记住两个文件"：`src/lib/types.test.ts` 直接读 Rust 源码逐条比对
+  （TS ↔ Rust：`SOURCE_LEVEL_MAX` 400 ↔ `config::SOURCE_VOLUME_MAX`、`PRIMARY_VOLUME_MIN` 5 ↔ `config::PRIMARY_VOLUME_MIN_PERCENT`、
+  `PRIMARY_VOLUME_MAX` 100 ↔ `config::SOURCE_VOLUME_NEUTRAL`、`DELAY_MAX_MS` 10000 ↔ `config::DELAY_MAX_MS`、
+  `LATENCY_TARGET_MS` 100 ↔ `audio/duplication.rs` 同名常量），**任何一边漂移就是一条测试红**，不再等人来肉眼对两种语言。
+  ⚠️ 同一个测试还扫遍 `src/` 禁止第二处声明——组件里就地写一份数字就是它要抓的形状；`knownDuplicates` 白名单只准缩短，不是许可证。
+  `lib/delay.ts` 只是把两枚延迟常量**转发**出去（数值仍在 `types.ts`）。主输出音量的上限**就是**源电平的中性值（同一枚 Rust 常量），两条轴不许当成一条改。
 
 **记忆与撤销**（[state.md](docs/agents/state.md)）
 - 撤销是一个快照不是栈；记忆跟着撤销走（重路由用原 `remember` 标志，`stopRoute` 清记忆）。
@@ -191,6 +195,9 @@ AppAudioRouter/
   ⚠️ **CI 的 clippy 没带 `--all-targets`**：测试目标只被 `cargo test` 编译、不被 clippy 把关，所以测试代码里的 lint 只有本地跑
   `cargo clippy --all-targets -- -D warnings` 才看得见（第二轮就是用它发现过 `config.rs` 的问题）。
   ⚠️ `pnpm fmt:check` 是**第一道门**，格式化没跑就等于 CI 红。
+  ⚠️ **`e2e/` 不是免检区**：`tsconfig.json` 的 `include` 里有 `e2e` 与 `playwright.config.ts`，所以假 Tauri IPC 桥也被
+  `tsc --noEmit` 类型检查；prettier 的 glob 同样含 `e2e/**/*.ts` 与 `playwright.config.ts`，所以那里也要过 `fmt:check`。
+  假桥必须复刻真后端的拒绝与事件顺序——桥放宽了，绿的测的就不是这个产品。
 - **发布（`release.yml`）：只在 tag `v*` 上跑**，先 `cargo audit`（ubuntu，钉版本），audit 过了才由 `tauri-action` 在
   windows-latest 上 `pnpm tauri build` 出安装包（**MSI 与 NSIS 两种**），并建 **draft** release（`releaseDraft: true`，
   所以要人工去 Release 页面确认发布），release 正文是写死在 workflow 里的，改了功能口径记得同步它。
@@ -204,7 +211,7 @@ AppAudioRouter/
 - 能力文件只有 `main.json` 一份：`tauri.conf.json` 的 `capabilities: ["main"]` 是**过滤器**，写了名字之后该目录下其它文件全部静默失效。改完必须 touch `build.rs` 才会重新编译进策略。
 - 禁止在前端拼接 shell 命令
 - Rust 端 COM 调用必须校验输入（device_id 格式、pid 范围）
-- 每应用端点分配的清除只走槽 25 的 null HSTRING（单进程）；槽 27 的 `ClearAll...` 会连用户手设的一起清，禁止使用
+- 每应用端点分配的清除只走槽 25 的 null HSTRING（按 pid，一条一条，能读回校验）；槽 27 的 `ClearAll...` 不经 pid、清完无从逐条核对，禁止使用。**但"禁 ClearAll"不等于"本应用只清自己写的"**：Windows 那侧的记录没有作者字段，`PinnedRoutes` 只是本轮进程的内存账，所以 `reset_pinned_endpoints` 放开的是**每个挂着音频会话、又没有被本应用路由**的程序（渲染与捕获两条流一起）——里面必然包含用户在音量合成器里手设的那些。任何文案、注释与验收条目都不许把它说成"只清旧版本留下的记录"
 - 系统关键进程的路由必须在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；槽 25 的 `set_persisted_default` 只是裸调用，从它旁边另起一路就等于绕过这道拒绝；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限

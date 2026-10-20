@@ -8,8 +8,9 @@
 
 ### 托盘（`tray.rs`）
 
-- 托盘图标**常驻**：左键开关窗口，右键菜单只有「显示/隐藏」和「退出」。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口；退出都会经过 `RunEvent::ExitRequested`，在那里交还本进程写过的端点分配**并归还它认领过的主输出音量**（见下面「每应用端点分配的生命周期」）。
-- 菜单标签是**原生控件**，读不到 i18next → 由前端在挂载和语言切换时调 `set_tray_labels(t('tray.show'), t('tray.quit'))` 下发。不要指望 Rust 侧自己翻译，也不要用 `set_menu()` 换整个菜单（换完托盘的事件路由就不再认那些条目）。
+- 托盘图标**常驻**：左键开关窗口（`show_menu_on_left_click(false)`），右键菜单五项：显示/隐藏、打开设置、开机自动启动（勾选态跟注册表）、停止全部路由、退出。后三项只发一条 `tray-menu` 事件（`open-settings` / `toggle-autostart` / `stop-all`）给**前端**执行——状态在 store 里，Rust 只报"点了哪个"（「打开设置」额外把窗口叫出来再转发）。`Quit` 走 `app.exit(0)`，是唯一会拆掉复制引擎的出口。
+- ⚠️ 交还端点分配与主输出音量的地方**同时接 `RunEvent::ExitRequested` 与 `RunEvent::Exit`**（`main.rs` 的 `on_run_event` → `release_pinned_routes`），这不是重复：**注销与关机根本不经过 `ExitRequested`**（事件循环当场被销毁），一个开机自启、被签退杀掉的应用若只等前者，会把每个被路由的程序永久钉在它替用户选的那台设备上。两处用的登记是**取走**（`take_all`）而不是读，所以后到的那个事件看到空账本直接返回，不会二次触碰音频服务。退出都会经过这两处之一。
+- 菜单标签是**原生控件**，读不到 i18next → 由前端在挂载和语言切换时调 `set_tray_labels`，一次给全六样：`show` / `openSettings` / `autostart` / `autostartChecked` / `stopAll` / `quit`（勾选态也在这里下发，与 store 从注册表读回的 `autostart` 同源，菜单与设置页因此不会各说一套）。不要指望 Rust 侧自己翻译，也不要用 `set_menu()` 换整个菜单（换完托盘的事件路由就不再认那些条目）。
 - `close_to_tray` 存在 `app_data_dir/app-settings.json`，**默认 false**：发版不该悄悄改掉老用户按 X 的语义。为 true 时 `main.rs` 的 `WindowEvent::CloseRequested` 里 `api.prevent_close()` + `hide()`。
 - 这个判断在 **Rust**，所以设置必须在后端。**只有 Rust 需要知道的设置才进 `app-settings.json`**——主题/语言/步进仍然走 localStorage，别顺手搬过去。
 - 新增 Tauri 命令**不需要**动 `capabilities/`：ACL 只管插件命令，`generate_handler!` 注册的应用自有命令默认可调（`apply_route` 等一直没有权限条目就是证据）。要改的是窗口按钮那类，见 AGENTS.md 的「安全注意事项」。
@@ -43,9 +44,11 @@
   - 回调对象里必须**在注册时**存下 pid（`SessionEvents.pid`，读不出来存 0 并丢弃该 pid 的状态事件）——状态回调本身不带身份。`Expired` 的语义与路径不变。
   - 前端 `soundingPids` 是**纯显示状态**（线上流动、脉冲环、标题栏计数），路由逻辑一个字都不读它；每次 `refreshSessions` 按会话列表的 `playing` 标志**重建**（列表是权威），事件在两次刷新之间补瞬时的转换。`AudioSession.playing`（枚举时是否有任一会话 Active，按 pid 跨设备取 OR）是它的种子。
 - 线程启动时必须先 `sync()` 一次：两种回调都只报「变化」，不给已存在的设备/会话预先挂钩子，启动前就在放音的程序永远不会被通知到。
+- ⚠️ **一轮 `sync()` 走不完时，"这轮没点到名"不等于"设备没了"**（`notifications.rs` 的 `AbsenceLedger`）：被跳过的端点和被拔掉的端点在"没出现在这一轮的列表里"这件事上长得一模一样，照后者处理就会注销掉还在出声的会话管理器与它全部会话 watcher——而重新挂回去的只有**走得完的那一轮**，一台永久读不到的设备于是把注册、watcher 和存活账本（`sounding`）里的槽位一起留到进程结束。规则：**缺席要问音频服务本人**（`endpoint_probe` 按精确 id 查；只有 `AUDCLNT_E_DEVICE_INVALIDATED` 算"没了"，RPC 断开 / AudioSrv 忙这类"问不通"**不算**证据），问不通的才按**有界**推迟（`MAX_DEFERRED_ABSENCE_PASSES` = 5 轮，**或** `DEFERRED_ABSENCE_GRACE_MS` = 60 s，谁先到；重新被点名即清零）。读不到会话列表的端点也照这一套：逐个 `GetState` 问它自己（`session_self_reports_gone`），读不出来两边都不算证据、留着的正是它该留的。
 - 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
-- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。`devices` 分支还会跟一次 `loadCaptureDevices()`：载体选择器列的是捕获侧，回环驱动装上后必须不重启就出现在列表里。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面两处才不至于永远停在旧值。
-- **第四个引擎事件 `duplication-ready`**（pid / generation）：最后一个镜像初始化完成时由 `mirror_ready` 发一次，因为镜像的 `GetStreamLatency` 是在**渲染线程**里、在一次异步设备激活**之后**才拿到的，而 `apply_route` 早就返回了——前端若只在收到路由回执时读一次，读到的必然是空值，而且**再也不会重读**。`reconcileActiveDuplications()` 因此有四处调用：开机、路由落地后、撤销后、以及这个事件；外加改延迟之后与 `syncFromNotification`。**每一条新起引擎的路径都要跟一次**，否则那台设备的读数要么不出现、要么停在改动之前。
+- 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。`devices` 分支还会跟一次 `loadCaptureDevices()`：载体选择器列的是捕获侧，回环驱动装上后必须不重启就出现在列表里。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面列出的其余各处才不至于永远停在旧值。
+- **第四个引擎事件 `duplication-ready`**（pid / generation）：最后一个镜像初始化完成时由 `mirror_ready` 发一次，因为镜像的 `GetStreamLatency` 是在**渲染线程**里、在一次异步设备激活**之后**才拿到的，而 `apply_route` 早就返回了——前端若只在收到路由回执时读一次，读到的必然是空值，而且**再也不会重读**。
+- ⚠️ **`reconcileActiveDuplications()` 的调用点必须数得全**（现在是八处：`App.tsx` 首帧之后开机一次、`applyRoute` 成功后、`applyRoute` 被**全部**拒掉时、`undoLastRoute`、`restoreRememberedRoutes`、`setDeviceDelayValue`、`syncFromNotification`、`handleDuplicationReady`）。**每一条改动引擎生死的路径都要跟一次**——包括"以为会起、结果一台都没落地"那条：`applyRoute` 动手前先把旧引擎拆掉，全被拒时后端已经没有引擎而徽标还挂着旧路由，不重建就会在屏幕上留一条已经不存在的流。漏一处，那台设备的读数要么不出现、要么停在改动之前。**不要**改成轮询或定时器补这一课。
 - 注册失败只 `warn!`，绝不致命：列表退化成手动刷新，窗口必须照常打开。
 - ⚠️ **本应用自己不出现在程序列表里**（2026-10-11）：`enumerate_sessions` 结尾走 `exclude_own_processes`——
   用一次 `CreateToolhelp32Snapshot` 走出**本进程树**（自己 + 所有后代），把它们从会话里剔除；再按 `current_exe()` 的**文件名**
@@ -72,11 +75,12 @@
 
 路由期间 `routing.rs` 写下的不是一条"临时路由"，而是音频服务为**可执行文件**保存的一条 Per-app 默认端点记录：程序退出、本应用退出、乃至卸载之后它都还在，并且**优先于系统默认设备**。2.1.0 的「停止路由」是把这条记录改写成当时的默认设备再留在那儿，于是用户之后手动切默认设备对这个程序失效（现场表现就是"停止之后就切不了播放设备了"）。规则：
 
-- 写入 = 槽 25 `SetPersistedDefaultAudioEndpoint`；同槽传 **null HSTRING 即清除这条记录**（音量合成器里的「默认」走的就是同一条路）；槽 26 `GetPersistedDefaultAudioEndpoint` 读回，没有记录时返回 `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)` = `0x80070490`。槽 27 的 `ClearAllPersistedApplicationDefaultEndpoints` **禁止使用**：它会连用户在音量合成器里手设的分配一起清掉。
-- **任何写端点的路径都必须登记 `PinnedRoutes`**：`mark` = 活路由（重置/清扫要放过它），`mark_returned` = 停止时 Windows 拒绝释放、于是把它指回当前默认设备的（重置**必须**能清掉它，否则用户只剩"重启应用"这一条路）。登记是唯一能把"我们钉的""用户自己钉的""已经不算路由的"三者分开的东西。
+- 写入 = 槽 25 `SetPersistedDefaultAudioEndpoint`；同槽传 **null HSTRING 即清除这条记录**（音量合成器里的「默认」走的就是同一条路）；槽 26 `GetPersistedDefaultAudioEndpoint` 读回，没有记录时返回 `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)` = `0x80070490`。槽 27 的 `ClearAllPersistedApplicationDefaultEndpoints` **禁止使用**——禁它是因为机制：一次清全局、不经 pid，于是既放过不了仍在路由的程序、也没法逐条读回校验、更报不出哪一台还被 Windows 攥着。
+- ⚠️ **本应用自己的「重置每应用音频输出」同样不是外科手术**（`commands.rs` 的 `reset_pinned_endpoints`）：它拿一次会话枚举，把**每个没有被活路由占着的 pid**（连仍在路由的那个 exe 的兄弟进程一起排除，因为分配是按 exe 存的）用 `Role::All` 两条流一起放开——里面**必然包含用户自己手设的分配**。所以它的文案必须按"会清掉当前正在运行的程序的固定输出设备"这个口径写（见下面「启动提示」一节），任何"只清旧版本留下的""只清我们写的"之类的说法都是假话，界面上也不许留第二处更温和的解释。
+- **任何写端点的路径都必须登记 `PinnedRoutes`**：`mark` = 活路由（重置/清扫要放过它），`mark_returned` = 停止时 Windows 拒绝释放、于是把它指回当前默认设备的（重置**必须**能清掉它，否则用户只剩"重启应用"这一条路）。这本账是**本轮进程的内存账**，是"哪条分配是我们钉的"唯一有据可查的地方——也正因为它只在进程活着时存在，上一版本留下的、以及用户手设的那些都不在里面，所以上一条的重置只能按会话逐个放开，不能假装挑得出谁写的。
 - 归属判定**按可执行文件、不按单个 pid**：分配是按 exe 存的，而一个程序可以有多个带会话的进程（浏览器就是），清扫时挑中的 pid 未必是我们路由的那个。清理前要问"这个 exe 是否还有属于我们的活路由"，问"这个 pid 是不是我们的"会漏。
 - 清除后必须**读回校验**（`release_default_endpoints` 已这么做），并把结果回给前端；Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
-- 四条归还路径缺一不可，各自覆盖一种"分配比路由活得久"的情形：停止路由（`stop_route`）、退出应用（`main.rs` 的 `RunEvent::ExitRequested` → `release_pinned_routes`，它把 `PinnedRoutes::take_all` 交给 `audio::routing::exit_cleanup`，独立线程 + 有界等待，绝不能让音频服务卡住退出；同一趟里先归还各引擎认领的会话音量），程序在路由期间退出后下次出声（`release_stale_routes`；音频服务按 pid 寻址，所以只能借它新的进程去释放）、设置页「重置每应用音频输出」（`reset_pinned_endpoints`，清旧版本留下的，跳过仍在路由的 pid）。
+- 四条归还路径缺一不可，各自覆盖一种"分配比路由活得久"的情形：停止路由（`stop_route`）、退出应用（`main.rs` 的 `on_run_event` **同时**接 `RunEvent::ExitRequested` 与 `RunEvent::Exit` → `release_pinned_routes`：前者管托盘 Quit 与最后一个窗口被销毁，后者管**注销 / 关机**——那种情况下事件循环被当场拆掉，`ExitRequested` 根本不会来，只接前者就等于让开机自启的应用在签退时把每个路由过的程序永久钉死。两处都是 `PinnedRoutes::take_all`（取走不是读），所以后到的那一个看到空账本直接返回；`audio::routing::exit_cleanup` 独立线程 + 有界等待，绝不能让音频服务卡住退出；同一趟里先归还各引擎认领的会话音量），程序在路由期间退出后下次出声（`release_stale_routes`；音频服务按 pid 寻址，所以只能借它新的进程去释放）、设置页「重置每应用音频输出」（`reset_pinned_endpoints`：按会话枚举逐个放开**没有活路由**的程序的分配，两条流一起，分不清也挑不出是谁写的——它清得掉旧版本留下的，也就一并清得掉用户手设的）。
 - 新增任何"改变某程序输出"的代码路径，都要把这一套接上：写 → 登记 → 停止时归还。少一步就是把用户锁在错误的设备上，而且界面上没有任何东西能解释为什么。
 - 系统关键进程在 `set_process_default_endpoint_flow`（`set_process_default_device` 与 `set_process_default_capture_device` 两条写入流共用的那个入口）被 `routing_refusal` 拒绝（`PROTECTED_EXES` + pid 0/4），两份 README 都承诺过这件事——不要绕过这个入口另开 COM 写入路径。槽 25 那层（`set_persisted_default`）只是裸调用，**不带任何校验**，从它旁边另起一条写入路就等于把这条红线删了。
 - ⚠️ **读不出进程名的 pid 一律拒绝**（`None` 不是「不在名单上」）：`csrss`/`lsass`/`audiodg` 对本应用不可见的原因，正是它们受保护。名字先用 `QueryFullProcessImageNameW` 再退回 `GetProcessImageFileNameA`——后者 260 字节的缓冲区对长路径返回 0，而「返回 0」当年就是放行系统进程的那个答案。代价是比本应用权限更高的程序无法被路由，提示语要说清是哪一种，别把它们都叫成系统进程。

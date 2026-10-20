@@ -46,9 +46,10 @@
 
 `BOARD_W(640)` / `BOARD_H(470)` / `HUB_W(190)` / `HUB_H(84)` / `HUB_X(160)` / `GROUP_X(398)` / `GROUP_W(212)` /
 `GROUP_PAD(6)` / `GROUP_HEADER_H(24)` / `PANEL_BORDER(1)` / `ROW_X` / `ROW_W` / `ROW_H(52)` / `ROW_GAP(6)` /
-`MINI_W(120)` / `FEEDER_X(12)` / `PIN_D(11)` 是**唯一的**尺寸来源，由 `panelColumn()`、`panelBodyHeight()`、
+`MINI_W(120)` / `MINI_H(52)` / `FEEDER_X(12)` / `PIN_D(11)` 是**唯一的**尺寸来源，由 `panelColumn()`、`panelBodyHeight()`、
 `primaryPanelHeight()`、`rowContentY()`、`rowPortY()`、`rowInPort()`、`rowVisible()`、
-`feederY()`、`hubOutPort()`、`hubInPort()`、`feederOutPort()`、`nodePath()`、`boardCentre()` 算出位置与线两端。
+`feederPitch()`、`feedersFitting()`、`feederColumn()`、`feederY()`、`hubOutPort()`、`hubInPort()`、`feederOutPort()`、
+`nodePath()`、`orderLabel()`、`boardCentre()` 算出位置、线两端与角标的编号。
 组件用 `style` 从这些常量取宽高与坐标，**不要**改成 Tailwind 的 `w-[…]`：尺寸在两处各写一份，线迟早会离开卡片。
 
 ⚠️ **尺寸唯一的度量是井的高度**：`BOARD_H` 只在第一帧（井还没报高度时）顶一下，此后板子**正好等于井的高度**
@@ -62,6 +63,12 @@
 下一行的中点」——底边正好落在某一行的中心，于是**半张卡片露在裁切线以上**，这行本身就在说「下面还有」。配合
 `Panel` 里那两层 `bg-gradient-to-* from-surface-sunken` 的**背景渐隐**（只在对应方向还有内容时淡入，`opacity` 过渡）：
 半行 + 渐隐一起构成「底部有东西在拉」的滚动提示。⚠️ 渐隐是**背景色渐变**不是 blur/黑罩，别把它做成遮罩层或加 `backdrop-filter`。
+⚠️ **半行收尾 + 背景渐隐是整块板的规矩，不是复制面板一家的**：来源卡那一列没有可滚的容器（井不滚、列自己也不滚），
+装不下时**裁两端**——`feedersFitting(height)` 说这块井在最紧间距（`FEEDER_MIN_PITCH` = 一张卡 + 6px）下**坐得下几张卡**，
+`feederColumn(count, height)` 说**哪几张**坐得下：`{ first, seated, cutAbove, cutBelow }`，`seated` 自 `first` 起算、永不超过前者，
+判据 `feederSeated` 量的是卡的**中心**还在板内（`lib/stage.ts:273-382`；间距先由 `feederPitch` 压，压到底才裁）。
+卡、线、两端渐隐都由这**同一个连续窗**决定（`NodeStage.tsx:535-537`），画法与禁令见「三类卡」的来源卡。
+**别在别处另算一遍来源卡的可见性**：卡与线一旦分两头算，就有一头指着一张不在板上的卡——只裁卡不裁线，「这里还有」会读成「这里断了」。
 ⚠️ 面板那 1px 描边也算进几何（`PANEL_BORDER`）：行是在**边框之内**再加内边距的，
 少算这一像素，每根线都会停在它那一行的左边一像素（这条踩过，`rowPortY` / `ROW_X` 里都写死着它）。
 
@@ -104,17 +111,26 @@
   ⚠️ 追加**不等于**"一定落在副本位"之外的东西：追加永远把新设备放在计划尾部；**主位只随用户换主设备的动作动**，
   不因延迟值自动变动。
 - **来源卡（左侧一列）**：谁把声音送进了当前程序。点它**切到那个程序的看板**——图一次讲一个程序，这是两个程序之间的门。
+  这一列**和复制面板同一套装不下的办法**：`feederPitch` 先压缩间距，压到最紧（`FEEDER_MIN_PITCH`）还装不下就按
+  `feederColumn` 给的座位窗把两端切在板外；**露出一半以上的卡保留座位也保留线**（半张卡就是"这里还有"的提示，而那根线是唯一说清它往哪儿去的），
+  一点没露出的卡**卡片与线都不画**（`feederHasSeat` 同时闸这两处——一个谁也够不到的按钮不该在看板上，可聚焦却不可达等于骗读屏），
+  两端各有一层 `from-surface-sunken` 的**背景渐隐**按 `cutAbove` / `cutBelow` 淡入淡出——与复制面板的半行收尾是同一条规矩，别只裁卡不裁线。
 
 ## 编号与调音条（`Inspector`）
 
 - **角标即调音入口**：点去向卡的编号，底部调音条切到那张卡的杠杆——主输出=会话音量一行，副本=延迟 + 份额两行。
   ⚠️ **单设备路由没有编号按钮**（那是 `span`，不是按钮）：一个设备的路由由系统直放，没有引擎，也就没有可调的杠杆——
   与旧舞台同一条规则。`drawn.length > 1` 是唯一条件，别为单设备路由特例盖章。
+  ⚠️ **送入那一行的编号永远是 `span`**（`FeedRow` 根本没有 inspect 入口，`InspectorKey` 只有 `dev:${string}` 一种）：
+  两端都被钉死的关系没有中间量可调，那行只有琥珀色三态词与行尾 ✕。**不要**为它加第三种调音条——`BoardRole` 是
+  `primary | mirror | feed`（`lib/stage.ts`），能挂杠杆的角色只有前两个。
 - ⚠️ **调音条按需出现，底部没有常驻 status bar**（2026-10-11）：`Inspector` 只在 `inspectorKey !== null` 时**挂载**
   （外层 `AnimatePresence` + `height: auto` 让它自占地、离开时把空间还回去）。曾经它常驻在底部、没选中时显示一句提示语——
   那是一条谁都不会读的状态栏。被检查的那台设备**离开计划**（被移除，或计划降到一台、不再有引擎）时，
   `NodeStage` 里的 effect 会把 `inspectorKey` 清空，所以 `Inspector` 可以假定自己指的那一行一定在计划里；
   它也因此**不再有 hub 摘要分支**（'hub' 这个 key 已随常驻形态一起删掉，别再搬回来）。
+  ⚠️ 条子自己的 ✕ **把焦点还给打开它的那枚编号**（`inspectorReturnRef`，`NodeStage.tsx:189-191`、`485-494`）：它整个子树正在卸载，
+  焦点留在死掉的子树里等于把 Tab 走回窗口顶部。换程序、被检查的设备离开计划这两条关法**不还**——那两下本来就把键盘带走了。
 - 调音条里**没有**开始/停止路由的按钮：开始只属于 hub（点按生效），停止属于左栏行内 ✕ 与底部中央的已路由胶囊
   （见「已路由胶囊」）。别把动作塞回调音条——它是调音的地方，不是运输控制的地方。
 - **± 按钮的 aria-label 沿用旧词表**（`deviceDelay.stepUp/stepDown`、`deviceVolume.*`、`primaryVolume.*`），
@@ -164,20 +180,28 @@
 - **误操作防护**：① 看板只是提案，改动要按 hub 才落地（送入例外，见上）；② "也改这个"有看得见的开关；
   ③ 破坏性且影响全局的动作用 `ConfirmButton`；④ 路由与送入后 Toast 各给 8 秒撤销。路由不可能被点成空的（最后一个设备卡不可移除）。
 - **Toast 有两种卡**：撤销卡（问句，带按钮）与失败卡（陈述，`role="alert"`、红点领头、没有按钮，2026-10-19 起）。
-  两张卡共用同一套时限、悬停停住与 `Escape`；`errorNotice` 一条一份、按计数器换，同一句话第二次失败也算新的一次。
-  哪些失败举牌、哪些只写日志见 [state.md](./state.md)；**别**为了少写一个组件把错误塞进撤销卡。
+  两张卡共用同一套时限、悬停停住与 `Escape`。失败卡**一次用户动作只有一张**：批量动作里多处失败由 store 合流成一张
+  （`beginErrorBatch` / `endErrorBatch`，`src/stores/routerStore.ts:396-409`），每条失败仍各自即时写进日志；
+  `errorNotice` 按计数器换，同一句话第二次失败也算新的一次。哪些失败举牌、哪些只写日志见 [state.md](./state.md)；
+  **别**为了少写一个组件把错误塞进撤销卡，也**别**在 Toast 里把一次动作的失败叠成一排——一排里只有最后一张站得住，其余的闪一下就没了。
 - **空态的两句话不许混用**：`stage.pickNone`（「没有可添加的了」）只说计划已经装满；`devices.length === 0` 时两个设备选择器改说
   `stage.pickNoDevices`（「Windows 没有报告任何输出设备」）。读不到设备的机器被告知"没东西可加"，听起来像一个完成的动作。
   左栏同理：第一次枚举返回之前画占位（`rail.reading` + Spinner），不是"没有程序在放音"——见 [state.md](./state.md) 的 `sessionsLoaded`。
 - **键盘要走到每一处入口**：两把看板选择器与已路由胶囊的浮层**打开时把焦点放进第一行、`Escape` 时还给打开它的按钮**
-  （外部按下不还，那一下点在哪儿焦点就在哪儿）；`ScrubReadout` 的键入框自己卸载，`Enter` / `Escape` 后必须 `hostRef.current?.focus()`；
+  （外部按下不还，那一下点在哪儿焦点就在哪儿）；`ScrubReadout` 的键入框自己卸载，`Enter` / `Escape` 后必须 `hostRef.current?.focus()`，
+  挂在 hub 下的 `SourceLevelDial` 是同一件事的另一半——计划降回一台设备时它整个没了，焦点交回 hub 卡（`NodeStage.tsx:873-887` + `SourceLevelDial.tsx:96-100`）；
+  **设置页的延迟输入框是另一套**：`Enter` 写完光标留在原地（blur 会把 Tab 的起点丢回窗口顶部），`Escape` 弃稿后把焦点交给本行的宿主 `div`
+  （`tabIndex={-1}`，`ui/DelayStepper.tsx:52-75`），两种写法别互相搬；调音条 ✕ 还焦点给编号，见「编号与调音条」；
   活动记录区挂 `tabIndex={0}`（它是页面里唯一只有滚动条能到的区域），但**不加** `role="log"` / `aria-live`——日志逐条播报等于在界面之上再叠一张嘴。
   校准对话框声明了 `aria-modal`，就要真的把焦点收进去（`dialogRef` + `tabIndex={-1}`），关闭时由设置页把焦点还给那枚按钮。
 - **只有 hover 才现身的控件一律算找不到**：左栏行末的批量开关从 2026-10-19 起**常驻**（`opacity-30`，悬停/聚焦回到常态），
   触屏与笔没有 hover，而"把五个程序并成一次改动"不该是事后才发现的能力。副本与主设备的角色词本来就带**点状下划线**（那是它的可见线索），
   hover 只是把词换成动作。
-- **查不到设备名就说"一台已经离开的设备"**（`briefingPage.deviceGone` / `routed.deviceGone`），不写 GUID：那串没人读得懂，
-  而这是两次刷新之间的瞬时不一致；左栏的做法是不说（`playsThrough` 返回 null）。
+- **查不到设备名就说"一台已经离开的设备"**，不写 GUID：那串没人读得懂，而这是两次刷新之间的瞬时不一致。
+  每处按自己那枚 `deviceGone` 说：看板与调音条 `stage.deviceGone`（`NodeStage.tsx:579`、`1860`，撤销卡上的设备名同一条，`routerStore.ts:843`）、
+  现状页 `briefingPage.deviceGone`（`BriefingPage.tsx:137`、`159`）、胶囊 `routed.deviceGone`（`RoutedCapsule.tsx:113`）、
+  设置页 `settings.deviceGone`（记忆 chip 与载体下拉，`SettingsPage.tsx:123`、`611`）、校准向导 `calibration.deviceGone`（`DelayCalibration.tsx:240`）；
+  左栏的做法是不说（`playsThrough` 返回 null，`ProgramRail.tsx:102-106`）。
 - **i18n**：文案分组是 `rail` / `stage` / `briefing` / `settings` / `toast` / `log`，
   两组 locale 的键集合、占位符与非空由 `src/i18n/locales.test.ts` 的对称测试保护。
   句子说人话，避开"路由 / 镜像 / 主设备"这类内部词。
@@ -215,6 +239,8 @@
   延迟/音量控件——同一个数在两个地方能改，一定有先后之争。
 - **没有路由时整颗胶囊不存在**（与标题栏计数同一条规矩）；列表被停空时浮层自己收起。
 - ⚠️ 行按会话列表走，不按路由表走：正在退出的进程可能还挂着路由，但没有名字和图标可画（现状页同一条读法）。
+- **浮层的列表有高度上限**（`SHEET_LIST_MAX_PX` = 280px，超出在内部滚 `overflow-y-auto`）：程序多起来时浮层不许长成一屏。
+  这里的 320px 宽与 28px 行高是**胶囊自己家的形状**，不是看板几何——`lib/stage.ts` 的 `ROW_H(52)` 管的是板上的行，两处别混成一个数（板子那一侧的规矩见「看板几何」）。
 - ⚠️ `Escape` / `pointerdown` 监听跟浮层可见性同注册同注销（与看板选择器同款）。
 
 ## 左栏（`ProgramRail`）
