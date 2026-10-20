@@ -146,6 +146,21 @@ pub async fn get_default_device() -> Result<audio::AudioDevice, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Refuse a command that names no program.
+///
+/// Every program-side key this app persists is an executable name, and a blank
+/// one is a record no session can ever match: it would sit on the settings page
+/// as a remembered rule nobody owns, be read by no engine, and — for a feed —
+/// stand behind an endpoint pin no removal can find again. The write path already
+/// refuses a process whose name it cannot read; this stops the same nonsense
+/// arriving as an argument instead of being inferred from one.
+fn require_exe_name(what: &str, exe_name: &str) -> Result<(), String> {
+    if exe_name.trim().is_empty() {
+        return Err(format!("{what} needs the program it applies to"));
+    }
+    Ok(())
+}
+
 /// Route a process to an ordered list of devices.
 ///
 /// The first device becomes the process's native endpoint (all roles); every
@@ -170,6 +185,14 @@ pub async fn apply_route(
     app: AppHandle,
 ) -> Result<u64, String> {
     info!("cmd: apply_route pid={pid} exe={exe_name} devices={device_ids:?} remember={remember}");
+    // PID 0 is the system-sounds session. The endpoint write below refuses it, but
+    // refusing at the boundary is what keeps the *rollback* honest: the release
+    // walk answers nothing at all for PID 0, and an empty outcome list is the one
+    // thing an `.all()` over outcomes reads as "everything came back".
+    if pid == 0 {
+        return Err("a route needs a process".to_string());
+    }
+    require_exe_name("a route", &exe_name)?;
     if device_ids.is_empty() {
         return Err("no devices selected".to_string());
     }
@@ -244,7 +267,14 @@ pub async fn apply_route(
             )
             .await
             {
-                Ok(outcomes) if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) => {
+                // One pid asked, one answer required: the walk skips a pid it will
+                // not speak for and returns nothing at all, and "nothing said" is
+                // not "handed back" — the pin would be forgotten while the program
+                // kept playing on the device this command chose.
+                Ok(outcomes)
+                    if outcomes.len() == 1
+                        && outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
+                {
                     pins.forget(pid);
                     // The render slot is free again, so the feeds this
                     // program was holding back go back on, exactly as a
@@ -383,7 +413,13 @@ pub async fn stop_route(
     match audio::routing::release_process_default_devices_flow(vec![pid], audio::Role::All, false)
         .await
     {
-        Ok(outcomes) if outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) => {
+        // Exactly one answer for the one pid asked: an empty list would satisfy
+        // `all()` vacuously and let a stop claim it handed the program back to the
+        // system default for a step the audio service never performed.
+        Ok(outcomes)
+            if outcomes.len() == 1
+                && outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
+        {
             pins.forget(pid);
             info!("stopped PID {pid} and released its endpoint assignment");
             // The feeds this executable was holding back now get their moment:
@@ -585,6 +621,10 @@ pub async fn reset_pinned_endpoints(
     };
     let pids: Vec<u32> = sessions
         .iter()
+        // The system-sounds session holds no assignment of ours and the release
+        // walk answers nothing for it; asking anyway would make the sweep's count
+        // of programs it was asked about disagree with the count it can report on.
+        .filter(|session| session.pid != 0)
         .filter(|session| !routed.contains(&session.pid) && !pins.is_routed(session.pid))
         // The enumeration already read every one of these names; asking the
         // process again would be an OpenProcess per session for the same answer.
@@ -681,6 +721,10 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         .map_err(|e| e.to_string())?;
 
     let live_pids: HashSet<u32> = sessions.iter().map(|session| session.pid).collect();
+    // The system-sounds session (PID 0) is not a process the service will answer
+    // for, so it must never be the sibling this sweep hands the assignment to: the
+    // release walk skips it and returns no outcome at all, which the guard below
+    // would otherwise read as a clean release.
     let live_by_exe = smallest_pid_per_exe(
         sessions
             .iter()
@@ -749,10 +793,14 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
         )
         .await
         {
+            // One pid asked, one answer taken: an empty list would satisfy `all()`
+            // without the service having said anything, and the sweep would forget
+            // an entry for an assignment that is still standing.
             Ok(outcomes)
-                if outcomes
-                    .iter()
-                    .all(|(_, outcome)| *outcome == ReleaseOutcome::Released) =>
+                if outcomes.len() == 1
+                    && outcomes
+                        .iter()
+                        .all(|(_, outcome)| *outcome == ReleaseOutcome::Released) =>
             {
                 pins.forget(pid);
                 info!("released the assignment {exe_name} was left on by an earlier route");
@@ -812,7 +860,8 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
     Ok(released)
 }
 
-/// Fold the session list down to one PID per executable: the smallest one.
+/// Fold the session list down to one PID per executable: the smallest one that
+/// is a process at all.
 ///
 /// The product rule is one executable routes one process, and the process it
 /// routes is the smallest pid of that name — that is the pid the frontend's
@@ -821,11 +870,15 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
 /// sibling and could pick a different one on the next run of the same machine.
 /// Keys are lower-cased, because the name on a session is whatever case the
 /// launch used.
+///
+/// PID 0 is the system-sounds session and is never folded in: it names no
+/// process, and the audio service will not speak for it, so a sweep that picked
+/// it would be answered with no outcome at all.
 fn smallest_pid_per_exe<'a>(
     sessions: impl Iterator<Item = (&'a str, u32)>,
 ) -> HashMap<String, u32> {
     let mut by_exe: HashMap<String, u32> = HashMap::new();
-    for (exe_name, pid) in sessions {
+    for (exe_name, pid) in sessions.filter(|(_, pid)| *pid != 0) {
         by_exe
             .entry(exe_name.to_ascii_lowercase())
             .and_modify(|smallest| *smallest = (*smallest).min(pid))
@@ -881,6 +934,15 @@ pub fn get_device_delays(delays: State<'_, Arc<DelayConfig>>) -> Vec<(String, i3
 /// whole session, and a short `tail_ms` between calls; the defaults describe a
 /// standalone single-device sequence. Values are clamped inside the player.
 ///
+/// `run` names the wizard's run, and it is what lets a start that arrives *after*
+/// the user's cancel be refused instead of played: the cancel lands on the IPC
+/// thread while this command's body is still queued, so without a run to compare,
+/// the start would clear the cancel it had just caused and sound into a dialog
+/// that is gone. Passing it is precise — only that run is refused. A caller that
+/// names no run still gets the race closed, by the coarser rule in
+/// [`audio::calibration::CalibrationState::begin`]; see
+/// [`audio::calibration::NO_RUN_TOKEN`].
+///
 /// Resolves when the whole sequence has played, so the frontend treats the
 /// command's promise as "this burst is done" and the events as the timeline
 /// itself. Only one run exists at a time; `calibration_cancel` ends the
@@ -891,15 +953,24 @@ pub async fn calibration_start(
     reps: Option<usize>,
     lead_ms: Option<usize>,
     tail_ms: Option<usize>,
+    run: Option<u64>,
     app: AppHandle,
     state: State<'_, audio::calibration::CalibrationState>,
 ) -> Result<(), String> {
     info!(
-        "cmd: calibration_start device={device_id} reps={reps:?} lead={lead_ms:?} tail={tail_ms:?}"
+        "cmd: calibration_start device={device_id} reps={reps:?} lead={lead_ms:?} tail={tail_ms:?} run={run:?}"
     );
     audio::routing::validate_device_id(&device_id).map_err(|e| e.to_string())?;
-    if !state.begin() {
-        return Err("a calibration run is already in progress".to_string());
+    let run = run.unwrap_or(audio::calibration::NO_RUN_TOKEN);
+    if let Err(refusal) = state.begin(run) {
+        if refusal == audio::calibration::Refusal::Cancelled {
+            // The wizard is already gone by definition, so this line is the only
+            // trace the burst was stopped rather than never asked for.
+            info!(
+                "calibration start for run {run} was cancelled before it was admitted; refusing it"
+            );
+        }
+        return Err(refusal.message().to_string());
     }
     let (guard, cancel) = state.worker_tokens();
     tokio::task::spawn_blocking(move || {
@@ -921,10 +992,25 @@ pub async fn calibration_start(
 
 /// Ask the running calibration to stop. The start command resolves with an
 /// error shortly after; the frontend that called cancel simply ignores it.
+///
+/// `run` names the run the caller means, which is what lets a start still in
+/// flight for *that* run be refused when it lands. The burst that is sounding is
+/// stopped whichever run the caller named: a user who said stop is heard, and the
+/// token only decides what may still begin.
 #[tauri::command]
-pub fn calibration_cancel(state: State<'_, audio::calibration::CalibrationState>) {
-    info!("cmd: calibration_cancel");
-    state.cancel();
+pub fn calibration_cancel(
+    run: Option<u64>,
+    state: State<'_, audio::calibration::CalibrationState>,
+) {
+    state.cancel(run.unwrap_or(audio::calibration::NO_RUN_TOKEN));
+    // The generation is read after the cancel it just took, because that number is
+    // the only thing this side can say about the start/cancel race: it is what tells
+    // a refused start from a burst nobody asked to stop, in a log line the wizard's
+    // own dialog has already walked away from.
+    info!(
+        "cmd: calibration_cancel run={run:?} generation={}",
+        state.generation()
+    );
 }
 
 /// Set a device's volume (percent, 0–100) and push it to any live engine using
@@ -973,6 +1059,10 @@ pub fn set_source_volume(
     duplications: State<'_, DuplicationManager>,
 ) -> Result<(), String> {
     info!("cmd: set_source_volume exe={exe_name} level={percent}%");
+    // The key this level is stored and read under is the executable name; a blank
+    // one is a level no engine will ever ask for and the settings page will still
+    // list.
+    require_exe_name("a program level", &exe_name)?;
     sources.set(&exe_name, percent)?;
     duplications.update_source_volume(&exe_name, percent);
     Ok(())
@@ -1015,6 +1105,7 @@ pub async fn set_primary_volume(
     app: AppHandle,
 ) -> Result<(), String> {
     info!("cmd: set_primary_volume exe={exe_name} volume={percent}%");
+    require_exe_name("a program volume", &exe_name)?;
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         let primaries = app.state::<Arc<PrimaryVolumeConfig>>();
         primaries.set(&exe_name, percent)?;
@@ -1286,6 +1377,11 @@ pub async fn set_feed_target(
     if source_exe.eq_ignore_ascii_case(&target_exe) {
         return Err("a program cannot be fed into itself".to_string());
     }
+    // Both halves of the rule are keyed by executable name, and the pins that hold
+    // the two endpoints are looked up by that name on the way out: a blank one
+    // would be a feed nothing can ever remove.
+    require_exe_name("the sending program of a feed", &source_exe)?;
+    require_exe_name("the receiving program of a feed", &target_exe)?;
     // The rule is recorded first: an undeliverable feed is still the user's
     // decision, and the board shows it with the reason it is quiet. Recording
     // is cheap and idempotent.
@@ -1400,6 +1496,12 @@ pub async fn remove_feed_target(
     pins: State<'_, PinnedRoutes>,
 ) -> Result<Vec<String>, String> {
     info!("cmd: remove_feed_target {source_pid} -> {target_pid}");
+    // The same bound `set_feed_target` imposes on its way in: a feed has two real
+    // processes or it is not a feed, and PID 0 (the system-sounds session) is one
+    // the release walk below will not answer for.
+    if source_pid == 0 || target_pid == 0 {
+        return Err("a feed needs two real processes".to_string());
+    }
     // The executable names decide which memory rule this is. The pins record
     // them for delivered feeds; a feed that was never delivered — recorded
     // with no carrier, or while its source was routed — has no pin to ask, so
@@ -1414,21 +1516,29 @@ pub async fn remove_feed_target(
         .feed_capture_exe_of(target_pid)
         .or_else(|| audio::sessions::get_process_exe_name(target_pid))
         .unwrap_or_default();
-    if !source_exe.is_empty() && !target_exe.is_empty() {
-        feeds.remove(&source_exe, &target_exe)?;
+    if source_exe.is_empty() || target_exe.is_empty() {
+        // Neither the pin nor the process can say which program this wire
+        // belonged to, so the rule cannot be found and no endpoint can be
+        // named: the memory would go on resurrecting a feed the board has
+        // already dropped. Answering `Ok` here would report a removal that
+        // did not happen — and this command's answer is exactly the channel
+        // that carries "what is still stuck" to the user.
+        return Err(format!(
+            "the program behind this feed (PID {source_pid} in, PID {target_pid} out) is gone, \
+             so its rule cannot be found to be forgotten — clear the remembered feed instead"
+        ));
     }
+    feeds.remove(&source_exe, &target_exe)?;
     // What is still on the books decides what this run may let go: a rule
     // from the same source or into the same target shares the endpoint pin,
     // and releasing it here would silence the feed that remains.
     let remaining = feeds.all();
-    let source_still_needed = !source_exe.is_empty()
-        && remaining
-            .iter()
-            .any(|(src, _)| src.eq_ignore_ascii_case(&source_exe));
-    let target_still_needed = !target_exe.is_empty()
-        && remaining
-            .iter()
-            .any(|(_, tgt)| tgt.eq_ignore_ascii_case(&target_exe));
+    let source_still_needed = remaining
+        .iter()
+        .any(|(src, _)| src.eq_ignore_ascii_case(&source_exe));
+    let target_still_needed = remaining
+        .iter()
+        .any(|(_, tgt)| tgt.eq_ignore_ascii_case(&target_exe));
     // Hand both ends back, but only the flow the feed owns: a routed source
     // keeps its render assignment (that one belongs to the route, and the
     // feed was recorded as suspended), and a target with no capture pin of
@@ -1478,12 +1588,21 @@ pub async fn remove_feed_target(
 
 /// Whether a release attempt came back clean for every endpoint it was asked
 /// about, naming in the log the half that failed.
+///
+/// An answer of *nothing* is not a clean release: the walk skips a process it
+/// will not speak for, and a caller that read an empty list as success would
+/// forget its pin while the program stayed fixed to the endpoint — with the board
+/// already moved on, nothing later would come back for it.
 fn released_cleanly(
     release: Result<Vec<(u32, ReleaseOutcome)>, audio::AudioError>,
     which: &str,
 ) -> bool {
     match release {
         Ok(outcomes) => {
+            if outcomes.is_empty() {
+                warn!("the {which} endpoint release answered nothing for the process it was asked about");
+                return false;
+            }
             let stuck: Vec<String> = outcomes
                 .iter()
                 .filter(|(_, outcome)| *outcome != ReleaseOutcome::Released)
@@ -1593,6 +1712,10 @@ mod tests {
     /// through its smallest pid. Folded by whichever session was enumerated first,
     /// the same machine walked twice could reach two different siblings, and the
     /// one the route entry is keyed by would be the one left out.
+    ///
+    /// PID 0 is the system-sounds session, which names no process at all: the
+    /// release walk skips it and answers nothing, so folding it in would hand the
+    /// sweep a pid it can never get a verdict on.
     #[test]
     fn one_executable_is_handed_the_smallest_of_its_pids() {
         let by_exe = smallest_pid_per_exe(
@@ -1600,15 +1723,72 @@ mod tests {
                 ("Chrome.exe", 4100u32),
                 ("chrome.exe", 900),
                 ("Game.exe", 70),
+                ("System", 0),
             ]
             .into_iter(),
         );
         assert_eq!(by_exe.get("chrome.exe"), Some(&900));
         assert_eq!(by_exe.get("game.exe"), Some(&70));
         assert_eq!(
+            by_exe.get("system"),
+            None,
+            "the system-sounds session is no process to hand an assignment to"
+        );
+        assert_eq!(
             by_exe.len(),
             2,
             "one entry per executable, whatever the case"
+        );
+    }
+
+    /// A release that answers *nothing* is not a release that came back clean: the
+    /// walk drops a process it will not speak for, and the caller that read an
+    /// empty list as success would forget the pin while the program stayed fixed to
+    /// the carrier — the board having already dropped the wire, nothing later would
+    /// come back for it.
+    #[test]
+    fn an_empty_answer_is_not_a_clean_release() {
+        assert!(
+            !released_cleanly(Ok(Vec::new()), "feed source"),
+            "no verdict at all is not a verdict of released"
+        );
+        assert!(
+            released_cleanly(Ok(vec![(7, ReleaseOutcome::Released)]), "feed source"),
+            "one process answered, handed back"
+        );
+        assert!(
+            !released_cleanly(Ok(vec![(7, ReleaseOutcome::Unknown)]), "feed target"),
+            "a refusal is reported, not swallowed"
+        );
+        assert!(
+            !released_cleanly(
+                Ok(vec![(
+                    7,
+                    ReleaseOutcome::StillPinned("{0.0.0.00000000}.{a}".to_string())
+                )]),
+                "feed target"
+            ),
+            "and so is a named device it would not give up"
+        );
+        assert!(
+            !released_cleanly(
+                Err(audio::AudioError::Api("the service is gone".to_string())),
+                "feed source"
+            ),
+            "a walk that could not be asked at all is not a clean one"
+        );
+    }
+
+    /// A command that names no program cannot be carried out: every program-side
+    /// key is the executable name, so a blank one is a rule nothing can read back
+    /// or forget later.
+    #[test]
+    fn a_command_that_names_no_program_is_refused() {
+        assert!(require_exe_name("a route", "game.exe").is_ok());
+        assert!(require_exe_name("a route", "").is_err());
+        assert!(
+            require_exe_name("a route", "   ").is_err(),
+            "a name of nothing but spaces is a blank key beside every session"
         );
     }
 }
