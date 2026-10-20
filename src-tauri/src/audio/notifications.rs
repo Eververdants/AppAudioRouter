@@ -19,7 +19,7 @@ use std::time::Instant;
 use log::warn;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use windows::core::{implement, Interface, GUID, PCWSTR};
+use windows::core::{implement, Interface, GUID, HRESULT, PCWSTR};
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Media::Audio::{
     eRender, AudioSessionDisconnectReason, AudioSessionState, AudioSessionStateActive,
@@ -27,7 +27,7 @@ use windows::Win32::Media::Audio::{
     IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionEvents, IAudioSessionEvents_Impl,
     IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice,
     IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
-    DEVICE_STATE, DEVICE_STATE_ACTIVE,
+    AUDCLNT_E_DEVICE_INVALIDATED, DEVICE_STATE, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
@@ -316,11 +316,11 @@ struct WatchedSession {
     device_id: String,
 }
 
-/// How many incomplete passes one unproven endpoint absence may ride on before
-/// the absence is accepted.
+/// How many incomplete passes one endpoint that cannot be asked about may ride
+/// on before its absence is accepted.
 const MAX_DEFERRED_ABSENCE_PASSES: u32 = 5;
-/// The wall-clock bound on the same deferral, for a graph that changes slowly
-/// enough that the pass count never gets there first.
+/// The monotonic-clock bound on the same deferral, for a graph that changes
+/// slowly enough that the pass count never gets there first.
 const DEFERRED_ABSENCE_GRACE_MS: u64 = 60_000;
 
 /// A monotonic clock in milliseconds, for bounding a deferral.
@@ -350,7 +350,9 @@ struct DeferredAbsence {
 /// ever complete, and the session manager of a device that left weeks ago keeps
 /// its COM registration, along with every session watcher on it and their slots
 /// in the liveness ledger, for the rest of the run. So an absence is *asked
-/// about* (see [`endpoint_by_id`]) and only deferred on a bound.
+/// about* (see [`endpoint_probe`]): an answer of gone or live ends the
+/// deferral on the spot, and only an endpoint that cannot be asked at all is
+/// deferred, and only under a bound.
 #[derive(Default)]
 struct AbsenceLedger {
     deferred: HashMap<String, DeferredAbsence>,
@@ -366,17 +368,21 @@ impl AbsenceLedger {
 
     /// Whether one endpoint the walk skipped may keep its watchers this pass.
     ///
-    /// `present` is the audio service's own answer about that exact id: an
-    /// endpoint it no longer names is gone and the absence is accepted at once.
-    /// An endpoint that does answer is on a flaky walk, so its absence rides on
-    /// at most [`MAX_DEFERRED_ABSENCE_PASSES`] passes or
-    /// [`DEFERRED_ABSENCE_GRACE_MS`] of monotonic clock, whichever comes first;
-    /// past either bound the absence is accepted even though the lookup said
-    /// otherwise, because that is the leak being bounded.
-    fn tolerate(&mut self, id: &str, present: bool, now_ms: u64) -> bool {
-        if !present {
+    /// `answer` is the audio service's own reading of that exact id (see
+    /// [`endpoint_probe`]). An endpoint it no longer resolves, or resolves to
+    /// something it does not call active, is gone and the absence is accepted at
+    /// once. An endpoint it calls active keeps its watchers however often the
+    /// walk fails to name it: it is handed back and walked on every one of those
+    /// passes, so its expired sessions are still pruned and nothing accumulates.
+    /// Only an endpoint that cannot be asked at all rides on at most
+    /// [`MAX_DEFERRED_ABSENCE_PASSES`] passes or
+    /// [`DEFERRED_ABSENCE_GRACE_MS`] of monotonic clock, whichever comes first —
+    /// a question this thread can never get an answer to must not hold a
+    /// registration for the rest of the run either.
+    fn tolerate(&mut self, id: &str, answer: EndpointAnswer, now_ms: u64) -> bool {
+        if answer != EndpointAnswer::Unproven {
             self.deferred.remove(id);
-            return false;
+            return answer == EndpointAnswer::Live;
         }
         let entry = self
             .deferred
@@ -415,17 +421,91 @@ fn watched_device_ids(
     ids
 }
 
-/// Ask the audio service for one endpoint by its exact id.
+/// What the audio service's own answer about one exact endpoint id means.
 ///
-/// `None` is the answer that ends a deferral: an endpoint the service no longer
-/// names is gone whatever the collection walk did or did not read. A transient
-/// service failure answers the same way, which is survivable — the next pass
-/// re-registers anything that is back.
-fn endpoint_by_id(enumerator: &IMMDeviceEnumerator, id: &str) -> Option<IMMDevice> {
+/// Only [`EndpointAnswer::Gone`] proves an absence and only
+/// [`EndpointAnswer::Live`] disproves one; [`EndpointAnswer::Unproven`] keeps the
+/// question open for a bounded number of passes (see [`AbsenceLedger`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EndpointAnswer {
+    /// The service names this endpoint and calls it active: the walk failed to
+    /// read it, it did not go away.
+    Live,
+    /// The service no longer resolves this id, or resolves it to an endpoint it
+    /// does not call active (unplugged, disabled, or removed from the store).
+    Gone,
+    /// The question could not be asked: a transient service failure says nothing
+    /// about whether this endpoint is there.
+    Unproven,
+}
+
+/// Whether the service's own answer about an id means that endpoint is gone.
+///
+/// `AUDCLNT_E_DEVICE_INVALIDATED` is what `GetDevice` returns for an id the
+/// device store no longer resolves. Codes that mean "the service could not be
+/// talked to just now" — a disconnected RPC channel, an out-of-memory in
+/// AudioSrv, an uninitialized apartment — are deliberately *not* absence: an
+/// endpoint read as gone on such a failure loses its session-manager and session
+/// watchers, and because the walk is what normally re-registers them, an
+/// endpoint the walk keeps failing to name would stay unwatched for the rest of
+/// the run. That is the blindness this module exists to avoid.
+fn lookup_denotes_absence(code: HRESULT) -> bool {
+    code == AUDCLNT_E_DEVICE_INVALIDATED
+}
+
+/// Whether the service calls this endpoint an active one.
+///
+/// The same reading the enumeration walk filters on (`DEVICE_STATE_ACTIVE`), so
+/// an endpoint the store still keeps but has unplugged or disabled answers the
+/// absence question the way a vanished id does instead of riding on a bound.
+fn endpoint_is_active(state: DEVICE_STATE) -> bool {
+    state.0 & DEVICE_STATE_ACTIVE.0 != 0
+}
+
+/// Ask the audio service about one endpoint by its exact id.
+///
+/// Along with the answer it returns the endpoint itself — only for
+/// [`EndpointAnswer::Live`], so a pass whose walk could not read that entry can
+/// still watch a device that is demonstrably there.
+fn endpoint_probe(
+    enumerator: &IMMDeviceEnumerator,
+    id: &str,
+) -> (EndpointAnswer, Option<DeviceRef>) {
     let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
     // SAFETY: `wide` is NUL-terminated and outlives the call; GetDevice copies
     // the id it needs before returning.
-    unsafe { enumerator.GetDevice(PCWSTR(wide.as_ptr())) }.ok()
+    let device = match unsafe { enumerator.GetDevice(PCWSTR(wide.as_ptr())) } {
+        Ok(device) => device,
+        Err(e) => {
+            if lookup_denotes_absence(e.code()) {
+                return (EndpointAnswer::Gone, None);
+            }
+            warn!("endpoint {id} could not be asked whether it is there: {e}");
+            return (EndpointAnswer::Unproven, None);
+        }
+    };
+    // SAFETY: GetState on the device this thread just obtained and owns.
+    let state = match unsafe { device.GetState() } {
+        Ok(state) => state,
+        Err(e) => {
+            // Known, but not known to be active: no evidence either way, so the
+            // deferral survives under its own bound rather than being read as a
+            // removal.
+            warn!("endpoint {id} could not be asked its state: {e}");
+            return (EndpointAnswer::Unproven, None);
+        }
+    };
+    if endpoint_is_active(state) {
+        (
+            EndpointAnswer::Live,
+            Some(DeviceRef {
+                id: id.to_string(),
+                raw: device,
+            }),
+        )
+    } else {
+        (EndpointAnswer::Gone, None)
+    }
 }
 
 /// Whether a watched session reports itself gone.
@@ -449,11 +529,13 @@ fn session_self_reports_gone(watched: &WatchedSession) -> bool {
 #[derive(Clone, Default)]
 struct Witness {
     /// Endpoints this pass can account for: named by the walk, or skipped by it
-    /// and recovered by the lookup of that exact id.
+    /// and kept by [`AbsenceLedger`] after being asked about by that exact id.
     devices: HashSet<String>,
     /// Sessions named by a session list that was read to the end.
     sessions: HashSet<String>,
-    /// Endpoints whose session list this pass read to the end.
+    /// Endpoints whose session list this pass read to the end. A list with an
+    /// entry that could not be read is *not* one of these: it names some of the
+    /// device's sessions, which proves nothing about the rest.
     walked: HashSet<String>,
     /// Watched sessions that reported themselves expired.
     expired: HashSet<String>,
@@ -464,7 +546,8 @@ struct Witness {
 /// The four readings of an absent session id, in the order they are settled:
 /// the walk saw it, so it lives; its endpoint is gone, so it went with it; it
 /// reported itself expired; and only if none of that applies, the endpoint is
-/// still watched but its session list could not be read, which proves nothing.
+/// still accounted for but its session list was not read to the end, which
+/// proves nothing.
 fn keep_session_watcher(id: &str, device_id: &str, witness: &Witness) -> bool {
     if witness.sessions.contains(id) {
         return true;
@@ -637,8 +720,9 @@ fn watch(app: AppHandle) {
 /// watcher onto every session, dropping registrations that no longer exist.
 ///
 /// `absences` carries what this thread already knows about endpoints an earlier
-/// pass could not name, so a partial walk defers a prune for a bounded number of
-/// passes instead of forever. See [`AbsenceLedger`].
+/// pass could not name: each one is asked about by id, and only an endpoint the
+/// service cannot be asked about at all defers its prune, and only under a bound.
+/// See [`AbsenceLedger`].
 fn sync(
     enumerator: &IMMDeviceEnumerator,
     session_client: &IAudioSessionNotification,
@@ -655,13 +739,15 @@ fn sync(
     // What the walk named, against what this thread still holds watchers on.
     // The two only agree when the walk was complete, so the gap between them is
     // asked about by id rather than assumed in either direction: an endpoint the
-    // service no longer names is gone and gets pruned on the spot, and one it
-    // does name was merely skipped by the walk, so it is walked here like any
+    // service resolves to nothing active is gone and gets pruned on the spot, one
+    // it calls active was merely skipped by the walk and is walked here like any
     // other endpoint of this pass — which keeps its new sessions watched and its
-    // departed ones prunable.
+    // departed ones prunable — and one the service cannot be asked about keeps
+    // its watchers for as long as the ledger allows.
     let named: HashSet<String> = devices.iter().map(|device| device.id.clone()).collect();
     let watched_ids = watched_device_ids(watched_managers, watched_sessions);
     absences.sweep(&named, &watched_ids);
+    let mut witness = Witness::default();
     if !endpoints_are_all_named {
         let now = clock_ms();
         let unexplained: Vec<String> = watched_ids
@@ -670,17 +756,20 @@ fn sync(
             .cloned()
             .collect();
         for id in unexplained {
-            let device = endpoint_by_id(enumerator, &id);
-            if !absences.tolerate(&id, device.is_some(), now) {
+            let (answer, device) = endpoint_probe(enumerator, &id);
+            if !absences.tolerate(&id, answer, now) {
                 continue;
             }
-            if let Some(raw) = device {
-                devices.push(DeviceRef { id, raw });
+            // Accounted for whatever the answer was: that is exactly what
+            // `tolerate` just decided, and an endpoint with no device to walk
+            // (the unaskable case) must still hold its watchers this pass.
+            witness.devices.insert(id.clone());
+            if let Some(device) = device {
+                devices.push(device);
             }
         }
     }
 
-    let mut witness = Witness::default();
     for device in &devices {
         // Accounted for before anything is read off it: a device whose manager
         // will not activate is still present, and the watchers on it must not be
@@ -698,12 +787,12 @@ fn sync(
     }
 
     // Sessions this pass can neither see nor lose: their endpoint is still
-    // watched, but its session list could not be read, so the walk says nothing
-    // about them and their absence proves nothing. Ask each one for itself
-    // instead of keeping it on the assumption that the walk simply missed it —
-    // otherwise a device whose list stays unreadable keeps an expired session's
-    // two COM registrations, and every expiry it still reports provokes another
-    // full re-enumeration, for the rest of the run.
+    // accounted for, but its session list could not be read to the end, so the
+    // walk says nothing about them and their absence proves nothing. Ask each
+    // one for itself instead of keeping it on the assumption that the walk simply
+    // missed it — otherwise a device whose list stays unreadable keeps an expired
+    // session's two COM registrations, and every expiry it still reports provokes
+    // another full re-enumeration, for the rest of the run.
     for (id, watched) in watched_sessions.iter() {
         let unread = !witness.sessions.contains(id.as_str())
             && witness.devices.contains(&watched.device_id)
@@ -757,21 +846,34 @@ fn watch_device(
         }
     };
 
-    // `None` here means the device's sessions could not be read at all, which is
-    // what keeps it out of `walked` and off the prune list.
-    let Some(sessions) = sessions_of(&manager) else {
+    // `None` here means the device's sessions could not be read at all, and a
+    // second value of `false` that only some of them could be: either way the
+    // list names less than the device holds, which is what keeps it out of
+    // `walked` and off the prune list.
+    let Some((sessions, read_to_the_end)) = sessions_of(&manager) else {
         return;
     };
-    witness.walked.insert(device.id.clone());
+    let mut accounted = read_to_the_end;
     for session in sessions {
-        watch_session(session, &device.id, tx, sounding, watched_sessions, witness);
+        if !watch_session(session, &device.id, tx, sounding, watched_sessions, witness) {
+            accounted = false;
+        }
+    }
+    if accounted {
+        witness.walked.insert(device.id.clone());
+    } else {
+        warn!("session list of {} was only partly read", device.id);
     }
 }
 
 /// Register the expiry watcher on one session, unless this thread watches it
 /// already — which is also what keeps a pass that named the same endpoint twice
-/// (through the walk and through a lookup of the same id) from wiring it in
+/// (through the walk and through a probe of the same id) from wiring it in
 /// twice.
+///
+/// Returns `false` when this entry could not be read at all, meaning the
+/// device's list does not account for every session on it and therefore cannot
+/// be trusted to prove that any session it left out has gone.
 fn watch_session(
     session: IAudioSessionControl2,
     device_id: &str,
@@ -779,16 +881,16 @@ fn watch_session(
     sounding: &Sounding,
     watched_sessions: &mut HashMap<String, WatchedSession>,
     witness: &mut Witness,
-) {
+) -> bool {
     let id = session_identifier(&session);
     if id.is_empty() {
-        return;
+        return false;
     }
-    // Every session that exists is accounted for, whether or not this pass is the
-    // one that registered its watcher — the prune compares against this set.
+    // Every session that is read is accounted for, whether or not this pass is
+    // the one that registered its watcher — the prune compares against this set.
     witness.sessions.insert(id.clone());
     if watched_sessions.contains_key(&id) {
-        return;
+        return true;
     }
     // SAFETY: GetProcessId on the session control this thread just enumerated and
     // owns.
@@ -804,13 +906,13 @@ fn watch_session(
     }
     .into();
     let Ok(control) = session.cast::<IAudioSessionControl>() else {
-        return;
+        return true;
     };
     // SAFETY: the callback and the control are kept alive in `watched_sessions`,
     // so this registration remains valid until it is unregistered during a prune
     // or at thread teardown.
     if unsafe { session.RegisterAudioSessionNotification(&events) }.is_err() {
-        return;
+        return true;
     }
     // Seed the ledger with the state as it stands. The frontend learns the same
     // fact from the list it is about to enumerate, and an unseeded ledger would
@@ -829,6 +931,7 @@ fn watch_session(
             device_id: device_id.to_string(),
         },
     );
+    true
 }
 
 /// Drop watchers for devices and sessions that no longer exist, unregistering
@@ -923,22 +1026,35 @@ fn open_session_manager(device: &IMMDevice) -> Result<IAudioSessionManager2, ()>
     unsafe { device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) }.map_err(|_| ())
 }
 
-/// Every session of one device, or `None` when the enumerator is unavailable.
-fn sessions_of(manager: &IAudioSessionManager2) -> Option<Vec<IAudioSessionControl2>> {
+/// Every session of one device, and whether the whole list was read.
+///
+/// `None` means the enumerator itself was unavailable. The second value is
+/// `false` when the enumerator answered but one of its entries did not: the list
+/// is then a partial one, and a partial list must not be used to prove that a
+/// session is gone — that is the same blind walk that was fixed for endpoints,
+/// one level down.
+fn sessions_of(manager: &IAudioSessionManager2) -> Option<(Vec<IAudioSessionControl2>, bool)> {
     // SAFETY: GetSessionEnumerator on a live session manager.
     let session_enum: IAudioSessionEnumerator = unsafe { manager.GetSessionEnumerator() }.ok()?;
     let count = unsafe { session_enum.GetCount() }.ok()?;
     let mut sessions = Vec::with_capacity(count as usize);
+    let mut complete = true;
     for i in 0..count {
         // SAFETY: i is within [0, count).
         let Ok(control) = (unsafe { session_enum.GetSession(i) }) else {
+            complete = false;
             continue;
         };
-        if let Ok(control2) = control.cast::<IAudioSessionControl2>() {
-            sessions.push(control2);
-        }
+        let Ok(control2) = control.cast::<IAudioSessionControl2>() else {
+            // The entry was read; it just is not a session this module can watch.
+            // Say so rather than dropping it silently, or its device would be
+            // marked as fully read while one of its sessions went unaccounted.
+            complete = false;
+            continue;
+        };
+        sessions.push(control2);
     }
-    Some(sessions)
+    Some((sessions, complete))
 }
 
 /// A session's unique identifier, or an empty string when it cannot be read.
@@ -962,7 +1078,7 @@ mod tests {
         ids.iter().map(|id| (*id).to_string()).collect()
     }
 
-    /// An endpoint the audio service no longer names is gone on the spot.
+    /// An endpoint the audio service no longer resolves is gone on the spot.
     ///
     /// This is the case the deferral must never swallow: the watcher of a device
     /// that was pulled out keeps its COM registrations for the rest of the run,
@@ -971,30 +1087,55 @@ mod tests {
     #[test]
     fn a_device_that_answers_no_lookup_is_accepted_as_gone_at_once() {
         let mut ledger = AbsenceLedger::default();
-        assert!(!ledger.tolerate("gone", false, 0));
+        assert!(!ledger.tolerate("gone", EndpointAnswer::Gone, 0));
         assert!(ledger.deferred.is_empty());
 
         // And the next pass starts clean rather than counting towards a bound it
         // no longer needs.
-        assert!(ledger.tolerate("flaky", true, 0));
-        assert!(!ledger.tolerate("flaky", false, 1));
+        assert!(ledger.tolerate("flaky", EndpointAnswer::Unproven, 0));
+        assert!(!ledger.tolerate("flaky", EndpointAnswer::Gone, 1));
         assert!(ledger.deferred.is_empty());
     }
 
-    /// The deferral exists because a flaky walk cannot prove an absence — not
-    /// because an absence is allowed to ride on it forever.
+    /// An endpoint the service still calls active is not on its way out, however
+    /// often the walk fails to name it, and the bound must not say otherwise:
+    /// the tolerated endpoint is handed back and walked on every one of those
+    /// passes, so nothing accumulates — while a prune here would take its watchers
+    /// away from a live device, and since the walk is what re-registers them, an
+    /// endpoint the walk never names would never be watched again.
     #[test]
-    fn an_endpoint_that_survives_the_probe_is_deferred_only_a_bounded_number_of_times() {
+    fn a_live_endpoint_is_never_pruned_by_a_walk_that_cannot_read_it() {
+        let mut ledger = AbsenceLedger::default();
+        for pass in 0..3 * MAX_DEFERRED_ABSENCE_PASSES {
+            assert!(
+                ledger.tolerate("flaky", EndpointAnswer::Live, u64::from(pass) * 1_000),
+                "pass {pass} of a walk that cannot read this entry still keeps it"
+            );
+        }
+        // It leaves no trace behind either, so a failure that comes later starts
+        // its own count instead of inheriting this one.
+        assert!(ledger.deferred.is_empty());
+    }
+
+    /// The bound is for the endpoint that cannot be asked about at all: a
+    /// question this thread never gets an answer to must not hold a registration
+    /// for the rest of the run.
+    #[test]
+    fn an_endpoint_that_cannot_be_asked_is_deferred_only_a_bounded_number_of_times() {
         let mut ledger = AbsenceLedger::default();
         for pass in 1..MAX_DEFERRED_ABSENCE_PASSES {
             assert!(
-                ledger.tolerate("flaky", true, u64::from(pass)),
-                "pass {pass} of a slow walk still defers"
+                ledger.tolerate("mute", EndpointAnswer::Unproven, u64::from(pass)),
+                "pass {pass} of an unanswered question still defers"
             );
         }
         assert!(
-            !ledger.tolerate("flaky", true, u64::from(MAX_DEFERRED_ABSENCE_PASSES)),
-            "the bound ends the deferral even against a device that answers"
+            !ledger.tolerate(
+                "mute",
+                EndpointAnswer::Unproven,
+                u64::from(MAX_DEFERRED_ABSENCE_PASSES)
+            ),
+            "the bound ends the deferral when nothing else can"
         );
         assert!(ledger.deferred.is_empty());
     }
@@ -1005,9 +1146,9 @@ mod tests {
     #[test]
     fn the_deadline_ends_a_deferral_whatever_the_pass_count() {
         let mut ledger = AbsenceLedger::default();
-        assert!(ledger.tolerate("flaky", true, 0));
-        assert!(ledger.tolerate("flaky", true, 1_000));
-        assert!(!ledger.tolerate("flaky", true, DEFERRED_ABSENCE_GRACE_MS));
+        assert!(ledger.tolerate("mute", EndpointAnswer::Unproven, 0));
+        assert!(ledger.tolerate("mute", EndpointAnswer::Unproven, 1_000));
+        assert!(!ledger.tolerate("mute", EndpointAnswer::Unproven, DEFERRED_ABSENCE_GRACE_MS));
     }
 
     /// Being named again is the evidence that ends the suspicion, so a device
@@ -1016,8 +1157,8 @@ mod tests {
     #[test]
     fn naming_an_endpoint_again_clears_its_deferral() {
         let mut ledger = AbsenceLedger::default();
-        assert!(ledger.tolerate("back", true, 0));
-        assert!(ledger.tolerate("gone", true, 0));
+        assert!(ledger.tolerate("back", EndpointAnswer::Unproven, 0));
+        assert!(ledger.tolerate("gone", EndpointAnswer::Unproven, 0));
         ledger.sweep(&set(&["back"]), &set(&["back", "gone"]));
         assert!(!ledger.deferred.contains_key("back"));
         assert!(ledger.deferred.contains_key("gone"));
@@ -1025,6 +1166,53 @@ mod tests {
         // A watcher that no longer exists stops being counted, too.
         ledger.sweep(&set(&[]), &set(&[]));
         assert!(ledger.deferred.is_empty());
+    }
+
+    /// Only the service's own "this id is no longer an endpoint" may end a
+    /// deferral early. Every other failure — a disconnected RPC channel, an
+    /// out-of-memory inside AudioSrv, an apartment that is not up yet — means the
+    /// question could not be asked, and reading it as a removal would unregister
+    /// the watchers of a device that is playing sound right now.
+    #[test]
+    fn a_busy_audio_service_is_not_evidence_that_an_endpoint_left() {
+        use windows::Win32::Foundation::{CO_E_NOTINITIALIZED, E_OUTOFMEMORY, RPC_E_DISCONNECTED};
+        use windows::Win32::Media::Audio::AUDCLNT_E_NOT_INITIALIZED;
+
+        assert!(lookup_denotes_absence(AUDCLNT_E_DEVICE_INVALIDATED));
+        for could_not_ask in [
+            E_OUTOFMEMORY,
+            RPC_E_DISCONNECTED,
+            CO_E_NOTINITIALIZED,
+            AUDCLNT_E_NOT_INITIALIZED,
+        ] {
+            assert!(
+                !lookup_denotes_absence(could_not_ask),
+                "{could_not_ask} only says the question could not be asked"
+            );
+        }
+    }
+
+    /// The device store keeps endpoints that are unplugged or disabled, and
+    /// `GetDevice` answers for them, so the state — the same mask the walk
+    /// enumerates with — is what makes a departed device a departure.
+    #[test]
+    fn an_endpoint_the_store_keeps_but_does_not_call_active_is_gone() {
+        use windows::Win32::Media::Audio::{
+            DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
+        };
+
+        assert!(endpoint_is_active(DEVICE_STATE_ACTIVE));
+        for inactive in [
+            DEVICE_STATE_DISABLED,
+            DEVICE_STATE_NOTPRESENT,
+            DEVICE_STATE_UNPLUGGED,
+            DEVICE_STATE(0),
+        ] {
+            assert!(
+                !endpoint_is_active(inactive),
+                "{inactive:?} is not an endpoint the walk would have named"
+            );
+        }
     }
 
     /// The four readings of a session id missing from this pass's list, which
