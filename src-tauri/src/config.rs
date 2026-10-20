@@ -95,6 +95,48 @@ pub struct RouteMap {
     routes: HashMap<String, DeviceList>,
 }
 
+impl RouteMap {
+    /// Fold every case variant of one executable into the single entry that
+    /// executable is allowed to have.
+    ///
+    /// `save_route` and `remove_route` consolidate as they write, but a file
+    /// written before they did can still hold one program twice, and nothing
+    /// there rewrites the spelling nobody touches again: every remembered route
+    /// the settings page lists and every one the frontend restores would be read
+    /// twice — two remembered routes for one program is how it ends up applied to
+    /// two of a browser's processes, against the one-executable-one-process rule.
+    /// The fold therefore happens on the way in rather than on the next write.
+    ///
+    /// The surviving spelling is the one that sorts first, so a fold does not
+    /// depend on the map's iteration order; its targets are the first non-empty
+    /// list remembered under any of the variants.
+    fn consolidate_case_variants(&mut self) {
+        let mut names: Vec<String> = self.routes.keys().cloned().collect();
+        names.sort();
+        let mut folded: Vec<(String, DeviceList)> = Vec::new();
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        for name in names {
+            let Some(list) = self.routes.remove(&name) else {
+                continue;
+            };
+            match seen.get(&name.to_ascii_lowercase()).copied() {
+                Some(index) => {
+                    // A later variant only supplies targets when the spelling
+                    // that survived remembered none: an empty list is no route.
+                    if folded[index].1 .0.is_empty() && !list.0.is_empty() {
+                        folded[index].1 = list;
+                    }
+                }
+                None => {
+                    seen.insert(name.to_ascii_lowercase(), folded.len());
+                    folded.push((name, list));
+                }
+            }
+        }
+        self.routes = folded.into_iter().collect();
+    }
+}
+
 /// Manages route config file (interior mutability for Tauri State).
 pub struct RouteConfig {
     inner: Mutex<RouteConfigInner>,
@@ -114,7 +156,8 @@ impl RouteConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("route-memory.json");
 
-        let map = read_or_default(&path);
+        let mut map: RouteMap = read_or_default(&path);
+        map.consolidate_case_variants();
 
         Ok(Self {
             inner: Mutex::new(RouteConfigInner { path, map }),
@@ -469,6 +512,45 @@ impl FeedMap {
         }
     }
 
+    /// Fold every case variant of one source executable into one entry, merging
+    /// the targets each of them remembered.
+    ///
+    /// Same hazard [`RouteMap::consolidate_case_variants`] answers, with a
+    /// different fold: a second spelling of one program lists its feeds twice on
+    /// the settings page and restores twice at startup, while dropping either
+    /// spelling's targets would silently un-make a rule the user set. Nothing
+    /// here rewrites a key nobody touches again, so the fold happens on load.
+    fn consolidate_case_variants(&mut self) {
+        let mut names: Vec<String> = self.feeds.keys().cloned().collect();
+        names.sort();
+        let mut folded: Vec<(String, Vec<String>)> = Vec::new();
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        for name in names {
+            let Some(targets) = self.feeds.remove(&name) else {
+                continue;
+            };
+            let lower = name.to_ascii_lowercase();
+            let index = match seen.get(&lower).copied() {
+                Some(index) => index,
+                None => {
+                    seen.insert(lower, folded.len());
+                    folded.push((name, Vec::new()));
+                    folded.len() - 1
+                }
+            };
+            for target in targets {
+                if !folded[index]
+                    .1
+                    .iter()
+                    .any(|kept| kept.eq_ignore_ascii_case(&target))
+                {
+                    folded[index].1.push(target);
+                }
+            }
+        }
+        self.feeds = folded.into_iter().collect();
+    }
+
     /// Drop one target from `source_exe`'s rule; a rule left empty is removed.
     ///
     /// Every case variant of the source's key goes, not just the first the map
@@ -513,7 +595,8 @@ impl FeedConfig {
             .map_err(|e| format!("app_data_dir failed: {e}"))?
             .join("feed-memory.json");
 
-        let map = read_or_default(&path);
+        let mut map: FeedMap = read_or_default(&path);
+        map.consolidate_case_variants();
 
         Ok(Self {
             inner: Mutex::new(FeedConfigInner { path, map }),
@@ -671,10 +754,17 @@ impl SourceVolumeMap {
     }
 
     /// The level for `exe_name`, neutral when nothing is stored.
+    ///
+    /// Searched without regard to case, like every other exe-keyed map: a name
+    /// carries whatever case the launch used, so the engine's spelling and the
+    /// one on file are not guaranteed to match. Read by exact key, a stored 40
+    /// would be missed and the program would play at the neutral level while
+    /// the file said otherwise — and the settings page would still show the 40.
     pub fn level(&self, exe_name: &str) -> u32 {
         self.volumes
-            .get(exe_name)
-            .copied()
+            .iter()
+            .find(|(stored, _)| stored.eq_ignore_ascii_case(exe_name))
+            .map(|(_, level)| *level)
             .unwrap_or(SOURCE_VOLUME_NEUTRAL)
     }
 
@@ -685,13 +775,17 @@ impl SourceVolumeMap {
                 "source volume {percent} is out of range (0–{SOURCE_VOLUME_MAX})"
             ));
         }
-        if percent == SOURCE_VOLUME_NEUTRAL {
-            // Unlike a device volume, the neutral value is not the top of the
-            // range here, it is the middle of it: only equality means "as the
-            // program made it", which is why this is not the `>=` the device
-            // config uses.
-            self.volumes.remove(exe_name);
-        } else {
+        // Every spelling of this program goes before the new entry arrives, so
+        // one executable holds exactly one level: two entries for one program
+        // leave the other one on file, reported to the settings page and read
+        // by no engine.
+        self.volumes
+            .retain(|stored, _| !stored.eq_ignore_ascii_case(exe_name));
+        // Unlike a device volume, the neutral value is not the top of the
+        // range here, it is the middle of it: only equality means "as the
+        // program made it", which is why this is not the `>=` the device
+        // config uses. The retain above is that removal.
+        if percent != SOURCE_VOLUME_NEUTRAL {
             self.volumes.insert(exe_name.to_string(), percent);
         }
         Ok(())
@@ -810,10 +904,18 @@ impl PrimaryVolumeMap {
     }
 
     /// The volume for `exe_name`, neutral when nothing is stored.
+    ///
+    /// Searched without regard to case for the same reason the remembered routes
+    /// are consolidated by it: the key is an image name, and a name carries
+    /// whatever case the launch used. Read by exact key, an engine started under
+    /// the other spelling claims the neutral 100 while the file says the program
+    /// plays at 40 — and the read-back in `set_primary_volume` then hands the
+    /// sessions a number the settings page does not show.
     pub fn volume(&self, exe_name: &str) -> u32 {
         self.volumes
-            .get(exe_name)
-            .copied()
+            .iter()
+            .find(|(stored, _)| stored.eq_ignore_ascii_case(exe_name))
+            .map(|(_, volume)| *volume)
             .unwrap_or(SOURCE_VOLUME_NEUTRAL)
     }
 
@@ -824,9 +926,13 @@ impl PrimaryVolumeMap {
                 "primary volume {percent} is out of range ({PRIMARY_VOLUME_MIN_PERCENT}–{SOURCE_VOLUME_NEUTRAL})"
             ));
         }
-        if percent == SOURCE_VOLUME_NEUTRAL {
-            self.volumes.remove(exe_name);
-        } else {
+        // One executable, one entry: a second spelling of the same program would
+        // be read by no engine and listed as if it were another one.
+        self.volumes
+            .retain(|stored, _| !stored.eq_ignore_ascii_case(exe_name));
+        // The neutral value is stored by removal, so a read-back that trusted the
+        // entry alone would hand the sessions a 0.
+        if percent != SOURCE_VOLUME_NEUTRAL {
             self.volumes.insert(exe_name.to_string(), percent);
         }
         Ok(())
@@ -1143,6 +1249,47 @@ mod tests {
     }
 
     #[test]
+    fn one_program_with_two_spellings_on_file_keeps_one_route() {
+        let mut map: RouteMap = serde_json::from_str(
+            r#"{"routes": {"Chrome.exe": ["{0.0.0.00000000}.{a}"], "chrome.exe": ["{0.0.0.00000000}.{b}"], "game.exe": []}}"#,
+        )
+        .unwrap();
+        map.consolidate_case_variants();
+        assert_eq!(map.routes.len(), 2, "one program, one entry");
+        assert!(!map.routes.contains_key("chrome.exe"));
+        assert_eq!(
+            map.routes["Chrome.exe"].0,
+            vec!["{0.0.0.00000000}.{a}".to_string()],
+            "the spelling that sorts first survives with its own targets"
+        );
+        // A survivor that remembered nothing is no route to keep: the variant
+        // behind it has the targets the user set.
+        let mut map: RouteMap =
+            serde_json::from_str(r#"{"routes": {"A.exe": [], "a.exe": ["device"]}}"#).unwrap();
+        map.consolidate_case_variants();
+        assert_eq!(map.routes.len(), 1);
+        assert_eq!(map.routes["A.exe"].0, vec!["device".to_string()]);
+    }
+
+    #[test]
+    fn one_program_with_two_spellings_on_file_keeps_every_feed_target() {
+        // Folding the source's spelling may not cost the user a rule: the two
+        // variants' targets merge, and a target the other spelling already lists
+        // under another case is the same rule twice.
+        let mut map: FeedMap = serde_json::from_str(
+            r#"{"feeds": {"Chrome.exe": ["obs64.exe"], "chrome.exe": ["OBS64.EXE", "audacity.exe"]}}"#,
+        )
+        .unwrap();
+        map.consolidate_case_variants();
+        assert_eq!(map.feeds.len(), 1, "one source, one entry");
+        assert!(!map.feeds.contains_key("chrome.exe"));
+        assert_eq!(
+            map.feeds["Chrome.exe"],
+            vec!["obs64.exe".to_string(), "audacity.exe".to_string()]
+        );
+    }
+
+    #[test]
     fn delay_config_loads_unsigned_values_written_before_signed_delays() {
         let map: DelayMap = serde_json::from_str(r#"{"delays": {"dev": 300}}"#).unwrap();
         assert_eq!(map.delays["dev"], 300);
@@ -1205,6 +1352,35 @@ mod tests {
         map.store("game.exe", SOURCE_VOLUME_NEUTRAL).unwrap();
         assert!(map.volumes.is_empty());
         assert_eq!(map.volume("game.exe"), SOURCE_VOLUME_NEUTRAL);
+    }
+
+    #[test]
+    fn a_source_level_is_read_and_stored_whatever_case_the_launch_used() {
+        // The key is an image name, and the engine asks by the spelling its route
+        // was made under while the file holds whatever case an earlier launch
+        // used. Matched exactly, a stored 40 read as the neutral 100 and a fresh
+        // write opened a second entry for one program.
+        let mut map: SourceVolumeMap =
+            serde_json::from_str(r#"{"volumes": {"Chrome.exe": 40}}"#).unwrap();
+        assert_eq!(map.level("chrome.exe"), 40);
+        map.store("chrome.exe", 250).unwrap();
+        assert_eq!(map.volumes.len(), 1, "one program, one entry");
+        assert_eq!(map.level("CHROME.EXE"), 250);
+        // Clearing reaches the entry from any spelling too.
+        map.store("Chrome.exe", SOURCE_VOLUME_NEUTRAL).unwrap();
+        assert!(map.volumes.is_empty());
+    }
+
+    #[test]
+    fn a_primary_volume_is_read_and_stored_whatever_case_the_launch_used() {
+        let mut map: PrimaryVolumeMap =
+            serde_json::from_str(r#"{"volumes": {"Game.EXE": 40}}"#).unwrap();
+        assert_eq!(map.volume("game.exe"), 40);
+        map.store("game.exe", 70).unwrap();
+        assert_eq!(map.volumes.len(), 1, "one program, one entry");
+        assert_eq!(map.volume("Game.EXE"), 70);
+        map.store("GAME.exe", SOURCE_VOLUME_NEUTRAL).unwrap();
+        assert!(map.volumes.is_empty());
     }
 
     #[test]
