@@ -13,7 +13,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use log::warn;
 use serde::Serialize;
@@ -315,6 +316,168 @@ struct WatchedSession {
     device_id: String,
 }
 
+/// How many incomplete passes one unproven endpoint absence may ride on before
+/// the absence is accepted.
+const MAX_DEFERRED_ABSENCE_PASSES: u32 = 5;
+/// The wall-clock bound on the same deferral, for a graph that changes slowly
+/// enough that the pass count never gets there first.
+const DEFERRED_ABSENCE_GRACE_MS: u64 = 60_000;
+
+/// A monotonic clock in milliseconds, for bounding a deferral.
+///
+/// `Instant` and not the wall clock: an NTP correction, or the machine waking
+/// from sleep, must not lengthen or shorten how long a watcher may be deferred.
+fn clock_ms() -> u64 {
+    static ANCHOR: OnceLock<Instant> = OnceLock::new();
+    ANCHOR.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+/// One endpoint this thread still holds watchers on but a walk did not name.
+#[derive(Clone, Copy)]
+struct DeferredAbsence {
+    /// Incomplete passes this absence has ridden on, the current one included.
+    passes: u32,
+    /// When it was first suspected, in [`clock_ms`] units.
+    since_ms: u64,
+}
+
+/// Bookkeeping for endpoint absences a partial walk cannot prove.
+///
+/// A walk that skipped an entry cannot tell a skipped endpoint from a removed
+/// one. Pruning on that reading unregisters watchers of sessions that are still
+/// playing, so the correction is to defer — but a deferral with no end is the
+/// same bug turned slow: with one permanently flaky endpoint no later pass is
+/// ever complete, and the session manager of a device that left weeks ago keeps
+/// its COM registration, along with every session watcher on it and their slots
+/// in the liveness ledger, for the rest of the run. So an absence is *asked
+/// about* (see [`endpoint_by_id`]) and only deferred on a bound.
+#[derive(Default)]
+struct AbsenceLedger {
+    deferred: HashMap<String, DeferredAbsence>,
+}
+
+impl AbsenceLedger {
+    /// Forget the endpoints that this pass named again, or that no watcher is
+    /// held on any more.
+    fn sweep(&mut self, named: &HashSet<String>, watched: &HashSet<String>) {
+        self.deferred
+            .retain(|id, _| !named.contains(id) && watched.contains(id));
+    }
+
+    /// Whether one endpoint the walk skipped may keep its watchers this pass.
+    ///
+    /// `present` is the audio service's own answer about that exact id: an
+    /// endpoint it no longer names is gone and the absence is accepted at once.
+    /// An endpoint that does answer is on a flaky walk, so its absence rides on
+    /// at most [`MAX_DEFERRED_ABSENCE_PASSES`] passes or
+    /// [`DEFERRED_ABSENCE_GRACE_MS`] of monotonic clock, whichever comes first;
+    /// past either bound the absence is accepted even though the lookup said
+    /// otherwise, because that is the leak being bounded.
+    fn tolerate(&mut self, id: &str, present: bool, now_ms: u64) -> bool {
+        if !present {
+            self.deferred.remove(id);
+            return false;
+        }
+        let entry = self
+            .deferred
+            .entry(id.to_string())
+            .or_insert(DeferredAbsence {
+                passes: 0,
+                since_ms: now_ms,
+            });
+        entry.passes += 1;
+        let overdue = entry.passes >= MAX_DEFERRED_ABSENCE_PASSES
+            || now_ms.saturating_sub(entry.since_ms) >= DEFERRED_ABSENCE_GRACE_MS;
+        if overdue {
+            self.deferred.remove(id);
+            return false;
+        }
+        true
+    }
+}
+
+/// The endpoints this thread holds watchers on: every session manager it
+/// registered, plus the device of every session watcher it holds.
+///
+/// Both halves are needed: a manager whose `RegisterSessionNotification` was
+/// refused is not in the map, yet its sessions are still watched, and a device
+/// that left with its sessions behind would otherwise go unprobed.
+fn watched_device_ids(
+    watched_managers: &HashMap<String, IAudioSessionManager2>,
+    watched_sessions: &HashMap<String, WatchedSession>,
+) -> HashSet<String> {
+    let mut ids: HashSet<String> = watched_managers.keys().cloned().collect();
+    ids.extend(
+        watched_sessions
+            .values()
+            .map(|watched| watched.device_id.clone()),
+    );
+    ids
+}
+
+/// Ask the audio service for one endpoint by its exact id.
+///
+/// `None` is the answer that ends a deferral: an endpoint the service no longer
+/// names is gone whatever the collection walk did or did not read. A transient
+/// service failure answers the same way, which is survivable — the next pass
+/// re-registers anything that is back.
+fn endpoint_by_id(enumerator: &IMMDeviceEnumerator, id: &str) -> Option<IMMDevice> {
+    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call; GetDevice copies
+    // the id it needs before returning.
+    unsafe { enumerator.GetDevice(PCWSTR(wide.as_ptr())) }.ok()
+}
+
+/// Whether a watched session reports itself gone.
+///
+/// Only asked of watchers a pass could not account for any other way, so the
+/// cost is bounded by how many of them there are — normally none. A state that
+/// cannot be read is no evidence either way and keeps the watcher.
+fn session_self_reports_gone(watched: &WatchedSession) -> bool {
+    // SAFETY: GetState on a session control this thread registered and owns.
+    matches!(
+        unsafe { watched.control.GetState() },
+        Ok(state) if state == AudioSessionStateExpired
+    )
+}
+
+/// What one synchronisation pass proved is still there.
+///
+/// The four sets travel together because the prune needs all of them to answer
+/// one question — may this watcher still exist? — and a pass that read half the
+/// graph can only ever answer it in degrees.
+#[derive(Clone, Default)]
+struct Witness {
+    /// Endpoints this pass can account for: named by the walk, or skipped by it
+    /// and recovered by the lookup of that exact id.
+    devices: HashSet<String>,
+    /// Sessions named by a session list that was read to the end.
+    sessions: HashSet<String>,
+    /// Endpoints whose session list this pass read to the end.
+    walked: HashSet<String>,
+    /// Watched sessions that reported themselves expired.
+    expired: HashSet<String>,
+}
+
+/// Whether one watched session survives this pass.
+///
+/// The four readings of an absent session id, in the order they are settled:
+/// the walk saw it, so it lives; its endpoint is gone, so it went with it; it
+/// reported itself expired; and only if none of that applies, the endpoint is
+/// still watched but its session list could not be read, which proves nothing.
+fn keep_session_watcher(id: &str, device_id: &str, witness: &Witness) -> bool {
+    if witness.sessions.contains(id) {
+        return true;
+    }
+    if !witness.devices.contains(device_id) {
+        return false;
+    }
+    if witness.expired.contains(id) {
+        return false;
+    }
+    !witness.walked.contains(device_id)
+}
+
 /// Start watching, if the audio graph allows it.
 ///
 /// Failures are logged and swallowed: the lists stay refreshable by hand, which
@@ -372,6 +535,9 @@ fn watch(app: AppHandle) {
     // reported as a change of its process. Shared with the callback objects,
     // which Windows invokes on its own threads.
     let sounding: Sounding = Arc::new(Mutex::new(HashMap::new()));
+    // Endpoint absences a partial walk could not prove, carried from one pass to
+    // the next so the deferral stays bounded. See [`AbsenceLedger`].
+    let mut absences = AbsenceLedger::default();
 
     // Wire the session watchers onto the graph as it already is. Both callbacks
     // only ever report *changes*, so without this pass a session that started
@@ -385,6 +551,7 @@ fn watch(app: AppHandle) {
         &sounding,
         &mut watched_managers,
         &mut watched_sessions,
+        &mut absences,
     );
 
     while let Ok(first) = rx.recv() {
@@ -435,6 +602,7 @@ fn watch(app: AppHandle) {
                 &sounding,
                 &mut watched_managers,
                 &mut watched_sessions,
+                &mut absences,
             );
             let changed = AudioChanged { devices, sessions };
             if let Err(e) = app.emit(AUDIO_CHANGED_EVENT, &changed) {
@@ -467,6 +635,10 @@ fn watch(app: AppHandle) {
 
 /// Wire the session watcher onto every active render device and the expiry
 /// watcher onto every session, dropping registrations that no longer exist.
+///
+/// `absences` carries what this thread already knows about endpoints an earlier
+/// pass could not name, so a partial walk defers a prune for a bounded number of
+/// passes instead of forever. See [`AbsenceLedger`].
 fn sync(
     enumerator: &IMMDeviceEnumerator,
     session_client: &IAudioSessionNotification,
@@ -474,127 +646,71 @@ fn sync(
     sounding: &Sounding,
     watched_managers: &mut HashMap<String, IAudioSessionManager2>,
     watched_sessions: &mut HashMap<String, WatchedSession>,
+    absences: &mut AbsenceLedger,
 ) {
-    let Ok((devices, endpoints_are_all_named)) = active_render_devices(enumerator) else {
+    let Ok((mut devices, endpoints_are_all_named)) = active_render_devices(enumerator) else {
         return;
     };
 
-    let mut live_devices: HashSet<String> = HashSet::new();
-    let mut live_sessions: HashSet<String> = HashSet::new();
-    // The endpoints whose session list this pass read to the end. Pruning is
-    // only honest against a complete walk, but it has to be decided *per
-    // endpoint*: one device that will not activate — a DisplayPort sink the
-    // audio service refuses, a shared-mode exclusive device — used to switch
-    // pruning off for every device, for the rest of the run. Each watcher then
-    // held two COM references and a channel sender for a session that had
-    // already expired, and every expiry it still reported provoked another full
-    // re-enumeration.
-    let mut walked: HashSet<String> = HashSet::new();
-
-    for device in &devices {
-        live_devices.insert(device.id.clone());
-
-        let manager = match watched_managers.get(&device.id) {
-            Some(manager) => manager.clone(),
-            None => {
-                let manager = match open_session_manager(&device.raw) {
-                    Ok(manager) => manager,
-                    Err(_) => continue,
-                };
-
-                // SAFETY: manager and session_client are owned and used on this
-                // one notification thread. The manager is kept in the map below,
-                // which is what keeps this registration alive between syncs.
-                match unsafe { manager.RegisterSessionNotification(session_client) } {
-                    Ok(()) => {
-                        watched_managers.insert(device.id.clone(), manager.clone());
-                    }
-                    Err(e) => warn!("could not watch sessions on {}: {e}", device.id),
-                }
-                manager
+    // What the walk named, against what this thread still holds watchers on.
+    // The two only agree when the walk was complete, so the gap between them is
+    // asked about by id rather than assumed in either direction: an endpoint the
+    // service no longer names is gone and gets pruned on the spot, and one it
+    // does name was merely skipped by the walk, so it is walked here like any
+    // other endpoint of this pass — which keeps its new sessions watched and its
+    // departed ones prunable.
+    let named: HashSet<String> = devices.iter().map(|device| device.id.clone()).collect();
+    let watched_ids = watched_device_ids(watched_managers, watched_sessions);
+    absences.sweep(&named, &watched_ids);
+    if !endpoints_are_all_named {
+        let now = clock_ms();
+        let unexplained: Vec<String> = watched_ids
+            .iter()
+            .filter(|id| !named.contains(*id))
+            .cloned()
+            .collect();
+        for id in unexplained {
+            let device = endpoint_by_id(enumerator, &id);
+            if !absences.tolerate(&id, device.is_some(), now) {
+                continue;
             }
-        };
-
-        // `None` here means the device's sessions could not be read at all, which
-        // is what keeps it out of `walked` below and off the prune list.
-        if let Some(sessions) = sessions_of(&manager) {
-            {
-                walked.insert(device.id.clone());
-                for session in sessions {
-                    let id = session_identifier(&session);
-                    if id.is_empty() {
-                        continue;
-                    }
-                    // Every session that exists is accounted for, whether or not
-                    // this pass is the one that registered its watcher — the
-                    // prune below compares against exactly this set.
-                    live_sessions.insert(id.clone());
-                    if watched_sessions.contains_key(&id) {
-                        continue;
-                    }
-                    // SAFETY: GetProcessId on the session control this thread
-                    // just enumerated and owns.
-                    let pid = unsafe { session.GetProcessId() }.unwrap_or(0);
-                    let events: IAudioSessionEvents = SessionEvents {
-                        tx: tx.clone(),
-                        // Read here, on the owner thread, while the control is
-                        // in hand: the state callback has no identity of its
-                        // own to report. `0` reads as "unknown" and only costs
-                        // the liveness events, never the expiry ones.
-                        pid,
-                        session_id: id.clone(),
-                        sounding: Arc::clone(sounding),
-                    }
-                    .into();
-                    let Ok(control) = session.cast::<IAudioSessionControl>() else {
-                        continue;
-                    };
-                    // SAFETY: the callback and the control are kept alive in
-                    // watched_sessions, so this registration remains valid until
-                    // we unregister it during a prune or thread teardown.
-                    if unsafe { session.RegisterAudioSessionNotification(&events) }.is_ok() {
-                        // Seed the ledger with the state as it stands. The
-                        // frontend learns the same fact from the list it is
-                        // about to enumerate, and an unseeded ledger would read
-                        // this session's first pause as "nothing changed" —
-                        // leaving a program that fell silent drawn as sounding.
-                        if pid != 0 {
-                            // SAFETY: the session control is the one just read.
-                            let state =
-                                unsafe { session.GetState() }.unwrap_or(AudioSessionStateInactive);
-                            note_session_state(
-                                sounding,
-                                pid,
-                                &id,
-                                state == AudioSessionStateActive,
-                            );
-                        }
-                        watched_sessions.insert(
-                            id.clone(),
-                            WatchedSession {
-                                control,
-                                events,
-                                device_id: device.id.clone(),
-                            },
-                        );
-                    }
-                }
+            if let Some(raw) = device {
+                devices.push(DeviceRef { id, raw });
             }
         }
     }
 
-    if !endpoints_are_all_named {
-        // One endpoint could not be read out of the collection, so an id
-        // missing from `live_devices` may be that failed read rather than a
-        // removal. Assume what is still watched is still there: those endpoints
-        // were not walked either, so the prune keeps their watchers, and the
-        // next pass decides for real.
-        live_devices.extend(watched_managers.keys().cloned());
-        live_devices.extend(
-            watched_sessions
-                .values()
-                .map(|watched| watched.device_id.clone()),
+    let mut witness = Witness::default();
+    for device in &devices {
+        // Accounted for before anything is read off it: a device whose manager
+        // will not activate is still present, and the watchers on it must not be
+        // dropped because this pass could not look at them.
+        witness.devices.insert(device.id.clone());
+        watch_device(
+            device,
+            session_client,
+            tx,
+            sounding,
+            watched_managers,
+            watched_sessions,
+            &mut witness,
         );
+    }
+
+    // Sessions this pass can neither see nor lose: their endpoint is still
+    // watched, but its session list could not be read, so the walk says nothing
+    // about them and their absence proves nothing. Ask each one for itself
+    // instead of keeping it on the assumption that the walk simply missed it —
+    // otherwise a device whose list stays unreadable keeps an expired session's
+    // two COM registrations, and every expiry it still reports provokes another
+    // full re-enumeration, for the rest of the run.
+    for (id, watched) in watched_sessions.iter() {
+        let unread = !witness.sessions.contains(id.as_str())
+            && witness.devices.contains(&watched.device_id)
+            && !witness.walked.contains(&watched.device_id);
+        if unread && session_self_reports_gone(watched) {
+            witness.expired.insert(id.clone());
+        }
     }
 
     prune_watchers(
@@ -602,9 +718,116 @@ fn sync(
         sounding,
         watched_managers,
         watched_sessions,
-        &live_devices,
-        &live_sessions,
-        &walked,
+        &witness,
+    );
+}
+
+/// Register this thread's session watcher on one endpoint's session manager, and
+/// the expiry watcher on every session of it this pass could read.
+///
+/// Nothing is reported upward: a device whose manager will not activate is simply
+/// left unwalked, and the sessions already watched on it survive the pass because
+/// this pass cannot say what became of them.
+fn watch_device(
+    device: &DeviceRef,
+    session_client: &IAudioSessionNotification,
+    tx: &Sender<Msg>,
+    sounding: &Sounding,
+    watched_managers: &mut HashMap<String, IAudioSessionManager2>,
+    watched_sessions: &mut HashMap<String, WatchedSession>,
+    witness: &mut Witness,
+) {
+    let manager = match watched_managers.get(&device.id) {
+        Some(manager) => manager.clone(),
+        None => {
+            let Ok(manager) = open_session_manager(&device.raw) else {
+                return;
+            };
+
+            // SAFETY: manager and session_client are owned and used on this one
+            // notification thread. The manager is kept in the map below, which is
+            // what keeps this registration alive between syncs.
+            match unsafe { manager.RegisterSessionNotification(session_client) } {
+                Ok(()) => {
+                    watched_managers.insert(device.id.clone(), manager.clone());
+                }
+                Err(e) => warn!("could not watch sessions on {}: {e}", device.id),
+            }
+            manager
+        }
+    };
+
+    // `None` here means the device's sessions could not be read at all, which is
+    // what keeps it out of `walked` and off the prune list.
+    let Some(sessions) = sessions_of(&manager) else {
+        return;
+    };
+    witness.walked.insert(device.id.clone());
+    for session in sessions {
+        watch_session(session, &device.id, tx, sounding, watched_sessions, witness);
+    }
+}
+
+/// Register the expiry watcher on one session, unless this thread watches it
+/// already — which is also what keeps a pass that named the same endpoint twice
+/// (through the walk and through a lookup of the same id) from wiring it in
+/// twice.
+fn watch_session(
+    session: IAudioSessionControl2,
+    device_id: &str,
+    tx: &Sender<Msg>,
+    sounding: &Sounding,
+    watched_sessions: &mut HashMap<String, WatchedSession>,
+    witness: &mut Witness,
+) {
+    let id = session_identifier(&session);
+    if id.is_empty() {
+        return;
+    }
+    // Every session that exists is accounted for, whether or not this pass is the
+    // one that registered its watcher — the prune compares against this set.
+    witness.sessions.insert(id.clone());
+    if watched_sessions.contains_key(&id) {
+        return;
+    }
+    // SAFETY: GetProcessId on the session control this thread just enumerated and
+    // owns.
+    let pid = unsafe { session.GetProcessId() }.unwrap_or(0);
+    let events: IAudioSessionEvents = SessionEvents {
+        tx: tx.clone(),
+        // Read here, on the owner thread, while the control is in hand: the state
+        // callback has no identity of its own to report. `0` reads as "unknown"
+        // and only costs the liveness events, never the expiry ones.
+        pid,
+        session_id: id.clone(),
+        sounding: Arc::clone(sounding),
+    }
+    .into();
+    let Ok(control) = session.cast::<IAudioSessionControl>() else {
+        return;
+    };
+    // SAFETY: the callback and the control are kept alive in `watched_sessions`,
+    // so this registration remains valid until it is unregistered during a prune
+    // or at thread teardown.
+    if unsafe { session.RegisterAudioSessionNotification(&events) }.is_err() {
+        return;
+    }
+    // Seed the ledger with the state as it stands. The frontend learns the same
+    // fact from the list it is about to enumerate, and an unseeded ledger would
+    // read this session's first pause as "nothing changed" — leaving a program
+    // that fell silent drawn as sounding.
+    if pid != 0 {
+        // SAFETY: the session control is the one just read.
+        let state = unsafe { session.GetState() }.unwrap_or(AudioSessionStateInactive);
+        note_session_state(sounding, pid, &id, state == AudioSessionStateActive);
+    }
+    watched_sessions.insert(
+        id,
+        WatchedSession {
+            control,
+            events,
+            device_id: device_id.to_string(),
+        },
     );
 }
 
@@ -612,21 +835,18 @@ fn sync(
 /// each COM callback before its owning interface is released, and forget each
 /// dropped session in the liveness ledger.
 ///
-/// A watcher whose endpoint this pass could not walk is kept: its sessions are
-/// missing from `live_sessions` because the walk failed, not because they went
-/// away, and unregistering on that reading would drop callbacks for sessions
-/// that are still playing.
+/// Every reading of "not in this pass's list" is decided by
+/// [`keep_session_watcher`], which is what keeps a walk that could not read one
+/// device from dropping the callbacks of sessions still playing on it.
 fn prune_watchers(
     session_client: &IAudioSessionNotification,
     sounding: &Sounding,
     watched_managers: &mut HashMap<String, IAudioSessionManager2>,
     watched_sessions: &mut HashMap<String, WatchedSession>,
-    live_devices: &HashSet<String>,
-    live_sessions: &HashSet<String>,
-    walked: &HashSet<String>,
+    witness: &Witness,
 ) {
     watched_managers.retain(|id, manager| {
-        if live_devices.contains(id) {
+        if witness.devices.contains(id) {
             return true;
         }
         // SAFETY: balances the registration recorded in this map.
@@ -636,15 +856,7 @@ fn prune_watchers(
         false
     });
     watched_sessions.retain(|id, watched| {
-        let keep = if live_sessions.contains(id) {
-            true
-        } else if !live_devices.contains(&watched.device_id) {
-            // The endpoint itself is gone, so everything on it went with it.
-            false
-        } else {
-            !walked.contains(&watched.device_id)
-        };
-        if keep {
+        if keep_session_watcher(id, &watched.device_id, witness) {
             return true;
         }
         // SAFETY: balances the registration recorded in this map.
@@ -739,4 +951,126 @@ fn session_identifier(session: &IAudioSessionControl2) -> String {
     // SAFETY: balances GetSessionIdentifier's allocation.
     unsafe { CoTaskMemFree(Some(pwstr.0 as *const _)) };
     id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A device set from a list of ids.
+    fn set(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    /// An endpoint the audio service no longer names is gone on the spot.
+    ///
+    /// This is the case the deferral must never swallow: the watcher of a device
+    /// that was pulled out keeps its COM registrations for the rest of the run,
+    /// and its expired sessions keep their slots in the liveness ledger — where
+    /// a PID a recycled process inherits keeps the new one drawn as sounding.
+    #[test]
+    fn a_device_that_answers_no_lookup_is_accepted_as_gone_at_once() {
+        let mut ledger = AbsenceLedger::default();
+        assert!(!ledger.tolerate("gone", false, 0));
+        assert!(ledger.deferred.is_empty());
+
+        // And the next pass starts clean rather than counting towards a bound it
+        // no longer needs.
+        assert!(ledger.tolerate("flaky", true, 0));
+        assert!(!ledger.tolerate("flaky", false, 1));
+        assert!(ledger.deferred.is_empty());
+    }
+
+    /// The deferral exists because a flaky walk cannot prove an absence — not
+    /// because an absence is allowed to ride on it forever.
+    #[test]
+    fn an_endpoint_that_survives_the_probe_is_deferred_only_a_bounded_number_of_times() {
+        let mut ledger = AbsenceLedger::default();
+        for pass in 1..MAX_DEFERRED_ABSENCE_PASSES {
+            assert!(
+                ledger.tolerate("flaky", true, u64::from(pass)),
+                "pass {pass} of a slow walk still defers"
+            );
+        }
+        assert!(
+            !ledger.tolerate("flaky", true, u64::from(MAX_DEFERRED_ABSENCE_PASSES)),
+            "the bound ends the deferral even against a device that answers"
+        );
+        assert!(ledger.deferred.is_empty());
+    }
+
+    /// The other half of the bound, for a graph that barely changes: five
+    /// passes of a quiet session can be hours apart, and a deferred prune that
+    /// waits that long is the leak with a longer fuse.
+    #[test]
+    fn the_deadline_ends_a_deferral_whatever_the_pass_count() {
+        let mut ledger = AbsenceLedger::default();
+        assert!(ledger.tolerate("flaky", true, 0));
+        assert!(ledger.tolerate("flaky", true, 1_000));
+        assert!(!ledger.tolerate("flaky", true, DEFERRED_ABSENCE_GRACE_MS));
+    }
+
+    /// Being named again is the evidence that ends the suspicion, so a device
+    /// that comes back cannot be pruned by a later pass on the strength of the
+    /// passes it spent missing.
+    #[test]
+    fn naming_an_endpoint_again_clears_its_deferral() {
+        let mut ledger = AbsenceLedger::default();
+        assert!(ledger.tolerate("back", true, 0));
+        assert!(ledger.tolerate("gone", true, 0));
+        ledger.sweep(&set(&["back"]), &set(&["back", "gone"]));
+        assert!(!ledger.deferred.contains_key("back"));
+        assert!(ledger.deferred.contains_key("gone"));
+
+        // A watcher that no longer exists stops being counted, too.
+        ledger.sweep(&set(&[]), &set(&[]));
+        assert!(ledger.deferred.is_empty());
+    }
+
+    /// The four readings of a session id missing from this pass's list, which
+    /// is the whole difference between dropping a live callback and holding a
+    /// dead one.
+    #[test]
+    fn an_absent_session_is_kept_only_while_the_walk_says_nothing_about_it() {
+        let read = Witness {
+            devices: set(&["present"]),
+            sessions: set(&[]),
+            walked: set(&["present"]),
+            expired: set(&[]),
+        };
+        let unwalked = Witness {
+            walked: set(&[]),
+            ..read.clone()
+        };
+        let gone = Witness {
+            devices: set(&[]),
+            ..read.clone()
+        };
+
+        // The endpoint is gone: everything on it went with it.
+        assert!(!keep_session_watcher("s", "gone", &gone));
+        // Its list was read to the end and did not name the session.
+        assert!(!keep_session_watcher("s", "present", &read));
+        // Its list could not be read, so the walk proves nothing — unless the
+        // session itself reports expired.
+        assert!(keep_session_watcher("s", "present", &unwalked));
+        assert!(!keep_session_watcher(
+            "s",
+            "present",
+            &Witness {
+                expired: set(&["s"]),
+                ..unwalked.clone()
+            }
+        ));
+        // And a session the walk did see is kept whatever else says.
+        assert!(keep_session_watcher(
+            "s",
+            "present",
+            &Witness {
+                sessions: set(&["s"]),
+                expired: set(&["s"]),
+                ..gone.clone()
+            }
+        ));
+    }
 }
