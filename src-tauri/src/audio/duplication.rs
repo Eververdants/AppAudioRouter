@@ -670,9 +670,15 @@ impl EngineShared {
 /// would keep the audio service's slow round trips on the shutdown's critical
 /// path.
 pub fn restore_session_volume_now(pid: u32, percent: u32) {
-    let touched = super::sessions::set_session_volume(pid, percent as f32 / 100.0).unwrap_or(0);
-    if touched > 0 {
-        info!("restored session volume of PID {pid} to {percent}%");
+    // `Ok(0)` is the benign half of this: the program has no live session, so
+    // there is nothing left to give the loudness back to. A failed call is the
+    // half that must not be quiet — the program keeps playing at the route's
+    // value and the mixer remembers it for its next launch, with nothing on
+    // screen or in the log to explain the difference.
+    match super::sessions::set_session_volume(pid, percent as f32 / 100.0) {
+        Ok(0) => {}
+        Ok(_) => info!("restored session volume of PID {pid} to {percent}%"),
+        Err(e) => warn!("giving PID {pid} its {percent}% back failed: {e}"),
     }
 }
 
@@ -834,6 +840,13 @@ impl DuplicationManager {
     ///
     /// A program with no live session is left as it is: the value is stored,
     /// and the next engine this program gets applies it at start.
+    ///
+    /// Each engine's write is serialized against that engine's own claim/restore
+    /// (see `volume_claim`), for the same reason the claim is: a `stop` landing
+    /// mid-write hands the pre-route loudness back, and unless the two are kept
+    /// apart the restore can land *first* — leaving the program at the route's
+    /// value with no engine left to undo it, and the mixer remembering that
+    /// value for the program's next launch.
     pub fn update_primary_volume(&self, exe_name: &str, percent: u32) {
         // The engines are collected under the lock and written to outside of
         // it: `set_session_volume` is a full device and session enumeration,
@@ -850,13 +863,24 @@ impl DuplicationManager {
             engine
                 .session_volume_percent
                 .store(percent, Ordering::Relaxed);
-            let touched = super::sessions::set_session_volume(engine.pid, percent as f32 / 100.0)
-                .unwrap_or(0);
-            if touched == 0 {
-                log::warn!(
+            let _claim = engine
+                .volume_claim
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            // The engine is on its way down and its restore owns the promise:
+            // writing here would stand after the value it hands back. The
+            // stored percentage is what the next engine for this program
+            // applies, so the user's number is not lost by skipping the write.
+            if engine.shutdown.load(Ordering::Relaxed) {
+                continue;
+            }
+            match super::sessions::set_session_volume(engine.pid, percent as f32 / 100.0) {
+                Ok(0) => log::warn!(
                     "no live session for PID {} — primary volume stored for its next route",
                     engine.pid
-                );
+                ),
+                Ok(_) => {}
+                Err(e) => log::warn!("writing primary volume onto PID {} failed: {e}", engine.pid),
             }
         }
     }
@@ -2965,7 +2989,7 @@ mod tests {
         let mut format = vec![0u8; 40];
         format[0..2].copy_from_slice(&0xFFFEu16.to_le_bytes());
         format[14..16].copy_from_slice(&32u16.to_le_bytes());
-        format[18..20].copy_from_slice(&22u16.to_le_bytes());
+        format[16..18].copy_from_slice(&22u16.to_le_bytes());
         format[24..28].copy_from_slice(&[0x03, 0x00, 0x00, 0x00]);
         assert_eq!(SampleFormat::parse(&format), SampleFormat::Float32);
 
