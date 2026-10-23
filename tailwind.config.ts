@@ -79,6 +79,18 @@ const config: Config = {
         ],
         mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
       },
+      /* One scale, four steps, and nothing readable below it. The interface
+         used to run on thirteen arbitrary sizes from 8 to 19px — 9.5px for a
+         delay reading, 10.5px for a share, 11px for body copy — which is not a
+         type system, it is a pile. Anything a person has to read is `xs` or
+         larger; the only smaller marks left are glyphs inside 16px controls
+         (✕, ⌄) and the letter tile of a program with no icon yet. */
+      fontSize: {
+        xs: ['11px', { lineHeight: '16px' }],
+        sm: ['12px', { lineHeight: '18px' }],
+        base: ['13px', { lineHeight: '20px' }],
+        lg: ['17px', { lineHeight: '24px' }],
+      },
     },
   },
   plugins: [],

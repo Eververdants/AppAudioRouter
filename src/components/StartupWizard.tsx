@@ -507,17 +507,17 @@ function BoardSketch() {
       </svg>
       <div className="absolute left-0 top-[24px] flex h-[60px] w-[152px] flex-col justify-center rounded-card border border-line-strong bg-surface px-4">
         <span className="text-[12px] font-medium text-text-primary">{t('wizard.sketchHub')}</span>
-        <span className="mt-0.5 text-[10px] text-text-muted">{t('wizard.sketchHubHint')}</span>
+        <span className="mt-0.5 text-xs text-text-muted">{t('wizard.sketchHubHint')}</span>
       </div>
       <div className="absolute right-0 top-[8px] flex h-[44px] w-[112px] items-center justify-between rounded-card border border-line-strong bg-surface pl-3 pr-2.5">
         <span className="text-[11px] text-text-primary">{t('wizard.sketchTargetDevice')}</span>
-        <span className="flex h-[18px] w-[22px] items-center justify-center rounded-full font-mono text-[9px] tabular-nums text-[var(--type-primary)] ring-1 ring-[var(--type-primary)]">
+        <span className="flex h-[18px] w-[22px] items-center justify-center rounded-full font-mono text-xs tabular-nums text-[var(--type-primary)] ring-1 ring-[var(--type-primary)]">
           01
         </span>
       </div>
       <div className="absolute right-0 top-[64px] flex h-[44px] w-[112px] items-center justify-between rounded-card border border-line-strong bg-surface pl-3 pr-2.5">
         <span className="text-[11px] text-text-primary">{t('wizard.sketchTargetFeed')}</span>
-        <span className="flex h-[18px] w-[22px] items-center justify-center rounded-full font-mono text-[9px] tabular-nums text-[var(--type-feed)] ring-1 ring-[var(--type-feed)]">
+        <span className="flex h-[18px] w-[22px] items-center justify-center rounded-full font-mono text-xs tabular-nums text-[var(--type-feed)] ring-1 ring-[var(--type-feed)]">
           02
         </span>
       </div>

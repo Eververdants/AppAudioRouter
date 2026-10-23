@@ -177,7 +177,7 @@ export function Toast() {
                   report, small and second — never the first thing to read, and
                   never the only place the reason exists. */}
               {errorNotice.detail !== undefined && errorNotice.detail !== '' && (
-                <span className="mt-0.5 block text-[10px] leading-relaxed text-text-muted [overflow-wrap:anywhere]">
+                <span className="mt-0.5 block text-xs leading-relaxed text-text-muted [overflow-wrap:anywhere]">
                   {errorNotice.detail}
                 </span>
               )}
@@ -203,7 +203,7 @@ export function Toast() {
               <button
                 type="button"
                 onClick={() => dismissError()}
-                className="pressable mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] text-text-muted outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
+                className="pressable mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs text-text-muted outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
                 title={t('toast.dismiss')}
                 aria-label={t('toast.dismiss')}
               >

@@ -150,9 +150,7 @@ export function TitleBar({
         {/* The version is reference information, so it reads as one: muted,
             monospaced, and not wearing the accent reserved for what can be
             acted on. */}
-        <span className="font-mono text-[10px] tabular-nums text-text-muted">
-          v{__APP_VERSION__}
-        </span>
+        <span className="font-mono text-xs tabular-nums text-text-muted">v{__APP_VERSION__}</span>
       </div>
 
       <div className="flex items-center">
@@ -169,7 +167,7 @@ export function TitleBar({
               exit={{ opacity: 0, y: -4 }}
               transition={FADE}
               transformTemplate={MAIN_THREAD_TRANSFORM}
-              className="mr-1 font-mono text-[10px] tabular-nums text-text-muted"
+              className="mr-1 font-mono text-xs tabular-nums text-text-muted"
             >
               {t('titleBar.status', { n: routedCount, m: soundingCount })}
             </motion.span>

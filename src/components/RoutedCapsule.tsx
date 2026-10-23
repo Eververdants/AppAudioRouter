@@ -205,7 +205,7 @@ export function RoutedCapsule() {
               transformTemplate={(_, generated) => `translateX(-50%) ${generated}`}
               className="cc absolute bottom-full left-1/2 mb-2 w-[320px] rounded-card border border-line-strong bg-surface p-1.5"
             >
-              <div className="px-2 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+              <div className="px-2 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">
                 {t('routed.title')}
               </div>
               {/* The rows scroll inside a capped box; the two background fades
@@ -311,7 +311,7 @@ function CapsuleRow({
       >
         {row.name}
       </button>
-      <span className="max-w-[92px] flex-none truncate text-[10px] text-text-muted">
+      <span className="max-w-[92px] flex-none truncate text-xs text-text-muted">
         {row.devices.length === 1 ? first : `${first} +${row.devices.length - 1}`}
       </span>
       <ConfirmButton

@@ -77,7 +77,7 @@ export function DelayStepper({ deviceId, name }: { deviceId: string; name: strin
           aria-label={t('deviceDelay.valueLabel', { device: name })}
           className="h-full w-[54px] bg-transparent text-right font-mono text-[11px] tabular-nums text-text-primary outline-none"
         />
-        <span className="ml-0.5 font-mono text-[9px] leading-none text-text-muted">ms</span>
+        <span className="ml-0.5 font-mono text-xs leading-none text-text-muted">ms</span>
       </div>
       <StepButton
         label={t('deviceDelay.stepUp', { step: stepLabel })}

@@ -277,7 +277,7 @@ export function ProgramRail() {
                   {/* The reason, in the backend's own words, and the one action
                       that answers it. The raw sentence is small on purpose: it
                       is evidence for a report, not something to read first. */}
-                  <p className="max-w-[30ch] text-[10px] leading-relaxed text-text-muted">
+                  <p className="max-w-[30ch] text-xs leading-relaxed text-text-muted">
                     {sessionsError}
                   </p>
                   <button
@@ -478,7 +478,7 @@ const RailRow = memo(function RailRow({
             {/* PID, the exe it really is when the window names it
               differently, and — only once something has actually been
               routed — where its sound goes. */}
-            <span className="block truncate font-mono text-[9.5px] tabular-nums text-text-muted">
+            <span className="block truncate font-mono text-xs tabular-nums text-text-muted">
               {exeDiffers && (
                 <>
                   {session.exe_name}

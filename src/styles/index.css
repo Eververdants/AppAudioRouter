@@ -264,8 +264,8 @@ input[type='number']::-webkit-inner-spin-button {
      no corner of its own to clip a badge to. */
   .no {
     flex: none;
-    min-width: 20px;
-    height: 18px;
+    min-width: 22px;
+    height: 20px;
     padding: 0 4px;
     border-radius: 6px;
     background: var(--bg-tertiary);
@@ -273,7 +273,9 @@ input[type='number']::-webkit-inner-spin-button {
     color: var(--text-secondary);
     font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
     font-variant-numeric: tabular-nums;
-    font-size: 9.5px;
+    /* 11px, like every other figure in the app: a route order is a number
+       somebody reads, and 9.5px is not a size to read one at. */
+    font-size: 11px;
     display: grid;
     place-items: center;
   }

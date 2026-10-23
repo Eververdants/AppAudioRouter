@@ -746,7 +746,7 @@ export function NodeStage() {
                     {feederName}
                   </span>
                 </span>
-                <span className="w-full truncate pl-[22px] text-[9.5px] text-text-muted">
+                <span className="w-full truncate pl-[22px] text-xs text-text-muted">
                   {t('stage.feederSub', { target: name ?? '' })}
                 </span>
               </motion.button>
@@ -835,7 +835,7 @@ export function NodeStage() {
                     exit={{ opacity: 0, x: '-50%', y: -3, scale: 0.96 }}
                     transition={SPRING_TAP}
                     transformTemplate={MAIN_THREAD_TRANSFORM}
-                    className="absolute -top-3 left-1/2 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink"
+                    className="absolute -top-3 left-1/2 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-accent-ink"
                   >
                     {drawn.length > 1
                       ? t('stage.applyHintMany', { n: drawn.length })
@@ -880,7 +880,7 @@ export function NodeStage() {
                   className="ml-0.5"
                 />
               </span>
-              <span className="text-[9.5px] text-text-muted">
+              <span className="text-xs text-text-muted">
                 {applying && (
                   <Spinner size={10} className="mr-1 inline-block align-[-1px] text-accent" />
                 )}
@@ -1175,7 +1175,7 @@ export function NodeStage() {
                           className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
                         >
                           <span
-                            className={`flex h-3 w-3 flex-none items-center justify-center text-[10px] ${
+                            className={`flex h-3 w-3 flex-none items-center justify-center text-xs ${
                               picked ? 'text-accent' : 'text-transparent'
                             }`}
                             aria-hidden="true"
@@ -1320,7 +1320,7 @@ function Panel({
         className="flex items-center justify-between gap-2 px-2"
         style={{ height: GROUP_HEADER_H }}
       >
-        <span className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+        <span className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">
           {label}
         </span>
         {headerAction}
@@ -1344,7 +1344,7 @@ function Panel({
               animate={{ opacity: 1 }}
               transition={FADE}
               transformTemplate={MAIN_THREAD_TRANSFORM}
-              className="px-3 py-2.5 text-[10.5px] leading-relaxed text-text-muted"
+              className="px-3 py-2.5 text-xs leading-relaxed text-text-muted"
             >
               {empty}
             </motion.div>
@@ -1493,7 +1493,7 @@ function DeviceRow({
               all before acting. The action now has a control of its own. */}
           <span
             title={isPrimary ? t('stage.primaryTitle') : t('stage.promoteTitle')}
-            className={`text-[10px] font-semibold ${
+            className={`text-xs font-semibold ${
               isPrimary ? ROLE_TEXT_CLASS.primary : ROLE_TEXT_CLASS.mirror
             }`}
           >
@@ -1513,7 +1513,7 @@ function DeviceRow({
             </button>
           )}
           {!isPrimary && delay !== 0 && (
-            <span className="font-mono text-[9.5px] tabular-nums text-text-muted">
+            <span className="font-mono text-xs tabular-nums text-text-muted">
               {formatDelaySigned(delay)}
             </span>
           )}
@@ -1719,13 +1719,11 @@ function FeedRow({
         </span>
         <span className="flex items-center gap-1">
           <span
-            className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.feed} ${state !== 'live' ? 'opacity-60' : ''}`}
+            className={`text-xs font-semibold ${ROLE_TEXT_CLASS.feed} ${state !== 'live' ? 'opacity-60' : ''}`}
           >
             {stateWord}
           </span>
-          <span className="truncate text-[9.5px] text-text-muted">
-            {t('stage.feedInputSuffix')}
-          </span>
+          <span className="truncate text-xs text-text-muted">{t('stage.feedInputSuffix')}</span>
         </span>
       </span>
       <button
@@ -1780,7 +1778,7 @@ function PickerSection({
 }) {
   return (
     <div data-picker-section={section} className="mb-0.5 last:mb-0">
-      <div className="px-2 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+      <div className="px-2 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">
         {label}
       </div>
       <div className="flex flex-col">{children}</div>
@@ -1818,7 +1816,7 @@ function StripRow({
 }) {
   return (
     <div className="rounded-seg" title={title}>
-      <span className="text-[10.5px] text-text-secondary">{label}</span>
+      <span className="text-xs text-text-secondary">{label}</span>
       <span className="flex items-center gap-1 rounded-seg border border-line-strong px-1 py-0.5">
         <button
           type="button"
@@ -1839,7 +1837,7 @@ function StripRow({
           animate={{ opacity: 1, y: 0 }}
           transition={FADE}
           transformTemplate={MAIN_THREAD_TRANSFORM}
-          className="min-w-[44px] text-center font-mono text-[10.5px] tabular-nums text-text-secondary"
+          className="min-w-[44px] text-center font-mono text-xs tabular-nums text-text-secondary"
         >
           {value}
         </motion.span>
@@ -1912,7 +1910,7 @@ function Inspector({
           <Ring tone="main" size={14} />
           <span>
             <span className="block text-[12.5px] font-bold">{deviceLabel}</span>
-            <span className="text-[9.5px] text-text-muted">{t('stage.main')}</span>
+            <span className="text-xs text-text-muted">{t('stage.main')}</span>
           </span>
         </div>
         <StripRow
@@ -1926,7 +1924,7 @@ function Inspector({
           downLabel={t('primaryVolume.stepDown', { step: '5%' })}
           upLabel={t('primaryVolume.stepUp', { step: '5%' })}
         />
-        <span className="text-[10.5px] text-text-muted">{t('stage.stripPrimaryNote')}</span>
+        <span className="text-xs text-text-muted">{t('stage.stripPrimaryNote')}</span>
       </>
     );
   } else {
@@ -1939,7 +1937,7 @@ function Inspector({
           <Ring tone="copy" size={14} />
           <span>
             <span className="block text-[12.5px] font-bold">{deviceLabel}</span>
-            <span className="text-[9.5px] text-text-muted">{t('stage.copy')}</span>
+            <span className="text-xs text-text-muted">{t('stage.copy')}</span>
           </span>
         </div>
         <StripRow
@@ -1980,7 +1978,7 @@ function Inspector({
       <button
         type="button"
         onClick={onClear}
-        className="pressable flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
+        className="pressable flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
         title={t('stage.inspectClear')}
         aria-label={t('stage.inspectClear')}
       >
@@ -1990,7 +1988,7 @@ function Inspector({
       {/* A primary delay reading would describe a stream that does not exist:
           the system plays this device itself. The strip says so in words. */}
       {isPrimary && (
-        <span className="text-[10.5px] text-text-muted">{t('stage.stripPrimaryLatency')}</span>
+        <span className="text-xs text-text-muted">{t('stage.stripPrimaryLatency')}</span>
       )}
     </div>
   );

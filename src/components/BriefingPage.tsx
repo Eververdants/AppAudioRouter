@@ -84,7 +84,7 @@ function Chip({ destination, roleWord }: { destination: Destination; roleWord: s
         {destination.name}
       </span>
       <span
-        className={`text-[9.5px] font-semibold uppercase tracking-[0.06em] ${
+        className={`text-xs font-semibold uppercase tracking-[0.06em] ${
           destination.role === 'feed' ? 'text-type-feed' : 'text-text-muted'
         }`}
       >
@@ -347,7 +347,7 @@ function BriefingCard({ card, liveness }: { card: Card; liveness: boolean }) {
         </AnimatePresence>
       </div>
       {!sounding && (
-        <span className="flex-none text-[10px] text-text-muted">{t('briefingPage.quiet')}</span>
+        <span className="flex-none text-xs text-text-muted">{t('briefingPage.quiet')}</span>
       )}
     </motion.div>
   );

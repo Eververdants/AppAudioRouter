@@ -307,7 +307,7 @@ export function ScrubReadout({
           last thing in the cell and the whole column aligns on it, which puts
           the figures at a different x in every row: "0 ms" and "+180 ms" need
           their digits to line up, not their unit letters. */}
-      <span className="min-w-[15px] flex-none text-left font-mono text-[10px] leading-none text-text-muted">
+      <span className="min-w-[15px] flex-none text-left font-mono text-xs leading-none text-text-muted">
         {unit}
       </span>
       {/* Hairline underline: the only hint that the number is live, and it

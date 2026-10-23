@@ -304,7 +304,7 @@ export function Select({
                   </span>
                   <span className="min-w-0 flex-1 truncate">{option.label}</span>
                   {option.hint !== undefined && (
-                    <span className="flex-none text-[10px] text-text-muted">{option.hint}</span>
+                    <span className="flex-none text-xs text-text-muted">{option.hint}</span>
                   )}
                 </button>
               );

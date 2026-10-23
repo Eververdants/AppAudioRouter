@@ -131,7 +131,7 @@ function RememberedChip({
       transition={FADE}
       transformTemplate={MAIN_THREAD_TRANSFORM}
       title={`${entry.exeName} → ${target}`}
-      className="flex max-w-full items-center gap-1 rounded-seg border border-line bg-surface-raised py-0.5 pl-1.5 pr-0.5 font-mono text-[10px] text-text-secondary"
+      className="flex max-w-full items-center gap-1 rounded-seg border border-line bg-surface-raised py-0.5 pl-1.5 pr-0.5 font-mono text-xs text-text-secondary"
     >
       <span className="truncate">{entry.exeName}</span>
       <button
@@ -487,7 +487,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           );
         })}
 
-        <div className="mt-auto px-2 pt-3 font-mono text-[10px] tabular-nums text-text-muted">
+        <div className="mt-auto px-2 pt-3 font-mono text-xs tabular-nums text-text-muted">
           v{__APP_VERSION__}
         </div>
       </nav>
@@ -766,7 +766,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       <p className="text-[11px] text-text-secondary">
                         {t('settings.devicesReadFailed')}
                       </p>
-                      <p className="max-w-[46ch] text-[10px] leading-relaxed text-text-muted">
+                      <p className="max-w-[46ch] text-xs leading-relaxed text-text-muted">
                         {devicesError}
                       </p>
                       <button
@@ -847,7 +847,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     </span>
                     {/* The version is a fact, not an achievement: set in the same
                         monospaced muted type as every other number in the app. */}
-                    <span className="font-mono text-[10px] tabular-nums text-text-muted">
+                    <span className="font-mono text-xs tabular-nums text-text-muted">
                       v{__APP_VERSION__}
                     </span>
                   </div>
