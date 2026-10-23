@@ -275,6 +275,12 @@ export function NodeStage() {
     (d) => d.id !== feedCarrier.render || drawn.includes(d.id),
   );
   const addableDevices = pickableDevices.filter((d) => !drawn.includes(d.id));
+  // What "play here instead" can name: every device but the one already in the
+  // seat. Picking one hands it the primary seat and takes the seat's old
+  // occupant out of the plan — the opposite question from "also play here",
+  // which is why the menu asks the two separately instead of guessing which of
+  // them a press meant.
+  const switchableDevices = pickableDevices.filter((d) => d.id !== primaryDeviceId);
   // A machine Windows reports no render endpoint for must not be told its plan
   // is already full — "nothing left to add" reads as a finished action, and
   // there was nothing to act on.
@@ -345,6 +351,15 @@ export function NodeStage() {
     session: targetSession,
     state: feedLiveness(pid ?? -1, feedCarrier, routedPids, sessions),
   }));
+  /** What the add menu can offer as a programme input: neither the programme
+   *  being drawn nor one of its own siblings (a feed into itself), and nothing
+   *  already on the list. */
+  const feedableSessions = sessions.filter(
+    (s) =>
+      s.pid !== pid &&
+      s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
+      !feedTargetStates.some((f) => f.session.pid === s.pid),
+  );
   /** Every row in the copies panel: the copies first, then the feeds. */
   const copiesRows = copyDeviceIds.length + feedTargetStates.length;
   // The two panels, as one column centred on the hub: whatever the route's
@@ -807,7 +822,10 @@ export function NodeStage() {
                   Motion owns the whole transform: a Tailwind
                   `-translate-x-1/2` centering would be overridden by the inline
                   transform, so the centering rides inside the animated values
-                  as a constant `x`. */}
+                  as a constant `x`. With more than one destination it counts
+                  them: "also play here" is the one press on this board that
+                  makes sound come out of a second place, and the count is said
+                  before it happens rather than noticed after. */}
               <AnimatePresence initial={false}>
                 {canApply && (
                   <motion.span
@@ -819,7 +837,9 @@ export function NodeStage() {
                     transformTemplate={MAIN_THREAD_TRANSFORM}
                     className="absolute -top-3 left-1/2 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-accent-ink"
                   >
-                    {t('stage.applyHint')}
+                    {drawn.length > 1
+                      ? t('stage.applyHintMany', { n: drawn.length })
+                      : t('stage.applyHint')}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -922,7 +942,6 @@ export function NodeStage() {
                 badgeIsButton={badgeIsButton}
                 removable={false}
                 inspected={inspectorKey === `dev:${primaryDeviceId}`}
-                onToggle={() => toggleTarget(primaryDeviceId)}
                 onRemove={() => undefined}
                 onPromote={() => undefined}
                 onPrimaryPick={() => {
@@ -987,7 +1006,6 @@ export function NodeStage() {
                   badgeIsButton={badgeIsButton}
                   removable
                   inspected={inspectorKey === `dev:${deviceId}`}
-                  onToggle={() => toggleTarget(deviceId)}
                   onRemove={() => toggleTarget(deviceId)}
                   onPromote={() => promoteDevice(deviceId)}
                   onInspect={(source) => {
@@ -1034,8 +1052,30 @@ export function NodeStage() {
                 }}
               >
                 <div className="overflow-y-auto" style={{ maxHeight: addPickerCap - 14 }}>
-                  <PickerSection label={t('stage.pickDevice')}>
-                    {addableDevices.length === 0 && <PickerEmpty text={devicePickerEmpty} />}
+                  <PickerSection label={t('stage.pickSwitch')} section="switch">
+                    {switchableDevices.length === 0 && <PickerEmpty text={devicePickerEmpty} />}
+                    {switchableDevices.map((d) => (
+                      <motion.button
+                        key={d.id}
+                        type="button"
+                        role="menuitem"
+                        variants={PICKER_ITEM_VARIANTS}
+                        transformTemplate={MAIN_THREAD_TRANSFORM}
+                        onClick={() => {
+                          // The seat, not a second output: the device that held
+                          // it leaves the plan, because "play here instead" was
+                          // never "play here as well".
+                          setPrimaryDevice(d.id);
+                          closePicker(true);
+                        }}
+                        className="pressable w-full rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        {d.name}
+                      </motion.button>
+                    ))}
+                  </PickerSection>
+                  <PickerSection label={t('stage.pickCopy')} section="copy">
+                    {addableDevices.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
                     {addableDevices.map((d) => (
                       <motion.button
                         key={d.id}
@@ -1044,7 +1084,7 @@ export function NodeStage() {
                         variants={PICKER_ITEM_VARIANTS}
                         transformTemplate={MAIN_THREAD_TRANSFORM}
                         onClick={() => {
-                          // Append, never toggle: "add" has to leave the plan's
+                          // Append, never toggle: "also" has to leave the plan's
                           // membership alone and put the new device on the tail.
                           // The seat it ends up in is the delay order's call,
                           // exactly as for any other row.
@@ -1057,43 +1097,31 @@ export function NodeStage() {
                       </motion.button>
                     ))}
                   </PickerSection>
-                  <PickerSection label={t('stage.pickFeed')}>
-                    {sessions.filter(
-                      (s) =>
-                        s.pid !== pid &&
-                        s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
-                        !feedTargetStates.some((f) => f.session.pid === s.pid),
-                    ).length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
-                    {sessions
-                      .filter(
-                        (s) =>
-                          s.pid !== pid &&
-                          s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
-                          !feedTargetStates.some((f) => f.session.pid === s.pid),
-                      )
-                      .map((s) => (
-                        <motion.button
-                          key={s.pid}
-                          type="button"
-                          role="menuitem"
-                          variants={PICKER_ITEM_VARIANTS}
-                          transformTemplate={MAIN_THREAD_TRANSFORM}
-                          onClick={() => {
-                            if (pid !== undefined) void addFeed(pid, s.pid);
-                            closePicker(true);
-                          }}
-                          className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                        >
-                          <span className="text-type-feed" aria-hidden="true">
-                            ◧
-                          </span>
-                          <span className="truncate">
-                            {t('stage.pickFeedItem', {
-                              process: s.display_name ?? s.exe_name,
-                            })}
-                          </span>
-                        </motion.button>
-                      ))}
+                  <PickerSection label={t('stage.pickFeed')} section="feed">
+                    {feedableSessions.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
+                    {feedableSessions.map((s) => (
+                      <motion.button
+                        key={s.pid}
+                        type="button"
+                        role="menuitem"
+                        variants={PICKER_ITEM_VARIANTS}
+                        transformTemplate={MAIN_THREAD_TRANSFORM}
+                        onClick={() => {
+                          if (pid !== undefined) void addFeed(pid, s.pid);
+                          closePicker(true);
+                        }}
+                        className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        <span className="text-type-feed" aria-hidden="true">
+                          ◧
+                        </span>
+                        <span className="truncate">
+                          {t('stage.pickFeedItem', {
+                            process: s.display_name ?? s.exe_name,
+                          })}
+                        </span>
+                      </motion.button>
+                    ))}
                   </PickerSection>
                 </div>
               </motion.div>
@@ -1128,7 +1156,7 @@ export function NodeStage() {
                 }}
               >
                 <div className="overflow-y-auto" style={{ maxHeight: primaryPickerCap - 14 }}>
-                  <PickerSection label={t('stage.pickPrimary')}>
+                  <PickerSection label={t('stage.pickPrimary')} section="primary">
                     {pickableDevices.length === 0 && <PickerEmpty text={devicePickerEmpty} />}
                     {pickableDevices.map((d) => {
                       const picked = d.id === primaryDeviceId;
@@ -1360,7 +1388,6 @@ function DeviceRow({
   badgeIsButton,
   removable,
   inspected,
-  onToggle,
   onRemove,
   onPromote,
   onPrimaryPick,
@@ -1376,19 +1403,17 @@ function DeviceRow({
   badgeIsButton: boolean;
   removable: boolean;
   inspected: boolean;
-  onToggle: () => void;
   onRemove: () => void;
   onPromote: () => void;
   /** Present on the primary row only: clicking the row opens the picker that
    *  hands the primary seat to another device. */
   onPrimaryPick?: () => void;
-  /** Opens the strip, with the badge that was pressed: closing the strip
+  /** Opens the strip, with the control that was pressed: closing the strip
    *  later puts the keyboard back there. */
   onInspect: (source: HTMLElement) => void;
   onHover: (key: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const roleWord = isPrimary ? t('stage.main') : t('stage.copy');
   const wireKey = `dev:${deviceId}`;
 
@@ -1429,78 +1454,61 @@ function DeviceRow({
         </span>
       )}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {/* One control per row, and it opens the row: the primary's name opens
+            the picker that hands the seat over, a copy's name opens the strip
+            that tunes it. Neither removes anything — a press that takes a
+            destination out of the plan is the ✕, and it says so. */}
         <button
           type="button"
           // The primary row's name opens the change-primary picker: the press
           // that opens it must not be the press that closes it, so the button
           // is exempt from the outside-close like the pickers themselves.
           data-owns-picker={onPrimaryPick !== undefined ? 'true' : undefined}
-          aria-pressed={
-            onPrimaryPick === undefined ? selectedDeviceIds.includes(deviceId) : undefined
-          }
           aria-label={
             onPrimaryPick === undefined
-              ? deviceName
+              ? t('stage.rowAria', { name: deviceName })
               : t('stage.changePrimaryAria', { name: deviceName })
           }
-          title={onPrimaryPick === undefined ? undefined : t('stage.changePrimaryTitle')}
-          onClick={onPrimaryPick ?? onToggle}
-          className="pressable truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
+          title={
+            onPrimaryPick === undefined
+              ? t('stage.inspectTitle', { name: deviceName })
+              : t('stage.changePrimaryTitle')
+          }
+          onClick={onPrimaryPick ?? ((event) => onInspect(event.currentTarget))}
+          className="pressable flex items-center gap-1 truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
         >
-          {deviceName}
+          <span className="truncate">{deviceName}</span>
+          {/* The chevron is the one mark that says this name opens something:
+              without it the row reads as a label that happens to be bold. */}
+          {onPrimaryPick !== undefined && (
+            <span aria-hidden="true" className="flex-none text-[9px] leading-none text-text-muted">
+              ⌄
+            </span>
+          )}
         </button>
         <span className="flex items-center gap-1.5">
-          {isPrimary ? (
-            onPrimaryPick === undefined ? (
-              <span
-                title={t('stage.primaryTitle')}
-                className={`text-[10px] font-semibold ${ROLE_TEXT_CLASS.primary}`}
-              >
-                {roleWord}
-              </span>
-            ) : (
-              // On the board the role word doubles as the way to hand the seat
-              // over: it reads "Main" until the pointer or the keyboard arrives,
-              // then it offers the move — the same gesture the copies carry.
-              <button
-                type="button"
-                data-owns-picker
-                aria-label={t('stage.changePrimary')}
-                title={t('stage.changePrimaryTitle')}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onPrimaryPick();
-                }}
-                className="pressable group/role text-[10px] font-semibold text-type-primary underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
-              >
-                <span className="group-hover/copy:hidden group-focus-visible/role:hidden">
-                  {roleWord}
-                </span>
-                <span className="hidden group-hover/copy:inline group-focus-visible/role:inline">
-                  {t('stage.changePrimary')}
-                </span>
-              </button>
-            )
-          ) : (
-            // The role word itself is the switch: it reads "Copy" until the
-            // pointer or the keyboard arrives, then it offers the move. The
-            // accessible name is the action, so a screen reader hears the
-            // control and not the state.
+          {/* The role word is a label and nothing else. It used to be the
+              button that handed the seat over — a state word that changed under
+              the pointer and, with no hover to reveal it, changed nothing at
+              all before acting. The action now has a control of its own. */}
+          <span
+            title={isPrimary ? t('stage.primaryTitle') : t('stage.promoteTitle')}
+            className={`text-[10px] font-semibold ${
+              isPrimary ? ROLE_TEXT_CLASS.primary : ROLE_TEXT_CLASS.mirror
+            }`}
+          >
+            {roleWord}
+          </span>
+          {!isPrimary && (
             <button
               type="button"
               aria-label={t('stage.promote')}
               title={t('stage.promoteTitle')}
-              onClick={(event) => {
-                event.stopPropagation();
-                onPromote();
-              }}
-              className="pressable group/role text-[10px] font-semibold text-type-mirror underline decoration-dotted underline-offset-2 outline-none hover:text-accent focus-visible:text-accent"
+              onClick={onPromote}
+              className="pressable relative flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full text-text-muted opacity-60 outline-none hover:bg-accent-muted hover:text-accent hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60"
             >
-              <span className="group-hover/copy:hidden group-focus-visible/role:hidden">
-                {roleWord}
-              </span>
-              <span className="hidden group-hover/copy:inline group-focus-visible/role:inline">
-                {t('stage.promote')}
+              <span aria-hidden="true" className="text-[11px] leading-none">
+                ⇄
               </span>
             </button>
           )}
@@ -1758,10 +1766,20 @@ function walkPickerMenu(event: React.KeyboardEvent<HTMLDivElement>): void {
   rows[next]?.focus();
 }
 
-/** One section of the add-destination picker. */
-function PickerSection({ label, children }: { label: string; children: React.ReactNode }) {
+/** One section of the add-destination picker. `section` is the stable hook the
+ *  end-to-end specs scope a row to: the same device can appear in more than one
+ *  section, and "which one did you mean" is the question the sections answer. */
+function PickerSection({
+  label,
+  section,
+  children,
+}: {
+  label: string;
+  section: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="mb-0.5 last:mb-0">
+    <div data-picker-section={section} className="mb-0.5 last:mb-0">
       <div className="px-2 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">
         {label}
       </div>

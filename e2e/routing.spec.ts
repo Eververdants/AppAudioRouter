@@ -264,14 +264,13 @@ test('a copy can be promoted to what the system plays directly', async ({ page }
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
 
-  // The copy's own role word is the switch: one press trades the seats in the
-  // plan, the role words cross-fade on the spot, and the hub is what moves the
-  // hardware. The offer reaches the keyboard too — a row read by the tab order
-  // says what pressing it would do, the same words the pointer gets.
+  // The role word is a label, and the action beside it is its own control: a
+  // state word that doubles as a button is a press nobody can predict, and on a
+  // touch screen — where there is no hover to reveal the offer — it is a press
+  // nobody can see coming. The ⇄ carries the accessible name, so the keyboard
+  // and a screen reader hear the action, not the state.
+  await expect(deviceRowShell(page, 'Speakers').getByText('Copy', { exact: true })).toBeVisible();
   const promote = deviceRowShell(page, 'Speakers').getByRole('button', { name: 'Make primary' });
-  await promote.focus();
-  await expect(deviceRowShell(page, 'Speakers').getByText('Make primary')).toBeVisible();
-  await expect(deviceRowShell(page, 'Speakers').getByText('Copy', { exact: true })).toBeHidden();
   await promote.click();
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Main');
   await expect(deviceRowShell(page, 'TV')).toContainText('Copy');
@@ -500,25 +499,35 @@ test('the board’s picker answers the arrow keys', async ({ page }) => {
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
 
   // A `role=menu` is walked with the arrows, one stop for the whole list: the
-  // device row steps down into the programme inputs and back, and Home/End
-  // jump to the ends of the menu rather than out of it.
-  const device = page.getByRole('menuitem', { name: 'TV', exact: true });
+  // walk runs the picker's sections in order — the devices to switch to, the
+  // devices to also play through, the programme inputs — and Home/End jump to
+  // the ends of the menu rather than out of it.
+  const switchRow = page
+    .locator('[data-picker-section="switch"]')
+    .getByRole('menuitem', { name: 'TV', exact: true });
+  const copyRow = page
+    .locator('[data-picker-section="copy"]')
+    .getByRole('menuitem', { name: 'TV', exact: true });
   const input = page.getByRole('menuitem', { name: "game.exe's input" });
 
   // Opening walks in. The menu's rows sit after the whole panel in the
   // document, so a keyboard left outside would Tab past every device on the
   // board before reaching one it could choose; Escape hands the caret back to
   // the button the menu came out of.
-  await expect(device).toBeFocused();
+  await expect(switchRow).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('main').getByRole('button', { name: 'Add destination' })).toBeFocused();
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
 
-  await device.focus();
+  await switchRow.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(copyRow).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(input).toBeFocused();
   await page.keyboard.press('ArrowUp');
-  await expect(device).toBeFocused();
+  await expect(copyRow).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(switchRow).toBeFocused();
   await page.keyboard.press('End');
   await expect(input).toBeFocused();
 });

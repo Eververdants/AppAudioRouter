@@ -188,19 +188,23 @@ export function feedRow(page: Page, pid: number) {
 }
 
 /**
- * Add one destination through the board's ghost card.
+ * Add one destination through the board's ghost card — as a *copy*, which is
+ * the section that keeps the plan's membership and appends.
  *
  * The board draws the plan, not the inventory: a device becomes a card when it
  * joins the plan, which is what the dashed "add destination" card is for. Any
  * second device therefore arrives through this picker rather than by clicking a
- * disc that was always on screen.
+ * disc that was always on screen. The same picker offers the other question
+ * ("play through this one instead"), so a row is addressed by its section: the
+ * device names alone appear in both.
  */
 export async function addDevice(page: Page, name: string): Promise<void> {
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
-  // Scoped to the add menu: the change-primary menu can still be mid-exit when
-  // this opens, and both list devices by their plain names.
+  // Scoped to the add menu's copy section: the change-primary menu can still be
+  // mid-exit when this opens, and both list devices by their plain names.
   await page
     .getByRole('menu', { name: 'Add destination' })
+    .locator('[data-picker-section="copy"]')
     .getByRole('menuitem', { name, exact: true })
     .click();
 }

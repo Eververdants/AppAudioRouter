@@ -178,7 +178,19 @@ test('the board does not offer the carrier as a destination', async ({ page }) =
 
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
   const addMenu = page.getByRole('menu', { name: 'Add destination' });
-  await expect(addMenu.getByRole('menuitem', { name: 'TV', exact: true })).toBeVisible();
+  // Both halves of the picker read the same inventory, so neither offers the
+  // carrier: "play through this one instead" and "also play through this one"
+  // are two questions with the same answer.
+  await expect(
+    addMenu
+      .locator('[data-picker-section="switch"]')
+      .getByRole('menuitem', { name: 'TV', exact: true }),
+  ).toBeVisible();
+  await expect(
+    addMenu
+      .locator('[data-picker-section="copy"]')
+      .getByRole('menuitem', { name: 'TV', exact: true }),
+  ).toBeVisible();
   await expect(addMenu.getByRole('menuitem', { name: CARRIER })).toHaveCount(0);
 
   // The change-primary list reads the whole inventory rather than what is left
