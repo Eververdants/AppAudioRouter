@@ -476,7 +476,15 @@ const RailRow = memo(function RailRow({
         )}
 
         {targets.length > 0 && (
-          <span className="flex flex-none scale-75 items-center opacity-0 transition duration-200 group-focus-within/row:scale-100 group-focus-within/row:opacity-100 group-hover/row:scale-100 group-hover/row:opacity-100">
+          <span
+            // Invisible is not the same as inert: a control that cannot be
+            // seen must not be able to be hit, or a pointer crossing the row
+            // on its way somewhere else stops a route. It comes back under the
+            // pointer, under the keyboard, and on any machine that has no
+            // hover at all — a touch screen gets the control the mouse gets,
+            // not an empty space where it should be.
+            className="pointer-events-none flex flex-none scale-75 items-center opacity-0 transition duration-200 group-focus-within/row:pointer-events-auto group-focus-within/row:scale-100 group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:scale-100 group-hover/row:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:scale-100 [@media(hover:none)]:opacity-100"
+          >
             {/* Stopping sends the programme's sound back to the system
               default — harmless, but baffling when it happens under an
               accidental click, so it asks first. */}
@@ -536,8 +544,10 @@ function MiniToggle({
           : // Present, not conjured: a control that only exists under a pointer
             // is a control a touch, a pen, or a fast reader never finds — and
             // this one makes a five-program batch, which is not something to
-            // discover after the fact. Quiet until asked for, then ordinary.
-            'border-line bg-surface text-text-muted opacity-30 hover:text-accent hover:opacity-100 focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
+            // discover after the fact. Quiet until asked for, then ordinary;
+            // and on a machine with no hover to ask with, ordinary from the
+            // start.
+            'border-line bg-surface text-text-muted opacity-30 hover:text-accent hover:opacity-100 focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100'
       }`}
     >
       {/* The plus does not turn into a tick, it is replaced by one: the mark

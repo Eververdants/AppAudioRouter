@@ -473,6 +473,41 @@ test('the activity tab shows what the app did, behind an underlined rule', async
   await expect(deviceRowShell(page, 'TV')).toBeVisible();
 });
 
+test.describe('a machine with no hover to ask with', () => {
+  // A touch screen reports `hover: none`: nothing arrives by resting the
+  // pointer somewhere, so every affordance the mouse reveals has to be there
+  // from the start — and nothing invisible may stay in the way.
+  test.use({ hasTouch: true });
+
+  test('the row’s way back is ordinary, not something to discover', async ({ page }) => {
+    await openApp(page);
+    await appRow(page, 'music.exe').click();
+    await changePrimary(page, 'Speakers', 'TV');
+    await hub(page).click();
+
+    // No pointer has rested anywhere, so this is the touch screen's first look
+    // at the row: the ✕ is painted, and it is live. (Opacity, not the box —
+    // a zero-opacity element still has a bounding box.)
+    const stop = railRow(page, 1001).getByRole('button', {
+      name: /^Stop and return to the system default$|^Click again to confirm$/,
+    });
+    await expect(stop).toHaveCSS('opacity', '1');
+    await stop.click();
+    // The first press only asks, exactly as it does under a pointer.
+    expect(await callsFor(page, 'stop_route')).toHaveLength(0);
+    await stop.click();
+    expect(await callsFor(page, 'stop_route')).toHaveLength(1);
+  });
+
+  test('the batch toggle is visible without a pointer on the row', async ({ page }) => {
+    await openApp(page);
+    const toggle = railRow(page, 1002).getByRole('button', {
+      name: 'Change this app too',
+    });
+    await expect(toggle).toHaveCSS('opacity', '1');
+  });
+});
+
 test('the tab row is one tab stop, and the arrows walk it', async ({ page }) => {
   await openApp(page);
 
