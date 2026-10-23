@@ -13,12 +13,20 @@
   --bg-tertiary: #e8e8ec;
   --text-primary: #18181b;
   --text-secondary: #3f3f46;
-  --text-muted: #71717a;
-  --accent: #0891b2;
-  --accent-hover: #0e7490;
-  --accent-muted: rgba(8, 145, 178, 0.12);
-  --success: #10b981;
-  --error: #ef4444;
+  /* Every figure a person reads sits on white, on the sunken panel or on the
+     window's own plane. #71717a cleared the first and missed the other two
+     (4.35 and 4.23 against AA's 4.5); #63636b clears all three at 11px. */
+  --text-muted: #63636b;
+  /* The readable accent. #0891b2 was a graphics colour — 3.68:1 as text on
+     white, and the same as white text on top of it — so anything with words in
+     it (the undo button, the wizard's primary button, the apply capsule, the
+     settings rail's chosen row) was below AA. The fill and the words now share
+     one deeper cyan: 5.36:1 both ways. */
+  --accent: #0e7490;
+  --accent-hover: #155e75;
+  --accent-muted: rgba(14, 116, 144, 0.12);
+  --success: #047857;
+  --error: #dc2626;
 
   --surface: #ffffff;
   --surface-sunken: #f2f3f5;
@@ -29,16 +37,15 @@
   --accent-ink: #ffffff;
 
   /* The three roles a device can be in, painted on the stage. One colour paints
-     three things: the ring on the device's disc, the spoke that reaches it, and
-     the role word under its name — nothing else in the interface is allowed to
-     be one of them, or the encoding stops meaning anything. `primary` is the
-     accent because it is the same fact accent already marks; `mirror` is its
+     sentence in the dock, not to the ring. `primary` is the accent because it
+     is the same fact accent already marks — the deeper of the two, since a
+     role word is text and has to clear AA on white (5.36:1); `mirror` is its
      neighbour hue rather than a second accent, since both describe a route that
      is live; `idle` is the slate of hardware no route touches, and it gets no
      spoke at all. There is no violet in either palette, and there is no fourth
      colour for "picked but not applied": that difference belongs to the
      sentence in the dock, not to the ring. */
-  --type-primary: #0891b2;
+  --type-primary: #0e7490;
   --type-mirror: #0f766e;
   --type-idle: #94a3b8;
   /* A program's input as a route target: amber, so "sound flowing into another
@@ -50,13 +57,13 @@
      alpha to a plain var() colour, so those tokens are declared as
      `rgb(var(--x-rgb) / <alpha-value>)` in tailwind.config.ts. Keep the
      channels in sync with the hex/rgba values above. */
-  --accent-rgb: 8 145 178;
-  --error-rgb: 239 68 68;
+  --accent-rgb: 14 116 144;
+  --error-rgb: 220 38 38;
   --bg-tertiary-rgb: 232 232 236;
-  --text-muted-rgb: 113 113 122;
+  --text-muted-rgb: 99 99 107;
   --hairline-rgb: 230 230 234;
   --surface-rgb: 255 255 255;
-  --type-primary-rgb: 8 145 178;
+  --type-primary-rgb: 14 116 144;
   --type-mirror-rgb: 15 118 110;
   --type-idle-rgb: 148 163 184;
   --type-feed-rgb: 180 83 9;
