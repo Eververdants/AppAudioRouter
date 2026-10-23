@@ -130,6 +130,10 @@ test('a feed from a routed programme is held, and carries sound again when the r
 }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
+  // Routing is the change that fills the program's render slot: without it the
+  // plan would be only the device it already plays through, and there would be
+  // nothing for the hub to land.
+  await changePrimary(page, 'Speakers', 'TV');
   await hub(page).click();
 
   await addFeedTarget(page, 'game.exe');

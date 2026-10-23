@@ -6,7 +6,7 @@ import { Ring } from '@/components/ui/Ring';
 import { useLiveness } from '@/hooks/useLiveness';
 import { useProgramRoutes } from '@/hooks/useProgramRoutes';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
-import { alreadyApplied } from '@/lib/stage';
+import { alreadyApplied, effectiveFallback } from '@/lib/stage';
 import { feedLiveness, useRouterStore } from '@/stores/routerStore';
 
 /** One destination, as the page draws it. */
@@ -184,9 +184,12 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
 
   // Changes staged on the board that have not landed: the one thing this page
   // cannot show, because the page reports what is happening and those are not.
-  // The plan's own order — the same one the apply will land.
+  // The plan's own order — the same one the apply will land. A plan that is
+  // only where the programme already plays (the system default, for one with no
+  // route) is not a pending change either.
   const staged = selectedDeviceIds;
-  const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routesByPid);
+  const fallback = effectiveFallback(defaultDeviceId, devices);
+  const pending = staged.length > 0 && !alreadyApplied(staged, selectedPids, routesByPid, fallback);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">

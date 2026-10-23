@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { appRow, callsFor, emit, hub, openApp, setSessions } from './fixtures';
+import { appRow, callsFor, changePrimary, emit, hub, openApp, setSessions } from './fixtures';
 
 /**
  * The display layer a person reads: the window's name leads, the executable
@@ -29,6 +29,7 @@ test.describe('display names', () => {
     // with it the memory, the levels and the endpoint record — is the exe. If a
     // window title ever reached that argument, the route would survive the next
     // tab switch exactly as long as the title did.
+    await changePrimary(page, 'Speakers', 'TV');
     await hub(page).click();
     const applied = await callsFor(page, 'apply_route');
     expect(applied).toHaveLength(1);
@@ -80,9 +81,10 @@ test.describe('display names', () => {
     // is what makes that absence mean something: a record panel that never
     // wrote a line at all would pass it too, so the test asks for the line the
     // action earned before it counts the line the retitle did not.
+    await changePrimary(page, 'Speakers', 'TV');
     await hub(page).click();
     await page.getByRole('tab', { name: 'Activity' }).click();
-    await expect(page.getByText('Routed music.exe to Speakers')).toBeVisible();
+    await expect(page.getByText('Routed music.exe to TV')).toBeVisible();
     await expect(page.getByText('Session list changed')).toHaveCount(0);
   });
 });

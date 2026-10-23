@@ -82,6 +82,7 @@
     "applyHint": "点按生效",
     "applyAriaOne": "将「{{process}}」的声音改为通过 {{device}} 播放",
     "applyAriaMany": "将 {{n}} 个程序的声音改为通过 {{device}} 播放",
+    "hubAria": "「{{process}}」正在通过 {{device}} 播放",
     "removeTarget": "把 {{name}} 移出方案",
     "inspectAria": "调音 {{name}}",
     "inspectTitle": "打开 {{name}} 的调音条",

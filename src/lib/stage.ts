@@ -25,31 +25,49 @@
 export type BoardRole = 'primary' | 'mirror' | 'feed';
 
 /**
+ * Where a programme's sound actually goes right now, when no route holds it:
+ * the system default. The board stages it for an unrouted programme (that is
+ * what "the screen shows the reality" means), so the same list has to answer
+ * for both halves of the question.
+ */
+export function effectiveFallback(
+  defaultDeviceId: string | null,
+  devices: { id: string }[],
+): string[] {
+  if (defaultDeviceId === null) return [];
+  return devices.some((d) => d.id === defaultDeviceId) ? [defaultDeviceId] : [];
+}
+
+/**
  * Whether every selected programme is already playing through exactly what is
  * staged.
  *
  * Nothing is a question when the answer is already on screen: this is the state
- * the store lands in right after a route, and the state a programme with a
- * remembered route starts in. Asking there — lighting an apply affordance,
- * showing a sentence — would be asking someone to confirm what they can hear.
+ * the store lands in right after a route, the state a programme with a
+ * remembered route starts in, and — the case that used to slip through — the
+ * state of an unrouted programme staged on the device it already plays through.
+ * Asking there — lighting an apply affordance, showing a sentence — would be
+ * asking someone to confirm what they can hear, and pressing it would pin the
+ * programme to the endpoint it was already using without moving any sound.
  *
  * Both sides are read in the order the route goes out in — the plan's own
  * order, which is what the board draws and the store keeps live routes in — so
  * the comparison is like with like.
+ *
+ * `fallback` is what a programme with no route at all plays through: the
+ * system default. A plan that is only the fallback is not a proposal, it is a
+ * description.
  */
 export function alreadyApplied(
   staged: string[],
   pids: number[],
   routedPids: Record<number, string[] | undefined>,
+  fallback: string[],
 ): boolean {
   if (staged.length === 0 || pids.length === 0) return false;
   return pids.every((pid) => {
-    const ids = routedPids[pid];
-    return (
-      ids !== undefined &&
-      ids.length === staged.length &&
-      ids.every((id, index) => id === staged[index])
-    );
+    const ids = routedPids[pid] ?? fallback;
+    return ids.length === staged.length && ids.every((id, index) => id === staged[index]);
   });
 }
 

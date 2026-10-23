@@ -37,6 +37,7 @@ import {
   ROW_W,
   alreadyApplied,
   boardCentre,
+  effectiveFallback,
   feederColumn,
   feederOutPort,
   feederY,
@@ -146,6 +147,7 @@ export function NodeStage() {
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const routedPids = useRouterStore((s) => s.routedPids);
+  const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   // The route read by the process being drawn: a sibling process of a routed
   // program carries the same route as the one holding it, so selecting one
   // reports the program as answered instead of proposing what is already on.
@@ -248,7 +250,12 @@ export function NodeStage() {
   // same sequence, so a delay value can never push another device onto the
   // seat behind the user's back.
   const drawn = selectedDeviceIds;
-  const answered = alreadyApplied(drawn, selectedPids, routesByPid);
+  // What an unrouted programme plays through, so a plan that is only the
+  // system default reads as the answer it is rather than as a proposal to
+  // press: "where this already goes" is not a change, and pressing it would
+  // pin the programme to the endpoint it is on without moving any sound.
+  const fallback = effectiveFallback(defaultDeviceId, devices);
+  const answered = alreadyApplied(drawn, selectedPids, routesByPid, fallback);
   const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
   const hasPlan = drawn.length > 0;
 
@@ -578,13 +585,20 @@ export function NodeStage() {
   const deviceNameOf = (id: string): string =>
     devices.find((d) => d.id === id)?.name ?? t('stage.deviceGone');
   const targets = drawn.map(deviceNameOf).join(' + ');
-  const applyAria =
-    selectedPids.length > 1
+  // The name is a question while there is something to press and a statement
+  // once the screen already shows the answer — the same split the affordance
+  // makes, said in words so the hub is never an unlabelled button.
+  const hubAria = canApply
+    ? selectedPids.length > 1
       ? t('stage.applyAriaMany', { n: selectedPids.length, device: targets })
       : t('stage.applyAriaOne', {
           process: name ?? '',
           device: targets,
-        });
+        })
+    : t('stage.hubAria', {
+        process: name ?? '',
+        device: targets === '' ? t('stage.groupPrimaryEmpty') : targets,
+      });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -776,7 +790,7 @@ export function NodeStage() {
               onClick={() => {
                 if (canApply) void applyRoute();
               }}
-              aria-label={canApply ? applyAria : undefined}
+              aria-label={hubAria}
               whileTap={canApply ? { scale: 0.98 } : undefined}
               transformTemplate={MAIN_THREAD_TRANSFORM}
               transition={SPRING_TAP}

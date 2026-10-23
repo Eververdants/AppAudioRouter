@@ -82,6 +82,7 @@
     "applyHint": "Click to apply",
     "applyAriaOne": "Play {{process}} through {{device}} instead",
     "applyAriaMany": "Play {{n}} apps through {{device}} instead",
+    "hubAria": "{{process}} is playing through {{device}}",
     "removeTarget": "Remove {{name}} from the plan",
     "inspectAria": "Tune {{name}}",
     "inspectTitle": "Open the tuning strip for {{name}}",
