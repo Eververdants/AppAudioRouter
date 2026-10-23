@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { BriefingPage } from '@/components/BriefingPage';
@@ -20,6 +20,7 @@ import type {
   MirrorFailedEvent,
   SessionActivityEvent,
   TrayMenuEvent,
+  WorkTab,
 } from '@/lib/types';
 import { FADE, MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import { isSilentLaunch, setTrayLabels } from '@/lib/invoke';
@@ -31,9 +32,6 @@ import { revealMainWindow } from '@/lib/window';
  * re-enumeration at the end of the burst is all the UI needs.
  */
 const AUDIO_SYNC_DEBOUNCE_MS = 400;
-
-/** The things the work area can show. */
-type WorkTab = 'router' | 'briefing' | 'activity';
 
 /** Runs `task` once the browser is idle, falling back to a task tick. */
 function afterFirstPaint(task: () => void): () => void {
@@ -63,8 +61,14 @@ export default function App() {
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const startupNotice = useRouterStore((s) => s.startupNotice);
-  const [view, setView] = useState<'router' | 'settings'>('router');
-  const [tab, setTab] = useState<WorkTab>('router');
+  // Which surface and which tab: the store owns both, because the tray menu,
+  // the error card and the briefing page all have to be able to move the user
+  // from where they are standing.
+  const view = useRouterStore((s) => s.view);
+  const setView = useRouterStore((s) => s.setView);
+  const tab = useRouterStore((s) => s.tab);
+  const setTab = useRouterStore((s) => s.setTab);
+  const unreadErrors = useRouterStore((s) => s.unreadErrors);
   // The launch owns the work area until it is acknowledged: the first run of
   // this version line — a fresh install, or a machine walking in from anything
   // older — walks the user in, and the upgrade's tour carries the one screen
@@ -123,7 +127,7 @@ export default function App() {
   // startup entry's switch on the settings page, and the settings view itself.
   useBackendEvent<TrayMenuEvent>('tray-menu', ({ action }) => {
     const store = useRouterStore.getState();
-    if (action === 'open-settings') setView('settings');
+    if (action === 'open-settings') store.setView('settings');
     else if (action === 'toggle-autostart') void store.toggleAutostart();
     else if (action === 'stop-all') void store.stopAllRoutes();
   });
@@ -254,7 +258,7 @@ export default function App() {
     <div className="relative isolate flex h-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
       <TitleBar
         settingsOpen={view === 'settings'}
-        onToggleSettings={() => setView((v) => (v === 'settings' ? 'router' : 'settings'))}
+        onToggleSettings={() => setView(view === 'settings' ? 'router' : 'settings')}
         hideSettings={wizardActive}
       />
 
@@ -297,7 +301,23 @@ export default function App() {
                 tabs={[
                   { id: 'router', label: t('tabs.router') },
                   { id: 'briefing', label: t('tabs.briefing') },
-                  { id: 'activity', label: t('tabs.activity') },
+                  // The record's own dot: error lines written while it was closed
+                  // are ones nobody has read, and a failure nobody saw is a
+                  // failure nobody can act on.
+                  {
+                    id: 'activity',
+                    label: (
+                      <span className="relative">
+                        {t('tabs.activity')}
+                        {unreadErrors > 0 && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute -right-2.5 top-0 h-1.5 w-1.5 rounded-full bg-error"
+                          />
+                        )}
+                      </span>
+                    ),
+                  },
                 ]}
               />
               {/*
@@ -324,7 +344,7 @@ export default function App() {
                     <RoutedCapsule />
                   </>
                 ) : tab === 'briefing' ? (
-                  <BriefingPage onOpenBoard={() => setTab('router')} />
+                  <BriefingPage />
                 ) : (
                   <LogPanel />
                 )}

@@ -38,6 +38,7 @@ export function Toast() {
   const dismissFeedUndo = useRouterStore((s) => s.dismissFeedUndo);
   const errorNotice = useRouterStore((s) => s.errorNotice);
   const dismissError = useRouterStore((s) => s.dismissError);
+  const setTab = useRouterStore((s) => s.setTab);
   // Held while the pointer or the keyboard is on *that* card, so a user reaching
   // for the button does not have it taken away mid-reach. Which card is held,
   // not whether one is: two offers can stand at once, and freezing both
@@ -63,6 +64,11 @@ export function Toast() {
 
   useEffect(() => {
     if (errorNotice === null || held === 'error') return;
+    // A failure the user has to act on does not take itself away: an engine
+    // that would not start, or a mirror that went quiet, is a state rather
+    // than a moment, and a countdown would leave them with silence and no
+    // explanation eight seconds later.
+    if (errorNotice.sticky) return;
     const timer = window.setTimeout(() => dismissError(), TOAST_DISMISS_MS);
     return () => window.clearTimeout(timer);
   }, [errorNotice, held, dismissError]);
@@ -154,13 +160,56 @@ export function Toast() {
             transformTemplate={MAIN_THREAD_TRANSFORM}
             onPointerEnter={() => setHeld('error')}
             onPointerLeave={() => setHeld((current) => (current === 'error' ? null : current))}
-            className="pointer-events-auto flex items-center gap-2.5 rounded-full border border-error/50 bg-surface py-2 pl-4 pr-4"
+            className="pointer-events-auto flex max-w-[440px] items-start gap-2.5 rounded-card border border-error/50 bg-surface py-2 pl-4 pr-1.5"
           >
             {/* A dot in the failure's own colour leads the sentence: the undo
                 cards ask a question, this one reports, and the difference has to
                 read before the words are parsed. */}
-            <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-error" />
-            <span className="text-[12px] text-text-secondary">{errorNotice.message}</span>
+            <span
+              aria-hidden="true"
+              className="mt-[5px] h-1.5 w-1.5 flex-none rounded-full bg-error"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[12px] leading-relaxed text-text-secondary">
+                {errorNotice.message}
+              </span>
+              {/* The backend's own words, when there are any: evidence for a
+                  report, small and second — never the first thing to read, and
+                  never the only place the reason exists. */}
+              {errorNotice.detail !== undefined && errorNotice.detail !== '' && (
+                <span className="mt-0.5 block text-[10px] leading-relaxed text-text-muted [overflow-wrap:anywhere]">
+                  {errorNotice.detail}
+                </span>
+              )}
+            </span>
+            {/* The way out, on the card rather than in a key nobody presses:
+                an error nobody asked for still has to be dismissable by hand,
+                and a sticky one has nothing else to take it away. */}
+            <div className="flex flex-none items-center gap-0.5">
+              {/* The record keeps the whole story — every line this failure
+                  wrote, and everything that came before it — so the card says
+                  where it is rather than being the only place the reason
+                  exists. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTab('activity');
+                  dismissError();
+                }}
+                className="pressable h-5 rounded-full px-2 text-[11px] font-semibold text-accent outline-none hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                {t('toast.openLog')}
+              </button>
+              <button
+                type="button"
+                onClick={() => dismissError()}
+                className="pressable mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] text-text-muted outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
+                title={t('toast.dismiss')}
+                aria-label={t('toast.dismiss')}
+              >
+                ✕
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -1,10 +1,14 @@
+import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { SPRING_GLIDE } from '@/lib/motion';
 
 /** One entry of an `UnderlineTabs` row. */
 export interface TabItem {
   id: string;
-  label: string;
+  /** The word the tab shows. A node rather than a string so a tab can carry a
+   *  mark of its own (the record's unread dot) without the row knowing what
+   *  the mark means; the accessible name still comes from the words. */
+  label: ReactNode;
 }
 
 /** The id of one tab's button. The panel it shows points back at it, so the two

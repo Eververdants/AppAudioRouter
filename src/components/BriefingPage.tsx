@@ -110,7 +110,7 @@ function Chip({ destination, roleWord }: { destination: Destination; roleWord: s
  * **programme's** name is a door to its board. The destination chips are labels,
  * not controls — one place to change a route, and this is not it.
  */
-export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
+export function BriefingPage() {
   const { t } = useTranslation();
   const liveness = useLiveness();
   const devices = useRouterStore((s) => s.devices);
@@ -255,12 +255,7 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
           <div className="flex flex-col gap-2.5">
             <AnimatePresence initial={false}>
               {cards.map((card) => (
-                <BriefingCard
-                  key={card.pid}
-                  card={card}
-                  liveness={liveness}
-                  onOpenBoard={onOpenBoard}
-                />
+                <BriefingCard key={card.pid} card={card} liveness={liveness} />
               ))}
             </AnimatePresence>
           </div>
@@ -292,17 +287,10 @@ export function BriefingPage({ onOpenBoard }: { onOpenBoard: () => void }) {
  * system repaints one row at most, never the whole page (chips included,
  * each of which re-measures itself for its layout travel).
  */
-function BriefingCard({
-  card,
-  liveness,
-  onOpenBoard,
-}: {
-  card: Card;
-  liveness: boolean;
-  onOpenBoard: () => void;
-}) {
+function BriefingCard({ card, liveness }: { card: Card; liveness: boolean }) {
   const { t } = useTranslation();
   const selectProcess = useRouterStore((s) => s.selectProcess);
+  const setTab = useRouterStore((s) => s.setTab);
   const exeKey = card.exeName.toLowerCase();
   const sounding = useRouterStore((s) => s.soundingExes[exeKey] === true);
 
@@ -337,7 +325,7 @@ function BriefingCard({
           type="button"
           onClick={() => {
             selectProcess(card.pid);
-            onOpenBoard();
+            setTab('router');
           }}
           title={t('briefingPage.openBoard', { name: card.name })}
           aria-label={t('briefingPage.openBoard', { name: card.name })}

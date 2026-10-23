@@ -290,6 +290,8 @@
     "routedMany": "{{n}} apps → {{device}}",
     "routedManyMore": "{{n}} apps → {{device}} +{{m}}",
     "undo": "Undo",
+    "dismiss": "Dismiss",
+    "openLog": "See the record",
     "feedAdded": "{{source}} → {{target}} (input)",
     "feedRemoved": "Feed to {{target}} removed"
   },

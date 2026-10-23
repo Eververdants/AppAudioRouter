@@ -84,6 +84,31 @@ export interface LogEntry {
   level: 'info' | 'success' | 'error';
 }
 
+/**
+ * The one card that says a thing the user just asked for did not happen.
+ *
+ * `message` is the sentence a person reads; `detail` is the backend's own
+ * words, when there are any — evidence for a report, not the first thing on
+ * screen, which is why it renders small and second.
+ *
+ * `sticky` marks a failure that no countdown should take away: a mirror that
+ * went quiet or an engine that would not start is a state the user has to do
+ * something about, and a card that vanishes eight seconds later leaves them
+ * with silence and no explanation.
+ */
+export interface ErrorNotice {
+  id: number;
+  message: string;
+  detail?: string;
+  sticky?: boolean;
+}
+
+/** The three things the work area shows behind its tab row. */
+export type WorkTab = 'router' | 'briefing' | 'activity';
+
+/** Which of the window's two surfaces is up: the router, or settings. */
+export type WorkView = 'router' | 'settings';
+
 /** `(exe_name, device_ids)` — ids in route order, first is the primary. */
 export type RememberedRoute = [exeName: string, deviceIds: string[]];
 

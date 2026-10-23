@@ -6,6 +6,7 @@ import type {
   AudioSession,
   DuplicationReadyEvent,
   DuplicationStoppedEvent,
+  ErrorNotice,
   FeedCarrier,
   LogEntry,
   MirrorFailedEvent,
@@ -15,6 +16,8 @@ import type {
   SessionActivityEvent,
   StartupNotice,
   UndoSnapshot,
+  WorkTab,
+  WorkView,
 } from '@/lib/types';
 import { currentLanguage } from '@/i18n';
 import { DELAY_STEP_STORAGE_KEY, clampDelay, clampStep, readDelayStep } from '@/lib/delay';
@@ -209,7 +212,18 @@ interface RouterState {
    * notice stands. One at a time: a second failure replaces the first, the way
    * a new route replaces the undo offer that described the last one.
    */
-  errorNotice: { id: number; message: string } | null;
+  errorNotice: ErrorNotice | null;
+  /**
+   * Which surface the window is showing, and which tab the work area is on.
+   * They live here rather than in a component because more than one place has
+   * to be able to move the user: the tray menu opens settings, the error card
+   * offers the activity record, the briefing page walks back to the board.
+   */
+  view: WorkView;
+  tab: WorkTab;
+  /** Error lines written since the activity tab was last open. The tab's own
+   * dot: a failure nobody saw is a failure nobody can act on. */
+  unreadErrors: number;
   /** True while a route request is in flight, so a rapid double-click cannot
    * dispatch two overlapping routes against the same selection. */
   applying: boolean;
@@ -380,9 +394,18 @@ interface RouterState {
    * things someone just asked for that did not happen — a background read that
    * failed reaches the log alone, or every launch would open holding a stack of
    * complaints nobody caused.
+   *
+   * `options.detail` is the backend's own words: they travel with the card,
+   * small and second, because they are evidence for a report rather than the
+   * sentence a person reads. `options.sticky` holds the card up: a failure the
+   * user has to act on (an engine that would not start, a mirror that went
+   * quiet) must not disappear eight seconds later and leave them with silence.
    */
-  raiseError: (message: string) => void;
+  raiseError: (message: string, options?: { detail?: string; sticky?: boolean }) => void;
   dismissError: () => void;
+  /** Which surface the window shows, and which tab the work area is on. */
+  setView: (view: WorkView) => void;
+  setTab: (tab: WorkTab) => void;
 }
 
 let logId = 0;
@@ -973,6 +996,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   logs: [],
   errorNotice: null,
   applying: false,
+  view: 'router',
+  tab: 'router',
+  unreadErrors: 0,
   // Why the last enumeration of each list failed, in the backend's own words.
   // An empty list is a claim about the machine; a failed read is a claim about
   // this moment, and the two must never render as the same sentence.
@@ -1497,7 +1523,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         if (s.feedCarrier.render !== render || s.feedCarrier.capture !== capture) return {};
         return { feedCarrier: previous };
       });
-      get().raiseError(i18next.t('log.feedCarrierSetFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.feedCarrierSetFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -1602,7 +1630,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           feedUndo: null,
         };
       });
-      get().raiseError(i18next.t('log.feedSetFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.feedSetFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -1690,7 +1720,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           feedUndo: null,
         };
       });
-      get().raiseError(i18next.t('log.feedRemoveFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.feedRemoveFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -1835,7 +1867,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       get().addLog(i18next.t(next ? 'log.closeToTrayOn' : 'log.closeToTrayOff'), 'info');
     } catch (e) {
       set({ closeToTray: !next });
-      get().raiseError(i18next.t('log.closeToTrayFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.closeToTrayFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -1849,7 +1883,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // Writing HKCU\...\Run can genuinely fail; the switch must snap back rather
       // than lie about an entry that is not there.
       set({ autostart: !next });
-      get().raiseError(i18next.t('log.autostartFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.autostartFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -1941,7 +1977,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
       });
       if (applied.length === 0) {
-        get().raiseError(i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }));
+        get().raiseError(i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }), {
+          detail: errors[0],
+        });
         // Every apply tears the selection's old engines down before it starts
         // new ones, so a rejected re-route has left the backend with no engine
         // for these pids while the badges above may still carry the old route.
@@ -2037,7 +2075,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // for the next route, or for Core Audio to move.
       await get().reconcileActiveDuplications();
     } catch (e) {
-      get().raiseError(i18next.t('log.routeFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.routeFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     } finally {
       // Always release the flighting flag — a failed route must not leave the
       // hub latched disabled against a still-routable selection.
@@ -2107,7 +2147,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     if (failure === null) {
       get().addLog(i18next.t('log.routeUndone', { n: snapshot.entries.length }), 'info');
     } else {
-      get().raiseError(i18next.t('log.routeUndoFailed', { error: failure }));
+      get().raiseError(i18next.t('log.routeUndoFailed', { error: failure }), {
+        detail: failure,
+      });
     }
   },
 
@@ -2221,7 +2263,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
         };
       });
-      get().raiseError(i18next.t('log.stopRouteFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.stopRouteFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -2263,7 +2307,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       if (pid === undefined) return;
       if (result.status === 'rejected') {
         failed.push(pid);
-        get().raiseError(i18next.t('log.stopRouteFailed', { error: String(result.reason) }));
+        get().raiseError(i18next.t('log.stopRouteFailed', { error: String(result.reason) }), {
+          detail: String(result.reason),
+        });
       } else if (!result.value.released && !result.value.sibling_held) {
         // Stopped, but the program keeps a fixed output device: one line for the
         // whole batch is enough, the single-stop case names the device. A stop
@@ -2364,7 +2410,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       }
       return outcome;
     } catch (e) {
-      get().raiseError(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.pinnedEndpointsResetFailed', { error: String(e) }), {
+        detail: String(e),
+      });
       return null;
     }
   },
@@ -2490,7 +2538,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { deviceVolumes };
       });
-      get().raiseError(i18next.t('log.deviceVolumeFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.deviceVolumeFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -2541,7 +2591,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { primaryVolumes };
       });
-      get().raiseError(i18next.t('log.primaryVolumeFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.primaryVolumeFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -2592,7 +2644,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { sourceVolumes };
       });
-      get().raiseError(i18next.t('log.sourceVolumeFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.sourceVolumeFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
   },
 
@@ -2621,7 +2675,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         'info',
       );
     } catch (e) {
-      get().raiseError(i18next.t('log.sourceLevelsAlignFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.sourceLevelsAlignFailed', { error: String(e) }), {
+        detail: String(e),
+      });
     }
     // Read the levels back rather than trusting the ones this side could have
     // predicted: the backend rounds each gain and bounds it by that program's
@@ -2724,7 +2780,9 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         }
         return { deviceDelays };
       });
-      get().raiseError(i18next.t('log.delaySetFailed', { error: String(e) }));
+      get().raiseError(i18next.t('log.delaySetFailed', { error: String(e) }), {
+        detail: String(e),
+      });
       return false;
     }
   },
@@ -2765,7 +2823,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // the rest of the session on a quiet machine.
     invalidateReconciliation();
     if (reason === 'error') {
-      get().raiseError(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }));
+      get().raiseError(i18next.t('log.duplicationFailed', { pid, error: error ?? '' }), {
+        detail: error ?? undefined,
+        sticky: true,
+      });
       // End it the way a stop ends it, and it has to be the stop. The engine
       // took its mirrors down with itself but not the endpoint Windows was told
       // to play this program on. Cleared locally only, that assignment stays
@@ -2847,7 +2908,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // plays directly. The honest answer is to end the route instead of
     // reassigning its roles.
     if (routed[0] === deviceId) {
-      get().raiseError(i18next.t('log.duplicationFailed', { pid, error }));
+      get().raiseError(i18next.t('log.duplicationFailed', { pid, error }), {
+        detail: error,
+        sticky: true,
+      });
       // Same reasoning as an engine that stops by itself: this ends the route,
       // so it ends it through the stop, which is the path that hands the
       // program's endpoint back. The clear below would leave the badge gone and
@@ -2952,10 +3016,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     const ts = new Date().toLocaleTimeString(currentLanguage(), { hour12: false });
     set((s) => ({
       logs: [...s.logs, { id: ++logId, timestamp: ts, message, level }].slice(-200),
+      // An error line written while the record is closed is one nobody has
+      // read: the activity tab wears the count until it is opened, because a
+      // failure nobody saw is a failure nobody can act on.
+      unreadErrors: level === 'error' && s.tab !== 'activity' ? s.unreadErrors + 1 : s.unreadErrors,
     }));
   },
 
-  raiseError: (message) => {
+  raiseError: (message, options = {}) => {
     // Inside a batched action, collect rather than replace: the card goes up
     // once when the action ends (see `beginErrorBatch`). The log line is never
     // deferred — every failure is on the record the moment it happens.
@@ -2966,11 +3034,22 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
     // Keyed on a counter, not on the text: the same refusal happening twice is
     // two notices, and the second one's countdown starts on its own arrival.
-    set({ errorNotice: { id: ++errorId, message } });
+    set({
+      errorNotice: {
+        id: ++errorId,
+        message,
+        ...(options.detail === undefined ? {} : { detail: options.detail }),
+        ...(options.sticky === true ? { sticky: true } : {}),
+      },
+    });
     get().addLog(message, 'error');
   },
 
   dismissError: () => set({ errorNotice: null }),
+
+  setView: (view) => set({ view }),
+
+  setTab: (tab) => set(tab === 'activity' ? { tab, unreadErrors: 0 } : { tab }),
 }));
 
 /**

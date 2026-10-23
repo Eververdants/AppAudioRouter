@@ -290,6 +290,8 @@
     "routedMany": "{{n}} 个程序 → {{device}}",
     "routedManyMore": "{{n}} 个程序 → {{device}} +{{m}}",
     "undo": "撤销",
+    "dismiss": "不再显示",
+    "openLog": "看记录",
     "feedAdded": "{{source}} → {{target}}（输入）",
     "feedRemoved": "已撤下送往 {{target}} 的送入"
   },
