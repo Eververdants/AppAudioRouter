@@ -51,6 +51,7 @@ export function ProgramRail() {
   const liveness = useLiveness();
 
   const routedCount = Object.keys(routedPids).length;
+  const sessionsError = useRouterStore((s) => s.sessionsError);
   const [query, setQuery] = useState('');
 
   /**
@@ -71,6 +72,10 @@ export function ProgramRail() {
   // The search box cannot be open while this holds: it only mounts once the
   // list has rows, and the query clears itself when the list empties.
   const loading = !sessionsLoaded && sessions.length === 0;
+  // Three different answers, not one: still reading, could not read, and
+  // nothing is playing. The third is a fact about the machine; the second is a
+  // fact about this moment, and the two must never read as the same sentence.
+  const readFailed = sessionsLoaded && sessions.length === 0 && sessionsError !== null;
 
   // The search box only exists while there are programmes to search; a query
   // that outlived it would keep filtering a list whose field is gone — rows
@@ -243,11 +248,45 @@ export function ProgramRail() {
                   first beat the list is empty because nobody has asked yet. A
                   placeholder says so; "no apps are playing sound" is a claim
                   about the machine, and this frame makes it before the machine
-                  has answered. */}
+                  has answered. The same courtesy is owed to a read that was
+                  refused: the machine has not said nothing is playing, this
+                  moment has failed to ask it. */}
               {loading ? (
                 <>
                   <Spinner size={16} className="text-text-muted/60" />
                   <p className="text-[11px] leading-relaxed text-text-muted">{t('rail.reading')}</p>
+                </>
+              ) : readFailed ? (
+                <>
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    className="text-error/70"
+                  >
+                    <path d="M12 9v4" />
+                    <path d="M12 17h.01" />
+                    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                  </svg>
+                  <p className="text-[11px] leading-relaxed text-text-secondary">
+                    {t('rail.readFailed')}
+                  </p>
+                  {/* The reason, in the backend's own words, and the one action
+                      that answers it. The raw sentence is small on purpose: it
+                      is evidence for a report, not something to read first. */}
+                  <p className="max-w-[30ch] text-[10px] leading-relaxed text-text-muted">
+                    {sessionsError}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void refreshSessions()}
+                    className="pressable pointer-events-auto rounded-ctl border border-line px-2.5 py-1 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+                  >
+                    {t('rail.retry')}
+                  </button>
                 </>
               ) : (
                 <>

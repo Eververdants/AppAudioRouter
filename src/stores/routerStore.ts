@@ -71,6 +71,14 @@ interface RouterState {
    * would otherwise open by claiming no app is playing sound.
    */
   sessionsLoaded: boolean;
+  /**
+   * Why the last enumeration of each list failed, in the backend's own words.
+   * An empty list is a claim about the machine; a failed read is a claim about
+   * this moment, and the two must never render as the same sentence. Cleared by
+   * the next read that answers.
+   */
+  sessionsError: string | null;
+  devicesError: string | null;
   /** Processes targeted by the current selection (Ctrl+click to multi-select). */
   selectedPids: number[];
   /** Devices targeted by the current selection — the plan, in the order the
@@ -965,6 +973,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   logs: [],
   errorNotice: null,
   applying: false,
+  // Why the last enumeration of each list failed, in the backend's own words.
+  // An empty list is a claim about the machine; a failed read is a claim about
+  // this moment, and the two must never render as the same sentence.
+  sessionsError: null,
+  devicesError: null,
   engineGenerations: {},
   undoSnapshot: null,
 
@@ -1014,7 +1027,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           if (remaining.length > 0) routedPids[numericPid] = remaining;
           else delete engineGenerations[numericPid];
         }
-        return { devices, selectedDeviceIds, routedPids, engineGenerations };
+        return { devices, selectedDeviceIds, routedPids, engineGenerations, devicesError: null };
       });
       for (const pid of enginelessEnded) {
         api.stopRoute(pid).catch(() => {
@@ -1040,6 +1053,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // own, which is one of the three boot inputs whose arrival order nobody
       // caused. Only a press against a list already on screen is a thing the user
       // tried and did not get, and that one answers where they are looking.
+      set({ devicesError: message });
       if (viaNotification || get().devices.length === 0) get().addLog(message, 'error');
       else get().raiseError(message);
     } finally {
@@ -1115,6 +1129,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           soundingPids,
           soundingExes,
           feeds,
+          sessionsError: null,
         };
       });
       // A routed program can exit on its own, and the fixed output device
@@ -1154,6 +1169,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // background reads and reach the log alone. The rail's Refresh button pressed
       // against a list that is already there is the user's own ask, and its refusal
       // has to stand where the user is looking.
+      set({ sessionsError: message });
       if (viaNotification || !listWasUp) get().addLog(message, 'error');
       else get().raiseError(message);
     } finally {

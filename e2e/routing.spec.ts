@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { DEFAULT_STATE, installBridge } from './tauri/bridge';
 import {
   addDevice,
   appRow,
@@ -471,6 +472,26 @@ test('the activity tab shows what the app did, behind an underlined rule', async
 
   await page.getByRole('tab', { name: 'Routing' }).click();
   await expect(deviceRowShell(page, 'TV')).toBeVisible();
+});
+
+test('a read that refused is not an empty list', async ({ page }) => {
+  // The very first enumeration answers nothing: nobody has asked for a list yet,
+  // so nothing on screen is wrong — but "no apps are playing audio" is a claim
+  // about the machine, and this moment has simply failed to ask it.
+  await installBridge(page, { ...DEFAULT_STATE, failing: ['list_sessions'] });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+
+  await expect(page.getByText('Could not read which apps are playing sound')).toBeVisible();
+  // The reason travels with it, and so does the one action that answers it.
+  await expect(page.getByText('list_sessions failed (injected)')).toBeVisible();
+
+  await setFailing(page, []);
+  await page.getByRole('button', { name: 'Retry' }).click();
+
+  // The list the machine actually has arrives, and the complaint goes with it.
+  await expect(appRow(page, 'music.exe')).toBeVisible();
+  await expect(page.getByText('Could not read which apps are playing sound')).toHaveCount(0);
 });
 
 test.describe('a machine with no hover to ask with', () => {

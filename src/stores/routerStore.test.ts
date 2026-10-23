@@ -1608,6 +1608,23 @@ describe('the first session enumeration', () => {
     expect(state().sessionsLoaded).toBe(true);
     expect(lastLog()?.level).toBe('error');
     expect(state().errorNotice).toBeNull();
+    // And the reason is kept where the list is drawn: an empty list is a claim
+    // about the machine, a refused read is a claim about this moment, and the
+    // rail has to be able to tell the two apart.
+    expect(state().sessionsError).toContain('list_sessions');
+  });
+
+  it('clears the read failure on the enumeration that answers', async () => {
+    installBackend({ fail: (cmd) => cmd === 'list_sessions' });
+    reset();
+    await state().refreshSessions();
+    expect(state().sessionsError).not.toBeNull();
+
+    installBackend({ sessions: [MUSIC] });
+    await state().refreshSessions();
+
+    expect(state().sessionsError).toBeNull();
+    expect(state().sessions).toEqual([MUSIC]);
   });
 
   it('keeps a session refresh the notification provoked in the log', async () => {
@@ -1836,6 +1853,9 @@ describe('hotplug', () => {
 
     expect(lastLog()?.level).toBe('error');
     expect(state().errorNotice).toBeNull();
+    // The settings page and the board's empty panels read this, so a machine
+    // with no devices is not confused with a machine nobody asked about.
+    expect(state().devicesError).toContain('list_devices');
   });
 
   it('cannot be undone by a reconciliation asked before the unplug', async () => {

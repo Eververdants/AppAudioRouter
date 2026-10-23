@@ -301,6 +301,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const delayStepMs = useRouterStore((s) => s.delayStepMs);
   const setDelayStep = useRouterStore((s) => s.setDelayStep);
   const sessions = useRouterStore((s) => s.sessions);
+  const devicesError = useRouterStore((s) => s.devicesError);
+  const refreshDevices = useRouterStore((s) => s.refreshDevices);
   const routedPids = useRouterStore((s) => s.routedPids);
   const alignSourceLevels = useRouterStore((s) => s.alignSourceLevels);
   const closeToTray = useRouterStore((s) => s.closeToTray);
@@ -752,9 +754,30 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   {t('settings.calibrationNote')}
                 </p>
                 {devices.length === 0 ? (
-                  <p className="py-6 text-center text-[11px] text-text-muted">
-                    {t('settings.noDevices')}
-                  </p>
+                  devicesError === null ? (
+                    <p className="py-6 text-center text-[11px] text-text-muted">
+                      {t('settings.noDevices')}
+                    </p>
+                  ) : (
+                    // A read that refused is not a machine with no devices: the
+                    // two need different sentences, and the second needs a way
+                    // out of itself.
+                    <div className="flex flex-col items-center gap-2 py-6 text-center">
+                      <p className="text-[11px] text-text-secondary">
+                        {t('settings.devicesReadFailed')}
+                      </p>
+                      <p className="max-w-[46ch] text-[10px] leading-relaxed text-text-muted">
+                        {devicesError}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void refreshDevices()}
+                        className={ROW_BUTTON_CLASS}
+                      >
+                        {t('settings.retry')}
+                      </button>
+                    </div>
+                  )
                 ) : (
                   devices.map((device) => (
                     <DelayRow key={device.id} deviceId={device.id} name={device.name} />

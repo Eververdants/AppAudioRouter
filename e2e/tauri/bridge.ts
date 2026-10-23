@@ -43,6 +43,9 @@ export interface BridgeState {
   primaryVolumes: [string, number][];
   /** Recording endpoints, for the settings page's carrier picker. */
   captureDevices: BridgeDevice[];
+  /** Commands that refuse from the very first call, so a boot-time failure is
+   *  reachable without a round-trip through `setFailing` after the app loaded. */
+  failing?: string[];
   /** The loopback pair feeds are carried through; null halves mean "none set". */
   feedCarrier: { render: string | null; capture: string | null };
   /** `(source_exe, target_exe)` — the remembered feed rules. */
@@ -232,7 +235,7 @@ function tauriBridge(initial: BridgeState): void {
     },
     calls: [] as { cmd: string; args: Record<string, unknown> }[],
     generation: 0,
-    failing: [] as string[],
+    failing: [...(initial.failing ?? [])],
   };
   const callbacks = new Map<number, (data: unknown) => void>();
   const listeners = new Map<string, number[]>();
