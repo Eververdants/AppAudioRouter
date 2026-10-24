@@ -272,12 +272,24 @@ mod tests {
         );
     }
 
+    /// The two tests below claim the *test process's own* slot — the one exe a
+    /// unit test can name — so run in parallel they contend for the
+    /// process-global clock, and the gate under test is exactly that clock: the
+    /// sibling's claim is a newer ask by definition, and the loser reads its own
+    /// fresh claim as superseded. One lock keeps them off each other; the tests
+    /// stay honest about sharing a process.
+    fn test_clock_lock() -> std::sync::MutexGuard<'static, ()> {
+        static CLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        CLOCK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The gate holds the slot for the newest claim and refuses an older one — and
     /// holding it is what makes the check mean something: no ticket can be handed
     /// out while a writer is inside the slot, so a claim that passes never loses
     /// afterwards, and one that loses never wrote at all.
     #[test]
     fn the_gate_holds_the_slot_for_the_newest_claim_only() {
+        let _clock = test_clock_lock();
         let live = std::process::id();
         // Asked for a flow this program's own process can be named for, which is
         // the same witness the write path uses.
@@ -317,6 +329,7 @@ mod tests {
     /// itself and report one program handed back while it is still pinned.
     #[test]
     fn one_walk_holds_one_claim_per_slot() {
+        let _clock = test_clock_lock();
         let live = std::process::id();
         let mut held = std::collections::HashMap::new();
         let first =
