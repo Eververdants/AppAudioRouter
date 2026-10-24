@@ -13,6 +13,7 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { useTheme } from '@/hooks/useTheme';
 import { MAIN_THREAD_TRANSFORM, SPRING_GLIDE } from '@/lib/motion';
 import { isEditableTarget } from '@/lib/productionGuards';
+import type { ResetOutcome } from '@/lib/types';
 import { useRouterStore } from '@/stores/routerStore';
 
 /**
@@ -43,6 +44,13 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const sectionLabel = useSectionLabel();
 
   const [section, setSection] = useState<SettingsSection>('appearance');
+  // What the last "reset per-app output" press cleared, and whether it is still
+  // being answered. Both live here rather than in the routing section because a
+  // section unmounts when the page switches: kept there, the answer would vanish
+  // with the switch, and `resetBusy` — the one wipe at a time guard — could be
+  // walked around by leaving and coming back mid-press.
+  const [resetOutcome, setResetOutcome] = useState<ResetOutcome | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
   // The delay wizard; mounted over the page while it runs. The button keeps a
   // ref because the wizard takes the keyboard when it closes: the caret goes
   // back to the control that opened it, not to the top of the window.
@@ -131,7 +139,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               />
             )}
 
-            {section === 'routing' && <RoutingSection devices={devices} />}
+            {section === 'routing' && (
+              <RoutingSection
+                devices={devices}
+                resetOutcome={resetOutcome}
+                setResetOutcome={setResetOutcome}
+                resetBusy={resetBusy}
+                setResetBusy={setResetBusy}
+              />
+            )}
 
             {section === 'background' && <BackgroundSection />}
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Block } from '@/components/settings/Block';
@@ -22,8 +22,25 @@ import { useRouterStore } from '@/stores/routerStore';
  * it too, for the delay wizard — and because this list is the store's *own*
  * devices: the board's carrier filter lives on the board, and narrowing it here
  * would leave a configured carrier with no way back to change or clear it.
+ *
+ * The reset's answer and its in-flight flag arrive as props for the same reason
+ * they live in the page: this section unmounts when the rail moves, and a press
+ * that is still being answered must not lose its guard — or its result — to a
+ * section switch.
  */
-export function RoutingSection({ devices }: { devices: AudioDevice[] }) {
+export function RoutingSection({
+  devices,
+  resetOutcome,
+  setResetOutcome,
+  resetBusy,
+  setResetBusy,
+}: {
+  devices: AudioDevice[];
+  resetOutcome: ResetOutcome | null;
+  setResetOutcome: (outcome: ResetOutcome | null) => void;
+  resetBusy: boolean;
+  setResetBusy: (busy: boolean) => void;
+}) {
   const { t } = useTranslation();
   const autoRemember = useRouterStore((s) => s.autoRemember);
   const toggleAutoRemember = useRouterStore((s) => s.toggleAutoRemember);
@@ -36,12 +53,6 @@ export function RoutingSection({ devices }: { devices: AudioDevice[] }) {
   const setFeedCarrier = useRouterStore((s) => s.setFeedCarrier);
   const captureDevices = useRouterStore((s) => s.captureDevices);
   const raiseError = useRouterStore((s) => s.raiseError);
-
-  // What the last "reset per-app output" press cleared, so the press has an
-  // answer of its own instead of only a line in another tab.
-  const [resetOutcome, setResetOutcome] = useState<ResetOutcome | null>(null);
-  // Whether that press is still being answered.
-  const [resetBusy, setResetBusy] = useState(false);
 
   // Which known loopback driver, if any, is on the two lists right now. Both
   // lists follow the audio-changed event, so a driver installed while the app
