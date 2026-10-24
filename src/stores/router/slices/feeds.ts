@@ -221,6 +221,12 @@ export function createFeedsSlice(set: SetRouterState, get: GetRouterState): Feed
               : s.rememberedFeeds,
         };
       });
+      // Claimed against the feed restore before the ask: a boot or refresh
+      // restore can have this exact pair's `set_feed_target` in flight, and its
+      // reply must not re-record a rule the user just took down. Only a refused
+      // removal hands the claim back — the rule may still stand, and the
+      // restore is what retries it.
+      if (targetExe !== undefined) feedRestoreDecided.add(`${canonicalSource}|${targetExe}`);
       try {
         const stuck = await api.removeFeedTarget(canonicalSource, canonicalTarget);
         if (source !== undefined && target !== undefined) {
@@ -237,11 +243,13 @@ export function createFeedsSlice(set: SetRouterState, get: GetRouterState): Feed
           get().raiseError(i18next.t('log.feedRemovedStuck', { processes: stuck.join(', ') }));
         }
       } catch (e) {
-        // The backend kept the rule: put this one wire and this one memory entry
-        // back rather than showing a board that disagrees with the audio service.
-        // Functional, and scoped to this one wire, so a *different* feed the user
-        // moved while this removal was in flight keeps its own outcome instead of
-        // being reverted by a whole-map snapshot.
+        // The removal was refused, so the rule may still stand: hand the claim
+        // back and put this one wire and this one memory entry in place — not
+        // showing a board that disagrees with the audio service. Functional, and
+        // scoped to this one wire, so a *different* feed the user moved while
+        // this removal was in flight keeps its own outcome instead of being
+        // reverted by a whole-map snapshot.
+        if (targetExe !== undefined) feedRestoreDecided.delete(`${canonicalSource}|${targetExe}`);
         set((s) => {
           const nextFeeds = { ...s.feeds };
           const existing = nextFeeds[canonicalSource] ?? [];
@@ -312,10 +320,35 @@ export function createFeedsSlice(set: SetRouterState, get: GetRouterState): Feed
       );
       const restored: Record<number, number[]> = {};
       const recovered = new Set<string>();
-      results.forEach((result, index) => {
+      // A pair the user removed while this pass was in flight must neither come
+      // back to the map nor stay on file: its delivery can land *after* the
+      // removal, which re-records the rule in the backend's memory — the one
+      // resurrection nothing else reports. The memory read here is the post-removal
+      // one, so the pair that left is recognized, its state write is skipped, and
+      // the rule its reply just created is taken back down.
+      const stillRemembered = (sourceExe: string, targetExe: string): boolean =>
+        get().rememberedFeeds.some(
+          (entry) =>
+            entry.sourceExe.toLowerCase() === sourceExe.toLowerCase() &&
+            entry.targetExe.some((t) => t.toLowerCase() === targetExe.toLowerCase()),
+        );
+      for (const [index, result] of results.entries()) {
         const pair = pairs[index];
-        if (pair === undefined) return;
+        if (pair === undefined) continue;
         if (result.status === 'fulfilled' && result.value.delivered) {
+          if (!stillRemembered(pair.sourceExe, pair.targetExe)) {
+            try {
+              await api.removeFeedTarget(pair.sourcePid, pair.targetPid);
+            } catch (e) {
+              // The rule stands while the memory does not name it: the log is
+              // the honest channel, and the next removal of the pair retries.
+              get().addLog(
+                i18next.t('log.feedRestoreCleanupFailed', { error: String(e) }),
+                'error',
+              );
+            }
+            continue;
+          }
           restored[pair.sourcePid] = [...(restored[pair.sourcePid] ?? []), pair.targetPid];
           recovered.add(pair.sourceExe.toLowerCase());
           get().addLog(
@@ -326,7 +359,7 @@ export function createFeedsSlice(set: SetRouterState, get: GetRouterState): Feed
         // A missing carrier stays silent in a restore pass: the board shows that
         // state, and a boot sweep has no business scolding the user for a
         // configuration it can see.
-      });
+      }
       if (Object.keys(restored).length === 0) return;
       set((s) => {
         const nextFeeds = { ...s.feeds };
