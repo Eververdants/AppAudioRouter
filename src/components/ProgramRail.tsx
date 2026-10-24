@@ -415,6 +415,9 @@ const RailRow = memo(function RailRow({
     <motion.div
       layout
       data-rail-row={session.pid}
+      // The identity, for anything addressing the row by the program rather
+      // than by the words the window happens to be calling it.
+      data-exe={session.exe_name}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -486,28 +489,37 @@ const RailRow = memo(function RailRow({
             <span className="block truncate text-[12.5px] font-medium text-text-primary">
               {name}
             </span>
-            {/* PID, the exe it really is when the window names it
-              differently, and — only once something has actually been
-              routed — where its sound goes. */}
-            <span className="block truncate font-mono text-xs tabular-nums text-text-muted">
-              {exeDiffers && (
+            {/* One identity, and where the sound goes once there is somewhere to
+              say. Two segments at most: the row is 236px wide and a line that
+              carries three facts truncates the last one — which used to be the
+              destination and is now the PID. Whatever falls off the end is in
+              the tooltip, so nothing is lost, only ordered. */}
+            <span
+              title={`${session.exe_name} · ${t('rail.pid', { pid: session.pid })}${through !== null && targets.length > 0 ? ` → ${through}` : ''}`}
+              className="block truncate font-mono text-xs tabular-nums text-text-muted"
+            >
+              {through !== null && targets.length > 0 ? (
                 <>
-                  {session.exe_name}
-                  <span aria-hidden="true" className="opacity-50">
-                    {' · '}
-                  </span>
-                </>
-              )}
-              {t('rail.pid', { pid: session.pid })}
-              {targets.length > 0 && through !== null && (
-                <>
-                  <span aria-hidden="true" className="opacity-50">
-                    {' · '}
-                  </span>
                   <span className="font-sans">{through}</span>
                   {targets.length > 1 && (
                     <span className="text-accent"> +{targets.length - 1}</span>
                   )}
+                  <span aria-hidden="true" className="opacity-50">
+                    {' · '}
+                  </span>
+                  {t('rail.pid', { pid: session.pid })}
+                </>
+              ) : (
+                <>
+                  {exeDiffers && (
+                    <>
+                      {session.exe_name}
+                      <span aria-hidden="true" className="opacity-50">
+                        {' · '}
+                      </span>
+                    </>
+                  )}
+                  {t('rail.pid', { pid: session.pid })}
                 </>
               )}
             </span>

@@ -18,8 +18,9 @@ import { installBridge, type BridgeState } from './tauri/bridge';
 
 const ENABLED = process.env.CAPTURE_SCREENSHOTS === '1';
 
-/** The default window size, at 2× for a screen that is not a retina one. */
-test.use({ viewport: { width: 900, height: 680 }, deviceScaleFactor: 2 });
+/** The default window size (`tauri.conf.json`), at 2× for a screen that is
+ *  not a retina one. */
+test.use({ viewport: { width: 980, height: 720 }, deviceScaleFactor: 2 });
 
 test.skip(
   !ENABLED,
@@ -81,7 +82,7 @@ for (const theme of ['light', 'dark'] as const) {
     await installBridge(page, STATE);
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
-    await expect(page.getByText('Music.exe').first()).toBeVisible();
+    await expect(appRow(page, 'Music.exe')).toBeVisible();
 
     // Selecting the programme stages the system default device as the seat, so
     // the shot's route is the headset plus the two wired outputs it is copied

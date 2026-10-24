@@ -108,9 +108,15 @@ export function deviceRowShell(page: Page, name: string) {
   return page.locator('main [data-device-row]').filter({ hasText: name });
 }
 
-/** One row of the app list. */
+/**
+ * One row of the app list, by the executable it routes by.
+ *
+ * Addressed through the row's own hook rather than by its words: a program whose
+ * window name is its file name prints the name once, not twice, so the text a
+ * row carries is no longer a reliable address for it.
+ */
 export function appRow(page: Page, exeName: string) {
-  return page.locator('aside button').filter({ hasText: exeName });
+  return page.locator(`aside [data-exe="${exeName}"] button`).first();
 }
 
 /**
