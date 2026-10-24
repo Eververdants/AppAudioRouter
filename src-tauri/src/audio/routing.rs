@@ -804,8 +804,6 @@ pub struct PinnedRoute {
 pub struct FeedPin {
     /// Executable the pin speaks for, so a removal can find the memory rule.
     pub exe_name: String,
-    /// Endpoint the flow was pinned to.
-    pub device_id: String,
     /// The process's creation time when this pin was written. The pid is the
     /// only handle the release paths get, and the kernel hands pids to new
     /// processes — this is what tells the sweep that a pin's pid still names
@@ -814,10 +812,9 @@ pub struct FeedPin {
 }
 
 impl FeedPin {
-    fn new(pid: u32, exe_name: &str, device_id: &str) -> Self {
+    fn new(pid: u32, exe_name: &str) -> Self {
         Self {
             exe_name: exe_name.to_string(),
-            device_id: device_id.to_string(),
             creation_time: super::process_creation_time(pid).unwrap_or(0),
         }
     }
@@ -1045,18 +1042,22 @@ impl PinnedRoutes {
 
     // ------------------------------------------------------------- feed pins
 
-    /// Record that this app pointed `pid`'s *render* endpoint at the carrier,
-    /// which is how a feed source is wired.
-    pub fn mark_feed(&self, pid: u32, exe_name: &str, device_id: &str) {
+    /// Record that `pid` is a feed source: its audio is being carried into the
+    /// feed carrier, so a removal and a route stop both have a handle on it.
+    ///
+    /// The endpoint itself is not recorded: the carrier is one configured pair,
+    /// and the tap is rebuilt from that configuration whenever the engine that
+    /// carries it is restarted.
+    pub fn mark_feed(&self, pid: u32, exe_name: &str) {
         let mut book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
-        book.insert(pid, FeedPin::new(pid, exe_name, device_id));
+        book.insert(pid, FeedPin::new(pid, exe_name));
     }
 
     /// Record that this app pointed `pid`'s *capture* endpoint at the carrier —
     /// the receiving half of a feed.
-    pub fn mark_feed_capture(&self, pid: u32, exe_name: &str, device_id: &str) {
+    pub fn mark_feed_capture(&self, pid: u32, exe_name: &str) {
         let mut book = self.feed_targets.lock().unwrap_or_else(|e| e.into_inner());
-        book.insert(pid, FeedPin::new(pid, exe_name, device_id));
+        book.insert(pid, FeedPin::new(pid, exe_name));
     }
 
     /// The executable name a feed source pin was recorded under, if any.
@@ -1069,12 +1070,6 @@ impl PinnedRoutes {
     pub fn feed_capture_exe_of(&self, pid: u32) -> Option<String> {
         let book = self.feed_targets.lock().unwrap_or_else(|e| e.into_inner());
         book.get(&pid).map(|pin| pin.exe_name.clone())
-    }
-
-    /// The render endpoint a feed source pin was recorded against.
-    pub fn feed_source_device_of(&self, pid: u32) -> Option<String> {
-        let book = self.feed_sources.lock().unwrap_or_else(|e| e.into_inner());
-        book.get(&pid).map(|pin| pin.device_id.clone())
     }
 
     /// Whether a feed source (render half) pin exists for `pid`.
@@ -1607,18 +1602,18 @@ mod tests {
         assert!(!pins.is_routed(live));
     }
 
-    /// A suspended feed is resumed by writing an endpoint **through** the pid its
-    /// pin names. Offering a pin whose process is gone would point whatever
-    /// process holds that pid now at the carrier — an unrelated program made
-    /// silent — so the list a resume walks carries only pins that still speak for
-    /// a live process. The pin itself stays on the book: the sweep forgets it and
-    /// exit cleanup still walks it.
+    /// A feed that has to be put back is rebuilt **through** the pid its pin
+    /// names. Offering a pin whose process is gone would start an engine
+    /// capturing whatever process holds that pid now — an unrelated programme
+    /// sent into someone's microphone — so the list a resume walks carries only
+    /// pins that still speak for a live process. The pin itself stays on the
+    /// book: the sweep forgets it and exit cleanup still walks it.
     #[test]
     fn a_feed_pin_of_a_gone_process_is_not_offered_for_resume() {
         let pins = PinnedRoutes::new();
         let live = std::process::id();
-        pins.mark_feed(live, "sender.exe", "carrier-render");
-        pins.mark_feed(u32::MAX, "gone.exe", "carrier-render");
+        pins.mark_feed(live, "sender.exe");
+        pins.mark_feed(u32::MAX, "gone.exe");
 
         let listed = pins.feed_source_pins();
         assert!(
@@ -1673,32 +1668,29 @@ mod tests {
     }
 
     /// A chain — `A` into `B`, `B` into `C` — writes `B` on both flows, and
-    /// forgetting one half must not lose the other. A pin that goes missing is
-    /// an endpoint nothing can hand back any more: the program stays on the
-    /// carrier after the board says the feed was removed, which reads as the
+    /// forgetting one half must not lose the other. A pin that goes missing is a
+    /// half nothing can hand back any more: the programme keeps receiving or
+    /// sending after the board says the feed was removed, which reads as the
     /// removal having worked.
     #[test]
     fn one_program_holds_both_feed_halves() {
         let pins = PinnedRoutes::new();
-        pins.mark_feed_capture(20, "b.exe", "carrier-capture");
-        pins.mark_feed(20, "b.exe", "carrier-render");
+        pins.mark_feed_capture(20, "b.exe");
+        pins.mark_feed(20, "b.exe");
 
         assert_eq!(
             pins.feed_capture_of(20).as_deref(),
             Some("b.exe"),
             "the capture half outlived having the render half pinned after it"
         );
-        assert_eq!(
-            pins.feed_source_device_of(20).as_deref(),
-            Some("carrier-render")
-        );
+        assert_eq!(pins.feed_source_of(20).as_deref(), Some("b.exe"));
 
         pins.forget_feed_source(20);
         assert!(pins.feed_source_of(20).is_none());
         assert!(pins.feed_capture_of(20).is_some());
 
         // Both books feed the same shutdown list, and a pid in both appears once.
-        pins.mark_feed(21, "c.exe", "carrier-render");
+        pins.mark_feed(21, "c.exe");
         let mut all = pins.take_all();
         all.sort();
         assert_eq!(all, vec![20, 21]);
@@ -1843,11 +1835,23 @@ mod tests {
         );
 
         // The other half of the same program's assignment is a different slot, so a
-        // walk that means it takes its own ticket.
+        // walk that means it takes its own hold. The two tickets are not compared:
+        // the clock numbers each slot on its own — a stamp from the recording half
+        // deliberately says nothing about the playback one (see `claim_is_newest`),
+        // so the two counters mean nothing to each other.
         let capture = claim_walked_slot(live, E_CAPTURE, &mut held)
             .expect("the same process, the recording half");
-        assert_ne!(capture.ticket, first.ticket, "ordered apart");
+        assert_eq!(
+            capture.key.1, E_CAPTURE,
+            "the recording half is its own slot"
+        );
         assert_eq!(held.len(), 2, "one hold per slot");
+        let capture_again = claim_walked_slot(live, E_CAPTURE, &mut held)
+            .expect("the same process, the recording half again");
+        assert_eq!(
+            capture.ticket, capture_again.ticket,
+            "and a walk keeps the hold it already has on it"
+        );
     }
 
     /// A writer that loses the slot has to say so in words that are not a service

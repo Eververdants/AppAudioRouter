@@ -201,6 +201,8 @@ pub async fn apply_route(
     remember: bool,
     config: State<'_, RouteConfig>,
     pins: State<'_, PinnedRoutes>,
+    feeds: State<'_, FeedConfig>,
+    carrier: State<'_, FeedCarrierConfig>,
     app: AppHandle,
 ) -> Result<u64, String> {
     info!("cmd: apply_route pid={pid} exe={exe_name} devices={device_ids:?} remember={remember}");
@@ -254,13 +256,27 @@ pub async fn apply_route(
         let exe = exe_name.clone();
         let primary = device_ids[0].clone();
         let mirrors = device_ids[1..].to_vec();
+        // A programme that feeds another one carries its tap into every engine
+        // it starts: the feed is a second destination, not a state the route
+        // replaces, so applying a route must not cut the wire it already has.
+        let feed_tap = feed_tap_for(&exe_name, &feeds, &carrier);
         tokio::task::spawn_blocking(move || {
             let duplications = engine_app.state::<DuplicationManager>();
             duplications.stop(pid);
-            if mirrors.is_empty() {
+            if mirrors.is_empty() && feed_tap.is_none() {
                 return Ok(0);
             }
-            duplications.start(pid, &exe, &primary, mirrors, &engine_app)
+            // A single-device route runs an engine only to carry its feed tap,
+            // and `active_routes` deliberately leaves such an engine out: it
+            // serves no device of the board. Answering with its generation
+            // would tell the frontend the route is engine-backed, and the next
+            // reconciliation — which does not find it in the engine list —
+            // would retire the badge of a route that is playing perfectly well
+            // on Windows' own endpoint.
+            let tap_only = mirrors.is_empty();
+            let generation =
+                duplications.start(pid, &exe, &primary, mirrors, feed_tap, &engine_app)?;
+            Ok(if tap_only { 0 } else { generation })
         })
         .await
         // A thread that panicked mid-start counts as a failed start, not as a
@@ -295,10 +311,10 @@ pub async fn apply_route(
                         && outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
                 {
                     pins.forget(pid);
-                    // The render slot is free again, so the feeds this
-                    // program was holding back go back on, exactly as a
-                    // stop would hand them over.
-                    resume_suspended_feeds(&exe_name, &pins).await;
+                    // The route is gone and the engine with it, so the feeds
+                    // this programme sends go back on their own engine — the
+                    // wire into the carrier is not a route's property.
+                    resume_feed_taps(&exe_name, &feeds, &carrier, &pins, &app).await;
                 }
                 Ok(outcomes) if superseded_release(&outcomes) => {
                     // Somebody asked for this program's slot after this route did,
@@ -366,6 +382,8 @@ pub async fn stop_route(
     pid: u32,
     duplications: State<'_, DuplicationManager>,
     pins: State<'_, PinnedRoutes>,
+    feeds: State<'_, FeedConfig>,
+    carrier: State<'_, FeedCarrierConfig>,
     app: AppHandle,
 ) -> Result<StopOutcome, String> {
     info!("cmd: stop_route pid={pid}");
@@ -404,8 +422,10 @@ pub async fn stop_route(
     // endpoint is still ours until the release below hands it back, and answering
     // early would strand the assignment on that device with no engine running and
     // no route left for the board to stop.
+    let teardown_app = app.clone();
     if let Err(e) =
-        tokio::task::spawn_blocking(move || app.state::<DuplicationManager>().stop(pid)).await
+        tokio::task::spawn_blocking(move || teardown_app.state::<DuplicationManager>().stop(pid))
+            .await
     {
         warn!("the duplication teardown for PID {pid} did not finish: {e}");
         // A JoinError almost always means the closure never ran (the blocking
@@ -417,7 +437,7 @@ pub async fn stop_route(
         duplications.stop(pid);
     }
 
-    if sibling_routed {
+    let outcome = if sibling_routed {
         // The assignment Windows persists is stored per executable, and a
         // sibling process of this program is still routed: releasing it here
         // would take that route's primary endpoint away while its mirrors kept
@@ -434,82 +454,91 @@ pub async fn stop_route(
         info!(
             "stopped PID {pid}; its assignment stays because the same executable is still routed"
         );
-        return Ok(StopOutcome {
+        Ok(StopOutcome {
             released: false,
             pinned_device: pinned,
             sibling_held: true,
-        });
-    }
-
-    // Release the *render* half only: the capture half is a feed's, not a
-    // route's, and a program that receives another program's sound must keep
-    // receiving it when its own device route stops.
-    match audio::routing::release_process_default_devices_flow(vec![pid], audio::Role::All, false)
+        })
+    } else {
+        // Release the *render* half only: the capture half is a feed's, not a
+        // route's, and a program that receives another program's sound must keep
+        // receiving it when its own device route stops.
+        match audio::routing::release_process_default_devices_flow(
+            vec![pid],
+            audio::Role::All,
+            false,
+        )
         .await
-    {
-        // Exactly one answer for the one pid asked: an empty list would satisfy
-        // `all()` vacuously and let a stop claim it handed the program back to the
-        // system default for a step the audio service never performed.
-        Ok(outcomes)
-            if outcomes.len() == 1
-                && outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
         {
-            pins.forget(pid);
-            info!("stopped PID {pid} and released its endpoint assignment");
-            // The feeds this executable was holding back now get their moment:
-            // the route owned the one per-app render slot, and every recorded
-            // feed source of the executable — this PID's own feed as much as a
-            // sibling session's — was waiting for it.
-            if let Some(exe) = &released_exe {
-                resume_suspended_feeds(exe, &pins).await;
+            // Exactly one answer for the one pid asked: an empty list would satisfy
+            // `all()` vacuously and let a stop claim it handed the program back to the
+            // system default for a step the audio service never performed.
+            Ok(outcomes)
+                if outcomes.len() == 1
+                    && outcomes.iter().all(|(_, o)| *o == ReleaseOutcome::Released) =>
+            {
+                pins.forget(pid);
+                info!("stopped PID {pid} and released its endpoint assignment");
+                Ok(StopOutcome {
+                    released: true,
+                    pinned_device: None,
+                    sibling_held: false,
+                })
             }
-            Ok(StopOutcome {
-                released: true,
-                pinned_device: None,
-                sibling_held: false,
-            })
+            Ok(outcomes) if superseded_release(&outcomes) => {
+                // A newer write claimed this program's slot while the stop was setting
+                // itself up, so the assignment the stop was aimed at is gone and that
+                // writer's endpoint is what the program plays to now. Handing it to the
+                // default — the fallback below — would take *their* route away to undo a
+                // stop that lost, so the slot is left alone.
+                //
+                // What is ours to correct is the book: the engine is already down and the
+                // frontend has dropped the badge, so an entry still reading as a live
+                // route is the dead end `mark_abandoned` exists for — the reset skips
+                // every executable with a route, the sweep skips every live pid, and the
+                // board offers nothing to stop. Downgraded, the assignment stays on the
+                // book, stays reachable by the reset, and gets released for good when
+                // that writer's own route stops or this app quits.
+                let pinned = pins.device_of(pid);
+                warn!(
+                    "stopping PID {pid} was superseded by a newer write; the slot stays with it{}",
+                    pinned
+                        .as_deref()
+                        .map(|device| format!(" (this run last recorded {device})"))
+                        .unwrap_or_default()
+                );
+                pins.mark_abandoned(pid);
+                Ok(StopOutcome {
+                    released: false,
+                    pinned_device: pinned,
+                    sibling_held: false,
+                })
+            }
+            Ok(_) => {
+                warn!("PID {pid} still carries an endpoint assignment after the release attempt");
+                Ok(pin_to_default_or_abandon(pid, &pins).await)
+            }
+            Err(e) => {
+                // The policy object was unavailable, so nothing could be released;
+                // fall back to the pre-2.1.1 behaviour rather than leaving the
+                // program on the device it was routed to.
+                warn!("releasing the endpoint assignment of PID {pid} failed: {e}");
+                Ok(pin_to_default_or_abandon(pid, &pins).await)
+            }
         }
-        Ok(outcomes) if superseded_release(&outcomes) => {
-            // A newer write claimed this program's slot while the stop was setting
-            // itself up, so the assignment the stop was aimed at is gone and that
-            // writer's endpoint is what the program plays to now. Handing it to the
-            // default — the fallback below — would take *their* route away to undo a
-            // stop that lost, so the slot is left alone.
-            //
-            // What is ours to correct is the book: the engine is already down and the
-            // frontend has dropped the badge, so an entry still reading as a live
-            // route is the dead end `mark_abandoned` exists for — the reset skips
-            // every executable with a route, the sweep skips every live pid, and the
-            // board offers nothing to stop. Downgraded, the assignment stays on the
-            // book, stays reachable by the reset, and gets released for good when
-            // that writer's own route stops or this app quits.
-            let pinned = pins.device_of(pid);
-            warn!(
-                "stopping PID {pid} was superseded by a newer write; the slot stays with it{}",
-                pinned
-                    .as_deref()
-                    .map(|device| format!(" (this run last recorded {device})"))
-                    .unwrap_or_default()
-            );
-            pins.mark_abandoned(pid);
-            Ok(StopOutcome {
-                released: false,
-                pinned_device: pinned,
-                sibling_held: false,
-            })
-        }
-        Ok(_) => {
-            warn!("PID {pid} still carries an endpoint assignment after the release attempt");
-            Ok(pin_to_default_or_abandon(pid, &pins).await)
-        }
-        Err(e) => {
-            // The policy object was unavailable, so nothing could be released;
-            // fall back to the pre-2.1.1 behaviour rather than leaving the
-            // program on the device it was routed to.
-            warn!("releasing the endpoint assignment of PID {pid} failed: {e}");
-            Ok(pin_to_default_or_abandon(pid, &pins).await)
+    };
+    // A feed is not a route's property. The teardown above took down the engine
+    // that carried its tap, so the tap is put back on an engine of its own —
+    // otherwise stopping a route would silently cut a wire the user never asked
+    // to lose. A stop that left the executable's assignment alone (a sibling is
+    // still routed) took no engine with it, and restarting one here would put a
+    // gap in a route the user did not stop.
+    if !sibling_routed {
+        if let Some(exe) = &released_exe {
+            resume_feed_taps(exe, &feeds, &carrier, &pins, &app).await;
         }
     }
+    outcome
 }
 
 /// Point a program at the system default and admit that it stays pinned there.
@@ -573,37 +602,130 @@ async fn pin_to_default_or_abandon(pid: u32, pins: &PinnedRoutes) -> StopOutcome
     }
 }
 
-/// Re-point every feed source of `exe` that was waiting for its render slot at
-/// the carrier its pin recorded.
+/// The carrier endpoint a feed tap writes into, when `exe` sends at least one
+/// feed and both halves of the carrier are configured.
 ///
-/// The per-app render assignment is one per executable: while a route owns it,
-/// every feed the program sends is suspended, and the moment the slot frees —
-/// a stop, or the rollback of a route whose engine never started — is the
-/// moment each waiting source goes back on. The capture halves were pinned
-/// when the rules were made and need no attention. A source that has picked up
-/// a route of its own in the meantime keeps its slot: the route outranks the
-/// feed until it stops.
-async fn resume_suspended_feeds(exe: &str, pins: &PinnedRoutes) {
-    for (feed_pid, feed_exe) in pins.feed_source_pins() {
-        if !feed_exe.eq_ignore_ascii_case(exe) {
+/// `None` covers the two quiet cases on purpose: a programme that sends nothing
+/// has no tap, and a feed without a carrier is recorded but cannot move sound.
+fn feed_tap_for(exe: &str, feeds: &FeedConfig, carrier: &FeedCarrierConfig) -> Option<String> {
+    let pair = carrier.get();
+    let render = pair.render?;
+    pair.capture.as_ref()?;
+    feeds
+        .all()
+        .iter()
+        .any(|(source, _)| source.eq_ignore_ascii_case(exe))
+        .then_some(render)
+}
+
+/// The route `pid` is serving right now, as the engine knows it.
+///
+/// The engine is authoritative while it runs; without one, a single-device
+/// route lives only on the book (`PinnedRoutes`), because Windows plays that
+/// endpoint itself and no engine exists for it. `None` means the programme is
+/// not routed at all — the normal state of a programme that only feeds.
+fn route_targets_of(
+    duplications: &DuplicationManager,
+    pins: &PinnedRoutes,
+    pid: u32,
+) -> Option<(String, Vec<String>)> {
+    if let Some(targets) = duplications.device_targets_of(pid) {
+        return Some(targets);
+    }
+    pins.device_of(pid).map(|device| (device, Vec::new()))
+}
+
+/// Bring `pid`'s engine in line with the feed memory: one tap while the
+/// programme sends a feed through a configured carrier, none otherwise.
+///
+/// A tap is added or removed by restarting the engine with the same route,
+/// because an engine's mirror list is fixed for its lifetime. The route's own
+/// devices come back exactly as they were (`device_targets_of`), so restarting
+/// for a feed never changes what the user's devices play.
+async fn sync_feed_tap(
+    pid: u32,
+    exe: &str,
+    feeds: &FeedConfig,
+    carrier: &FeedCarrierConfig,
+    pins: &PinnedRoutes,
+    app: &AppHandle,
+) -> Result<u64, String> {
+    let tap = feed_tap_for(exe, feeds, carrier);
+    let duplications = app.state::<DuplicationManager>();
+    let targets = route_targets_of(&duplications, pins, pid);
+    // Nothing to do: an engine is already serving this route with exactly this
+    // tap. Restarting it would put a gap in the programme's sound for a change
+    // that is not one — adding a second feed from the same source, or taking one
+    // of two away, leaves the tap where it is.
+    if targets.is_some() && duplications.feed_tap_of(pid) == tap {
+        return Ok(0);
+    }
+    drop(duplications);
+    let exe = exe.to_string();
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let duplications = app.state::<DuplicationManager>();
+        match targets {
+            Some((primary, mirrors)) => {
+                if mirrors.is_empty() && tap.is_none() {
+                    // An engine with no copies and no tap has nothing to do: a
+                    // single-device route is Windows' own endpoint.
+                    duplications.stop(pid);
+                    return Ok(0);
+                }
+                duplications
+                    .start(pid, &exe, &primary, mirrors, tap, &app)
+                    .map_err(|e| e.to_string())
+            }
+            None => match tap {
+                Some(tap) => {
+                    // Unrouted, but feeding: the engine's primary is only the
+                    // delay baseline, and the engine never writes it — the
+                    // programme keeps playing where Windows has it.
+                    let primary = audio::devices::get_default_render_device()
+                        .map(|device| device.id)
+                        .unwrap_or_default();
+                    duplications
+                        .start(pid, &exe, &primary, Vec::new(), Some(tap), &app)
+                        .map_err(|e| e.to_string())
+                }
+                None => {
+                    duplications.stop(pid);
+                    Ok(0)
+                }
+            },
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Put the feed taps of `exe` back on after its engine was taken down with a
+/// route.
+///
+/// A feed now outlives the device route it was added alongside: the tap is the
+/// wire into the carrier, and stopping a route must not cut it. The rules
+/// themselves are the feed memory's; the pins say which processes are sending.
+async fn resume_feed_taps(
+    exe: &str,
+    feeds: &FeedConfig,
+    carrier: &FeedCarrierConfig,
+    pins: &PinnedRoutes,
+    app: &AppHandle,
+) {
+    if feed_tap_for(exe, feeds, carrier).is_none() {
+        return;
+    }
+    for (feed_pid, source_exe) in pins.feed_source_pins() {
+        if !source_exe.eq_ignore_ascii_case(exe) {
             continue;
         }
         // `feed_source_pins` hands out only the pins that still speak for a live
-        // process, so nothing below can write an endpoint through a pid the
-        // kernel has since handed on. What is left to decide is whether the
-        // render slot is still held by a route — and that is asked with the same
-        // witness, because an entry whose process exited holds nothing, and a
-        // feed that waits on one waits for good.
-        if pins.is_routed(feed_pid) {
-            continue;
-        }
-        if let Some(render) = pins.feed_source_device_of(feed_pid) {
-            match audio::routing::set_process_default_device(&render, feed_pid, audio::Role::All)
-                .await
-            {
-                Ok(()) => info!("feed of PID {feed_pid} resumed on its carrier"),
-                Err(e) => warn!("could not resume the feed of PID {feed_pid}: {e}"),
-            }
+        // process, so nothing below can start an engine through a pid the kernel
+        // has since handed on.
+        match sync_feed_tap(feed_pid, &source_exe, feeds, carrier, pins, app).await {
+            Ok(_) => info!("feed of PID {feed_pid} is back on its carrier"),
+            Err(e) => warn!("could not put the feed of PID {feed_pid} back on: {e}"),
         }
     }
 }
@@ -773,7 +895,12 @@ pub async fn reset_pinned_endpoints(
 /// released too. The user-initiated cleanup is [`reset_pinned_endpoints`], and
 /// that one answers with what is still pinned and on which device.
 #[tauri::command]
-pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<String>, String> {
+pub async fn release_stale_routes(
+    pins: State<'_, PinnedRoutes>,
+    feeds: State<'_, FeedConfig>,
+    carrier: State<'_, FeedCarrierConfig>,
+    app: AppHandle,
+) -> Result<Vec<String>, String> {
     let pinned = pins.snapshot();
     if pinned.is_empty() {
         return Ok(Vec::new());
@@ -926,7 +1053,7 @@ pub async fn release_stale_routes(pins: State<'_, PinnedRoutes>) -> Result<Vec<S
     // After the dead pins are off the book, so nothing here re-points a
     // process that has stopped needing it.
     for exe in &routes_ended {
-        resume_suspended_feeds(exe, &pins).await;
+        resume_feed_taps(exe, &feeds, &carrier, &pins, &app).await;
     }
     Ok(released)
 }
@@ -1356,12 +1483,10 @@ pub fn ack_startup_notice(state: State<'_, StartupNoticeState>) -> Result<(), St
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedOutcome {
-    /// True when the endpoints were pinned and sound can move.
+    /// True when the wire is in place and sound can move.
     pub delivered: bool,
     /// Why it could not be delivered, when it could not: `no_carrier` — no
-    /// loopback pair is configured; `source_routed` — the source's per-app
-    /// render slot belongs to a device route, so the rule is recorded and the
-    /// feed resumes when that route stops.
+    /// loopback pair is configured yet, so the rule is recorded and waits.
     pub reason: Option<FeedBlockReason>,
 }
 
@@ -1370,7 +1495,6 @@ pub struct FeedOutcome {
 #[serde(rename_all = "snake_case")]
 pub enum FeedBlockReason {
     NoCarrier,
-    SourceRouted,
 }
 
 /// Recording endpoints, for the carrier picker in settings.
@@ -1414,19 +1538,19 @@ pub fn list_feeds(feeds: State<'_, FeedConfig>) -> Vec<(String, String)> {
 
 /// Send one program's audio into another program's input.
 ///
-/// Delivered by pinning the source's render endpoint to the carrier's playback
-/// side and the target's capture endpoint to its recording side; both pins are
-/// written down so they can be handed back, and the rule itself is written to
+/// A feed is **additional**, not a move: the source keeps playing wherever it
+/// already plays — its device route, or the system default — and the engine
+/// gets one extra destination that is not a device (the *tap*, see
+/// `MirrorChannel::feed_tap`), writing the same captured audio into the
+/// carrier's playback side. The target's capture endpoint is pinned to the
+/// carrier's recording side, which is what makes it record the source. Both
+/// halves are written down so they can be handed back, and the rule goes into
 /// the feed memory so it survives a restart.
 ///
-/// The per-app endpoint the audio service keeps is a single slot per data flow:
-/// while the source's executable is routed to an output device — by this very
-/// process or by a sibling session — that slot belongs to the device route, and
-/// overwriting it would silently take the route's primary endpoint away. In
-/// that case the target's capture half is pinned now and the render half is
-/// recorded as an intent, and the rule is reported as `source_routed`:
-/// `stop_route` re-pins the render half from that record when the route frees
-/// the slot.
+/// The one thing this must never do is take the source's own output away: the
+/// per-app endpoint is a single slot per data flow, and pointing it at the
+/// carrier is exactly what used to silence the programme on the device it was
+/// playing on. The tap exists so that choice never has to be made.
 // Tauri commands carry their State params in the signature, so the argument
 // count is fixed by the framework.
 #[allow(clippy::too_many_arguments)]
@@ -1438,8 +1562,8 @@ pub async fn set_feed_target(
     target_exe: String,
     feeds: State<'_, FeedConfig>,
     carrier: State<'_, FeedCarrierConfig>,
-    duplications: State<'_, DuplicationManager>,
     pins: State<'_, PinnedRoutes>,
+    app: AppHandle,
 ) -> Result<FeedOutcome, String> {
     info!("cmd: set_feed_target {source_exe} ({source_pid}) -> {target_exe} ({target_pid})");
     if source_pid == 0 || target_pid == 0 || source_pid == target_pid {
@@ -1459,27 +1583,15 @@ pub async fn set_feed_target(
     feeds.add(&source_exe, &target_exe)?;
 
     let pair = carrier.get();
-    let (Some(render), Some(capture)) = (pair.render.clone(), pair.capture.clone()) else {
+    let (Some(_), Some(capture)) = (pair.render.clone(), pair.capture.clone()) else {
         return Ok(FeedOutcome {
             delivered: false,
             reason: Some(FeedBlockReason::NoCarrier),
         });
     };
 
-    // Is the source's render slot owned by a device route of ours? The audio
-    // service keeps the per-app endpoint **per executable**, so a route held
-    // by a sibling process of the same program occupies the slot all the same
-    // — writing the carrier over it would take the live route's primary
-    // endpoint away while its mirrors kept playing.
-    let source_routed = pins.is_routed(source_pid)
-        || pins.exe_routed_elsewhere(source_pid, &source_exe)
-        || duplications.exe_duplicated_elsewhere(source_pid);
-
-    // The capture half is the target's own endpoint and has nothing to do with
-    // the source's route, so it is pinned now whichever way the render half
-    // goes — a suspended feed is then one pin away from delivering, and
-    // stopping that route (which re-pins the render half from the bookkeeping
-    // below) completes it.
+    // The capture half is the target's own endpoint, and the only one a feed
+    // ever writes onto a program that is not its source.
     if let Err(e) =
         audio::routing::set_process_default_capture_device(&capture, target_pid, audio::Role::All)
             .await
@@ -1494,66 +1606,59 @@ pub async fn set_feed_target(
         }
         return Err(e.to_string());
     }
-    pins.mark_feed_capture(target_pid, &target_exe, &capture);
-    // The render half is what the route may be holding. The pin is recorded
-    // either way — delivered or suspended — because it is what `stop_route`
-    // reads when the route frees the slot: the endpoint to re-point the
-    // source at.
-    pins.mark_feed(source_pid, &source_exe, &render);
-    if source_routed {
-        return Ok(FeedOutcome {
-            delivered: false,
-            reason: Some(FeedBlockReason::SourceRouted),
-        });
-    }
-
-    if let Err(e) =
-        audio::routing::set_process_default_device(&render, source_pid, audio::Role::All).await
-    {
-        // Same contract as above: the UI has already forgotten this feed, so
-        // the halves written so far go back and the rule with them. Each
-        // release is guarded by the rules that remain — the endpoints are
-        // shared per executable, and another rule may still need them.
-        let still_sources = feeds.all().iter().any(|(src, tgt)| {
-            src.eq_ignore_ascii_case(&source_exe) && !tgt.eq_ignore_ascii_case(&target_exe)
-        });
-        let still_targets = feeds.all().iter().any(|(src, tgt)| {
-            tgt.eq_ignore_ascii_case(&target_exe) && !src.eq_ignore_ascii_case(&source_exe)
-        });
-        if !still_sources {
-            let _ = audio::routing::release_process_default_devices_flow(
-                vec![source_pid],
-                audio::Role::All,
-                false,
-            )
-            .await;
+    pins.mark_feed_capture(target_pid, &target_exe);
+    // The sending half is the tap, and the pin records that this programme is a
+    // feed source — that is what a removal, a restart of the route, and a sweep
+    // read.
+    pins.mark_feed(source_pid, &source_exe);
+    match sync_feed_tap(source_pid, &source_exe, &feeds, &carrier, &pins, &app).await {
+        Ok(_) => Ok(FeedOutcome {
+            delivered: true,
+            reason: None,
+        }),
+        Err(e) => {
+            // Nothing moves, so nothing may be left behind: the target's mic
+            // must not stay pointed at a carrier that receives no audio, the
+            // rule must not come back on the next launch, and the pin must not
+            // outlive either. Another rule may still need the same capture
+            // endpoint, so the release is guarded by what remains.
+            let target_still_needed = feeds.all().iter().any(|(src, tgt)| {
+                tgt.eq_ignore_ascii_case(&target_exe) && !src.eq_ignore_ascii_case(&source_exe)
+            });
+            if !target_still_needed && pins.feed_capture_of(target_pid).is_some() {
+                let _ = audio::routing::release_process_default_devices_flow(
+                    vec![target_pid],
+                    audio::Role::All,
+                    true,
+                )
+                .await;
+                pins.forget_feed_capture(target_pid);
+            }
             pins.forget_feed_source(source_pid);
+            if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
+                warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
+            }
+            // The engine restart that failed may have taken the route's own
+            // engine down with it: put it back without the tap so the devices
+            // keep playing even though the feed did not land.
+            if let Err(retry) =
+                sync_feed_tap(source_pid, &source_exe, &feeds, &carrier, &pins, &app).await
+            {
+                warn!(
+                    "could not put the route of PID {source_pid} back after a failed feed: {retry}"
+                );
+            }
+            Err(e)
         }
-        if !still_targets && pins.feed_capture_of(target_pid).is_some() {
-            let _ = audio::routing::release_process_default_devices_flow(
-                vec![target_pid],
-                audio::Role::All,
-                true,
-            )
-            .await;
-            pins.forget_feed_capture(target_pid);
-        }
-        if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
-            warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
-        }
-        return Err(e.to_string());
     }
-    Ok(FeedOutcome {
-        delivered: true,
-        reason: None,
-    })
 }
 
-/// Take one feed rule back: drop it from the memory and release the endpoints
-/// the two ends were pinned to.
+/// Take one feed rule back: drop it from the memory, take its tap off the
+/// source's engine and release the target's capture endpoint.
 ///
-/// The release is per flow, so a source that is also routed to a device keeps
-/// its render assignment — that one belongs to the route, not to the feed.
+/// A source that is also routed keeps playing on its devices throughout: the
+/// tap is the only thing that goes, and the engine is restarted with the same
+/// route minus that one destination.
 ///
 /// Returns the programs that stay fixed to the carrier because Windows refused
 /// to hand their endpoint back. The rule and the wire are gone either way — the
@@ -1564,7 +1669,9 @@ pub async fn remove_feed_target(
     source_pid: u32,
     target_pid: u32,
     feeds: State<'_, FeedConfig>,
+    carrier: State<'_, FeedCarrierConfig>,
     pins: State<'_, PinnedRoutes>,
+    app: AppHandle,
 ) -> Result<Vec<String>, String> {
     info!("cmd: remove_feed_target {source_pid} -> {target_pid}");
     // The same bound `set_feed_target` imposes on its way in: a feed has two real
@@ -1610,10 +1717,21 @@ pub async fn remove_feed_target(
     let target_still_needed = remaining
         .iter()
         .any(|(_, tgt)| tgt.eq_ignore_ascii_case(&target_exe));
-    // Hand both ends back, but only the flow the feed owns: a routed source
-    // keeps its render assignment (that one belongs to the route, and the
-    // feed was recorded as suspended), and a target with no capture pin of
-    // ours is left alone.
+    // The sending half is a tap inside the source's engine, not an endpoint
+    // assignment, so it comes off by restarting that engine without it. While
+    // another rule from the same source stands, the tap is exactly what has to
+    // stay — restarting for it would only interrupt the audio.
+    let mut stuck = Vec::new();
+    if !source_still_needed && pins.feed_source_of(source_pid).is_some() {
+        pins.forget_feed_source(source_pid);
+        if let Err(e) = sync_feed_tap(source_pid, &source_exe, &feeds, &carrier, &pins, &app).await
+        {
+            warn!("could not take the feed tap of {source_exe} off: {e}");
+        }
+    }
+    // The receiving half is the target's own capture endpoint and does belong to
+    // the feed: a target with no capture pin of ours is left alone, and one that
+    // Windows will not hand back is named.
     //
     // A pin comes off the book only when Windows accepted the clear. Forgetting
     // it on a refusal leaves that assignment with nothing on our side pointing
@@ -1621,24 +1739,6 @@ pub async fn remove_feed_target(
     // back for it, and the program is left on the carrier with nothing but the
     // settings reset to explain why. So the pin stays, and the name goes into
     // the log line the frontend writes.
-    let slot_held_by_a_route =
-        pins.is_routed(source_pid) || pins.exe_routed_elsewhere(source_pid, &source_exe);
-    let mut stuck = Vec::new();
-    if pins.feed_source_of(source_pid).is_some() && !slot_held_by_a_route && !source_still_needed {
-        if released_cleanly(
-            audio::routing::release_process_default_devices_flow(
-                vec![source_pid],
-                audio::Role::All,
-                false,
-            )
-            .await,
-            "feed source",
-        ) {
-            pins.forget_feed_source(source_pid);
-        } else if !source_exe.is_empty() {
-            stuck.push(source_exe);
-        }
-    }
     if pins.feed_capture_of(target_pid).is_some() && !target_still_needed {
         if released_cleanly(
             audio::routing::release_process_default_devices_flow(

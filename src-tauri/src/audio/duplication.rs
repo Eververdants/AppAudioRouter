@@ -445,6 +445,12 @@ fn apply_gain(bytes: &mut [u8], format: SampleFormat, gain: f32) {
 /// One mirror device with its frame ring buffer.
 struct MirrorChannel {
     device_id: String,
+    /// True when this channel is the programme's audio being played into the
+    /// feed carrier — the sending half of a feed — rather than a device of the
+    /// route. A tap has no delay and no share of the group's loudness: it is a
+    /// wire into another programme, not somewhere a person is listening, so no
+    /// group arithmetic may include it and no route report may name it.
+    feed_tap: bool,
     /// Raw capture-format bytes, always a whole number of frames.
     ring: Mutex<VecDeque<u8>>,
     /// Ring capacity in bytes (base latency + max delay + margin).
@@ -1212,15 +1218,26 @@ impl DuplicationManager {
         }
     }
 
-    /// The executables this manager currently runs an engine for, each named
-    /// once, sorted.
+    /// The executables a live engine is playing to at least one *device* right
+    /// now, each named once and sorted.
     ///
     /// One program can hold several engines (a browser holds one per window's
     /// session), and a level belongs to the program, so the caller gets programs
     /// rather than PIDs.
+    ///
+    /// An engine that only carries a feed tap is not routing anything: no device
+    /// of the board is fed by it, its programme keeps playing wherever Windows
+    /// had it, and it holds no per-app output assignment of ours. Counting it as
+    /// routed would make the settings reset skip a programme whose endpoints are
+    /// exactly what that reset is for, and would pull a programme the user never
+    /// routed into the level alignment.
     pub fn routed_exe_names(&self) -> Vec<String> {
         let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
-        let mut names: Vec<String> = engines.values().map(|e| e.exe_name.clone()).collect();
+        let mut names: Vec<String> = engines
+            .values()
+            .filter(|engine| engine.mirrors.iter().any(|m| !m.feed_tap))
+            .map(|engine| engine.exe_name.clone())
+            .collect();
         names.sort();
         names.dedup();
         names
@@ -1258,6 +1275,13 @@ impl DuplicationManager {
     /// measured against it, so it has to be known by the engine (see
     /// `group_min_delay_ms`).
     ///
+    /// `feed_tap_device_id` adds one more destination that is deliberately not
+    /// a device of this route: the programme's audio is written into the feed
+    /// carrier so another programme can record it (see `MirrorChannel::feed_tap`).
+    /// A start may consist of the tap alone — that is how a programme with no
+    /// device route is fed — in which case `primary_device_id` only has to be a
+    /// sensible value for the delay baseline, and no session volume is claimed.
+    ///
     /// The capture format is probed synchronously (a fast call); the
     /// process-loopback activation runs on the engine thread and reports
     /// failures through the `duplication-stopped` event with reason `error`.
@@ -1273,6 +1297,7 @@ impl DuplicationManager {
         exe_name: &str,
         primary_device_id: &str,
         mirror_device_ids: Vec<String>,
+        feed_tap_device_id: Option<String>,
         app: &AppHandle,
     ) -> Result<u64, AudioError> {
         // Evict any incumbent and declare this start in flight, under one
@@ -1280,11 +1305,18 @@ impl DuplicationManager {
         // of this function, a `stop` for this pid waits rather than removing
         // nothing and letting the insertion below resurrect what it stopped.
         let start_guard = self.begin_start(pid);
-        if mirror_device_ids.is_empty() {
-            return Ok(0);
-        }
         if pid == 0 {
             return Err(AudioError::Api("invalid pid".to_string()));
+        }
+        // A tap that names the same endpoint as a device copy is dropped: the
+        // device copy already plays there, and two streams into one endpoint
+        // would be the programme heard twice.
+        let taps: Vec<String> = feed_tap_device_id
+            .filter(|id| !id.trim().is_empty() && !mirror_device_ids.contains(id))
+            .into_iter()
+            .collect();
+        if mirror_device_ids.is_empty() && taps.is_empty() {
+            return Ok(0);
         }
 
         let (format, block_align, sample_rate) = default_mix_format()?;
@@ -1298,12 +1330,29 @@ impl DuplicationManager {
             * (LATENCY_TARGET_MS + 2 * DELAY_MAX_MS as usize + TRIM_SLACK_MS + 100)
             / 1000
             * block_align;
+        // A feed tap rides the same ring, wake and park machinery as a device
+        // copy, because it is one: the programme's audio written into another
+        // endpoint. What it is *not* is a device of this route — it has no
+        // share of the group's loudness and no delay to compensate, so it is
+        // built with the neutral values and skipped by every group question
+        // below (`group_min_delay_ms`, `group_max_volume`, `active_routes`).
         let mirrors = mirror_device_ids
             .into_iter()
-            .map(|device_id| {
+            .map(|device_id| (device_id, false))
+            .chain(taps.into_iter().map(|device_id| (device_id, true)))
+            .map(|(device_id, feed_tap)| {
                 Arc::new(MirrorChannel {
-                    delay_ms: AtomicI32::new(self.delays.get(&device_id)),
-                    volume_percent: AtomicU32::new(self.volumes.get(&device_id)),
+                    delay_ms: AtomicI32::new(if feed_tap {
+                        0
+                    } else {
+                        self.delays.get(&device_id)
+                    }),
+                    volume_percent: AtomicU32::new(if feed_tap {
+                        100
+                    } else {
+                        self.volumes.get(&device_id)
+                    }),
+                    feed_tap,
                     device_id,
                     ring: Mutex::new(VecDeque::new()),
                     capacity: ring_capacity,
@@ -1313,7 +1362,11 @@ impl DuplicationManager {
                     worker: Mutex::new(None),
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+        // The route's own devices, which is what the session-volume claim below
+        // is about. A tap-only engine exists to feed another programme and must
+        // not move this one's loudness.
+        let device_copies = mirrors.iter().filter(|m| !m.feed_tap).count();
 
         let creation_time = process_creation_time(pid).unwrap_or(0);
         let shared = Arc::new(EngineShared {
@@ -1417,18 +1470,37 @@ impl DuplicationManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         if !shared.shutdown.load(Ordering::Relaxed) {
-            if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
-                shared.restore_volume_percent.store(
-                    (pre_route * 100.0).round().clamp(0.0, 100.0) as u32,
-                    Ordering::Relaxed,
-                );
-                shared.restore_volume.store(true, Ordering::Relaxed);
-            }
-            let session_percent = shared.session_volume_percent.load(Ordering::Relaxed);
-            let touched = super::sessions::set_session_volume(pid, session_percent as f32 / 100.0)
-                .unwrap_or(0);
-            if touched == 0 {
-                warn!("no live session for PID {pid} — primary volume applies when it next sounds");
+            if device_copies == 0 {
+                // A tap-only engine has no device of ours to be the primary, so
+                // the programme's loudness is none of its business: nothing is
+                // claimed and nothing is written. The tap still has to carry the
+                // level the programme actually produces, so the live session
+                // value is read into the same field `session_compensation`
+                // divides by — the feed then hears the programme as it plays,
+                // untouched by a lever this engine does not own.
+                if let Some(current) = super::sessions::get_session_volume(pid).ok().flatten() {
+                    shared.session_volume_percent.store(
+                        (current * 100.0).round().clamp(1.0, 100.0) as u32,
+                        Ordering::Relaxed,
+                    );
+                }
+            } else {
+                if let Some(pre_route) = super::sessions::get_session_volume(pid).ok().flatten() {
+                    shared.restore_volume_percent.store(
+                        (pre_route * 100.0).round().clamp(0.0, 100.0) as u32,
+                        Ordering::Relaxed,
+                    );
+                    shared.restore_volume.store(true, Ordering::Relaxed);
+                }
+                let session_percent = shared.session_volume_percent.load(Ordering::Relaxed);
+                let touched =
+                    super::sessions::set_session_volume(pid, session_percent as f32 / 100.0)
+                        .unwrap_or(0);
+                if touched == 0 {
+                    warn!(
+                        "no live session for PID {pid} — primary volume applies when it next sounds"
+                    );
+                }
             }
         }
         drop(claim);
@@ -1538,12 +1610,54 @@ impl DuplicationManager {
         }
     }
 
+    /// The ordered devices `pid`'s engine is serving right now, if one runs:
+    /// the primary the OS plays itself, then the copies. The feed tap is not
+    /// part of the answer — it is not a device of the route.
+    ///
+    /// Used when an engine has to be restarted with the same route (a feed tap
+    /// added or taken off): the mirror list is fixed for the life of an engine,
+    /// and reading it back is what keeps the restart from inventing a route.
+    pub fn device_targets_of(&self, pid: u32) -> Option<(String, Vec<String>)> {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = engines.get(&pid)?;
+        Some((
+            engine.primary_device_id.clone(),
+            engine
+                .mirrors
+                .iter()
+                .filter(|m| !m.feed_tap)
+                .map(|m| m.device_id.clone())
+                .collect(),
+        ))
+    }
+
+    /// The endpoint `pid`'s feed tap writes into, when its engine carries one.
+    ///
+    /// Asked before a feed change restarts an engine: the mirror list is fixed
+    /// for its lifetime, so a tap that is already the right one must not cost the
+    /// route a gap just because a second feed was added.
+    pub fn feed_tap_of(&self, pid: u32) -> Option<String> {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        engines
+            .get(&pid)?
+            .mirrors
+            .iter()
+            .find(|m| m.feed_tap)
+            .map(|m| m.device_id.clone())
+    }
+
     /// Live engines with the exact ordered device list they are serving.
+    ///
+    /// An engine that owns only a feed tap is not a route and is left out: no
+    /// device of the board is being played by it, and reporting it would put a
+    /// badge on a programme the user never routed — or, worse, would make the
+    /// board believe a single-device route is engine-backed and retire its badge
+    /// the moment the feed comes off.
     pub fn active_routes(&self) -> Vec<ActiveRoute> {
         let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
         let mut routes: Vec<ActiveRoute> = engines
             .values()
-            .map(|engine| {
+            .filter_map(|engine| {
                 // Only the mirrors that are still in service. A mirror that
                 // failed to open, or that errored later, is not a route target:
                 // reporting it as one puts its badge, its success dot and its
@@ -1551,12 +1665,19 @@ impl DuplicationManager {
                 // nothing, and hides the one report the user got about it. The
                 // frontend cannot recover this on its own — the failure arrives
                 // as an event, and it is this list that would overwrite it.
+                //
+                // The feed tap is not a device of this route at all: it is the
+                // wire into another programme (see `MirrorChannel::feed_tap`),
+                // and it never appears in a device list.
                 let mirrors: Vec<&Arc<MirrorChannel>> = engine
                     .mirrors
                     .iter()
-                    .filter(|m| m.enabled.load(Ordering::Relaxed))
+                    .filter(|m| !m.feed_tap && m.enabled.load(Ordering::Relaxed))
                     .collect();
-                ActiveRoute {
+                if mirrors.is_empty() {
+                    return None;
+                }
+                Some(ActiveRoute {
                     pid: engine.pid,
                     generation: engine.generation,
                     device_ids: std::iter::once(engine.primary_device_id.clone())
@@ -1567,7 +1688,7 @@ impl DuplicationManager {
                     latency_ms: std::iter::once(None)
                         .chain(mirrors.iter().map(|m| total_latency_ms(engine, m)))
                         .collect(),
-                }
+                })
             })
             .collect();
         routes.sort_by_key(|route| route.pid);
@@ -1868,7 +1989,7 @@ fn group_min_delay_ms(shared: &EngineShared) -> i32 {
     shared
         .mirrors
         .iter()
-        .filter(|m| m.enabled.load(Ordering::Relaxed))
+        .filter(|m| !m.feed_tap && m.enabled.load(Ordering::Relaxed))
         .map(|m| m.delay_ms.load(Ordering::Relaxed))
         .chain(std::iter::once(
             shared.primary_delay_ms.load(Ordering::Relaxed),
@@ -1893,7 +2014,7 @@ fn group_max_volume(shared: &EngineShared) -> u32 {
     shared
         .mirrors
         .iter()
-        .filter(|m| m.enabled.load(Ordering::Relaxed))
+        .filter(|m| !m.feed_tap && m.enabled.load(Ordering::Relaxed))
         .map(|m| m.volume_percent.load(Ordering::Relaxed))
         .max()
         .unwrap_or(100)
@@ -1921,6 +2042,12 @@ fn session_compensation(shared: &EngineShared) -> f32 {
 /// Gain to apply to `mirror`'s frames: its own share of the group's loudest
 /// device, i.e. 1.0 when it is the loudest one (or the only one left).
 fn volume_gain(shared: &EngineShared, mirror: &MirrorChannel) -> f32 {
+    // A tap is a wire into another programme, not a place somebody listens:
+    // there is no device share to honour and no group to balance against, so it
+    // carries the audio exactly as the programme produced it.
+    if mirror.feed_tap {
+        return 1.0;
+    }
     let own = mirror.volume_percent.load(Ordering::Relaxed);
     // The group max re-reads every share, so a volume change that lands
     // between the two loads can hand back a max below `own` — a gain above
@@ -1947,6 +2074,13 @@ fn source_gain(shared: &EngineShared) -> f32 {
 /// capture position at the same time, offset by exactly the delays that were
 /// configured for them.
 fn target_frames(shared: &EngineShared, mirror: &MirrorChannel) -> usize {
+    // The feed tap is not part of the device group: it is held only by the base
+    // pipeline, so the other programme records the programme's audio with the
+    // engine's own latency and none of the alignment this route's devices asked
+    // for. Its delay field is neutral by construction (see `start`).
+    if mirror.feed_tap {
+        return shared.latency_frames;
+    }
     if !shared.sync_delays.load(Ordering::Relaxed) {
         return shared.latency_frames;
     }
@@ -2162,8 +2296,24 @@ fn mirror_ready(shared: &EngineShared, app: &AppHandle) {
 /// still shows as fully applied, which is indistinguishable from the app being
 /// broken: the second device is silent and there is nothing on screen to say so.
 fn fail_mirror(shared: &EngineShared, mirror: &MirrorChannel, app: &AppHandle, error: AudioError) {
-    warn!("mirror device {} failed: {error}", mirror.device_id);
     mirror.enabled.store(false, Ordering::Relaxed);
+    if mirror.feed_tap {
+        // A feed's tap failing is not a device of this route going quiet: the
+        // route is untouched, and the board must keep its device rows. What it
+        // is, is the other programme silently no longer recording anything, so
+        // it gets its own report.
+        warn!("the feed tap of PID {} failed: {error}", shared.pid);
+        let _ = app.emit(
+            "feed-tap-failed",
+            json!({
+                "pid": shared.pid,
+                "generation": shared.generation,
+                "error": error.to_string(),
+            }),
+        );
+        return;
+    }
+    warn!("mirror device {} failed: {error}", mirror.device_id);
     let _ = app.emit(
         "duplication-mirror-failed",
         json!({
@@ -2888,6 +3038,7 @@ mod tests {
     fn channel(capacity: usize) -> MirrorChannel {
         MirrorChannel {
             device_id: "test".to_string(),
+            feed_tap: false,
             ring: Mutex::new(VecDeque::new()),
             capacity,
             delay_ms: AtomicI32::new(0),
@@ -2914,6 +3065,7 @@ mod tests {
                 .map(|&delay| {
                     Arc::new(MirrorChannel {
                         device_id: format!("device-{delay}"),
+                        feed_tap: false,
                         ring: Mutex::new(VecDeque::new()),
                         capacity: 1_000_000,
                         delay_ms: AtomicI32::new(delay),
@@ -3167,6 +3319,45 @@ mod tests {
         shared.mirrors[0].enabled.store(false, Ordering::Relaxed);
         assert_eq!(group_min_delay_ms(&shared), 0);
         assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800);
+    }
+
+    /// The feed tap rides the same engine as the device copies, but it is not one
+    /// of them: it must not move the delay reference, the volume reference, or
+    /// its own target. A tap silently joining the group would pull every device
+    /// back to the base latency (its delay is 0) and flatten every copy's share
+    /// (its level is 100), and nothing on screen would explain either.
+    #[test]
+    fn a_feed_tap_is_not_part_of_the_device_group() {
+        let mut shared = engine(&[300, 500], 300, true);
+        for mirror in &shared.mirrors {
+            mirror.volume_percent.store(40, Ordering::Relaxed);
+        }
+        let tap = Arc::new(MirrorChannel {
+            device_id: "carrier".to_string(),
+            feed_tap: true,
+            ring: Mutex::new(VecDeque::new()),
+            capacity: 1_000_000,
+            delay_ms: AtomicI32::new(0),
+            volume_percent: AtomicU32::new(100),
+            enabled: AtomicBool::new(true),
+            wakeups: AtomicU64::new(0),
+            stream_latency_ms: AtomicU32::new(0),
+            worker: Mutex::new(None),
+        });
+        shared.mirrors.push(Arc::clone(&tap));
+
+        // The reference is still the primary's 300 ms, not the tap's 0.
+        assert_eq!(group_min_delay_ms(&shared), 300);
+        assert_eq!(target_frames(&shared, &shared.mirrors[0]), 4_800);
+        assert_eq!(target_frames(&shared, &shared.mirrors[1]), 4_800 + 9_600);
+        // The tap itself carries no compensation.
+        assert_eq!(target_frames(&shared, &tap), 4_800);
+
+        // The loudest *device* is still the reference, and the tap plays at the
+        // programme's own level rather than a share of it.
+        assert_eq!(group_max_volume(&shared), 40);
+        assert_eq!(volume_gain(&shared, &shared.mirrors[0]), 1.0);
+        assert_eq!(volume_gain(&shared, &tap), 1.0);
     }
 
     #[test]
