@@ -182,11 +182,7 @@ pub(super) fn keep_session_watcher(id: &str, device_id: &str, witness: &Witness)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A device set from a list of ids.
-    fn set(ids: &[&str]) -> HashSet<String> {
-        ids.iter().map(|id| (*id).to_string()).collect()
-    }
+    use crate::audio::notifications::fixtures::set;
 
     /// The four readings of a session id missing from this pass's list, which
     /// is the whole difference between dropping a live callback and holding a

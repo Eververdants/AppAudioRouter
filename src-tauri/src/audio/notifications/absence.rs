@@ -213,11 +213,7 @@ pub(super) fn session_self_reports_gone(watched: &WatchedSession) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A device set from a list of ids.
-    fn set(ids: &[&str]) -> HashSet<String> {
-        ids.iter().map(|id| (*id).to_string()).collect()
-    }
+    use crate::audio::notifications::fixtures::set;
 
     /// An endpoint the audio service no longer resolves is gone on the spot.
     ///

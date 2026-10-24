@@ -39,6 +39,9 @@ mod engine;
 mod thread;
 mod walk;
 
+#[cfg(test)]
+mod fixtures;
+
 use serde::Serialize;
 
 // The thread's entry point, re-exported so it keeps resolving as
