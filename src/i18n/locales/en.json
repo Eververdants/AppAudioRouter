@@ -120,7 +120,9 @@
     "stripPrimaryNote": "This is the program's session volume — only the main path changes; the copies are compensated.",
     "stripPrimaryLatency": "The primary is played by Windows directly, so there is no measured latency to show here.",
     "stripDelay": "Delay",
-    "stripShare": "Share"
+    "stripShare": "Share",
+    "singleNote": "One destination: the system plays it directly, so there is no delay to compensate",
+    "singleNoteTitle": "This path's volume is the program's own session volume, adjusted in the Windows volume mixer; to attenuate a copy on its own, add a second destination"
   },
   "routed": {
     "capsule": "{{n}} routed",
@@ -282,7 +284,14 @@
     "staged": "The board still has changes waiting — go back to Routing and press the program card to make them real."
   },
   "logPanel": {
-    "empty": "No activity yet"
+    "empty": "No activity yet",
+    "emptyErrors": "No failures recorded",
+    "filter": "Filter the record",
+    "all": "All",
+    "errorsOnly": "Failures",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Copy failed"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",

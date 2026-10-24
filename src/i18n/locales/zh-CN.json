@@ -120,7 +120,9 @@
     "stripPrimaryNote": "这是程序的会话音量——只有主输出这一路变化；副本会被等比补回。",
     "stripPrimaryLatency": "主输出由系统直接播放，这里没有可实测的延迟读数。",
     "stripDelay": "延迟",
-    "stripShare": "份额"
+    "stripShare": "份额",
+    "singleNote": "只有一台去向：由系统直接播放，没有可补偿的延迟",
+    "singleNoteTitle": "这一路的音量属于程序自己的会话音量，在 Windows 音量合成器里调；想让副本单独衰减，把这个程序再加一台去向"
   },
   "routed": {
     "capsule": "已路由 {{n}}",
@@ -282,7 +284,14 @@
     "staged": "看板上还有没生效的改动——回到「路由」按下程序卡即可生效。"
   },
   "logPanel": {
-    "empty": "暂无活动记录"
+    "empty": "暂无活动记录",
+    "emptyErrors": "没有失败的记录",
+    "filter": "筛选记录",
+    "all": "全部",
+    "errorsOnly": "只看失败",
+    "copy": "复制记录",
+    "copied": "已复制",
+    "copyFailed": "复制失败"
   },
   "toast": {
     "routedOne": "{{process}} → {{device}}",

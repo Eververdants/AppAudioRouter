@@ -63,11 +63,17 @@
         overflow: hidden;
         background-color: var(--bg-primary);
         color: var(--text-primary);
+        /* The same stack `styles/index.css` declares, CJK fallback included:
+           two lists mean the first frame lays Chinese out in one font and the
+           second re-lays it in another. `Inter` is not bundled — it applies
+           only where the machine already has it, and Segoe UI is what most
+           Windows boxes render. */
         font-family:
           'Inter',
           system-ui,
           -apple-system,
           'Segoe UI',
+          'Microsoft YaHei UI',
           Roboto,
           sans-serif;
         -webkit-font-smoothing: antialiased;
