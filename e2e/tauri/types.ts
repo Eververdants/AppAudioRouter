@@ -175,6 +175,9 @@ export interface BridgeConstants {
   MAX_DEVICE_ID_LEN: number;
   /** `config::DELAY_MAX_MS`. */
   DELAY_MAX_MS: number;
+  /** `config::PRIMARY_VOLUME_MIN_PERCENT` / `config::SOURCE_VOLUME_NEUTRAL`. */
+  PRIMARY_VOLUME_MIN_PERCENT: number;
+  SOURCE_VOLUME_NEUTRAL: number;
 }
 
 /** The shared page-side context: the one thing the command domain modules touch,

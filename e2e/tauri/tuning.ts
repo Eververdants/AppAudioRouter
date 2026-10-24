@@ -14,7 +14,8 @@ export function registerTuningCommands(): void {
   const { state, handlers } = window.__AAR_BRIDGE__;
 
   /** `config::DELAY_MAX_MS`: a magnitude beyond it is refused, not clamped. */
-  const { DELAY_MAX_MS } = window.__AAR_CONSTANTS__;
+  const { DELAY_MAX_MS, PRIMARY_VOLUME_MIN_PERCENT, SOURCE_VOLUME_NEUTRAL } =
+    window.__AAR_CONSTANTS__;
 
   handlers.set('get_device_delays', () => state.delays);
   handlers.set('set_device_delay', (payload) => {
@@ -48,10 +49,20 @@ export function registerTuningCommands(): void {
   handlers.set('set_primary_volume', (payload) => {
     const exeName = String(payload.exeName);
     const percent = Number(payload.percent);
-    // 100 is the neutral volume and is stored as "no entry", the same rule
-    // the real backend follows.
+    // `PrimaryVolumeMap::store`: the span is the floor through the neutral
+    // value — a stored 0 would make the captured stream true silence — and a
+    // blank program name is a key nothing can read back. 100 (the neutral) is
+    // stored as "no entry", the same rule the real backend follows.
+    if (exeName.trim().length === 0) {
+      throw new Error('a program volume needs the program it applies to');
+    }
+    if (percent < PRIMARY_VOLUME_MIN_PERCENT || percent > SOURCE_VOLUME_NEUTRAL) {
+      throw new Error(
+        `primary volume ${percent} is out of range (${PRIMARY_VOLUME_MIN_PERCENT}–${SOURCE_VOLUME_NEUTRAL})`,
+      );
+    }
     const rest = state.primaryVolumes.filter(([name]) => name !== exeName);
-    state.primaryVolumes = percent === 100 ? rest : [...rest, [exeName, percent]];
+    state.primaryVolumes = percent === SOURCE_VOLUME_NEUTRAL ? rest : [...rest, [exeName, percent]];
     return null;
   });
   handlers.set('get_source_volumes', () => state.sourceVolumes);

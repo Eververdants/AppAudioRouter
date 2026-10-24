@@ -65,6 +65,12 @@ export function bridgeConstants(): void {
   const MAX_DEVICE_ID_LEN = 1024;
   /** `config::DELAY_MAX_MS`: a magnitude beyond it is refused, not clamped. */
   const DELAY_MAX_MS = 10000;
+  /** `config::PRIMARY_VOLUME_MIN_PERCENT` / `config::SOURCE_VOLUME_NEUTRAL`:
+   *  the primary volume's allowed span — the capture stream is made of the
+   *  session volume, so a stored 0 would be true silence no copy-side gain
+   *  could undo. 100 (the neutral) is stored by removal. */
+  const PRIMARY_VOLUME_MIN_PERCENT = 5;
+  const SOURCE_VOLUME_NEUTRAL = 100;
 
   window.__AAR_CONSTANTS__ = {
     TONE_BURST_MS,
@@ -84,5 +90,7 @@ export function bridgeConstants(): void {
     BUSY_MESSAGE,
     MAX_DEVICE_ID_LEN,
     DELAY_MAX_MS,
+    PRIMARY_VOLUME_MIN_PERCENT,
+    SOURCE_VOLUME_NEUTRAL,
   };
 }
