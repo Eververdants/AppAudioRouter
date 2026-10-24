@@ -53,17 +53,20 @@ pub async fn calibration_start(
     );
     audio::routing::validate_device_id(&device_id).map_err(|e| e.to_string())?;
     let run = run.unwrap_or(audio::calibration::NO_RUN_TOKEN);
-    if let Err(refusal) = state.begin(run) {
-        if refusal == audio::calibration::Refusal::Cancelled {
-            // The wizard is already gone by definition, so this line is the only
-            // trace the burst was stopped rather than never asked for.
-            info!(
-                "calibration start for run {run} was cancelled before it was admitted; refusing it"
-            );
+    let admitted = match state.begin(run) {
+        Ok(admitted) => admitted,
+        Err(refusal) => {
+            if refusal == audio::calibration::Refusal::Cancelled {
+                // The wizard is already gone by definition, so this line is the only
+                // trace the burst was stopped rather than never asked for.
+                info!(
+                    "calibration start for run {run} was cancelled before it was admitted; refusing it"
+                );
+            }
+            return Err(refusal.message().to_string());
         }
-        return Err(refusal.message().to_string());
-    }
-    let (guard, cancel) = state.worker_tokens();
+    };
+    let (guard, cancel_epoch) = state.worker_tokens();
     tokio::task::spawn_blocking(move || {
         // The guard hands the busy flag back on every exit, panics included.
         let _guard = guard;
@@ -73,7 +76,8 @@ pub async fn calibration_start(
             lead_ms.unwrap_or(audio::calibration::LEAD_MS_DEFAULT),
             tail_ms.unwrap_or(audio::calibration::TAIL_MS_DEFAULT),
             &app,
-            &cancel,
+            &cancel_epoch,
+            admitted,
         )
     })
     .await

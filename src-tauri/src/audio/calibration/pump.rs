@@ -10,10 +10,11 @@
 //!
 //! Every wait here is woken by the device's render event or bounded by
 //! [`WAIT_BACKSTOP_MS`], which exists so a cancelled run cannot linger between
-//! writes; the cancel flag [`super::state`] sets is checked on both exits, and a
-//! wait that fails outright ends the run rather than spinning it.
+//! writes; the cancel epoch [`super::state`] moves is checked on both exits —
+//! the run plays only while the epoch it was admitted under still stands — and
+//! a wait that fails outright ends the run rather than spinning it.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::warn;
 use serde_json::json;
@@ -35,8 +36,10 @@ const WAIT_BACKSTOP_MS: u32 = 250;
 ///
 /// Every wait in this loop is woken by the device's render event (once per
 /// period) or bounded by the backstop timeout, which exists so a cancelled run
-/// cannot linger between writes; the cancel flag is checked on both exits, and a
-/// wait that fails outright ends the run rather than spinning it (see below).
+/// cannot linger between writes; the cancel epoch is checked on both exits —
+/// the run stops the moment it no longer matches the epoch it was admitted
+/// under — and a wait that fails outright ends the run rather than spinning it
+/// (see below).
 // Tauri commands carry their State params in the signature, so the argument
 // count is fixed by the framework — same allowance the route command carries.
 #[allow(clippy::too_many_arguments)]
@@ -49,7 +52,8 @@ pub(super) fn pump(
     sample_rate: u32,
     buffer_frames: usize,
     event: HANDLE,
-    cancel: &AtomicBool,
+    cancel_epoch: &AtomicU64,
+    admitted_epoch: u64,
     app: &AppHandle,
 ) -> Result<(), AudioError> {
     let com_err =
@@ -66,7 +70,7 @@ pub(super) fn pump(
     let mut end_marked = false;
 
     while seg_idx < schedule.len() {
-        if cancel.load(Ordering::SeqCst) {
+        if cancel_epoch.load(Ordering::SeqCst) != admitted_epoch {
             return Err(AudioError::Api("calibration cancelled".to_string()));
         }
         // SAFETY: valid event handle; signalled once per device period while
@@ -84,7 +88,7 @@ pub(super) fn pump(
                 code.0
             )));
         }
-        if cancel.load(Ordering::SeqCst) {
+        if cancel_epoch.load(Ordering::SeqCst) != admitted_epoch {
             return Err(AudioError::Api("calibration cancelled".to_string()));
         }
         // SAFETY: padding query on a started render client.

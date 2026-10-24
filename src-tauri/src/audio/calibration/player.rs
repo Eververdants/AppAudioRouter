@@ -18,7 +18,7 @@
 //! [`EventHandle`] is created before the client that is handed the handle, so an
 //! early return cannot close a handle a live audio client still names.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 
 use log::warn;
 use tauri::AppHandle;
@@ -58,22 +58,32 @@ const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 /// Play `reps` bursts on `device_id`, bracketing each with events.
 ///
 /// `lead_ms` is the silence before the first burst, `tail_ms` the silence
-/// after each one; caller-supplied values are clamped to sane bounds. Returns
-/// when the sequence is done, or an error when the device could not be
-/// opened, fails mid-stream, or the run was cancelled.
+/// after each one; caller-supplied values are clamped to sane bounds. The run
+/// plays only while `cancel_epoch` still holds the `admitted_epoch` it was
+/// admitted under. Returns when the sequence is done, or an error when the
+/// device could not be opened, fails mid-stream, or the run was cancelled.
 pub fn play_test_tone(
     device_id: &str,
     reps: usize,
     lead_ms: usize,
     tail_ms: usize,
     app: &AppHandle,
-    cancel: &AtomicBool,
+    cancel_epoch: &AtomicU64,
+    admitted_epoch: u64,
 ) -> Result<(), AudioError> {
     let reps = reps.clamp(1, TONE_REPS_MAX);
     let lead_ms = lead_ms.clamp(LEAD_MS_MIN, LEAD_MS_MAX);
     let tail_ms = tail_ms.clamp(TAIL_MS_MIN, TAIL_MS_MAX);
     let com_owned = crate::audio::init_com()?;
-    let result = play_test_tone_inner(device_id, reps, lead_ms, tail_ms, app, cancel);
+    let result = play_test_tone_inner(
+        device_id,
+        reps,
+        lead_ms,
+        tail_ms,
+        app,
+        cancel_epoch,
+        admitted_epoch,
+    );
     crate::audio::uninit_com(com_owned);
     result
 }
@@ -139,7 +149,8 @@ fn play_test_tone_inner(
     lead_ms: usize,
     tail_ms: usize,
     app: &AppHandle,
-    cancel: &AtomicBool,
+    cancel_epoch: &AtomicU64,
+    admitted_epoch: u64,
 ) -> Result<(), AudioError> {
     let com_err =
         |what: &str, e: windows::core::Error| AudioError::Api(format!("{what} failed: {e}"));
@@ -279,7 +290,8 @@ fn play_test_tone_inner(
         sample_rate,
         buffer_frames,
         event_guard.0,
-        cancel,
+        cancel_epoch,
+        admitted_epoch,
         app,
     );
     // SAFETY: Stop on a started client; errors during teardown are ignored —

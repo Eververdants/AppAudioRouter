@@ -204,8 +204,12 @@ pub async fn set_feed_target(
                 }
             }
             // The engine restart that failed may have taken the route's own
-            // engine down with it: put it back without the tap so the devices
-            // keep playing even though the feed did not land.
+            // engine down with it: put it back so the devices keep playing even
+            // though the feed did not land. What the restart re-arms is whatever
+            // the memory holds at this point — a rule this call created is gone
+            // (removed above), so its tap does not come back; a rule that
+            // pre-existed and was kept re-arms, which matches the file the next
+            // launch would restore from.
             if let Err(retry) =
                 sync_feed_tap(source_pid, &source_exe, &feeds, &carrier, &pins, &app).await
             {

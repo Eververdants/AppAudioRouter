@@ -24,7 +24,6 @@ use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
 use super::NO_RUN_TOKEN;
-
 /// Why the tone player did not admit a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
@@ -60,8 +59,10 @@ impl Refusal {
 /// Shared state for the tone player, managed by Tauri.
 ///
 /// `busy` admits one run at a time — two devices playing bursts into each
-/// other's measurement would ruin both. `cancel` is watched between every
-/// write, so closing the wizard ends the run within one backstop interval.
+/// other's measurement would ruin both. `cancel_epoch` is the run's stop
+/// signal: a cancel moves the epoch, and a run plays only while the epoch it
+/// was admitted at is the one standing — so a cancel is never *cleared*, and
+/// there is no window in which one can be wiped by a start landing after it.
 ///
 /// `generation` counts the cancels this player has taken. `cancelled_run` holds
 /// the run identity the most recent of them named, and `stale_generation` the
@@ -72,24 +73,24 @@ impl Refusal {
 #[derive(Default)]
 pub struct CalibrationState {
     busy: Arc<AtomicBool>,
-    cancel: Arc<AtomicBool>,
+    cancel_epoch: Arc<AtomicU64>,
     generation: AtomicU64,
     cancelled_run: AtomicU64,
     stale_generation: AtomicU64,
 }
 
 impl CalibrationState {
-    /// Admit the run `run` identifies; `NO_RUN_TOKEN` for a caller that names none.
+    /// Admit the run `run` identifies, returning the cancel epoch it plays
+    /// under; `NO_RUN_TOKEN` for a caller that names none.
     ///
     /// A start is refused as stale when the user had already called this run off
     /// while the request was still in flight. That race is real and one-sided: the
     /// wizard awaits one burst at a time, so its Escape can be handled here
     /// *before* the start it was pressing Escape about has been admitted (the
     /// cancel runs on the IPC thread, the start body on the runtime's worker).
-    /// Without the check the start clears the cancel flag the cancel had just set
-    /// and the burst sounds into a dialog the user has already closed — the
-    /// frontend can re-cancel the late answer and hope, but only the player can
-    /// tell a cancel from the start it outranks.
+    /// Without a refusal the burst would sound into a dialog the user has already
+    /// closed — the frontend can re-cancel the late answer and hope, but only the
+    /// player can tell a cancel from the start it outranks.
     ///
     /// Two ways to tell, because the caller may or may not name its run:
     ///
@@ -103,10 +104,15 @@ impl CalibrationState {
     ///   to arrive is refused.
     ///
     /// Either mark is spent by the refusal it was aimed at, so a run that comes
-    /// afterwards is never refused twice, and a start that arrives while one is
-    /// playing is refused as busy *without* disturbing the live run's cancel flag
-    /// or a mark another start still owns.
-    pub fn begin(&self, run: u64) -> Result<(), Refusal> {
+    /// afterwards is never refused twice. The epoch makes the rest of the
+    /// ordering free: the run captures the epoch *before* anything is claimed,
+    /// so every cancel that lands after that capture — named or not, aimed at
+    /// this run or racing the admission itself — moves the epoch away from it and
+    /// stops it at the pump's next check, and every cancel that predates the
+    /// capture belongs to an earlier run and is inherited rather than replayed.
+    /// A start refused as busy claims nothing and disturbs nothing.
+    pub fn begin(&self, run: u64) -> Result<u64, Refusal> {
+        let admitted = self.cancel_epoch.load(Ordering::SeqCst);
         if run != NO_RUN_TOKEN && self.cancelled_run.load(Ordering::SeqCst) == run {
             // Consumed only for the run it names: a cancel aimed at this start
             // cannot also be a cancel the next start has to survive.
@@ -121,20 +127,6 @@ impl CalibrationState {
         if self.stale_generation.swap(NO_RUN_TOKEN, Ordering::SeqCst) != NO_RUN_TOKEN {
             return Err(Refusal::Cancelled);
         }
-        // A fresh run must not inherit the previous run's cancel request. The
-        // flag is never cleared on the way out, so without this every run after
-        // the first cancel would fail at once — and the wizard reads
-        // "calibration cancelled" as its own doing, leaving the measure screen
-        // standing with neither a burst nor an error to explain it.
-        //
-        // The clear happens *before* the slot is taken, and the stale mark is
-        // re-checked after it: a cancel landing between the two finds nothing
-        // playing and answers a start still in flight, which it records as a
-        // stale mark — exactly the race the check above closes. Clearing after
-        // the CAS instead would wipe that cancel out: the run would play to
-        // completion while the user waits on a dialog they already closed, and
-        // the gate would stay busy for the whole schedule.
-        self.cancel.store(false, Ordering::SeqCst);
         if self
             .busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -142,28 +134,43 @@ impl CalibrationState {
         {
             return Err(Refusal::Busy);
         }
-        if self.stale_generation.swap(NO_RUN_TOKEN, Ordering::SeqCst) != NO_RUN_TOKEN {
-            // The slot was taken to reach this check, so it goes back before
-            // refusing: nothing will run to hand it over.
+        // The slot is ours, so a cancel naming this run that landed while the
+        // admission was in flight is refused here — and one landing after this
+        // line still stops the run at the pump, because it moved the epoch the
+        // run was not admitted under. The same re-check guards the unnamed
+        // cancel that found nothing playing and marked the start still in
+        // flight. Both hand the slot back before refusing: nothing will run to
+        // hand it over.
+        if run != NO_RUN_TOKEN
+            && self
+                .cancelled_run
+                .compare_exchange(run, NO_RUN_TOKEN, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
             self.busy.store(false, Ordering::SeqCst);
             return Err(Refusal::Cancelled);
         }
-        Ok(())
+        if self.stale_generation.swap(NO_RUN_TOKEN, Ordering::SeqCst) != NO_RUN_TOKEN {
+            self.busy.store(false, Ordering::SeqCst);
+            return Err(Refusal::Cancelled);
+        }
+        Ok(admitted)
     }
 
     /// A cloneable handle pair for the worker thread, so the guard and the
-    /// cancel flag can cross into `spawn_blocking`.
-    pub fn worker_tokens(&self) -> (BusyGuard, Arc<AtomicBool>) {
-        (BusyGuard(self.busy.clone()), self.cancel.clone())
+    /// cancel epoch can cross into `spawn_blocking`.
+    pub fn worker_tokens(&self) -> (BusyGuard, Arc<AtomicU64>) {
+        (BusyGuard(self.busy.clone()), self.cancel_epoch.clone())
     }
 
     /// Records the user's request to stop the run `run`, which may be
     /// `NO_RUN_TOKEN` when the caller names none.
     ///
-    /// The flag is set whichever way: a cancel must always reach the burst that is
+    /// The epoch moves whichever way: a cancel must always reach the burst that is
     /// sounding right now, and the marks only decide what may still *begin*.
     pub fn cancel(&self, run: u64) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.cancel_epoch.fetch_add(1, Ordering::SeqCst);
         if run == NO_RUN_TOKEN {
             // No run named, so the ordering has to be inferred from what was
             // sounding: nothing was, which means the start this cancel answers has
@@ -174,7 +181,6 @@ impl CalibrationState {
         } else {
             self.cancelled_run.store(run, Ordering::SeqCst);
         }
-        self.cancel.store(true, Ordering::SeqCst);
         if run == NO_RUN_TOKEN {
             debug!("calibration cancelled at generation {generation}");
         } else {
@@ -251,47 +257,46 @@ mod tests {
     #[test]
     fn a_new_run_does_not_inherit_the_previous_cancel() {
         let state = CalibrationState::default();
-        assert_eq!(
-            state.begin(NO_RUN_TOKEN),
-            Ok(()),
-            "the first run is admitted"
-        );
-        let (_guard, cancel) = state.worker_tokens();
+        let admitted = state
+            .begin(NO_RUN_TOKEN)
+            .expect("the first run is admitted");
+        let (_guard, cancel_epoch) = state.worker_tokens();
         state.cancel(NO_RUN_TOKEN);
-        assert!(
-            cancel.load(Ordering::SeqCst),
+        assert_ne!(
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
             "the running run is cancellable"
         );
         drop(_guard);
 
+        let admitted = state
+            .begin(NO_RUN_TOKEN)
+            .expect("the run is over, so the next one is admitted");
+        let (_guard, cancel_epoch) = state.worker_tokens();
         assert_eq!(
-            state.begin(NO_RUN_TOKEN),
-            Ok(()),
-            "the run is over, so the next one is admitted"
-        );
-        let (_guard, cancel) = state.worker_tokens();
-        assert!(
-            !cancel.load(Ordering::SeqCst),
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
             "the fresh run must not start pre-cancelled"
         );
 
         // A second begin while one runs is refused, and must not disturb the
-        // running run's cancel flag.
-        assert_eq!(state.begin(NO_RUN_TOKEN), Err(Refusal::Busy));
-        assert!(
-            !cancel.load(Ordering::SeqCst),
-            "the refused start left the live run's flag alone"
+        // running run's cancel epoch.
+        assert!(matches!(state.begin(NO_RUN_TOKEN), Err(Refusal::Busy)));
+        assert_eq!(
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
+            "the refused start left the live run's epoch alone"
         );
         state.cancel(NO_RUN_TOKEN);
-        assert!(cancel.load(Ordering::SeqCst));
+        assert_ne!(cancel_epoch.load(Ordering::SeqCst), admitted);
     }
 
     /// The race the run counter exists for. The wizard awaits one burst at a
     /// time and its Escape goes on the IPC thread, so a cancel can be handled
     /// before the start it was answering has been admitted: without a refusal,
-    /// that start clears the flag the cancel just set and the burst sounds into a
-    /// dialog the user already closed. The frontend can only re-cancel the late
-    /// answer and hope; the player knows which side arrived first.
+    /// that start would sound into a dialog the user already closed. The
+    /// frontend can only re-cancel the late answer and hope; the player knows
+    /// which side arrived first.
     #[test]
     fn a_start_older_than_the_last_cancel_is_refused() {
         let state = CalibrationState::default();
@@ -304,11 +309,7 @@ mod tests {
             "a cancel with nothing playing starts nothing"
         );
 
-        assert_eq!(
-            state.begin(7),
-            Err(Refusal::Cancelled),
-            "a start the user already cancelled is refused"
-        );
+        assert!(matches!(state.begin(7), Err(Refusal::Cancelled)));
         assert!(
             Refusal::Cancelled.message().contains("superseded"),
             "the refusal names the wizard's own phrase for a run called off under it"
@@ -322,11 +323,12 @@ mod tests {
         // The refusal spends the cancel it was aimed at, so the retry — which is a
         // new run, and a new run carries a new token — gets its burst, and gets it
         // un-cancelled.
-        assert_eq!(state.begin(8), Ok(()));
+        let admitted = state.begin(8).expect("the retried run is admitted");
         assert!(state.is_running());
-        let (_guard, cancel) = state.worker_tokens();
-        assert!(
-            !cancel.load(Ordering::SeqCst),
+        let (_guard, cancel_epoch) = state.worker_tokens();
+        assert_eq!(
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
             "the retried run is not pre-cancelled"
         );
     }
@@ -343,25 +345,25 @@ mod tests {
         {
             // A cancel over a run that is sounding leaves no mark behind: the burst
             // it stops is in front of the player's eyes.
-            assert_eq!(state.begin(NO_RUN_TOKEN), Ok(()));
-            let (_guard, cancel) = state.worker_tokens();
+            let admitted = state.begin(NO_RUN_TOKEN).expect("admitted");
+            let (_guard, cancel_epoch) = state.worker_tokens();
             state.cancel(NO_RUN_TOKEN);
-            assert!(cancel.load(Ordering::SeqCst), "the live burst is stopped");
+            assert_ne!(
+                cancel_epoch.load(Ordering::SeqCst),
+                admitted,
+                "the live burst is stopped"
+            );
         }
 
         // Idle now, so this cancel cannot be answering a run the player admitted —
         // only a start that has not landed yet.
         state.cancel(NO_RUN_TOKEN);
-        assert_eq!(
-            state.begin(NO_RUN_TOKEN),
-            Err(Refusal::Cancelled),
-            "the start that was still in flight is refused instead of played"
-        );
-        assert_eq!(
-            state.begin(NO_RUN_TOKEN),
-            Ok(()),
-            "and the mark is spent, so the run after it plays"
-        );
+        assert!(matches!(state.begin(NO_RUN_TOKEN), Err(Refusal::Cancelled)));
+        let admitted = state
+            .begin(NO_RUN_TOKEN)
+            .expect("and the mark is spent, so the run after it plays");
+        let (_guard, cancel_epoch) = state.worker_tokens();
+        assert_eq!(cancel_epoch.load(Ordering::SeqCst), admitted);
     }
 
     /// A cancel must always reach the burst that is sounding, whichever run the
@@ -370,25 +372,81 @@ mod tests {
     #[test]
     fn a_cancel_stops_what_is_playing_and_refuses_only_the_run_it_named() {
         let state = CalibrationState::default();
-        assert_eq!(state.begin(1), Ok(()));
-        let (_guard, cancel) = state.worker_tokens();
+        let admitted = state.begin(1).expect("admitted");
+        let (_guard, cancel_epoch) = state.worker_tokens();
         // Aimed at a run that never started; the live burst still ends.
         state.cancel(99);
-        assert!(
-            cancel.load(Ordering::SeqCst),
+        assert_ne!(
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
             "a cancel nobody can match still stops the sound"
         );
         drop(_guard);
 
+        let admitted = state
+            .begin(2)
+            .expect("a cancel for another run refuses nothing else");
+        let (_guard, cancel_epoch) = state.worker_tokens();
         assert_eq!(
-            state.begin(2),
-            Ok(()),
-            "a cancel for another run refuses nothing else"
-        );
-        let (_guard, cancel) = state.worker_tokens();
-        assert!(
-            !cancel.load(Ordering::SeqCst),
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
             "and the run that plays afterwards is not pre-cancelled"
         );
+    }
+
+    /// The regression the epoch exists to close: a start refused as busy used to
+    /// wipe the live run's pending cancel on its way through, because the clear
+    /// of the shared flag ran before the slot check. With the epoch nothing is
+    /// cleared, so the refusal — like every other begin — claims nothing and
+    /// disturbs nothing, and a named cancel waiting for its own run is not
+    /// spent by a start that never played.
+    #[test]
+    fn a_start_refused_as_busy_disturbs_nothing() {
+        let state = CalibrationState::default();
+        let admitted = state.begin(NO_RUN_TOKEN).expect("admitted");
+        let (_guard, cancel_epoch) = state.worker_tokens();
+        state.cancel(NO_RUN_TOKEN);
+        assert!(matches!(state.begin(NO_RUN_TOKEN), Err(Refusal::Busy)));
+        assert_ne!(
+            cancel_epoch.load(Ordering::SeqCst),
+            admitted,
+            "the pending cancel survives a busy-refused start"
+        );
+        drop(_guard);
+
+        // A named cancel waiting for its own run is also not spent by the
+        // refused start: the next unnamed run plays, and run 9's start — when it
+        // comes — is still refused.
+        state.cancel(9);
+        let admitted = state
+            .begin(NO_RUN_TOKEN)
+            .expect("a start nobody named a cancel for plays");
+        assert_eq!(cancel_epoch.load(Ordering::SeqCst), admitted);
+        assert!(matches!(state.begin(9), Err(Refusal::Cancelled)));
+    }
+
+    /// The last gap the flag could not close: a named cancel landing while its
+    /// start is being admitted. The token is re-checked after the slot is taken —
+    /// and even one that lands after *that* line still stops the run, because it
+    /// moved the epoch the run was not admitted under. No interleaving plays a
+    /// burst into a dialog the user already closed.
+    #[test]
+    fn a_named_cancel_that_races_the_admission_is_refused_or_stops_the_run() {
+        let state = CalibrationState::default();
+        // The cancel lands between the token check and the slot: the re-check
+        // after the slot refuses the start, and hands the slot back.
+        state.cancel(5);
+        assert!(matches!(state.begin(5), Err(Refusal::Cancelled)));
+        assert!(
+            !state.is_running(),
+            "the refused start did not hold the slot"
+        );
+
+        // One landing after admission cannot be refused any more — but the run
+        // stops itself at the pump's first check, because the epoch moved.
+        let admitted = state.begin(6).expect("admitted");
+        let (_guard, cancel_epoch) = state.worker_tokens();
+        state.cancel(6);
+        assert_ne!(cancel_epoch.load(Ordering::SeqCst), admitted);
     }
 }
