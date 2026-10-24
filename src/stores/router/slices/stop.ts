@@ -20,62 +20,75 @@ export function createStopSlice(set: SetRouterState, get: GetRouterState): Route
     undoLastRoute: async () => {
       const snapshot = get().undoSnapshot;
       if (snapshot === null) return;
+      // One user action, held against the same flighting flag an apply is: a
+      // boot restore in flight for the same program must not race the re-route
+      // below — two `apply_route` calls for one executable would leave the
+      // board showing one device list while the engine plays the other until
+      // the next reconciliation heals it.
+      if (get().applying) return;
+      set({ applying: true });
       // Consumed before the work starts: a second activation — or a route landing
       // while this unwinds — must not undo the same thing twice. It is also what
       // keeps the stops below from dropping the offer they are running from.
       set({ undoSnapshot: null });
       let failure: string | null = null;
       let memoryDiffers = false;
-      for (const entry of snapshot.entries) {
-        const previous = entry.previous;
-        try {
-          if (previous === null || previous.length === 0) {
-            // Back to the system default through the same stop a manual one uses:
-            // that is the path that releases the program's fixed endpoint, and one
-            // left behind would hold it on a device the user thinks they left.
-            await get().stopRoute(entry.pid);
-            // A stop leaves the memory alone on purpose — a stopped route stays
-            // remembered — but the apply wrote this program's memory, and leaving
-            // that write behind would apply the route the user just undid the next
-            // time the program starts. Putting the old memory back is not possible
-            // without a command to write one, so it is cleared instead: losing a
-            // route that was not in effect is the smaller loss.
-            if (snapshot.remembered && isRememberableName(entry.exeName)) {
-              await api.clearRoute(entry.exeName);
-              memoryDiffers = true;
+      try {
+        for (const entry of snapshot.entries) {
+          const previous = entry.previous;
+          try {
+            if (previous === null || previous.length === 0) {
+              // Back to the system default through the same stop a manual one uses:
+              // that is the path that releases the program's fixed endpoint, and one
+              // left behind would hold it on a device the user thinks they left.
+              await get().stopRoute(entry.pid);
+              // A stop leaves the memory alone on purpose — a stopped route stays
+              // remembered — but the apply wrote this program's memory, and leaving
+              // that write behind would apply the route the user just undid the next
+              // time the program starts. Putting the old memory back is not possible
+              // without a command to write one, so it is cleared instead: losing a
+              // route that was not in effect is the smaller loss.
+              if (snapshot.remembered && isRememberableName(entry.exeName)) {
+                await api.clearRoute(entry.exeName);
+                memoryDiffers = true;
+              }
+              continue;
             }
-            continue;
+            // The snapshot holds the order the user last landed, primary first —
+            // it replays as is, the same promise the restore makes.
+            const ordered = [...previous];
+            // `remember` mirrors what the apply did, because that is what puts the
+            // memory back: with it false the old device list would never be written
+            // and the memory would keep naming the route being undone. The apply
+            // only remembers programs it can name — a "PID 4321" matches no future
+            // launch — and the undo holds itself to the same rule, or the settings
+            // list grows a row that can never be found again.
+            const remember = snapshot.remembered && isRememberableName(entry.exeName);
+            const generation = await get().routeOne(entry.pid, entry.exeName, ordered, remember);
+            if (remember) memoryDiffers = true;
+            // Written here, one program at a time: an undo is a single user action
+            // rather than a fan-out, and the generation is what a later
+            // duplication-stopped event for this engine is measured against.
+            set((s) => ({
+              routedPids: { ...s.routedPids, [entry.pid]: [...ordered] },
+              engineGenerations: { ...s.engineGenerations, [entry.pid]: generation },
+            }));
+          } catch (e) {
+            // One line for the whole action, not one per program.
+            failure ??= String(e);
           }
-          // The snapshot holds the order the user last landed, primary first —
-          // it replays as is, the same promise the restore makes.
-          const ordered = [...previous];
-          // `remember` mirrors what the apply did, because that is what puts the
-          // memory back: with it false the old device list would never be written
-          // and the memory would keep naming the route being undone. The apply
-          // only remembers programs it can name — a "PID 4321" matches no future
-          // launch — and the undo holds itself to the same rule, or the settings
-          // list grows a row that can never be found again.
-          const remember = snapshot.remembered && isRememberableName(entry.exeName);
-          const generation = await get().routeOne(entry.pid, entry.exeName, ordered, remember);
-          if (remember) memoryDiffers = true;
-          // Written here, one program at a time: an undo is a single user action
-          // rather than a fan-out, and the generation is what a later
-          // duplication-stopped event for this engine is measured against.
-          set((s) => ({
-            routedPids: { ...s.routedPids, [entry.pid]: [...ordered] },
-            engineGenerations: { ...s.engineGenerations, [entry.pid]: generation },
-          }));
-        } catch (e) {
-          // One line for the whole action, not one per program.
-          failure ??= String(e);
         }
+        // Re-read rather than patch the mirror by hand: the backend is the truth for
+        // what was written, and it is the state the settings list shows.
+        if (memoryDiffers) await get().loadRememberedRoutes();
+        // What this put back is duplicating now, so its readings are due for the
+        // same reason a freshly applied route's are.
+        await get().reconcileActiveDuplications();
+      } finally {
+        // Always handed back — an undo that fails part way must not leave the
+        // hub latched against a still-routable selection.
+        set({ applying: false });
       }
-      // Re-read rather than patch the mirror by hand: the backend is the truth for
-      // what was written, and it is the state the settings list shows.
-      if (memoryDiffers) await get().loadRememberedRoutes();
-      // What this put back is duplicating now, so its readings are due for the
-      // same reason a freshly applied route's are.
-      await get().reconcileActiveDuplications();
       if (failure === null) {
         get().addLog(i18next.t('log.routeUndone', { n: snapshot.entries.length }), 'info');
       } else {
@@ -111,6 +124,9 @@ export function createStopSlice(set: SetRouterState, get: GetRouterState): Route
           if (sibling.exe_name.toLowerCase() === stoppedExe) autoRestoreDecided.add(sibling.pid);
         }
       }
+      // What the optimistic clear takes out of the selection, so a refused stop
+      // can put exactly that back — no more.
+      let removedSelection: number[] = [];
       try {
         // Optimistic: reflect the stop immediately so the UI feels instant.
         invalidateReconciliation();
@@ -133,6 +149,7 @@ export function createStopSlice(set: SetRouterState, get: GetRouterState): Route
               (stoppedExe === undefined ||
                 s.sessions.find((x) => x.pid === p)?.exe_name.toLowerCase() !== stoppedExe),
           );
+          removedSelection = s.selectedPids.filter((p) => !selectedPids.includes(p));
           return {
             routedPids,
             engineGenerations,
@@ -193,6 +210,14 @@ export function createStopSlice(set: SetRouterState, get: GetRouterState): Route
           return {
             routedPids: { ...s.routedPids, [pid]: previous },
             engineGenerations: { ...s.engineGenerations, [pid]: previousGeneration },
+            // The route stays live, so its rows come back into the selection
+            // too — the batch stop does the same for its failures, and a
+            // refused single stop used to leave a live route with no selected
+            // rows, the board drawing a route the selection no longer named.
+            selectedPids: [
+              ...s.selectedPids,
+              ...removedSelection.filter((p) => !s.selectedPids.includes(p)),
+            ],
           };
         });
         get().raiseError(i18next.t('log.stopRouteFailed', { error: String(e) }), {
