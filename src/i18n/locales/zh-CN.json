@@ -112,7 +112,8 @@
     "feedTitleLive": "正把本程序的声音送进 {{name}} 的输入（本机设备照常出声）",
     "feedTitleSuspended": "暂停中：写入载体的那一路断了，重新选一次送入即可恢复",
     "feedTitleNoCarrier": "暂未生效：未配置载体，请到「设置 → 送入载体」选择端点对",
-    "removeFeed": "停止送入 {{name}}",
+    "feedTitlePlanned": "已加入计划：点中间的卡片后，本程序的声音送进 {{name}} 的输入",
+    "removeFeed": "撤下送往 {{name}} 的送入",
     "feederTitle": "打开它的路由看板",
     "feederAria": "{{process}} 正把声音送进 {{target}}",
     "feederSub": "送入「{{target}}」",
@@ -301,9 +302,7 @@
     "routedManyMore": "{{n}} 个程序 → {{device}} +{{m}}",
     "undo": "撤销",
     "dismiss": "不再显示",
-    "openLog": "看记录",
-    "feedAdded": "{{source}} → {{target}}（输入）",
-    "feedRemoved": "已撤下送往 {{target}} 的送入"
+    "openLog": "看记录"
   },
   "log": {
     "deviceRefreshed": "设备列表已刷新（{{n}} 项）",
@@ -311,7 +310,7 @@
     "defaultDeviceFailed": "获取系统默认播放设备失败：{{error}}",
     "sessionsRefreshed": "进程列表已刷新（{{n}} 项）",
     "sessionsRefreshFailed": "进程刷新失败：{{error}}",
-    "selectProcessAndDevice": "请先选择进程和至少一台设备",
+    "selectProcessAndDevice": "请先选择一个程序",
     "processGone": "所选进程已不存在",
     "routed": "已将 {{process}} 路由到 {{device}}",
     "routedRemembered": "已将 {{process}} 路由到 {{device}}（已记忆）",

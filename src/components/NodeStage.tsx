@@ -74,6 +74,10 @@ interface WireSpec {
   d: string;
   /** The wire moves only when sound is actually flowing through it. */
   live: boolean;
+  /** Overrides the default proposal mark. A staged-but-unlanded feed draws
+   *  itself in regardless of the device plan's answered-ness — it is the feed's
+   *  own proposal, not the route's. */
+  proposed?: boolean;
 }
 
 /** Card chrome for things that sit straight on the well: the continuous-
@@ -130,9 +134,10 @@ const PICKER_ITEM_VARIANTS: Variants = {
  *
  * The board is a proposal, exactly as the ring stage was: rows toggle
  * membership in the plan, and the hub — which wears a "click to apply" capsule
- * whenever the plan is not yet the truth — lands it. Feeds are the exception,
- * because their endpoint pair is theirs alone: they connect and disconnect
- * immediately, with the toast carrying the way back.
+ * whenever the plan is not yet the truth — lands it. Feeds are plan members
+ * like every destination: picking a programme input stages the row, the hub
+ * connects it, and the hub lands taking it back out too. One landing point for
+ * everything this board proposes, and no undo card beside it.
  *
  * Nothing here measures a card: every position comes from `lib/stage.ts` and
  * the single height the well reports, so a row and the wire meeting it cannot
@@ -163,8 +168,9 @@ export function NodeStage() {
   const setPrimaryDevice = useRouterStore((s) => s.setPrimaryDevice);
   const promoteDevice = useRouterStore((s) => s.promoteDevice);
   const applyRoute = useRouterStore((s) => s.applyRoute);
-  const addFeed = useRouterStore((s) => s.addFeed);
-  const removeFeed = useRouterStore((s) => s.removeFeed);
+  const selectedFeedPids = useRouterStore((s) => s.selectedFeedPids);
+  const appendFeedTarget = useRouterStore((s) => s.appendFeedTarget);
+  const dropFeedTarget = useRouterStore((s) => s.dropFeedTarget);
   const selectProcess = useRouterStore((s) => s.selectProcess);
 
   /** The row whose wire(s) light up under the pointer. */
@@ -256,9 +262,36 @@ export function NodeStage() {
   // press: "where this already goes" is not a change, and pressing it would
   // pin the programme to the endpoint it is on without moving any sound.
   const fallback = effectiveFallback(defaultDeviceId, devices);
-  const answered = alreadyApplied(drawn, selectedPids, routesByPid, fallback);
-  const canApply = pid !== undefined && drawn.length > 0 && !answered && !applying;
-  const hasPlan = drawn.length > 0;
+  // The feed plan: the programme inputs staged on this board. The board draws
+  // the plan, not the live map — an input the user picked but has not landed
+  // yet is a proposal with a row and a wire of its own, the way a staged
+  // device is, and the hub is what turns it into a feed.
+  const planFeedSessions = useMemo(
+    () =>
+      selectedFeedPids
+        .map((targetPid) => sessions.find((s) => s.pid === targetPid))
+        .filter((s) => s !== undefined),
+    [selectedFeedPids, sessions],
+  );
+  // The landed half: the program's live feeds, resolved through its holder
+  // like every per-program map read here.
+  const landedFeedPids = useMemo(() => {
+    if (pid === undefined) return [];
+    const owner = programEntryOf(sessions, feeds, pid);
+    return owner === undefined ? [] : (feeds[owner] ?? []);
+  }, [feeds, sessions, pid]);
+  const landedFeedSet = useMemo(() => new Set(landedFeedPids), [landedFeedPids]);
+  const devicesAnswered = alreadyApplied(drawn, selectedPids, routesByPid, fallback);
+  const feedsAnswered =
+    landedFeedPids.length === selectedFeedPids.length &&
+    selectedFeedPids.every((target) => landedFeedSet.has(target));
+  const answered = devicesAnswered && feedsAnswered;
+  const canApply =
+    pid !== undefined &&
+    (drawn.length > 0 || planFeedSessions.length > 0) &&
+    !answered &&
+    !applying;
+  const hasPlan = drawn.length > 0 || planFeedSessions.length > 0;
 
   const primaryDeviceId = drawn[0];
   const copyDeviceIds = drawn.slice(1);
@@ -288,8 +321,10 @@ export function NodeStage() {
   const devicePickerEmpty = devices.length === 0 ? t('stage.pickNoDevices') : t('stage.pickNone');
 
   // The wires move only when what is drawn is what is playing — a plan waiting
-  // for the hub is a proposal, and a proposal does not hum.
-  const flowing = sounding && answered && liveness;
+  // for the hub is a proposal, and a proposal does not hum. A feed staged
+  // beside an answered device plan does not hold the route's own wires still:
+  // they answer the device half of the plan, not the whole of it.
+  const flowing = sounding && devicesAnswered && liveness;
   /**
    * The number badge is the inspector's entry, and it is only a control once
    * there is something to tune: a single-device route starts no engine, so a
@@ -332,37 +367,32 @@ export function NodeStage() {
     [soundingFeederKey],
   );
 
-  /** Programmes the hub feeds, as sessions in feed order. */
-  const feedTargets = useMemo(() => {
-    if (pid === undefined) return [];
-    // A feed is keyed by the process that holds it — one per program, like a
-    // route — so a sibling process of the source resolves to it first.
-    const owner = programEntryOf(sessions, feeds, pid);
-    if (owner === undefined) return [];
-    return (feeds[owner] ?? [])
-      .map((targetPid) => sessions.find((s) => s.pid === targetPid))
-      .filter((s) => s !== undefined);
-  }, [feeds, sessions, pid]);
+  /** The board's feed rows: the plan, each with whether it has landed. A
+   *  landed row speaks in the three honest states; a staged one is a proposal
+   *  wearing the role word it will carry once the hub connects it. */
+  const planFeedStates = planFeedSessions.map((targetSession) => ({
+    session: targetSession,
+    landed: landedFeedSet.has(targetSession.pid),
+    state: feedLiveness(exe, feedCarrier, feedTapFailures),
+  }));
+  /** What the add menu can offer as a programme input: neither the programme
+   *  being drawn nor one of its own siblings (a feed into itself), and no
+   *  programme the plan already names — one rule per program, on either side. */
+  const feedableSessions = sessions.filter(
+    (s) =>
+      s.pid !== pid &&
+      s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
+      !planFeedSessions.some(
+        (planned) => planned.exe_name.toLowerCase() === s.exe_name.toLowerCase(),
+      ),
+  );
+  /** Every row in the copies panel: the copies first, then the feeds. */
+  const copiesRows = copyDeviceIds.length + planFeedStates.length;
 
   // The board is as tall as the well it sits in, and no taller: that is the
   // whole reason the stage never scrolls. Until the well has reported a height
   // (the very first frame), the app's own default window stands in.
   const height = measured > 0 ? Math.floor(measured) : BOARD_H;
-  const feedTargetStates = feedTargets.map((targetSession) => ({
-    session: targetSession,
-    state: feedLiveness(exe, feedCarrier, feedTapFailures),
-  }));
-  /** What the add menu can offer as a programme input: neither the programme
-   *  being drawn nor one of its own siblings (a feed into itself), and nothing
-   *  already on the list. */
-  const feedableSessions = sessions.filter(
-    (s) =>
-      s.pid !== pid &&
-      s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
-      !feedTargetStates.some((f) => f.session.pid === s.pid),
-  );
-  /** Every row in the copies panel: the copies first, then the feeds. */
-  const copiesRows = copyDeviceIds.length + feedTargetStates.length;
   // The two panels, as one column centred on the hub: whatever the route's
   // length, the hub sits in the middle of it with wires reaching both ways.
   const column = panelColumn(height, copiesRows);
@@ -467,7 +497,7 @@ export function NodeStage() {
   // single-row change reveals — a batch (remembered routes restoring, a
   // programme switch re-filling the plan) decides nothing about where the eye
   // should go, and a removal never scrolls anything.
-  const feedSig = feedTargetStates.map((f) => f.session.pid).join(',');
+  const feedSig = planFeedStates.map((f) => f.session.pid).join(',');
   useEffect(() => {
     const sig = `${drawnSignature}#${feedSig}`;
     const prev = prevRowsRef.current;
@@ -539,17 +569,20 @@ export function NodeStage() {
       live: flowing,
     });
   });
-  feedTargetStates.forEach(({ session: targetSession, state }, offset) => {
+  planFeedStates.forEach(({ session: targetSession, landed, state }, offset) => {
     const index = copyDeviceIds.length + offset;
     if (!rowVisible(column.copiesY, column.copiesHeight, index, copyScroll)) return;
     const to = rowInPort(column.copiesY, index, copyScroll);
     wires.push({
       key: `feed:${targetSession.pid}`,
       d: nodePath(from.x, from.y, to.x, to.y),
-      // A feed connects the moment it is picked, so this wire reports the feed
-      // itself — not the state of the device plan beside it. A programme whose
-      // device rows are still waiting for the hub can be feeding perfectly well.
-      live: sounding && liveness && state === 'live',
+      // A landed feed's wire reports the feed itself — not the state of the
+      // device plan beside it. A programme whose device rows are still waiting
+      // for the hub can be feeding perfectly well. A staged one is a proposal:
+      // it draws itself in once, and its sound has nowhere to go until the hub
+      // lands it.
+      live: landed && sounding && liveness && state === 'live',
+      proposed: !landed,
     });
   });
   // Feeders → hub. The column is centred on the hub and compresses only to the
@@ -676,8 +709,10 @@ export function NodeStage() {
               // merely went quiet — paused, or the window losing the gate — has
               // to fall back to the steady line: swapping `stage-flow` for
               // `stage-draw` restarts that keyframe, and every wire would then
-              // redraw itself as though it had just been proposed.
-              const proposed = !wire.live && !answered;
+              // redraw itself as though it had just been proposed. A staged
+              // feed proposes on its own: it carries the draw-in until the hub
+              // lands it, whatever the device half of the plan is doing.
+              const proposed = wire.proposed ?? (!wire.live && !devicesAnswered);
               return (
                 <path
                   key={wire.key}
@@ -878,7 +913,7 @@ export function NodeStage() {
                 />
                 <CharSwapText text={hubName} prev={nameSwap.prev} swapKey={nameSwap.key} />
                 <Ring
-                  tone={hasPlan || feedTargetStates.length > 0 ? 'main' : 'idle'}
+                  tone={hasPlan ? 'main' : 'idle'}
                   size={16}
                   live={sounding && liveness}
                   className="ml-0.5"
@@ -889,10 +924,10 @@ export function NodeStage() {
                   <Spinner size={10} className="mr-1 inline-block align-[-1px] text-accent" />
                 )}
                 {sounding ? t('stage.sounding') : t('stage.quiet')}
-                {feedTargetStates.length > 0 && (
+                {planFeedStates.length > 0 && (
                   <span className="text-type-feed">
                     {' '}
-                    · {t('stage.feedCount', { n: feedTargetStates.length })}
+                    · {t('stage.feedCount', { n: planFeedStates.length })}
                   </span>
                 )}
               </span>
@@ -1020,15 +1055,16 @@ export function NodeStage() {
                 />
               );
             })}
-            {feedTargetStates.map(({ session: targetSession, state }, offset) => (
+            {planFeedStates.map(({ session: targetSession, landed, state }, offset) => (
               <FeedRow
                 key={targetSession.pid}
                 session={targetSession}
+                landed={landed}
                 state={state}
                 index={copyDeviceIds.length + offset + 1}
                 top={rowContentY(copyDeviceIds.length + offset) - ROW_H / 2}
                 sourceName={name ?? ''}
-                onRemove={() => void removeFeed(pid ?? -1, targetSession.pid)}
+                onRemove={() => dropFeedTarget(targetSession.pid)}
                 onHover={setHoverKey}
               />
             ))}
@@ -1111,7 +1147,7 @@ export function NodeStage() {
                         variants={PICKER_ITEM_VARIANTS}
                         transformTemplate={MAIN_THREAD_TRANSFORM}
                         onClick={() => {
-                          if (pid !== undefined) void addFeed(pid, s.pid);
+                          if (pid !== undefined) appendFeedTarget(s.pid);
                           closePicker(true);
                         }}
                         className="pressable flex w-full items-center gap-2 rounded-seg px-2.5 py-1.5 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
@@ -1688,12 +1724,15 @@ function CharSwapText({
 }
 
 /**
- * One programme the hub's sound is fed into. Amber, immediate, and honest
- * about what is missing: the ✕ disconnects at once, the toast carries the way
- * back.
+ * One programme the hub's sound is fed into. Amber, immediate to read, and
+ * honest about what is missing. The row is the plan: staged with the picker,
+ * connected by the hub, and taken back out by the hub after its ✕ stages the
+ * removal — the same two beats a device row plays, and no undo card beside
+ * them.
  */
 function FeedRow({
   session,
+  landed,
   state,
   index,
   top,
@@ -1702,6 +1741,10 @@ function FeedRow({
   onHover,
 }: {
   session: AudioSession;
+  /** Whether this planned feed is already connected. A staged one reads as
+   *  the proposal it is; its three honest states only mean something once the
+   *  hub has landed it. */
+  landed: boolean;
   state: 'live' | 'suspended' | 'no-carrier';
   index: number;
   top: number;
@@ -1711,14 +1754,15 @@ function FeedRow({
 }) {
   const { t } = useTranslation();
   const targetName = session.display_name ?? session.exe_name;
-  const title =
-    state === 'live'
+  const title = !landed
+    ? t('stage.feedTitlePlanned', { name: targetName })
+    : state === 'live'
       ? t('stage.feedTitleLive', { name: targetName })
       : state === 'suspended'
         ? t('stage.feedTitleSuspended', { source: sourceName, name: targetName })
         : t('stage.feedTitleNoCarrier', { name: targetName });
   const stateWord =
-    state === 'live'
+    !landed || state === 'live'
       ? t('stage.feedRole')
       : state === 'suspended'
         ? t('stage.feedHeld')
@@ -1736,7 +1780,7 @@ function FeedRow({
       onMouseEnter={() => onHover(`feed:${session.pid}`)}
       onMouseLeave={() => onHover(null)}
       title={title}
-      className={`absolute flex items-center gap-2 rounded-ctl bg-surface pl-3 pr-2 ${state !== 'live' ? 'opacity-90' : ''}`}
+      className={`absolute flex items-center gap-2 rounded-ctl bg-surface pl-3 pr-2 ${landed && state !== 'live' ? 'opacity-90' : ''}`}
       style={{ left: GROUP_PAD, top, width: ROW_W, height: ROW_H, transformOrigin: 'left center' }}
     >
       <span className="pin pin-in pin-amber" aria-hidden="true" />

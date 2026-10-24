@@ -290,6 +290,8 @@ function reset(overrides: Partial<StoreState> = {}): void {
     // — the one that tracks the route and the system default — is only what
     // `selectProcess` leaves behind.
     deviceSelectionPrefilled: false,
+    selectedFeedPids: [],
+    feedSelectionPrefilled: false,
     routedPids: {},
     engineGenerations: {},
     deviceLatencyMs: {},
@@ -304,7 +306,6 @@ function reset(overrides: Partial<StoreState> = {}): void {
     feeds: {},
     feedCarrier: { render: null, capture: null },
     captureDevices: [],
-    feedUndo: null,
     defaultDeviceId: null,
     startupNotice: null,
     undoSnapshot: null,
@@ -2161,7 +2162,11 @@ describe('remembered routes', () => {
       autoRemember: true,
       selectedPids: [LATE.pid],
       selectedDeviceIds: ['speakers'],
-      defaultDeviceId: 'speakers',
+      // The default is the TV, so the staged Speakers plan is a proposal the
+      // hub can land. A plan that only names the system default is never
+      // pressable — `applyRoute` skips it — and staging this race against an
+      // unpressable plan would test nothing.
+      defaultDeviceId: 'tv',
     });
 
     const restoring = state().restoreRememberedRoutes();
@@ -2350,32 +2355,49 @@ describe('settings and log', () => {
 });
 
 describe('feeds', () => {
-  it('connects a programme into another input and offers the way back', async () => {
+  it('stages a programme input on the plan, and the hub lands it', async () => {
     const backend = installBackend();
-    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME], feedCarrier: backend.carrier });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, GAME],
+      feedCarrier: backend.carrier,
+      defaultDeviceId: 'speakers',
+    });
+    state().selectProcess(MUSIC.pid);
+    state().appendFeedTarget(GAME.pid);
 
-    await state().addFeed(MUSIC.pid, GAME.pid);
+    // Staged, not connected: the plan holds the pair and nothing has been asked
+    // of the backend yet. The plan also already names the system default the
+    // program plays through — a guess, not a route.
+    expect(state().selectedFeedPids).toEqual([GAME.pid]);
+    expect(state().selectedDeviceIds).toEqual(['speakers']);
+    expect(state().feeds[MUSIC.pid]).toBeUndefined();
+    expect(backend.calls.some((call) => call.cmd === 'set_feed_target')).toBe(false);
+
+    await state().applyRoute();
 
     expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
     expect(state().rememberedFeeds).toEqual([{ sourceExe: 'music.exe', targetExe: ['game.exe'] }]);
-    // Connected at once: a feed pins its own endpoints, so no hub press waits
-    // between the pick and the sound.
-    expect(backend.calls.some((call) => call.cmd === 'set_feed_target')).toBe(true);
-    expect(state().feedUndo).toMatchObject({ sourcePid: MUSIC.pid, targetPid: GAME.pid });
+    // A feeds-only press writes no route: the device plan named what the
+    // program already plays through, so `apply_route` never ran.
+    expect(backend.calls.some((call) => call.cmd === 'apply_route')).toBe(false);
 
-    await state().undoFeed();
-
+    // The way back out is the same two beats: stage the removal, land it.
+    state().dropFeedTarget(GAME.pid);
+    expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+    await state().applyRoute();
+    expect(backend.calls.some((call) => call.cmd === 'remove_feed_target')).toBe(true);
     expect(state().feeds[MUSIC.pid]).toBeUndefined();
     expect(state().rememberedFeeds).toEqual([]);
-    // The undo is the end of the chain, not a new offer.
-    expect(state().feedUndo).toBeNull();
   });
 
-  it('records a feed but says it is silent when no carrier is configured', async () => {
+  it('lands a feed with no carrier as recorded-but-silent, and says so', async () => {
     installBackend({ carrier: { render: null, capture: null } });
     reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+    state().selectProcess(MUSIC.pid);
+    state().appendFeedTarget(GAME.pid);
 
-    await state().addFeed(MUSIC.pid, GAME.pid);
+    await state().applyRoute();
 
     // The rule is the user's decision and stays; nothing moves until a pair is
     // picked in the settings, and the log says exactly that.
@@ -2385,16 +2407,21 @@ describe('feeds', () => {
     expect(lastLog()?.level).toBe('error');
   });
 
-  it('rolls the whole rule back when the backend refuses it', async () => {
+  it('rolls a refused feed out of the live map, and keeps the plan staged for a retry', async () => {
     installBackend({ fail: (cmd) => cmd === 'set_feed_target' });
     reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+    state().selectProcess(MUSIC.pid);
+    state().appendFeedTarget(GAME.pid);
 
-    await state().addFeed(MUSIC.pid, GAME.pid);
+    await state().applyRoute();
 
     expect(state().feeds[MUSIC.pid]).toBeUndefined();
     expect(state().rememberedFeeds).toEqual([]);
-    expect(state().feedUndo).toBeNull();
     expect(lastLog()?.level).toBe('error');
+    // The plan stands exactly as staged: the hub keeps asking, and the next
+    // press retries precisely what failed.
+    expect(state().selectedFeedPids).toEqual([GAME.pid]);
+    expect(state().feedSelectionPrefilled).toBe(false);
   });
 
   it('keeps a feed only while both of its ends are on the session list', async () => {
@@ -2416,13 +2443,14 @@ describe('feeds', () => {
     expect(state().rememberedFeeds).toHaveLength(1);
   });
 
-  it('refuses to feed a programme into itself', async () => {
+  it('refuses to stage a feed into the programme itself', async () => {
     installBackend();
     reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME] });
+    state().selectProcess(MUSIC.pid);
 
-    await state().addFeed(MUSIC.pid, MUSIC.pid);
+    state().appendFeedTarget(MUSIC.pid);
 
-    expect(state().feeds[MUSIC.pid]).toBeUndefined();
+    expect(state().selectedFeedPids).toEqual([]);
     expect(state().rememberedFeeds).toEqual([]);
   });
 
@@ -2462,26 +2490,27 @@ describe('feeds', () => {
     expect(lastLog()?.message).toContain('restore-music.exe');
   });
 
-  it('does not re-pin a feed the user added this run when a refresh comes by', async () => {
+  it('does not re-pin a feed the hub landed this run when a refresh comes by', async () => {
     const backend = installBackend();
     reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME], feedCarrier: backend.carrier });
-
-    await state().addFeed(MUSIC.pid, GAME.pid);
+    state().selectProcess(MUSIC.pid);
+    state().appendFeedTarget(GAME.pid);
+    await state().applyRoute();
     const asksAfterAdd = backend.calls.filter((c) => c.cmd === 'set_feed_target').length;
 
     // A Core Audio change arrives; the restore pass runs with it. The feed
-    // was delivered when it was added, so the pass has nothing to do here.
+    // was delivered when it landed, so the pass has nothing to do here.
     await state().refreshSessions();
 
     expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(asksAfterAdd);
     expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
   });
 
-  it('keeps one wire when a sibling process adds or removes it', async () => {
+  it('keeps one wire when a sibling process stages or drops it', async () => {
     // The live feed map is the program's, rebuilt on its lowest pid, and the
-    // board can be looking at any process of it. An add kept under the sibling
-    // gave one rule two addresses: the ✕ pressed from that board looked in the
-    // sibling's slot, found nothing, and did nothing at all.
+    // board can be looking at any process of it. A plan staged under the
+    // sibling's pid gave one rule two addresses: the hub would land a second
+    // wire, and the ✕ pressed from that board would find nothing.
     const BROWSER_MAIN: AudioSession = { pid: 6301, exe_name: 'sibling-browser.exe' };
     const BROWSER_TAB: AudioSession = { pid: 6302, exe_name: 'sibling-browser.exe' };
     const RECEIVER: AudioSession = { pid: 6303, exe_name: 'receiver.exe' };
@@ -2492,7 +2521,10 @@ describe('feeds', () => {
       feedCarrier: backend.carrier,
     });
 
-    await state().addFeed(BROWSER_TAB.pid, RECEIVER.pid);
+    // The board is on the tab; the rule lands under the program's lowest pid.
+    state().selectProcess(BROWSER_TAB.pid);
+    state().appendFeedTarget(RECEIVER.pid);
+    await state().applyRoute();
 
     expect(state().feeds[BROWSER_MAIN.pid]).toEqual([RECEIVER.pid]);
     expect(state().feeds[BROWSER_TAB.pid]).toBeUndefined();
@@ -2501,11 +2533,16 @@ describe('feeds', () => {
       targetPid: RECEIVER.pid,
     });
 
-    // Same for the way out: pressed from the tab's board, it finds the wire.
-    await state().removeFeed(BROWSER_TAB.pid, RECEIVER.pid);
+    // Same for the way out: dropped from the tab's plan, landed from there.
+    state().dropFeedTarget(RECEIVER.pid);
+    await state().applyRoute();
 
     expect(state().feeds[BROWSER_MAIN.pid]).toBeUndefined();
-    expect(backend.calls.some((call) => call.cmd === 'remove_feed_target')).toBe(true);
+    expect(
+      backend.calls.some(
+        (call) => call.cmd === 'remove_feed_target' && call.args.sourcePid === BROWSER_MAIN.pid,
+      ),
+    ).toBe(true);
   });
 
   it('puts a refused removal back where the wire stood, not at the end', async () => {
@@ -2530,8 +2567,10 @@ describe('feeds', () => {
         { sourceExe: 'sender.exe', targetExe: ['one.exe', 'two.exe', 'three.exe'] },
       ],
     });
+    state().selectProcess(SENDER.pid);
 
-    await state().removeFeed(SENDER.pid, TWO.pid);
+    state().dropFeedTarget(TWO.pid);
+    await state().applyRoute();
 
     expect(state().feeds[SENDER.pid]).toEqual([ONE.pid, TWO.pid, THREE.pid]);
     expect(state().rememberedFeeds[0]?.targetExe).toEqual(['one.exe', 'two.exe', 'three.exe']);
@@ -2557,11 +2596,12 @@ describe('feeds', () => {
     );
   });
 
-  it('claims a feed the moment it asks, so the refresh its pinning causes cannot pin it twice', async () => {
+  it('claims a feed the moment the hub asks, so the refresh its pinning causes cannot pin it twice', async () => {
     // Pinning both ends is itself a Core Audio change: the notification it
-    // raises runs the feed restore while the add's own reply is still in the
-    // air. Claiming only when the reply arrives left that pass free to deliver
-    // the same rule again and log a feed the user just made as restored.
+    // raises runs the feed restore while the landing's own reply is still in
+    // the air. Claiming only when the reply arrives left that pass free to
+    // deliver the same rule again and log a feed the user just made as
+    // restored.
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -2578,11 +2618,13 @@ describe('feeds', () => {
       sessions: [SOURCE, TARGET],
       feedCarrier: { render: 'cable-in', capture: 'cable-out' },
     });
+    state().selectProcess(SOURCE.pid);
+    state().appendFeedTarget(TARGET.pid);
 
-    const adding = state().addFeed(SOURCE.pid, TARGET.pid);
+    const landing = state().applyRoute();
     const restoring = state().restoreRememberedFeeds();
     release();
-    await Promise.all([adding, restoring]);
+    await Promise.all([landing, restoring]);
 
     expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(1);
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
@@ -2603,8 +2645,10 @@ describe('feeds', () => {
       sessions: [SOURCE, TARGET],
       feedCarrier: { render: null, capture: null },
     });
+    state().selectProcess(SOURCE.pid);
+    state().appendFeedTarget(TARGET.pid);
 
-    await state().addFeed(SOURCE.pid, TARGET.pid);
+    await state().applyRoute();
     expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(1);
 
     backend.carrier = { render: 'cable-in', capture: 'cable-out' };
@@ -2686,10 +2730,11 @@ describe('feeds', () => {
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
   });
 
-  it('delivers a feed added while a route is landing, and keeps it afterwards', async () => {
-    // The add's ask and the route's engine start overlap. A feed no longer waits
-    // on the programme's output slot, so the answer is a delivery either way —
-    // and the route stopping later must not turn it into a second ask.
+  it('lands a feed and a route from the same press, and keeps the feed when the route stops', async () => {
+    // One press, two plans: the staged route and the staged feed land together,
+    // and the landing's ask and the engine's start overlap. A feed no longer
+    // waits on the programme's output slot, so the answer is a delivery either
+    // way — and the route stopping later must not turn it into a second ask.
     let releaseFeed: () => void = () => {};
     const feedGate = new Promise<void>((resolve) => {
       releaseFeed = resolve;
@@ -2705,17 +2750,20 @@ describe('feeds', () => {
       devices: [SPEAKERS, TV],
       sessions: [SOURCE, TARGET],
       feedCarrier: { render: 'cable-in', capture: 'cable-out' },
-      selectedPids: [SOURCE.pid],
-      selectedDeviceIds: ['tv'],
       defaultDeviceId: 'speakers',
     });
+    state().selectProcess(SOURCE.pid);
+    state().appendFeedTarget(TARGET.pid);
+    // Naming another device replaces the prefilled guess: the route is the
+    // user's own staging, landed by the same press as the feed.
+    state().toggleDeviceSelection('tv');
 
-    const adding = state().addFeed(SOURCE.pid, TARGET.pid);
-    await state().applyRoute();
+    const landing = state().applyRoute();
     releaseFeed();
-    await adding;
+    await landing;
 
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
+    expect(state().routedPids[SOURCE.pid]).toEqual(['tv']);
     expect(backend.feeds).toEqual([['midflight-source.exe', 'midflight-target.exe']]);
     expect(feedLiveness('midflight-source.exe', state().feedCarrier, state().feedTapFailures)).toBe(
       'live',
@@ -2729,12 +2777,12 @@ describe('feeds', () => {
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
   });
 
-  it('hands the claim back when the add itself is refused', async () => {
+  it('hands the claim back when the landing itself is refused', async () => {
     // The catch path is the third exit of the claim (delivered / undelivered /
     // rejected). The rule goes back out of the memory with it, so nothing can be
     // re-delivered for a pair the audio service never accepted — but the claim
-    // must not stay standing either: the next time the user draws this wire it has
-    // to be asked for, and asked for once.
+    // must not stay standing either: the next time the user presses the hub it
+    // has to be asked for, and asked for once.
     const SOURCE: AudioSession = { pid: 8621, exe_name: 'refused-source.exe' };
     const TARGET: AudioSession = { pid: 8622, exe_name: 'refused-target.exe' };
     const backend = installBackend({
@@ -2747,15 +2795,17 @@ describe('feeds', () => {
       sessions: [SOURCE, TARGET],
       feedCarrier: { render: 'cable-in', capture: 'cable-out' },
     });
+    state().selectProcess(SOURCE.pid);
+    state().appendFeedTarget(TARGET.pid);
 
-    await state().addFeed(SOURCE.pid, TARGET.pid);
+    await state().applyRoute();
     expect(state().feeds[SOURCE.pid]).toBeUndefined();
     expect(state().rememberedFeeds).toEqual([]);
     expect(backend.feeds).toEqual([]);
 
-    // The same wire again, and this time it lands.
+    // The same press again, and this time it lands.
     backend.fail = () => false;
-    await state().addFeed(SOURCE.pid, TARGET.pid);
+    await state().applyRoute();
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
     const asks = backend.calls.filter((c) => c.cmd === 'set_feed_target');
     expect(asks).toHaveLength(2);
@@ -2763,6 +2813,24 @@ describe('feeds', () => {
     // Delivered: the pass a refresh provokes has nothing left to do here.
     await state().refreshSessions();
     expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(2);
+  });
+
+  it('keeps the plan tracking the live feeds until the user stages one of their own', async () => {
+    // The board can open before the memory arrives: the plan starts empty, and
+    // a restore landing afterwards must not read as a proposal waiting for the
+    // hub — a press on that hub would take down a feed the user never touched.
+    const backend = installBackend();
+    reset({ devices: [SPEAKERS, TV], sessions: [MUSIC, GAME], feedCarrier: backend.carrier });
+    state().selectProcess(MUSIC.pid);
+    expect(state().selectedFeedPids).toEqual([]);
+
+    backend.feeds = [['music.exe', 'game.exe']];
+    await state().loadFeeds();
+    // The restore rides the assignment queue behind the memory read.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
+    expect(state().selectedFeedPids).toEqual([GAME.pid]);
   });
 });
 

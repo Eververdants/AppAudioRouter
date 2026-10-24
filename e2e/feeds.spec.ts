@@ -16,13 +16,13 @@ import {
  * Sending one programme's audio into another's input — the "programme to
  * programme" half of 2.3.0.
  *
- * A feed is not a plan edit like a device route is: it pins an endpoint on each
- * end, so it connects the moment it is picked and the toast carries the way
- * back. What these specs hold the UI to is exactly that difference — plus the
- * honest states for the ways a recorded feed can be silent.
+ * A feed is a plan member like every destination: picking an input stages the
+ * amber row, and the hub — the same press that lands a device plan — connects
+ * it, and lands taking it back out. What these specs hold the UI to is that
+ * shape, plus the honest states for the ways a recorded feed can be silent.
  */
 
-/** Add one programme's input as a destination, through the dashed card. */
+/** Stage one programme's input onto the plan, through the dashed card. */
 async function addFeedTarget(page: import('@playwright/test').Page, process: string) {
   await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
   // Scoped to the menu: the change-primary picker can still be mid-exit when
@@ -39,6 +39,15 @@ test('a programme can be sent into another programmé’s input, and taken back'
 
   await addFeedTarget(page, 'game.exe');
 
+  // Staged, not connected: the plan holds the row, the backend has been asked
+  // for nothing, and the hub is the press that connects it.
+  await expect(feedRow(page, 1002)).toBeVisible();
+  await expect(feedRow(page, 1002)).toContainText('Send in');
+  expect(await callsFor(page, 'set_feed_target')).toHaveLength(0);
+  expect(await callsFor(page, 'apply_route')).toHaveLength(0);
+
+  await hub(page).click();
+
   const feeds = await callsFor(page, 'set_feed_target');
   expect(feeds).toHaveLength(1);
   expect(feeds[0]?.args).toMatchObject({
@@ -47,15 +56,14 @@ test('a programme can be sent into another programmé’s input, and taken back'
     targetPid: 1002,
     targetExe: 'game.exe',
   });
-
-  // The board says so without waiting for the hub: a feed connects at once.
-  await expect(feedRow(page, 1002)).toBeVisible();
   await expect(feedRow(page, 1002)).toContainText('Send in');
-  expect(await callsFor(page, 'apply_route')).toHaveLength(0);
-
-  // And the toast offers the way back, which is the whole of the undo a feed
-  // has — there is no hub press to reverse.
-  await page.getByRole('button', { name: 'Undo' }).click();
+  // No undo capsule rides the landing: the way back out is the same two beats
+  // the way in was — the ✕ stages the removal, the hub lands it.
+  await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+  await feedRow(page, 1002).getByRole('button').click();
+  expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
+  await expect(feedRow(page, 1002)).toHaveCount(0);
+  await hub(page).click();
   const removed = await callsFor(page, 'remove_feed_target');
   expect(removed).toHaveLength(1);
   expect(removed[0]?.args).toMatchObject({ sourcePid: 1001, targetPid: 1002 });
@@ -69,6 +77,7 @@ test('a feed with no carrier configured is recorded and says why it is silent', 
   await appRow(page, 'music.exe').click();
 
   await addFeedTarget(page, 'game.exe');
+  await hub(page).click();
 
   // Recorded: the rule is in the memory and on the board.
   expect(await callsFor(page, 'set_feed_target')).toHaveLength(1);
@@ -78,7 +87,7 @@ test('a feed with no carrier configured is recorded and says why it is silent', 
   await expect(feedRow(page, 1002)).toContainText('No carrier');
 });
 
-test('the wire a sibling process shows is its programme’s own, and its ✕ cuts it', async ({
+test('the wire a sibling process shows is its programme’s own, and its ✕ stages the way out', async ({
   page,
 }) => {
   await openApp(page, {
@@ -100,13 +109,17 @@ test('the wire a sibling process shows is its programme’s own, and its ✕ cut
 
   await feedRow(page, 1002).getByRole('button').click();
 
+  // Staged, not cut: the row leaves the plan at once, the wire the backend is
+  // still holding comes down when the hub lands it.
+  expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
+  await expect(feedRow(page, 1002)).toHaveCount(0);
+  await hub(page).click();
   const removed = await callsFor(page, 'remove_feed_target');
   expect(removed).toHaveLength(1);
   expect(removed[0]?.args).toMatchObject({ sourcePid: 1001, targetPid: 1002 });
-  await expect(feedRow(page, 1002)).toHaveCount(0);
 });
 
-test('a device route and a feed sit on the same board', async ({ page }) => {
+test('a device route and a feed land from the same press', async ({ page }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
 
@@ -119,9 +132,10 @@ test('a device route and a feed sit on the same board', async ({ page }) => {
   const applied = await callsFor(page, 'apply_route');
   expect(applied).toHaveLength(1);
   expect(applied[0]?.args.deviceIds).toEqual(['tv']);
-  // The feed was already connected — the hub lands the device plan, and does
-  // not touch the feed's own endpoints.
-  expect(await callsFor(page, 'set_feed_target')).toHaveLength(1);
+  // The feed landed with it — one press, both halves of the plan.
+  const feeds = await callsFor(page, 'set_feed_target');
+  expect(feeds).toHaveLength(1);
+  expect(feeds[0]?.args).toMatchObject({ sourcePid: 1001, targetPid: 1002 });
   await expect(feedRow(page, 1002)).toBeVisible();
 });
 
@@ -135,10 +149,16 @@ test('a feed moves sound beside a device route, and the route stops without it',
   await hub(page).click();
 
   await addFeedTarget(page, 'game.exe');
+  // A feeds-only press: the route already stands, so this one must not ask for
+  // it again — only the feed half of the plan moves.
+  await resetCalls(page);
+  await hub(page).click();
 
   // A feed is a second destination now: the programme keeps playing on the TV
   // while the engine writes the same audio into the carrier, so the card reads
   // as moving — the state a route used to make impossible.
+  expect(await callsFor(page, 'apply_route')).toHaveLength(0);
+  expect(await callsFor(page, 'set_feed_target')).toHaveLength(1);
   await expect(feedRow(page, 1002)).toContainText('Send in');
   expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
 

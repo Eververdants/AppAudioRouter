@@ -25,19 +25,12 @@ import { DELAY_STEP_STORAGE_KEY, clampDelay, clampStep, readDelayStep } from '@/
 import { rgbaToDataUrl } from '@/lib/icons';
 import * as api from '@/lib/invoke';
 import { programEntryOf } from '@/lib/routes';
+import { alreadyApplied, effectiveFallback } from '@/lib/stage';
 
 /** One executable's remembered feed rules: the programs its audio feeds into. */
 export interface RememberedFeedEntry {
   sourceExe: string;
   targetExe: string[];
-}
-
-/** The inverse offer a feed change leaves standing. */
-export interface FeedUndoOffer {
-  sourcePid: number;
-  targetPid: number;
-  /** True when the change was an add (undo removes it); false for a removal. */
-  added: boolean;
 }
 
 /** Where a feed rule stands right now.
@@ -99,6 +92,22 @@ interface RouterState {
    * until it is restored into a live route it is not where the process plays.
    */
   deviceSelectionPrefilled: boolean;
+  /**
+   * Programme inputs staged on the board — the feed plan, the way
+   * `selectedDeviceIds` is the device plan. Picking an input in the
+   * add-destination picker joins it here and lands nothing; the hub is what
+   * connects it, and the hub is also what lands taking it back out.
+   */
+  selectedFeedPids: number[];
+  /**
+   * Whether `selectedFeedPids` is still the app's own copy of the program's
+   * live feeds rather than something the user staged. While it stands, the
+   * subscription below keeps the plan tracking the live map — a restore landing
+   * at boot must not read as a proposal waiting for the hub, and pressing that
+   * hub would take down a feed the user never touched. The first staging
+   * freezes it, the same rule the device guess follows.
+   */
+  feedSelectionPrefilled: boolean;
   /** Devices each process is currently routed to, keyed by PID. */
   routedPids: Record<number, string[]>;
   /**
@@ -205,8 +214,6 @@ interface RouterState {
   feedTapFailures: Record<string, string>;
   /** Recording endpoints, for the carrier picker in settings. */
   captureDevices: AudioDevice[];
-  /** The last feed change that can still be undone, while the offer stands. */
-  feedUndo: FeedUndoOffer | null;
   /** Whether the close button hides the window to the tray instead of quitting. */
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
@@ -272,19 +279,17 @@ interface RouterState {
   setFeedCarrier: (render: string | null, capture: string | null) => Promise<void>;
   /** Read the recording endpoints for the carrier picker. */
   loadCaptureDevices: () => Promise<void>;
-  /** Send one program's audio into another's input. Immediate (no hub apply):
-   * the inverse offer rides the feed toast. */
+  /** Land one feed rule: record it in the memory, pin the endpoints the carrier
+   *  can carry, and log the pair's honest outcome. The landing primitive the
+   *  hub's apply drives for every planned feed — never called on a pick. */
   addFeed: (sourcePid: number, targetPid: number) => Promise<void>;
-  /** Take one feed rule back. */
+  /** Take one landed feed rule down: unrecord it, release the target's side,
+   *  and leave the source's own output untouched. */
   removeFeed: (sourcePid: number, targetPid: number) => Promise<void>;
   /** Put every remembered feed whose two ends are live back on. Like the
    * device-route restore, it waits for the lists and the memory; whichever of
    * the three lands last calls it. */
   restoreRememberedFeeds: () => Promise<void>;
-  /** Invert the last feed change without leaving a new offer. */
-  undoFeed: () => Promise<void>;
-  /** Drop the feed offer without acting on it. */
-  dismissFeedUndo: () => void;
   /** Fold one Core Audio change notification into the UI: refresh whatever moved
    * and quietly, since the user did not ask for this. */
   syncFromNotification: (changed: AudioChangedEvent) => Promise<void>;
@@ -300,6 +305,16 @@ interface RouterState {
    * copy; who sits first is the plan order's to say, and the seat only moves
    * when the user asks for it. */
   appendDeviceTarget: (deviceId: string) => void;
+  /** Stage one programme input on the board's feed plan — the add-destination
+   *  picker's feed verb. A plan edit and nothing else: the row and its wire
+   *  appear as a proposal, and the hub is what connects it, exactly as for a
+   *  device. Stored under the target program's lowest pid, the same address the
+   *  live map speaks, so a staged sibling never reads as a different feed. */
+  appendFeedTarget: (targetPid: number) => void;
+  /** Take one staged feed off the plan. For a landed feed this is the first
+   *  half of its way out — the hub lands the disconnect, the way it landed the
+   *  connection. */
+  dropFeedTarget: (targetPid: number) => void;
   /** Make `deviceId` the seat the system plays directly. A device already in
    * the plan is moved to the front (its role swaps with the old primary and the
    * plan keeps every member); one that is not replaces the primary, leaving the
@@ -516,6 +531,18 @@ function selectionTargets(
   const owner = programEntryOf(state.sessions, state.routedPids, pid);
   const routed = owner !== undefined ? state.routedPids[owner] : undefined;
   return routed ?? defaultTargets(state);
+}
+
+/**
+ * The live feed targets of the program `pid` belongs to, as the feeds map holds
+ * them — the answer the feed plan is prefilled with, and what the prefilled
+ * plan keeps tracking. Like `selectionTargets`, it resolves through the
+ * program's holder: the map is keyed by the lowest pid, and the board can be
+ * open on any sibling.
+ */
+function feedTargetsOf(state: Pick<RouterState, 'sessions' | 'feeds'>, pid: number): number[] {
+  const owner = programEntryOf(state.sessions, state.feeds, pid);
+  return owner === undefined ? [] : [...(state.feeds[owner] ?? [])];
 }
 
 /**
@@ -990,6 +1017,8 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   selectedPids: [],
   selectedDeviceIds: [],
   deviceSelectionPrefilled: false,
+  selectedFeedPids: [],
+  feedSelectionPrefilled: false,
   routedPids: {},
   deviceLatencyMs: {},
   defaultDeviceId: null,
@@ -1008,7 +1037,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   feedCarrier: { render: null, capture: null },
   feedTapFailures: {},
   captureDevices: [],
-  feedUndo: null,
   closeToTray: false,
   autostart: false,
   startupNotice: null,
@@ -1267,6 +1295,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // not something the user asked for yet — and it stays derived: the
       // subscription below keeps it tracking the route and the default.
       deviceSelectionPrefilled: true,
+      // The feed plan is the same kind of guess: the program's live feeds until
+      // the user stages one of their own, tracked by the same subscription.
+      selectedFeedPids: feedTargetsOf(s, pid),
+      feedSelectionPrefilled: true,
     })),
 
   toggleProcessSelection: (pid) =>
@@ -1278,7 +1310,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // when the last process was deselected. Either way the target list is no
       // longer one process's prefilled guess.
       const selectedDeviceIds = selectedPids.length === 0 ? [] : s.selectedDeviceIds;
-      return { selectedPids, selectedDeviceIds, deviceSelectionPrefilled: false };
+      // The feed plan is not shared — it belongs to the programme the board
+      // draws — so it survives a multi-selection and only leaves with the last
+      // one. The prefill flag is left as it stands: the board keeps showing the
+      // first process's plan either way.
+      const selectedFeedPids = selectedPids.length === 0 ? [] : s.selectedFeedPids;
+      return {
+        selectedPids,
+        selectedDeviceIds,
+        deviceSelectionPrefilled: false,
+        selectedFeedPids,
+      };
     }),
 
   toggleDeviceSelection: (deviceId) => {
@@ -1317,6 +1359,35 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     set({
       deviceSelectionPrefilled: false,
       selectedDeviceIds: [...selectedDeviceIds, deviceId],
+    });
+  },
+
+  appendFeedTarget: (targetPid) => {
+    const { sessions, selectedPids, selectedFeedPids } = get();
+    const pid = selectedPids[0];
+    const source = sessions.find((s) => s.pid === pid);
+    const target = sessions.find((s) => s.pid === targetPid);
+    // A feed into the program itself is not a state this app offers, and a
+    // target that has left the list has nothing to arrive at.
+    if (source === undefined || target === undefined) return;
+    if (source.exe_name.toLowerCase() === target.exe_name.toLowerCase()) return;
+    // The plan speaks the address the live map speaks — the program's lowest
+    // pid. Storing the sibling the picker happened to offer would make the same
+    // rule read as two, and the hub would never stop asking to apply it.
+    const canonical = lowestPidByExe(sessions).get(target.exe_name.toLowerCase()) ?? targetPid;
+    if (selectedFeedPids.includes(canonical)) return;
+    set({
+      selectedFeedPids: [...selectedFeedPids, canonical],
+      feedSelectionPrefilled: false,
+    });
+  },
+
+  dropFeedTarget: (targetPid) => {
+    const { selectedFeedPids } = get();
+    if (!selectedFeedPids.includes(targetPid)) return;
+    set({
+      selectedFeedPids: selectedFeedPids.filter((pid) => pid !== targetPid),
+      feedSelectionPrefilled: false,
     });
   },
 
@@ -1507,7 +1578,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         else entry.targetExe.push(targetExe);
       }
       const rememberedFeeds = [...grouped.values()];
-      set({ rememberedFeeds, feeds: deriveFeeds(rememberedFeeds, get().sessions) });
+      set({
+        rememberedFeeds,
+        feeds: deriveFeeds(rememberedFeeds, get().sessions),
+      });
     } catch (e) {
       get().addLog(i18next.t('log.feedsLoadFailed', { error: String(e) }), 'error');
       return;
@@ -1573,14 +1647,16 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // a sibling process, so an add kept under that pid would give one rule two
     // addresses in one run: the ✕ addressed by the sibling finds nothing in the
     // map and does nothing, and the next refresh moves the wire to the lowest
-    // pid anyway. Pin, remember and undo all use the address the refresh uses.
+    // pid anyway. Pin, remember and restore all use the address the refresh
+    // uses.
     const pidByExe = lowestPidByExe(sessions);
     const canonicalSource = pidByExe.get(source.exe_name.toLowerCase()) ?? sourcePid;
     const canonicalTarget = pidByExe.get(target.exe_name.toLowerCase()) ?? targetPid;
     if (canonicalSource === canonicalTarget) return;
     if ((feeds[canonicalSource] ?? []).includes(canonicalTarget)) return;
-    // Optimistic, like every other immediate change: the board shows the wire
-    // now, the backend records the rule and pins whatever endpoints it can.
+    // The board has shown this pair since the user staged it; landing records
+    // the rule in the memory and puts the wire into the live map, where the
+    // three-state word and the moving dashes read it.
     set((s) => ({
       feeds: {
         ...s.feeds,
@@ -1592,7 +1668,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         target.exe_name,
         true,
       ),
-      feedUndo: { sourcePid: canonicalSource, targetPid: canonicalTarget, added: true },
     }));
     // Claimed *before* the ask, like the restore's own attempts: the pinning
     // itself is a Core Audio change, and the refresh it provokes runs the feed
@@ -1652,7 +1727,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
             target.exe_name,
             false,
           ),
-          feedUndo: null,
         };
       });
       get().raiseError(i18next.t('log.feedSetFailed', { error: String(e) }), {
@@ -1698,7 +1772,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           source !== undefined && target !== undefined
             ? rememberFeedTargets(s.rememberedFeeds, source.exe_name, target.exe_name, false)
             : s.rememberedFeeds,
-        feedUndo: { sourcePid: canonicalSource, targetPid: canonicalTarget, added: false },
       };
     });
     try {
@@ -1742,7 +1815,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
                   memoryIndex,
                 )
               : s.rememberedFeeds,
-          feedUndo: null,
         };
       });
       get().raiseError(i18next.t('log.feedRemoveFailed', { error: String(e) }), {
@@ -1826,21 +1898,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       return { feeds: nextFeeds, feedTapFailures };
     });
   },
-
-  undoFeed: async () => {
-    const offer = get().feedUndo;
-    if (offer === null) return;
-    // Consumed first, like the route undo: the inverse action below must not
-    // open its own offer on top of the one being used.
-    set({ feedUndo: null });
-    if (offer.added) await get().removeFeed(offer.sourcePid, offer.targetPid);
-    else await get().addFeed(offer.sourcePid, offer.targetPid);
-    // Either inverse re-opens an offer of its own; this was the undo, so the
-    // chain stops here.
-    set({ feedUndo: null });
-  },
-
-  dismissFeedUndo: () => set({ feedUndo: null }),
 
   loadShellSettings: async () => {
     // Both come from the native side: the close-to-tray preference sits with the
@@ -1935,10 +1992,32 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // targets. Let the first one land, then start from fresh state.
     if (get().applying) return;
     set({ applying: true });
-    const { selectedPids, selectedDeviceIds, autoRemember, sessions } = get();
-    if (selectedPids.length === 0 || selectedDeviceIds.length === 0) {
+    const { selectedPids, selectedDeviceIds, selectedFeedPids, autoRemember, sessions } = get();
+    // One press can land two plans, and each half moves only when it differs
+    // from the truth: the devices when the staged list is not what every
+    // selected program already plays through, the feeds when the staged inputs
+    // are not the hub program's live map. A feeds-only press must not write a
+    // route nobody staged — an unrouted program pressed for a feed alone stays
+    // unrouted, the same courtesy `alreadyApplied` grants a plan that only
+    // names what the program already plays.
+    const devicesDirty =
+      selectedDeviceIds.length > 0 &&
+      !alreadyApplied(
+        selectedDeviceIds,
+        selectedPids,
+        get().routedPids,
+        effectiveFallback(get().defaultDeviceId, get().devices),
+      );
+    const hubPid = selectedPids[0];
+    const feedOwner =
+      hubPid !== undefined ? programEntryOf(sessions, get().feeds, hubPid) : undefined;
+    const liveFeeds = feedOwner === undefined ? [] : (get().feeds[feedOwner] ?? []);
+    const feedsDirty =
+      selectedFeedPids.some((target) => !liveFeeds.includes(target)) ||
+      liveFeeds.some((target) => !selectedFeedPids.includes(target));
+    if (selectedPids.length === 0 || (!devicesDirty && !feedsDirty)) {
       set({ applying: false });
-      get().addLog(i18next.t('log.selectProcessAndDevice'), 'error');
+      if (selectedPids.length === 0) get().addLog(i18next.t('log.selectProcessAndDevice'), 'error');
       return;
     }
     // A program that already holds a route keeps it under the pid that owns
@@ -1984,128 +2063,172 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       };
     });
     try {
-      // One invoke per process, all of them in flight together: the backend
-      // routes each PID on its own, so awaiting them in a loop simply added
-      // their latencies up — a ten-process selection cost ten times one.
-      const results = await Promise.allSettled(
-        targets.map((target) =>
-          get().routeOne(
-            target.pid,
-            target.exeName,
-            ordered,
-            autoRemember && isRememberableName(target.exeName),
+      // The device half moves only when the staged plan differs from the truth
+      // (`devicesDirty`); a press that only lands feeds skips all of it.
+      if (devicesDirty) {
+        // One invoke per process, all of them in flight together: the backend
+        // routes each PID on its own, so awaiting them in a loop simply added
+        // their latencies up — a ten-process selection cost ten times one.
+        const results = await Promise.allSettled(
+          targets.map((target) =>
+            get().routeOne(
+              target.pid,
+              target.exeName,
+              ordered,
+              autoRemember && isRememberableName(target.exeName),
+            ),
           ),
-        ),
-      );
-      const applied: { pid: number; exeName: string; generation: number }[] = [];
-      const errors: string[] = [];
-      results.forEach((result, index) => {
-        const target = targets[index];
-        if (target === undefined) return;
-        if (result.status === 'fulfilled') {
-          applied.push({ ...target, generation: result.value });
-        } else {
-          errors.push(String(result.reason));
-        }
-      });
-      if (applied.length === 0) {
-        get().raiseError(i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }), {
-          detail: errors[0],
+        );
+        const applied: { pid: number; exeName: string; generation: number }[] = [];
+        const errors: string[] = [];
+        results.forEach((result, index) => {
+          const target = targets[index];
+          if (target === undefined) return;
+          if (result.status === 'fulfilled') {
+            applied.push({ ...target, generation: result.value });
+          } else {
+            errors.push(String(result.reason));
+          }
         });
-        // Every apply tears the selection's old engines down before it starts
-        // new ones, so a rejected re-route has left the backend with no engine
-        // for these pids while the badges above may still carry the old route.
-        // Rebuilding from the live engines retires them — the same pass a
-        // partial failure gets below.
-        await get().reconcileActiveDuplications();
-        return;
+        if (applied.length === 0) {
+          get().raiseError(i18next.t('log.routeFailed', { error: errors[0] ?? 'unknown error' }), {
+            detail: errors[0],
+          });
+          // Every apply tears the selection's old engines down before it starts
+          // new ones, so a rejected re-route has left the backend with no engine
+          // for these pids while the badges above may still carry the old route.
+          // Rebuilding from the live engines retires them — the same pass a
+          // partial failure gets below. The feeds the same press asked for land
+          // either way; each half of the press reports its own outcome.
+          await get().reconcileActiveDuplications();
+        } else {
+          // What the offer to undo will cover: the programs this route was actually
+          // accepted for, not every process that was selected.
+          const accepted = new Set(applied.map((t) => t.pid));
+          // Only the processes the backend actually accepted keep a badge, an engine
+          // identity and a memory; a partial apply must not claim the rest. One
+          // `set` for the whole batch, so the stage repaints once.
+          set((s) => ({
+            routedPids: {
+              ...s.routedPids,
+              ...Object.fromEntries(applied.map((t) => [t.pid, [...ordered]])),
+            },
+            selectedDeviceIds: ordered,
+            // What was applied is the route now, and the plan goes back to tracking
+            // it: a device returning to the list, a route the backend reports
+            // differently, and the board redraws with them instead of keeping the
+            // moment of the apply frozen on screen. The user's own staging is the
+            // only thing that freezes it again.
+            deviceSelectionPrefilled: true,
+            // Mirrored locally so a program that plays again in this same session is
+            // restored from what was just written, not from the boot-time copy.
+            rememberedRoutes: autoRemember
+              ? rememberTargets(
+                  s.rememberedRoutes,
+                  applied.map((t) => t.exeName).filter(isRememberableName),
+                  ordered,
+                )
+              : s.rememberedRoutes,
+            engineGenerations: {
+              ...s.engineGenerations,
+              ...Object.fromEntries(applied.map((t) => [t.pid, t.generation])),
+            },
+            // This route is now what there is to undo, and it covers exactly the
+            // programs it was accepted for — a previous offer is dropped with it.
+            // The device it sent audio to rides along so the offer can name it.
+            undoSnapshot: {
+              entries: replaced.filter((entry) => accepted.has(entry.pid)),
+              remembered: autoRemember,
+              deviceName: primary ?? '',
+              deviceCount: ordered.length,
+            },
+          }));
+          const count = applied.length;
+          // Both counts say something: how many programs went, and how many devices
+          // each of them got. A route to three devices is not "routed to Speakers"
+          // just because only one program was selected — the two copies are the
+          // part worth reading about.
+          const key =
+            count > 1
+              ? autoRemember
+                ? 'log.routedMultiProcessRemembered'
+                : 'log.routedMultiProcess'
+              : extra > 0
+                ? autoRemember
+                  ? 'log.routedMultiRemembered'
+                  : 'log.routedMulti'
+                : autoRemember
+                  ? 'log.routedRemembered'
+                  : 'log.routed';
+          get().addLog(
+            i18next.t(key, {
+              n: count,
+              process: applied[0]?.exeName ?? '',
+              device: primary,
+              m: extra,
+            }),
+            'success',
+          );
+          if (errors.length > 0) {
+            get().raiseError(
+              i18next.t('log.routePartiallyFailed', {
+                ok: count,
+                n: targets.length,
+                error: errors[0],
+              }),
+            );
+          }
+          // The route is in effect and the 自动记忆 switch is on, so one of them did
+          // not happen — say which and why, or the next launch looks like the switch
+          // was ignored. Only reached for a process this app cannot open a file name
+          // for, which is rare enough that a line in the log is the right cost.
+          const skipped = applied.map((t) => t.exeName).filter((name) => !isRememberableName(name));
+          if (autoRemember && skipped.length > 0) {
+            get().addLog(i18next.t('log.notRememberable', { process: skipped.join(', ') }), 'info');
+          }
+          // The engines are up now, and this is the only pass that asks each of them
+          // how far behind its device plays. The badges above say what was applied;
+          // this is what makes the readings appear with the route instead of waiting
+          // for the next route, or for Core Audio to move.
+          await get().reconcileActiveDuplications();
+        }
       }
 
-      // What the offer to undo will cover: the programs this route was actually
-      // accepted for, not every process that was selected.
-      const accepted = new Set(applied.map((t) => t.pid));
-      // Only the processes the backend actually accepted keep a badge, an engine
-      // identity and a memory; a partial apply must not claim the rest. One
-      // `set` for the whole batch, so the stage repaints once.
-      set((s) => ({
-        routedPids: {
-          ...s.routedPids,
-          ...Object.fromEntries(applied.map((t) => [t.pid, [...ordered]])),
-        },
-        selectedDeviceIds: ordered,
-        // What was applied is the route now, and the plan goes back to tracking
-        // it: a device returning to the list, a route the backend reports
-        // differently, and the board redraws with them instead of keeping the
-        // moment of the apply frozen on screen. The user's own staging is the
-        // only thing that freezes it again.
-        deviceSelectionPrefilled: true,
-        // Mirrored locally so a program that plays again in this same session is
-        // restored from what was just written, not from the boot-time copy.
-        rememberedRoutes: autoRemember
-          ? rememberTargets(
-              s.rememberedRoutes,
-              applied.map((t) => t.exeName).filter(isRememberableName),
-              ordered,
+      // The feed half: the staged inputs go up, the live ones the plan dropped
+      // come down — through the same primitives every landing uses, so the
+      // memory, the restore claims and the honest three states stay in one
+      // place. Only the board's own programme feeds here: a multi-selection
+      // shares the device plan, never the feed plan.
+      const hubSession = hubPid === undefined ? undefined : sessions.find((s) => s.pid === hubPid);
+      if (hubPid !== undefined && hubSession !== undefined && feedsDirty) {
+        const sourcePid = lowestPidByExe(sessions).get(hubSession.exe_name.toLowerCase()) ?? hubPid;
+        // A staged input whose process has left cannot land; saying so beats a
+        // press that quietly did nothing, and the rest of the plan goes through.
+        if (selectedFeedPids.some((target) => !sessions.some((s) => s.pid === target))) {
+          get().raiseError(i18next.t('log.processGone'));
+        }
+        await Promise.allSettled([
+          ...selectedFeedPids
+            .filter(
+              (target) => !liveFeeds.includes(target) && sessions.some((s) => s.pid === target),
             )
-          : s.rememberedRoutes,
-        engineGenerations: {
-          ...s.engineGenerations,
-          ...Object.fromEntries(applied.map((t) => [t.pid, t.generation])),
-        },
-        // This route is now what there is to undo, and it covers exactly the
-        // programs it was accepted for — a previous offer is dropped with it.
-        // The device it sent audio to rides along so the offer can name it.
-        undoSnapshot: {
-          entries: replaced.filter((entry) => accepted.has(entry.pid)),
-          remembered: autoRemember,
-          deviceName: primary ?? '',
-          deviceCount: ordered.length,
-        },
-      }));
-      const count = applied.length;
-      // Both counts say something: how many programs went, and how many devices
-      // each of them got. A route to three devices is not "routed to Speakers"
-      // just because only one program was selected — the two copies are the
-      // part worth reading about.
-      const key =
-        count > 1
-          ? autoRemember
-            ? 'log.routedMultiProcessRemembered'
-            : 'log.routedMultiProcess'
-          : extra > 0
-            ? autoRemember
-              ? 'log.routedMultiRemembered'
-              : 'log.routedMulti'
-            : autoRemember
-              ? 'log.routedRemembered'
-              : 'log.routed';
-      get().addLog(
-        i18next.t(key, {
-          n: count,
-          process: applied[0]?.exeName ?? '',
-          device: primary,
-          m: extra,
-        }),
-        'success',
-      );
-      if (errors.length > 0) {
-        get().raiseError(
-          i18next.t('log.routePartiallyFailed', { ok: count, n: targets.length, error: errors[0] }),
-        );
+            .map((target) => get().addFeed(sourcePid, target)),
+          ...liveFeeds
+            .filter((target) => !selectedFeedPids.includes(target))
+            .map((target) => get().removeFeed(sourcePid, target)),
+        ]);
+        // What landed is the plan now, and the staged list goes back to tracking
+        // the live map — but only when all of it landed. A pair the backend
+        // refused leaves the plan frozen exactly as staged, so the hub keeps
+        // asking and the next press retries precisely what failed.
+        const liveNow = feedTargetsOf(get(), hubPid);
+        if (
+          selectedFeedPids.every((target) => liveNow.includes(target)) &&
+          liveNow.every((target) => selectedFeedPids.includes(target))
+        ) {
+          set({ feedSelectionPrefilled: true });
+        }
       }
-      // The route is in effect and the 自动记忆 switch is on, so one of them did
-      // not happen — say which and why, or the next launch looks like the switch
-      // was ignored. Only reached for a process this app cannot open a file name
-      // for, which is rare enough that a line in the log is the right cost.
-      const skipped = applied.map((t) => t.exeName).filter((name) => !isRememberableName(name));
-      if (autoRemember && skipped.length > 0) {
-        get().addLog(i18next.t('log.notRememberable', { process: skipped.join(', ') }), 'info');
-      }
-      // The engines are up now, and this is the only pass that asks each of them
-      // how far behind its device plays. The badges above say what was applied;
-      // this is what makes the readings appear with the route instead of waiting
-      // for the next route, or for Core Audio to move.
-      await get().reconcileActiveDuplications();
     } catch (e) {
       get().raiseError(i18next.t('log.routeFailed', { error: String(e) }), {
         detail: String(e),
@@ -3146,4 +3269,38 @@ useRouterStore.subscribe((state, previous) => {
     return;
   }
   useRouterStore.setState({ selectedDeviceIds: desired });
+});
+
+/**
+ * The staged feeds are derived state while the user stages nothing of their
+ * own, for the same reason the device plan is: a restore landing at boot, a
+ * process leaving the list, a rule the backend took down — the plan has to read
+ * what the live map holds, or a wire that is already up reads as a proposal
+ * waiting for the hub, and pressing that hub would take down a feed the user
+ * never touched. Unlike the device plan, the feed plan belongs to the one
+ * programme the board draws even in a multi-selection, so there is no
+ * single-selection guard here. The user's own staging
+ * (`feedSelectionPrefilled` false) freezes it, and a landing that refused a
+ * pair keeps it frozen — the hub stays honest about what has not landed.
+ */
+useRouterStore.subscribe((state, previous) => {
+  if (!state.feedSelectionPrefilled) return;
+  const pid = state.selectedPids[0];
+  if (pid === undefined) return;
+  if (
+    state.feeds === previous.feeds &&
+    state.sessions === previous.sessions &&
+    state.selectedPids === previous.selectedPids
+  ) {
+    return;
+  }
+  const desired = feedTargetsOf(state, pid);
+  const current = state.selectedFeedPids;
+  if (
+    desired.length === current.length &&
+    desired.every((target, index) => target === current[index])
+  ) {
+    return;
+  }
+  useRouterStore.setState({ selectedFeedPids: desired });
 });

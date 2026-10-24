@@ -112,7 +112,8 @@
     "feedTitleLive": "This program's audio feeds {{name}}'s input while it keeps playing on its own devices",
     "feedTitleSuspended": "Paused: the stream into the carrier stopped; set the feed again to put it back",
     "feedTitleNoCarrier": "Not moving: no carrier set — pick a loopback pair in Settings → Feed carrier",
-    "removeFeed": "Stop feeding {{name}}",
+    "feedTitlePlanned": "In the plan: this program's audio will feed {{name}}'s input once the hub is clicked",
+    "removeFeed": "Take down the feed into {{name}}",
     "feederTitle": "Open this program's board",
     "feederAria": "{{process}} feeds into {{target}}",
     "feederSub": "feeds into {{target}}",
@@ -301,9 +302,7 @@
     "routedManyMore": "{{n}} apps → {{device}} +{{m}}",
     "undo": "Undo",
     "dismiss": "Dismiss",
-    "openLog": "See the record",
-    "feedAdded": "{{source}} → {{target}} (input)",
-    "feedRemoved": "Feed to {{target}} removed"
+    "openLog": "See the record"
   },
   "log": {
     "deviceRefreshed": "Device list refreshed ({{n}})",
@@ -311,7 +310,7 @@
     "defaultDeviceFailed": "Failed to read the system default playback device: {{error}}",
     "sessionsRefreshed": "Session list refreshed ({{n}})",
     "sessionsRefreshFailed": "Session refresh failed: {{error}}",
-    "selectProcessAndDevice": "Select a process and at least one device first",
+    "selectProcessAndDevice": "Select a program first",
     "processGone": "Selected process no longer exists",
     "routed": "Routed {{process}} to {{device}}",
     "routedRemembered": "Routed {{process}} to {{device}} (remembered)",

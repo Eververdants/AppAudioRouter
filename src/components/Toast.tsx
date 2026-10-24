@@ -15,7 +15,9 @@ const TOAST_DISMISS_MS = 8000;
  * it is a click that takes over programs the user may not have meant to move —
  * several at once when they were multi-selected, and onto every selected
  * device. This is the way back, on screen for as long as the mistake is still
- * fresh.
+ * fresh. Feeds have no card here on purpose: they land through the hub like
+ * every other plan edit, and the hub lands their way back out too — a second
+ * way back beside it would be one more thing standing in the way.
  *
  * And the notice that something the user just asked for did not happen. Every
  * failure used to land only in the activity log — the third tab, the one
@@ -33,34 +35,24 @@ export function Toast() {
   const snapshot = useRouterStore((s) => s.undoSnapshot);
   const undoLastRoute = useRouterStore((s) => s.undoLastRoute);
   const dismissUndo = useRouterStore((s) => s.dismissUndo);
-  const feedUndo = useRouterStore((s) => s.feedUndo);
-  const undoFeed = useRouterStore((s) => s.undoFeed);
-  const dismissFeedUndo = useRouterStore((s) => s.dismissFeedUndo);
   const errorNotice = useRouterStore((s) => s.errorNotice);
   const dismissError = useRouterStore((s) => s.dismissError);
   const setTab = useRouterStore((s) => s.setTab);
   // Held while the pointer or the keyboard is on *that* card, so a user reaching
   // for the button does not have it taken away mid-reach. Which card is held,
-  // not whether one is: two offers can stand at once, and freezing both
+  // not whether one is: two cards can stand at once, and freezing both
   // countdowns because the cursor is on one of them pauses the other's question
   // indefinitely.
-  const [held, setHeld] = useState<'route' | 'feed' | 'error' | null>(null);
+  const [held, setHeld] = useState<'route' | 'error' | null>(null);
 
   // Keyed on the snapshot itself, not on it being non-null: a route applied
   // while the offer is still standing replaces it, and the countdown starts over
-  // rather than expiring under a question that has just changed. The feed offer
-  // runs its own timer on the same rule.
+  // rather than expiring under a question that has just changed.
   useEffect(() => {
     if (snapshot === null || held === 'route') return;
     const timer = window.setTimeout(() => dismissUndo(), TOAST_DISMISS_MS);
     return () => window.clearTimeout(timer);
   }, [snapshot, held, dismissUndo]);
-
-  useEffect(() => {
-    if (feedUndo === null || held === 'feed') return;
-    const timer = window.setTimeout(() => dismissFeedUndo(), TOAST_DISMISS_MS);
-    return () => window.clearTimeout(timer);
-  }, [feedUndo, held, dismissFeedUndo]);
 
   useEffect(() => {
     if (errorNotice === null || held === 'error') return;
@@ -81,19 +73,11 @@ export function Toast() {
   // that fails in several places still raises one card: the store batches it
   // (`beginErrorBatch` / `endErrorBatch`) while every failure writes its own log
   // line as it happens. Stacking them here would re-create the pile-up the batch
-  // replaced, with only the last one left standing. Same reasoning for the feed
-  // offer, whose key changes when the pair or the direction does.
+  // replaced, with only the last one left standing.
   const errorId = errorNotice?.id ?? null;
-  const feedKey =
-    feedUndo === null
-      ? null
-      : `${feedUndo.added ? 'add' : 'remove'}:${feedUndo.sourcePid}:${feedUndo.targetPid}`;
   useEffect(() => {
     setHeld((current) => (current === 'error' ? null : current));
   }, [errorId]);
-  useEffect(() => {
-    setHeld((current) => (current === 'feed' ? null : current));
-  }, [feedKey]);
 
   useEffect(() => {
     // A card that is gone cannot report the pointer leaving it: an offer that
@@ -105,15 +89,11 @@ export function Toast() {
   }, [snapshot, held]);
 
   useEffect(() => {
-    if (feedUndo === null && held === 'feed') setHeld(null);
-  }, [feedUndo, held]);
-
-  useEffect(() => {
     if (errorNotice === null && held === 'error') setHeld(null);
   }, [errorNotice, held]);
 
   useEffect(() => {
-    if (snapshot === null && feedUndo === null && errorNotice === null) return;
+    if (snapshot === null && errorNotice === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       // Escape belongs to the field that has the focus first. Clearing the
@@ -122,35 +102,23 @@ export function Toast() {
       // the one offer that could still undo the route.
       if (isEditableTarget(event.target)) return;
       dismissUndo();
-      dismissFeedUndo();
       dismissError();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [snapshot, feedUndo, errorNotice, dismissUndo, dismissFeedUndo, dismissError]);
+  }, [snapshot, errorNotice, dismissUndo, dismissError]);
 
   const entries = snapshot?.entries ?? [];
   const only = entries[0];
-  const sessions = useRouterStore((s) => s.sessions);
-  const feedSource =
-    feedUndo !== null
-      ? (sessions.find((s) => s.pid === feedUndo.sourcePid)?.display_name ??
-        sessions.find((s) => s.pid === feedUndo.sourcePid)?.exe_name)
-      : undefined;
-  const feedTarget =
-    feedUndo !== null
-      ? (sessions.find((s) => s.pid === feedUndo.targetPid)?.display_name ??
-        sessions.find((s) => s.pid === feedUndo.targetPid)?.exe_name)
-      : undefined;
 
   return (
     // The layer spans the bottom of the window but takes no pointer events: only
     // the cards themselves are clickable, so whatever is behind it stays usable.
-    // Two offers can stand at once (a route and a feed); they stack.
+    // Two cards can stand at once (a route undo and an error); they stack.
     // Anchored above the standing chrome rather than under it: the tuning
     // strip takes the bottom band, the routed capsule sits 56px up, and a
     // toast at the very bottom covered whichever of them was on screen. A
-    // stack of three rises away from the board instead of over it.
+    // stack of two rises away from the board instead of over it.
     <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex flex-col items-center justify-center gap-2 px-4">
       <AnimatePresence>
         {errorNotice !== null && (
@@ -167,7 +135,7 @@ export function Toast() {
             className="pointer-events-auto flex max-w-[440px] items-start gap-2.5 rounded-card border border-error/50 bg-surface py-2 pl-4 pr-1.5"
           >
             {/* A dot in the failure's own colour leads the sentence: the undo
-                cards ask a question, this one reports, and the difference has to
+                card asks a question, this one reports, and the difference has to
                 read before the words are parsed. */}
             <span
               aria-hidden="true"
@@ -214,42 +182,6 @@ export function Toast() {
                 ✕
               </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {feedUndo !== null && feedSource !== undefined && feedTarget !== undefined && (
-          <motion.div
-            key={`feed-toast-${feedUndo.added ? 'add' : 'remove'}-${feedUndo.sourcePid}-${feedUndo.targetPid}`}
-            role="status"
-            aria-live="polite"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0, pointerEvents: 'auto' }}
-            exit={{ opacity: 0, y: 8, pointerEvents: 'none' }}
-            transition={{ opacity: FADE, y: SPRING_GLIDE }}
-            transformTemplate={MAIN_THREAD_TRANSFORM}
-            onPointerEnter={() => setHeld('feed')}
-            onPointerLeave={() => setHeld((current) => (current === 'feed' ? null : current))}
-            onFocus={() => setHeld('feed')}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setHeld((current) => (current === 'feed' ? null : current));
-              }
-            }}
-            className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-surface py-2 pl-4 pr-2"
-          >
-            <span className="text-[12px] text-text-secondary">
-              {feedUndo.added
-                ? t('toast.feedAdded', { source: feedSource, target: feedTarget })
-                : t('toast.feedRemoved', { source: feedSource, target: feedTarget })}
-            </span>
-            <button
-              type="button"
-              onClick={() => void undoFeed()}
-              className="pressable shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold text-accent outline-none hover:bg-accent-muted focus-visible:ring-2 focus-visible:ring-accent/60"
-            >
-              {t('toast.undo')}
-            </button>
           </motion.div>
         )}
       </AnimatePresence>
