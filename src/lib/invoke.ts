@@ -32,6 +32,12 @@ export async function listSessions(): Promise<AudioSession[]> {
   return invoke<AudioSession[]>('list_sessions');
 }
 
+/** Every running app a person could name (a visible window, one entry per
+ * executable) — feed-target candidates beyond the audio-session list. */
+export async function listWindowApps(): Promise<AudioSession[]> {
+  return invoke<AudioSession[]>('list_window_apps');
+}
+
 /** One process's executable icon as raw RGBA, or null when the process is
  * gone or its file carries no icon (the backend caches per executable). */
 export async function getProcessIcon(pid: number): Promise<ProcessIcon | null> {

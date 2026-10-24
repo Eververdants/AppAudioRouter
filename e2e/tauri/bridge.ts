@@ -50,6 +50,9 @@ export interface BridgeState {
   feedCarrier: { render: string | null; capture: string | null };
   /** `(source_exe, target_exe)` — the remembered feed rules. */
   feeds: [string, string][];
+  /** Running apps with a visible window but no audio session — the feed
+   *  picker's second tier, answered by `list_window_apps`. */
+  windowApps: BridgeSession[];
 }
 
 /** Commands the fake backend should reject, by name. */
@@ -526,6 +529,8 @@ function tauriBridge(initial: BridgeState): void {
         return null;
       case 'list_feeds':
         return state.feeds;
+      case 'list_window_apps':
+        return state.windowApps;
       case 'set_feed_target': {
         const sourceExe = payload.sourceExe as string;
         const targetExe = payload.targetExe as string;
@@ -796,4 +801,5 @@ export const DEFAULT_STATE: BridgeState = {
   // have to walk through settings first; the carrier's own specs override it.
   feedCarrier: { render: 'cable-in', capture: 'cable-out' },
   feeds: [],
+  windowApps: [],
 };

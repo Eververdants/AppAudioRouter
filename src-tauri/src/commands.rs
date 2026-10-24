@@ -138,6 +138,20 @@ pub async fn list_sessions() -> Result<Vec<audio::AudioSession>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// List every running app a person could name (a visible window, one entry per
+/// executable), as feed-target candidates beyond the audio-session list.
+///
+/// Read-only and cheap; the frontend asks at boot and whenever the
+/// add-destination picker opens, never on a timer.
+#[tauri::command]
+pub async fn list_window_apps() -> Result<Vec<audio::AudioSession>, String> {
+    info!("cmd: list_window_apps");
+    tokio::task::spawn_blocking(audio::sessions::enumerate_window_apps)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// The executable name of `pid`, or an empty string when it cannot be read.
 ///
 /// The name is bookkeeping for the assignments the audio service persists per

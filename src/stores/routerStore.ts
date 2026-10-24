@@ -214,6 +214,16 @@ interface RouterState {
   feedTapFailures: Record<string, string>;
   /** Recording endpoints, for the carrier picker in settings. */
   captureDevices: AudioDevice[];
+  /**
+   * Every running app a person could name — processes owning a visible window,
+   * one entry per executable — as feed-target candidates beyond the audio
+   * session list. A feed's receiving end is often an app that has never opened
+   * a render session (an idle recorder, a game in its menu), and the capture
+   * pin it gets does not need one; the window is what makes an app nameable
+   * and aimable. Read once at boot and again whenever the add-destination
+   * picker opens — event-driven, never a poll.
+   */
+  windowApps: AudioSession[];
   /** Whether the close button hides the window to the tray instead of quitting. */
   closeToTray: boolean;
   /** Whether Windows starts this app at sign-in. */
@@ -279,6 +289,10 @@ interface RouterState {
   setFeedCarrier: (render: string | null, capture: string | null) => Promise<void>;
   /** Read the recording endpoints for the carrier picker. */
   loadCaptureDevices: () => Promise<void>;
+  /** Read the running apps the feed picker can offer beyond the session list.
+   *  Also re-derives the live feed map, whose targets may resolve through this
+   *  pool alone, and asks for the restore like every other arriving input. */
+  loadWindowApps: () => Promise<void>;
   /** Land one feed rule: record it in the memory, pin the endpoints the carrier
    *  can carry, and log the pair's honest outcome. The landing primitive the
    *  hub's apply drives for every planned feed — never called on a pick. */
@@ -790,6 +804,37 @@ function lowestPidByExe(sessions: AudioSession[]): Map<string, number> {
 }
 
 /**
+ * The address book for feed **targets**: every session process plus every
+ * windowed app, lowest pid per executable.
+ *
+ * The sending half of a feed keeps answering to the session list alone — no
+ * session, no sound to send — but the receiving half is legitimately a running
+ * app that has never opened a render session, and the capture pin it is given
+ * covers sessions started after it. One exe appearing in both lists folds to
+ * one address, the way its own siblings already do.
+ */
+function feedTargetPool(sessions: AudioSession[], windowApps: AudioSession[]): Map<string, number> {
+  const map = lowestPidByExe(sessions);
+  for (const app of windowApps) {
+    const key = app.exe_name.toLowerCase();
+    const known = map.get(key);
+    if (known === undefined || app.pid < known) map.set(key, app.pid);
+  }
+  return map;
+}
+
+/** The first entry of either list that answers for `pid` — a feed target may
+ *  be a session process or a windowed app, and its display half (name, icon)
+ *  is read from wherever it lives. The board's plan rows resolve through this. */
+export function findInPool(
+  sessions: AudioSession[],
+  windowApps: AudioSession[],
+  pid: number,
+): AudioSession | undefined {
+  return sessions.find((s) => s.pid === pid) ?? windowApps.find((s) => s.pid === pid);
+}
+
+/**
  * The selected processes, folded to one per executable — the lowest PID, which
  * is the address the audio service keeps a per-app assignment at.
  *
@@ -820,23 +865,26 @@ function oneProcessPerExe(
 }
 
 /**
- * Rebuild the live feed map from the memory and the sessions: a rule exists on
- * the board only while both of its ends are on the list — a feed pins an
- * endpoint on each of them, so a process leaving the list takes its half of the
- * wire with it.
+ * Rebuild the live feed map from the memory and the two candidate lists: a rule
+ * exists on the board only while its source holds a session — no session, no
+ * sound to send — and its target is a live process, which a windowed app that
+ * has never opened a session still is. A process leaving both lists takes its
+ * half of the wire with it.
  */
 function deriveFeeds(
   memory: RememberedFeedEntry[],
   sessions: AudioSession[],
+  windowApps: AudioSession[],
 ): Record<number, number[]> {
-  const pidByExe = lowestPidByExe(sessions);
+  const sourceByExe = lowestPidByExe(sessions);
+  const targetByExe = feedTargetPool(sessions, windowApps);
   const feeds: Record<number, number[]> = {};
   for (const entry of memory) {
-    const sourcePid = pidByExe.get(entry.sourceExe.toLowerCase());
+    const sourcePid = sourceByExe.get(entry.sourceExe.toLowerCase());
     if (sourcePid === undefined) continue;
     for (const targetExe of entry.targetExe) {
       if (targetExe.toLowerCase() === entry.sourceExe.toLowerCase()) continue;
-      const targetPid = pidByExe.get(targetExe.toLowerCase());
+      const targetPid = targetByExe.get(targetExe.toLowerCase());
       if (targetPid === undefined) continue;
       const existing = feeds[sourcePid] ?? [];
       if (!existing.includes(targetPid)) existing.push(targetPid);
@@ -1037,6 +1085,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   feedCarrier: { render: null, capture: null },
   feedTapFailures: {},
   captureDevices: [],
+  windowApps: [],
   closeToTray: false,
   autostart: false,
   startupNotice: null,
@@ -1191,10 +1240,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
           if (session.playing === true) soundingPids[session.pid] = true;
         }
         const soundingExes = foldSounding(sessions, soundingPids);
-        // Feeds pin an endpoint on each end, so both ends have to be live for
-        // the wire to stay on the board — rebuilt from the memory, same as the
-        // badges above are rebuilt from the engine list.
-        const feeds = deriveFeeds(s.rememberedFeeds, sessions);
+        // Feeds pin an endpoint on each end, so the source has to hold a
+        // session and the target has to be a live process — rebuilt from the
+        // memory, same as the badges above are rebuilt from the engine list.
+        const feeds = deriveFeeds(s.rememberedFeeds, sessions, s.windowApps);
         return {
           sessions,
           routedPids,
@@ -1363,18 +1412,20 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   appendFeedTarget: (targetPid) => {
-    const { sessions, selectedPids, selectedFeedPids } = get();
+    const { sessions, windowApps, selectedPids, selectedFeedPids } = get();
     const pid = selectedPids[0];
     const source = sessions.find((s) => s.pid === pid);
-    const target = sessions.find((s) => s.pid === targetPid);
+    const target = findInPool(sessions, windowApps, targetPid);
     // A feed into the program itself is not a state this app offers, and a
-    // target that has left the list has nothing to arrive at.
+    // target that has left both lists (sessions and windowed apps) has nothing
+    // to arrive at.
     if (source === undefined || target === undefined) return;
     if (source.exe_name.toLowerCase() === target.exe_name.toLowerCase()) return;
     // The plan speaks the address the live map speaks — the program's lowest
     // pid. Storing the sibling the picker happened to offer would make the same
     // rule read as two, and the hub would never stop asking to apply it.
-    const canonical = lowestPidByExe(sessions).get(target.exe_name.toLowerCase()) ?? targetPid;
+    const canonical =
+      feedTargetPool(sessions, windowApps).get(target.exe_name.toLowerCase()) ?? targetPid;
     if (selectedFeedPids.includes(canonical)) return;
     set({
       selectedFeedPids: [...selectedFeedPids, canonical],
@@ -1580,7 +1631,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       const rememberedFeeds = [...grouped.values()];
       set({
         rememberedFeeds,
-        feeds: deriveFeeds(rememberedFeeds, get().sessions),
+        feeds: deriveFeeds(rememberedFeeds, get().sessions, get().windowApps),
       });
     } catch (e) {
       get().addLog(i18next.t('log.feedsLoadFailed', { error: String(e) }), 'error');
@@ -1636,11 +1687,30 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
   },
 
+  loadWindowApps: async () => {
+    try {
+      set({ windowApps: await api.listWindowApps() });
+    } catch (e) {
+      get().addLog(i18next.t('log.windowAppsFailed', { error: String(e) }), 'error');
+      return;
+    }
+    // The pool arriving is the moment every remembered feed whose target runs
+    // silently becomes displayable: the live map is rebuilt with it, and the
+    // restore is asked the way every other arriving input asks — whichever of
+    // the three inputs landed last is the one that can actually pin.
+    set((s) => ({ feeds: deriveFeeds(s.rememberedFeeds, s.sessions, s.windowApps) }));
+    queueAssignmentWork(() => get().restoreRememberedFeeds());
+    // The picker names these apps, so they carry icons like the session list
+    // does; the ask reuses the same one-per-exe in-flight guard and retry
+    // budget, and a miss degrades to the letter tile as everywhere else.
+    get().loadMissingIcons();
+  },
+
   addFeed: async (sourcePid, targetPid) => {
-    const { sessions, feeds } = get();
+    const { sessions, windowApps, feeds } = get();
     if (sourcePid === targetPid) return;
     const source = sessions.find((s) => s.pid === sourcePid);
-    const target = sessions.find((s) => s.pid === targetPid);
+    const target = findInPool(sessions, windowApps, targetPid);
     if (source === undefined || target === undefined) return;
     // A feed belongs to the program, and the live map is rebuilt from the memory
     // on each program's lowest pid (`deriveFeeds`). The board can be looking at
@@ -1648,10 +1718,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // addresses in one run: the ✕ addressed by the sibling finds nothing in the
     // map and does nothing, and the next refresh moves the wire to the lowest
     // pid anyway. Pin, remember and restore all use the address the refresh
-    // uses.
-    const pidByExe = lowestPidByExe(sessions);
-    const canonicalSource = pidByExe.get(source.exe_name.toLowerCase()) ?? sourcePid;
-    const canonicalTarget = pidByExe.get(target.exe_name.toLowerCase()) ?? targetPid;
+    // uses — the source out of the session list, the target out of the pool
+    // that also holds the running-but-silent apps a feed may be aimed at.
+    const canonicalSource =
+      lowestPidByExe(sessions).get(source.exe_name.toLowerCase()) ?? sourcePid;
+    const canonicalTarget =
+      feedTargetPool(sessions, windowApps).get(target.exe_name.toLowerCase()) ?? targetPid;
     if (canonicalSource === canonicalTarget) return;
     if ((feeds[canonicalSource] ?? []).includes(canonicalTarget)) return;
     // The board has shown this pair since the user staged it; landing records
@@ -1736,20 +1808,23 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   removeFeed: async (sourcePid, targetPid) => {
-    const { sessions, feeds, rememberedFeeds } = get();
+    const { sessions, windowApps, feeds, rememberedFeeds } = get();
     const source = sessions.find((s) => s.pid === sourcePid);
-    const target = sessions.find((s) => s.pid === targetPid);
+    const target = findInPool(sessions, windowApps, targetPid);
     // The same address `addFeed` and `deriveFeeds` use: the row can be reached
     // from a sibling process's board, and the wire it shows lives under the
     // program's lowest pid. A session that has just left the list keeps the pid
-    // it was called with — that is still the wire's address.
-    const pidByExe = lowestPidByExe(sessions);
+    // it was called with — that is still the wire's address. The source is
+    // canonical out of the session list, the target out of the pool that also
+    // holds the running-but-silent apps.
+    const sourceByExe = lowestPidByExe(sessions);
+    const targetByExe = feedTargetPool(sessions, windowApps);
     const sourceExe = source?.exe_name.toLowerCase();
     const targetExe = target?.exe_name.toLowerCase();
     const canonicalSource =
-      (sourceExe === undefined ? undefined : pidByExe.get(sourceExe)) ?? sourcePid;
+      (sourceExe === undefined ? undefined : sourceByExe.get(sourceExe)) ?? sourcePid;
     const canonicalTarget =
-      (targetExe === undefined ? undefined : pidByExe.get(targetExe)) ?? targetPid;
+      (targetExe === undefined ? undefined : targetByExe.get(targetExe)) ?? targetPid;
     if (!(feeds[canonicalSource] ?? []).includes(canonicalTarget)) return;
     // Where this wire sat among its source's other wires, in the board and in
     // the memory the board is rebuilt from: a rollback that appended would
@@ -1824,11 +1899,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   restoreRememberedFeeds: async () => {
-    const { rememberedFeeds, sessions, feedCarrier } = get();
+    const { rememberedFeeds, sessions, windowApps, feedCarrier } = get();
     if (rememberedFeeds.length === 0) return;
     if (feedCarrier.render === null || feedCarrier.capture === null) return;
-    const pidByExe = lowestPidByExe(sessions);
-    if (pidByExe.size === 0) return;
+    const sourceByExe = lowestPidByExe(sessions);
+    if (sourceByExe.size === 0) return;
+    const targetByExe = feedTargetPool(sessions, windowApps);
     const pairs: {
       sourcePid: number;
       sourceExe: string;
@@ -1836,10 +1912,10 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       targetExe: string;
     }[] = [];
     for (const entry of rememberedFeeds) {
-      const sourcePid = pidByExe.get(entry.sourceExe.toLowerCase());
+      const sourcePid = sourceByExe.get(entry.sourceExe.toLowerCase());
       if (sourcePid === undefined) continue;
       for (const targetExe of entry.targetExe) {
-        const targetPid = pidByExe.get(targetExe.toLowerCase());
+        const targetPid = targetByExe.get(targetExe.toLowerCase());
         if (targetPid === undefined || targetPid === sourcePid) continue;
         // Membership in the live feed map is not delivery: the map is derived
         // from this very memory, so every live pair is in it, and skipping on
@@ -1992,7 +2068,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // targets. Let the first one land, then start from fresh state.
     if (get().applying) return;
     set({ applying: true });
-    const { selectedPids, selectedDeviceIds, selectedFeedPids, autoRemember, sessions } = get();
+    const {
+      selectedPids,
+      selectedDeviceIds,
+      selectedFeedPids,
+      autoRemember,
+      sessions,
+      windowApps,
+    } = get();
     // One press can land two plans, and each half moves only when it differs
     // from the truth: the devices when the staged list is not what every
     // selected program already plays through, the feeds when the staged inputs
@@ -2203,15 +2286,17 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       if (hubPid !== undefined && hubSession !== undefined && feedsDirty) {
         const sourcePid = lowestPidByExe(sessions).get(hubSession.exe_name.toLowerCase()) ?? hubPid;
         // A staged input whose process has left cannot land; saying so beats a
-        // press that quietly did nothing, and the rest of the plan goes through.
-        if (selectedFeedPids.some((target) => !sessions.some((s) => s.pid === target))) {
+        // press that quietly did nothing, and the rest of the plan goes
+        // through. "Left" is both lists: a target the session list never held
+        // may live in the windowed pool, and only leaving *that* is gone.
+        const inPool = (target: number): boolean =>
+          sessions.some((s) => s.pid === target) || windowApps.some((s) => s.pid === target);
+        if (selectedFeedPids.some((target) => !inPool(target))) {
           get().raiseError(i18next.t('log.processGone'));
         }
         await Promise.allSettled([
           ...selectedFeedPids
-            .filter(
-              (target) => !liveFeeds.includes(target) && sessions.some((s) => s.pid === target),
-            )
+            .filter((target) => !liveFeeds.includes(target) && inPool(target))
             .map((target) => get().addFeed(sourcePid, target)),
           ...liveFeeds
             .filter((target) => !selectedFeedPids.includes(target))
@@ -2841,11 +2926,12 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   loadMissingIcons: () => {
-    // Exes no longer on the list are not our business: a retry timer aimed at
-    // a departed process would only fire into an empty pass, and its spent
+    // Exes no longer on either list are not our business: a retry timer aimed
+    // at a departed process would only fire into an empty pass, and its spent
     // budget would follow the process around if it ever came back.
     const live = new Set<string>();
     for (const session of get().sessions) live.add(session.exe_name);
+    for (const app of get().windowApps) live.add(app.exe_name);
     for (const exeName of [...iconRetryTimers.keys()]) {
       if (!live.has(exeName)) clearIconRetry(exeName);
     }
@@ -2854,9 +2940,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     }
 
     // One ask per executable per pass: the icon belongs to the file, and the
-    // first session's pid is as good an address as any of its siblings'.
+    // first entry's pid is as good an address as any of its siblings'. The
+    // windowed apps ride the same pass — the feed picker names them, so they
+    // carry icons like the session list does.
     const asked = new Set<string>();
-    for (const session of get().sessions) {
+    for (const session of [...get().sessions, ...get().windowApps]) {
       const exeName = session.exe_name;
       if (asked.has(exeName)) continue;
       asked.add(exeName);

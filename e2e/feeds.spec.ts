@@ -170,6 +170,54 @@ test('a feed moves sound beside a device route, and the route stops without it',
   expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
 });
 
+test('a feed target that has never made a sound is found by search, and lands', async ({
+  page,
+}) => {
+  // obs.exe holds no audio session — the session list cannot name it. The
+  // windowed pool is the second tier, reached through the search box, and the
+  // capture pin it receives covers sessions started after it.
+  await openApp(page, { windowApps: [{ pid: 1004, exe_name: 'obs.exe' }] });
+  await appRow(page, 'music.exe').click();
+
+  await page.locator('main').getByRole('button', { name: 'Add destination' }).click();
+  const menu = page.getByRole('menu', { name: 'Add destination' });
+  await menu.getByRole('textbox').fill('obs');
+  await menu.getByRole('menuitem', { name: "obs.exe's input" }).click();
+
+  // Staged from the pool: the amber row is on the board, the backend has been
+  // asked for nothing.
+  await expect(feedRow(page, 1004)).toBeVisible();
+  expect(await callsFor(page, 'set_feed_target')).toHaveLength(0);
+
+  await hub(page).click();
+  const feeds = await callsFor(page, 'set_feed_target');
+  expect(feeds).toHaveLength(1);
+  expect(feeds[0]?.args).toMatchObject({
+    sourcePid: 1001,
+    targetPid: 1004,
+    targetExe: 'obs.exe',
+  });
+});
+
+test('a remembered feed to a running-but-silent app shows on the board, and is pinned', async ({
+  page,
+}) => {
+  await openApp(page, {
+    windowApps: [{ pid: 1004, exe_name: 'obs.exe' }],
+    feeds: [['music.exe', 'obs.exe']],
+  });
+  await appRow(page, 'music.exe').click();
+
+  // The pool resolves the target half at boot, so the row is on the board —
+  // and the restore pinned it, which the session list alone could never do.
+  await expect(feedRow(page, 1004)).toBeVisible();
+  await expect
+    .poll(async () => (await callsFor(page, 'set_feed_target')).length, { timeout: 5_000 })
+    .toBe(1);
+  const feeds = await callsFor(page, 'set_feed_target');
+  expect(feeds[0]?.args).toMatchObject({ sourcePid: 1001, targetPid: 1004 });
+});
+
 /** The carrier's playback side as the machine names it. */
 const CARRIER = 'CABLE Input (VB-Audio Virtual Cable)';
 /**

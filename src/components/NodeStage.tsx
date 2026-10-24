@@ -54,7 +54,7 @@ import {
 } from '@/lib/stage';
 import { PRIMARY_VOLUME_MAX, PRIMARY_VOLUME_MIN } from '@/lib/types';
 import type { AudioSession } from '@/lib/types';
-import { feedLiveness, useRouterStore } from '@/stores/routerStore';
+import { feedLiveness, findInPool, useRouterStore } from '@/stores/routerStore';
 
 /** Which card the bottom strip is tuning right now: a destination row. The
  *  strip only exists while one is picked — there is no standing bar under the
@@ -171,6 +171,8 @@ export function NodeStage() {
   const selectedFeedPids = useRouterStore((s) => s.selectedFeedPids);
   const appendFeedTarget = useRouterStore((s) => s.appendFeedTarget);
   const dropFeedTarget = useRouterStore((s) => s.dropFeedTarget);
+  const windowApps = useRouterStore((s) => s.windowApps);
+  const loadWindowApps = useRouterStore((s) => s.loadWindowApps);
   const selectProcess = useRouterStore((s) => s.selectProcess);
 
   /** The row whose wire(s) light up under the pointer. */
@@ -181,6 +183,13 @@ export function NodeStage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   /** The change-primary picker, anchored to the primary panel's title row. */
   const [primaryPickerOpen, setPrimaryPickerOpen] = useState(false);
+  /** The feed section's search. An empty query is the pool the menu opens
+   *  with; a query narrows both tiers and is one press (Escape) from gone. */
+  const [feedQuery, setFeedQuery] = useState('');
+  /** The feed search box, for the two keys that belong to it: Escape clears
+   *  the query before the menu hears the key, and the menu's own handler
+   *  stands aside by the same address. */
+  const feedSearchRef = useRef<HTMLInputElement | null>(null);
   /** How far the copies panel has been scrolled — its wires ride with it. */
   const [copyScroll, setCopyScroll] = useState(0);
   /** The copies-panel row a just-added destination landed in, one-shot: the
@@ -280,13 +289,15 @@ export function NodeStage() {
   // The feed plan: the programme inputs staged on this board. The board draws
   // the plan, not the live map — an input the user picked but has not landed
   // yet is a proposal with a row and a wire of its own, the way a staged
-  // device is, and the hub is what turns it into a feed.
+  // device is, and the hub is what turns it into a feed. A plan target
+  // resolves through both lists: a running app that has never opened a render
+  // session is a legitimate destination, and it lives in the windowed pool.
   const planFeedSessions = useMemo(
     () =>
       selectedFeedPids
-        .map((targetPid) => sessions.find((s) => s.pid === targetPid))
+        .map((targetPid) => findInPool(sessions, windowApps, targetPid))
         .filter((s) => s !== undefined),
-    [selectedFeedPids, sessions],
+    [selectedFeedPids, sessions, windowApps],
   );
   // The landed half: the program's live feeds, resolved through its holder
   // like every per-program map read here.
@@ -390,17 +401,38 @@ export function NodeStage() {
     landed: landedFeedSet.has(targetSession.pid),
     state: feedLiveness(exe, feedCarrier, feedTapFailures),
   }));
-  /** What the add menu can offer as a programme input: neither the programme
-   *  being drawn nor one of its own siblings (a feed into itself), and no
-   *  programme the plan already names — one rule per program, on either side. */
-  const feedableSessions = sessions.filter(
-    (s) =>
-      s.pid !== pid &&
-      s.exe_name.toLowerCase() !== (session?.exe_name ?? '').toLowerCase() &&
-      !planFeedSessions.some(
-        (planned) => planned.exe_name.toLowerCase() === s.exe_name.toLowerCase(),
-      ),
-  );
+  /** The add menu's programme-input rows: the apps already holding a session
+   *  while the query is empty, and — once the user types — every windowed app
+   *  the pool holds too. One row per program either way, because the rule is
+   *  per program and a second row for a sibling would stage the same rule
+   *  twice. Neither the programme being drawn nor one of its own siblings (a
+   *  feed into itself), and no programme the plan already names. */
+  const feedCandidates = useMemo(() => {
+    const hubExe = (session?.exe_name ?? '').toLowerCase();
+    const plannedExes = new Set(planFeedSessions.map((s) => s.exe_name.toLowerCase()));
+    const query = feedQuery.trim().toLowerCase();
+    const seen = new Set<string>();
+    const candidates: AudioSession[] = [];
+    for (const s of [...sessions, ...windowApps]) {
+      const exeKey = s.exe_name.toLowerCase();
+      if (s.pid === pid || exeKey === hubExe || plannedExes.has(exeKey) || seen.has(exeKey)) {
+        continue;
+      }
+      if (query !== '') {
+        const matches =
+          exeKey.includes(query) || (s.display_name ?? '').toLowerCase().includes(query);
+        if (!matches) continue;
+      } else if (!sessions.includes(s)) {
+        // The second tier waits for a query: the menu opens exactly as long as
+        // the session list, and any running app arrives with the first
+        // keystroke — the list's length never becomes the process count.
+        continue;
+      }
+      seen.add(exeKey);
+      candidates.push(s);
+    }
+    return candidates;
+  }, [sessions, windowApps, pid, session, planFeedSessions, feedQuery]);
   /** Every row in the copies panel: the copies first, then the feeds. */
   const copiesRows = copyDeviceIds.length + planFeedStates.length;
 
@@ -435,6 +467,7 @@ export function NodeStage() {
   const closePicker = (toTrigger: boolean) => {
     setPickerOpen(false);
     setPrimaryPickerOpen(false);
+    setFeedQuery('');
     if (toTrigger) pickerReturnRef.current?.focus();
     pickerReturnRef.current = null;
   };
@@ -443,6 +476,10 @@ export function NodeStage() {
     if (!pickerOpen && !primaryPickerOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // The feed search owns Escape while it holds a query: one press clears
+        // it, and only an empty box lets the key reach the menu's close.
+        const search = feedSearchRef.current;
+        if (search !== null && event.target === search && search.value !== '') return;
         event.stopPropagation();
         closePicker(true);
       }
@@ -487,6 +524,7 @@ export function NodeStage() {
     setInspectorKey(null);
     setPickerOpen(false);
     setPrimaryPickerOpen(false);
+    setFeedQuery('');
     setHoverKey(null);
     setCopyScroll(0);
     setRevealIndex(null);
@@ -1038,6 +1076,10 @@ export function NodeStage() {
                   pickerReturnRef.current = event.currentTarget;
                   // As above: one picker at a time.
                   setPrimaryPickerOpen(false);
+                  // The windowed pool is read when it can be looked at: this
+                  // menu is the one place its rows show, and the read is cheap
+                  // and idempotent. Opening only — closing needs no list.
+                  if (!pickerOpen) void loadWindowApps();
                   setPickerOpen((value) => !value);
                 }}
                 className="pressable hit flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] leading-none text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none"
@@ -1153,8 +1195,48 @@ export function NodeStage() {
                     ))}
                   </PickerSection>
                   <PickerSection label={t('stage.pickFeed')} section="feed">
-                    {feedableSessions.length === 0 && <PickerEmpty text={t('stage.pickNone')} />}
-                    {feedableSessions.map((s) => (
+                    {/* The way to any running app, not only the ones already
+                        making sound: typing narrows both tiers at once, and an
+                        empty query is the list the menu always opened with.
+                        Escape clears the query first — the menu's own handler
+                        stands aside for that one key. */}
+                    <input
+                      ref={feedSearchRef}
+                      type="text"
+                      value={feedQuery}
+                      onChange={(event) => setFeedQuery(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          if (event.currentTarget.value !== '') {
+                            setFeedQuery('');
+                            event.stopPropagation();
+                          }
+                          return;
+                        }
+                        if (event.key === 'Enter') {
+                          // The first match is the answer a typist means.
+                          const first = event.currentTarget
+                            .closest('[data-picker-section="feed"]')
+                            ?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+                          first?.click();
+                          return;
+                        }
+                        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                          walkFeedResults(event);
+                        }
+                      }}
+                      placeholder={t('stage.pickFeedSearch')}
+                      aria-label={t('stage.pickFeedSearch')}
+                      className="mb-1 block w-full rounded-seg border border-line bg-surface-sunken px-2 py-1 text-[12px] text-text-primary outline-none placeholder:text-text-muted focus-visible:border-accent"
+                    />
+                    {feedCandidates.length === 0 && (
+                      <PickerEmpty
+                        text={
+                          feedQuery.trim() === '' ? t('stage.pickNone') : t('stage.pickFeedNoMatch')
+                        }
+                      />
+                    )}
+                    {feedCandidates.map((s) => (
                       <motion.button
                         key={s.pid}
                         type="button"
@@ -1855,6 +1937,31 @@ function walkPickerMenu(event: React.KeyboardEvent<HTMLDivElement>): void {
   else if (event.key === 'End') next = rows.length - 1;
   if (next === null) return;
   event.preventDefault();
+  rows[next]?.focus();
+}
+
+/**
+ * Arrows out of the feed search walk *this section's* results, not the whole
+ * menu: the search sits in the menu's last section, and the menu's own walker —
+ * which always starts from its first row — would answer ArrowDown with a jump
+ * across two unrelated sections. Focus moves rather than a highlight, so the
+ * browser scrolls the row into view by itself, exactly like the menu above.
+ */
+function walkFeedResults(event: React.KeyboardEvent<HTMLInputElement>): void {
+  const section = event.currentTarget.closest('[data-picker-section="feed"]');
+  const rows = Array.from(section?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+  if (rows.length === 0) return;
+  const current = rows.findIndex((row) => row === document.activeElement);
+  const next =
+    event.key === 'ArrowDown'
+      ? current < 0
+        ? 0
+        : (current + 1) % rows.length
+      : current < 0
+        ? rows.length - 1
+        : (current - 1 + rows.length) % rows.length;
+  event.preventDefault();
+  event.stopPropagation();
   rows[next]?.focus();
 }
 

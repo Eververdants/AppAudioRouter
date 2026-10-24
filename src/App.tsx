@@ -59,6 +59,7 @@ export default function App() {
   const loadFeeds = useRouterStore((s) => s.loadFeeds);
   const loadFeedCarrier = useRouterStore((s) => s.loadFeedCarrier);
   const loadCaptureDevices = useRouterStore((s) => s.loadCaptureDevices);
+  const loadWindowApps = useRouterStore((s) => s.loadWindowApps);
   const reconcileActiveDuplications = useRouterStore((s) => s.reconcileActiveDuplications);
   const loadStartupNotice = useRouterStore((s) => s.loadStartupNotice);
   const startupNotice = useRouterStore((s) => s.startupNotice);
@@ -172,6 +173,10 @@ export default function App() {
       // Recording endpoints back the carrier picker in settings; they never
       // block anything on the board.
       void loadCaptureDevices();
+      // The windowed-app pool backs the feed picker's second tier, and lets a
+      // remembered feed whose target runs silently resolve at boot. One read,
+      // event-driven like the rest.
+      void loadWindowApps();
       // The tray preference and the startup registry entry are only read by the
       // settings page, so they wait for the first paint like the rest.
       void loadShellSettings();
@@ -185,6 +190,7 @@ export default function App() {
     loadFeeds,
     loadFeedCarrier,
     loadCaptureDevices,
+    loadWindowApps,
     loadShellSettings,
   ]);
 

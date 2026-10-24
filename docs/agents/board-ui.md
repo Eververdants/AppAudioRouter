@@ -160,6 +160,11 @@
   那个程序还可能在收别人的声音。只有"重置每应用音频输出"与退出这两条路会两个流一起清。
 - ⚠️ **别把送入并进设备路由的记忆**：`feed-memory.json` 与 `route-memory.json` 是两份，
   一条规则的存在不依赖另一条；恢复也各自独立（`restoreRememberedFeeds` vs `restoreRememberedRoutes`，都由列表/记忆/载体的到达触发）。
+- **「程序输入」分两层到达（2026-10-24 起）**：默认列出有音频会话的应用（第一层）；分组里一枚搜索框，输入即在
+  **窗口应用池**（`list_window_apps`，打开选择器时读一次）里找——运行中、有可见窗口、按 exe 去重。空查询的列表
+  永远只有第一层那么长，「任意应用」经键盘到达而不经列表铺开。搜索框的键位：Escape 先清查询再关菜单
+  （菜单的 capture 处理器为它让路），方向键只走本节结果（`walkFeedResults`），Enter 落第一个匹配。
+  候选**每程序一行**（规则按 exe），不再为同 exe 的兄弟进程各画一行。
 - **设置页会点名探测常见回环驱动**（`lib/carrierDetect.ts`：VB-Cable、VoiceMeeter；按友好名的子串匹配、
   不区分大小写，VoiceMeeter 的标记故意不命中 Aux 对——「… Aux Input」截断了子串，Banana/Potato 系统配的是 VAIO 对）。
   检测到就给「一键配对」（走现成的 `setFeedCarrier`）；没检测到**且载体未配置**时给 VB-Cable 下载指引——

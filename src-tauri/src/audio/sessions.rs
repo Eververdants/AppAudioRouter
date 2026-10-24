@@ -6,7 +6,7 @@
 
 use log::{debug, warn};
 use windows::core::Interface;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE, HWND, LPARAM};
 use windows::Win32::Media::Audio::{
     eRender, AudioSessionStateActive, IAudioSessionControl, IAudioSessionControl2,
     IAudioSessionEnumerator, IAudioSessionManager2, IMMDevice, IMMDeviceCollection,
@@ -321,6 +321,135 @@ fn fill_display_names(sessions: &mut [AudioSession]) {
             }),
         };
     }
+}
+
+/// Enumerate the running apps a person could name: processes owning a visible
+/// top-level window, one entry per executable, shaped like sessions.
+///
+/// This is the feed picker's second tier. The audio-session list answers "who
+/// is producing sound right now", but a feed's *receiving* end is often an app
+/// that has never opened a render session at all — an idle recorder, a game in
+/// its menu — and the capture pin it receives does not need one either: the
+/// per-app assignment is written per process and covers sessions started after
+/// it. What the user can aim at is an app with a window, so the list is
+/// exactly that: `EnumWindows` gathers the visible top-level windows (cloaked
+/// UWP hosts skipped — a suspended app is not running), one process lookup
+/// names each, and the lowest pid of an executable is the entry — the address
+/// every per-app assignment is written under. `playing` is `false` by
+/// construction: nothing here says anything about sound.
+pub fn enumerate_window_apps() -> Result<Vec<AudioSession>, AudioError> {
+    let windowed = visible_window_pids();
+    if windowed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // One entry per executable: the feed rule is per program, so a browser's
+    // dozen processes are one destination. The lowest pid wins, and the drive-
+    // letter image path rides along for the file-description fallback of the
+    // display-name assembly.
+    let mut best: std::collections::HashMap<String, AudioSession> =
+        std::collections::HashMap::new();
+    for pid in windowed {
+        let Some((path, exe_name)) = process_meta::process_image(pid) else {
+            // A pid the walk cannot name (it exited between the window walk
+            // and here) is not a destination.
+            continue;
+        };
+        let key = exe_name.to_ascii_lowercase();
+        match best.get_mut(&key) {
+            Some(winner) => {
+                if pid < winner.pid {
+                    winner.pid = pid;
+                    winner.exe_name = exe_name;
+                    winner.exe_path = Some(path);
+                }
+            }
+            None => {
+                best.insert(
+                    key,
+                    AudioSession {
+                        pid,
+                        exe_name,
+                        display_name: None,
+                        exe_path: Some(path),
+                        playing: false,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut apps: Vec<AudioSession> = best.into_values().collect();
+    // A stable list is part of the picker's promise: the same machine running
+    // the same apps hands back the same rows, whatever the window walk's order was.
+    apps.sort_by_key(|a| a.exe_name.to_ascii_lowercase());
+    // The self fence the session list also gets: this app is the picker's own
+    // home, not a destination in it.
+    exclude_own_processes(&mut apps);
+    // Display names come from the same assembly the session list uses, so an
+    // app named by its window there is named the same way here; the file
+    // description fallback covers a visible window with no title.
+    fill_display_names(&mut apps);
+    Ok(apps)
+}
+
+/// The pids of every visible, uncloaked top-level window, from one Z-order walk.
+fn visible_window_pids() -> Vec<u32> {
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
+    };
+
+    #[derive(Default)]
+    struct PidCollector {
+        pids: Vec<u32>,
+    }
+
+    // SAFETY: `lparam` is the `PidCollector` pointer passed to `EnumWindows`,
+    // and USER32 invokes this on the calling thread, so the access is exclusive.
+    unsafe extern "system" fn collect_pid(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        use windows::Win32::Foundation::BOOL;
+
+        let collector = &mut *(lparam.0 as *mut PidCollector);
+        // SAFETY: `hwnd` is a live window handle handed out by the walk.
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() {
+                return BOOL(1);
+            }
+            // A cloaked window belongs to a UWP host keeping a suspended app's
+            // place on screen: the app is not running, and naming it would
+            // offer a destination whose process is a shell, not the app.
+            let mut cloaked: u32 = 0;
+            let cloaked_ok = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                &mut cloaked as *mut u32 as *mut _,
+                std::mem::size_of::<u32>() as u32,
+            );
+            if cloaked_ok.is_ok() && cloaked != 0 {
+                return BOOL(1);
+            }
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid != 0 {
+                collector.pids.push(pid);
+            }
+        }
+        BOOL(1)
+    }
+
+    let mut collector = PidCollector::default();
+    // SAFETY: the collector outlives the call on this same thread.
+    let enumerated = unsafe {
+        EnumWindows(
+            Some(collect_pid),
+            LPARAM(&mut collector as *mut PidCollector as isize),
+        )
+    };
+    if let Err(e) = enumerated {
+        log::warn!("window pid walk failed: {e}");
+    }
+    collector.pids
 }
 
 /// Get the executable name for a PID.

@@ -73,6 +73,7 @@ const STATE: BridgeState = {
   captureDevices: [{ id: 'cable-out', name: 'CABLE Output (VB-Audio)' }],
   feedCarrier: { render: 'spdif', capture: 'cable-out' },
   feeds: [] as [string, string][],
+  windowApps: [],
 };
 
 for (const theme of ['light', 'dark'] as const) {

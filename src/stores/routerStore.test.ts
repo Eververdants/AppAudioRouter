@@ -50,6 +50,9 @@ interface Backend {
   volumes: [string, number][];
   /** The remembered feed rules, as `(source_exe, target_exe)` pairs. */
   feeds: [string, string][];
+  /** Running apps with a visible window but no audio session — the feed
+   *  picker's second tier, and the pool a silent feed target resolves through. */
+  windowApps: AudioSession[];
   /** The loopback pair feeds run through; null halves mean "not configured". */
   carrier: { render: string | null; capture: string | null };
   calls: { cmd: string; args: Record<string, unknown> }[];
@@ -97,6 +100,7 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
     delays: [],
     volumes: [],
     feeds: [],
+    windowApps: [],
     carrier: { render: 'speakers', capture: 'cable-out' },
     calls: [],
     generation: 0,
@@ -195,6 +199,8 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
         return null;
       case 'list_feeds':
         return backend.feeds;
+      case 'list_window_apps':
+        return backend.windowApps;
       case 'set_feed_target': {
         // A feed is delivered by the engine's tap into the carrier, so a device
         // route alongside it changes nothing: the only thing that can stop a
@@ -304,6 +310,7 @@ function reset(overrides: Partial<StoreState> = {}): void {
     rememberedRoutes: [],
     rememberedFeeds: [],
     feeds: {},
+    windowApps: [],
     feedCarrier: { render: null, capture: null },
     captureDevices: [],
     defaultDeviceId: null,
@@ -2831,6 +2838,75 @@ describe('feeds', () => {
 
     expect(state().feeds[MUSIC.pid]).toEqual([GAME.pid]);
     expect(state().selectedFeedPids).toEqual([GAME.pid]);
+  });
+
+  it('feeds a running app that has never made a sound, staged from the window pool', async () => {
+    // A feed's receiving end is often an app with no render session at all —
+    // an idle recorder, a game in its menu — and the capture pin it gets
+    // covers sessions started after it. The pool, not the session list, is
+    // what the plan and the live map resolve that half through.
+    const IDLE_RECORDER: AudioSession = { pid: 7001, exe_name: 'idle-rec.exe' };
+    const backend = installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, GAME],
+      windowApps: [IDLE_RECORDER],
+      feedCarrier: backend.carrier,
+    });
+    state().selectProcess(MUSIC.pid);
+    state().appendFeedTarget(IDLE_RECORDER.pid);
+
+    // Staged from the pool, and nothing has been asked of the backend yet.
+    expect(state().selectedFeedPids).toEqual([IDLE_RECORDER.pid]);
+    expect(backend.calls.some((c) => c.cmd === 'set_feed_target')).toBe(false);
+
+    await state().applyRoute();
+
+    expect(backend.calls.find((c) => c.cmd === 'set_feed_target')?.args).toMatchObject({
+      sourcePid: MUSIC.pid,
+      targetPid: IDLE_RECORDER.pid,
+      targetExe: 'idle-rec.exe',
+    });
+    expect(state().feeds[MUSIC.pid]).toEqual([IDLE_RECORDER.pid]);
+
+    // And the rule survives the refresh that rebuilds the map: the target is
+    // on no session list, so the pool is what answers for it there too.
+    await state().refreshSessions();
+    expect(state().feeds[MUSIC.pid]).toEqual([IDLE_RECORDER.pid]);
+    expect(state().errorNotice).toBeNull();
+  });
+
+  it('restores a remembered feed whose target runs silently', async () => {
+    // The boot restore used to skip a target the session list did not hold,
+    // which made a rule to a silent app un-restorable — pinned never again
+    // after a restart even though the pin needs no session of its own.
+    // Fresh names: the restore-decided set lives at module level, and the
+    // pair an earlier test landed was claimed by that landing.
+    const QUIET_SOURCE: AudioSession = { pid: 7100, exe_name: 'quiet-source.exe' };
+    const IDLE_RECORDER: AudioSession = { pid: 7101, exe_name: 'idle-rec.exe' };
+    const backend = installBackend({
+      sessions: [MUSIC, GAME, QUIET_SOURCE],
+      feeds: [['quiet-source.exe', 'idle-rec.exe']],
+      windowApps: [IDLE_RECORDER],
+    });
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [MUSIC, GAME, QUIET_SOURCE],
+      feedCarrier: backend.carrier,
+    });
+
+    // The boot reads, in either landing order: the pool and the memory are the
+    // two inputs the restore waits for, and whichever lands last asks.
+    await state().loadWindowApps();
+    await state().loadFeeds();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state().feeds[QUIET_SOURCE.pid]).toEqual([IDLE_RECORDER.pid]);
+    expect(
+      backend.calls.some(
+        (c) => c.cmd === 'set_feed_target' && c.args.targetPid === IDLE_RECORDER.pid,
+      ),
+    ).toBe(true);
   });
 });
 
