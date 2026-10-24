@@ -118,6 +118,11 @@ export function useBoardWires({
         soundingFeeders.has(feeder.exe_name.toLowerCase()) &&
         liveness &&
         feedLiveness(feeder.exe_name, feedCarrier, feedTapFailures) === 'live',
+      // A feeder is a fact, not a proposal of this board's device plan: left to
+      // the default it would inherit the staged-device draw-in and replay it
+      // every time the device half of the plan is answered, redrawing a wire
+      // that reports someone else's route.
+      proposed: false,
     });
   });
 
