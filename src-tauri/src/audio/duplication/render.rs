@@ -32,11 +32,11 @@ use windows::Win32::System::Threading::CreateEventW;
 
 use crate::audio::AudioError;
 
-use super::liveness::process_alive;
 use super::mirror::MirrorChannel;
 use super::pump::render_run;
 use super::shared::{EngineShared, ExitReason};
 use super::{CAPTURE_WAIT_MS, STREAM_BUFFER_DURATION};
+use crate::audio::process_is_running;
 
 /// Entry point of one mirror's render thread.
 pub(super) fn render_main(shared: Arc<EngineShared>, mirror: Arc<MirrorChannel>, app: AppHandle) {
@@ -157,7 +157,7 @@ pub(super) fn hold_after_lost_copies(shared: &EngineShared) -> ExitReason {
         if shared.shutdown.load(Ordering::Relaxed) {
             return ExitReason::Stopped;
         }
-        if !process_alive(shared.pid, shared.creation_time) {
+        if !process_is_running(shared.pid, shared.creation_time) {
             return ExitReason::ProcessExited;
         }
         // The park is armed before the next pass of the checks, so a stop that

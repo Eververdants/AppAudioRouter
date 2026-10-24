@@ -70,7 +70,6 @@
 //! - [`pump`] — the render cycle: one device period, and the park that ends it.
 //! - [`mix`] — the group arithmetic: delay reference, loudness reference, gains.
 //! - [`activation`] — the asynchronous process-loopback activation.
-//! - [`liveness`] — whether the engine's process is still its own process.
 //!
 //! The tuning constants stay here, together, because they are one schedule the
 //! two threads read at different points of a run — and [`LATENCY_TARGET_MS`] is
@@ -128,7 +127,6 @@ mod activation;
 mod capture;
 mod format;
 mod inventory;
-mod liveness;
 mod manager;
 mod metering;
 mod mirror;

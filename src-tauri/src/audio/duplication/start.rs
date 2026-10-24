@@ -25,12 +25,12 @@ use crate::config::DELAY_MAX_MS;
 
 use super::capture::capture_main;
 use super::format::{default_mix_format, validate_mix_format, SampleFormat};
-use super::liveness::process_creation_time;
 use super::manager::UnregisterOutcome;
 use super::mirror::MirrorChannel;
 use super::shared::{retire_engine, EngineShared};
 use super::DuplicationManager;
 use super::{LATENCY_TARGET_MS, TRIM_SLACK_MS};
+use crate::audio::process_creation_time;
 
 /// Generations handed out to engines so a stale thread can never unregister a
 /// newer engine that replaced it for the same PID.

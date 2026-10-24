@@ -31,7 +31,6 @@ use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use crate::audio::AudioError;
 
 use super::activation::activate_process_loopback;
-use super::liveness::process_alive;
 use super::manager::UnregisterOutcome;
 use super::metering::{measure_into, LevelTracker};
 use super::mirror::MirrorChannel;
@@ -41,6 +40,7 @@ use super::render::{
 use super::shared::{note_audio, EngineShared, ExitReason};
 use super::DuplicationManager;
 use super::{CAPTURE_WAIT_MS, PRE_ROLL_TIMEOUT, STREAM_BUFFER_DURATION};
+use crate::audio::process_is_running;
 
 /// Entry point of an engine's capture thread.
 pub(super) fn capture_main(shared: Arc<EngineShared>, app: AppHandle) {
@@ -375,7 +375,7 @@ fn capture_packets_inner(
         if wait == WAIT_TIMEOUT {
             // The loopback event only fires while the process actually plays
             // audio; use idle timeouts to notice process exit.
-            if !process_alive(shared.pid, shared.creation_time) {
+            if !process_is_running(shared.pid, shared.creation_time) {
                 return Ok(ExitReason::ProcessExited);
             }
             continue;
