@@ -610,8 +610,14 @@ fn with_device_session_volumes<T>(
         let volume: ISimpleAudioVolume = control
             .cast()
             .map_err(|e| AudioError::Api(format!("cast(ISimpleAudioVolume) failed: {e}")))?;
-        if let Some(value) = f(&volume)? {
-            produced.push(value);
+        // A callback failing on one session skips that session rather than the
+        // rest of the walk — the same answer the open steps above give: the
+        // program's other sessions on this endpoint, and the ones on later
+        // devices, still get their value.
+        match f(&volume) {
+            Ok(Some(value)) => produced.push(value),
+            Ok(None) => {}
+            Err(e) => warn!("skipping session {i}: {e}"),
         }
     }
     Ok(())
