@@ -4,7 +4,7 @@ import { programEntryOf } from '@/lib/routes';
 import type { RouterState } from '../types';
 
 /** The system default device as a route target, when it is still present. */
-export function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
+function defaultTargets(state: Pick<RouterState, 'devices' | 'defaultDeviceId'>): string[] {
   const id = state.defaultDeviceId;
   return id !== null && state.devices.some((d) => d.id === id) ? [id] : [];
 }

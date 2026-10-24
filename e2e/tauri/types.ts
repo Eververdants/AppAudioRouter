@@ -165,7 +165,7 @@ export interface BridgeConstants {
    *  wake-ups. */
   GAP_MIN_MS: number;
   GAP_MAX_MS: number;
-  CANCEL_BACKSTOP_MS: number;
+  WAIT_BACKSTOP_MS: number;
   /** `audio::calibration::NO_RUN_TOKEN`. */
   NO_RUN_TOKEN: number;
   /** `Refusal::Cancelled::message()` and `Refusal::Busy::message()`. */

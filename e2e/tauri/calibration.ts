@@ -28,7 +28,7 @@ export function registerCalibrationCommands(): void {
     TAIL_MS_MAX,
     GAP_MIN_MS,
     GAP_MAX_MS,
-    CANCEL_BACKSTOP_MS,
+    WAIT_BACKSTOP_MS,
     NO_RUN_TOKEN,
     SUPERSEDED_MESSAGE,
     BUSY_MESSAGE,
@@ -185,7 +185,7 @@ export function registerCalibrationCommands(): void {
           next < markers.length
             ? (markers[next] as { at: number }).at - elapsed
             : totalMs - elapsed;
-        timer = window.setTimeout(tick, Math.max(1, Math.min(waitTo, CANCEL_BACKSTOP_MS)));
+        timer = window.setTimeout(tick, Math.max(1, Math.min(waitTo, WAIT_BACKSTOP_MS)));
       };
       tick();
     });

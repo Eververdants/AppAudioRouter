@@ -23,10 +23,7 @@ export function readAutoRemember(): boolean {
  * image name carries whatever case the launch used, so two launches of the same
  * program can differ in it.
  */
-export function rememberedFor(
-  entries: RememberedRouteEntry[],
-  exeName: string,
-): string[] | undefined {
+function rememberedFor(entries: RememberedRouteEntry[], exeName: string): string[] | undefined {
   const wanted = exeName.toLowerCase();
   return entries.find((entry) => entry.exeName.toLowerCase() === wanted)?.deviceIds;
 }
@@ -103,7 +100,7 @@ export function rememberFeedTargets(
 }
 
 /** One process whose remembered route is due to be put back. */
-export interface RestorableProcess {
+interface RestorableProcess {
   pid: number;
   exeName: string;
   deviceIds: string[];

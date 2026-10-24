@@ -48,7 +48,7 @@ export function bridgeConstants(): void {
    *  wakes on the device's render event and at worst on this backstop, checking
    *  the cancel flag on both exits; the fake has no render event, so this is the
    *  ceiling on its own wake-ups too. */
-  const CANCEL_BACKSTOP_MS = 250;
+  const WAIT_BACKSTOP_MS = 250;
   /** `NO_RUN_TOKEN`: what a caller that names no run sends — and, unlike a real
    *  token, a number that may repeat, because it names nothing to match. */
   const NO_RUN_TOKEN = 0;
@@ -78,7 +78,7 @@ export function bridgeConstants(): void {
     TAIL_MS_MAX,
     GAP_MIN_MS,
     GAP_MAX_MS,
-    CANCEL_BACKSTOP_MS,
+    WAIT_BACKSTOP_MS,
     NO_RUN_TOKEN,
     SUPERSEDED_MESSAGE,
     BUSY_MESSAGE,
