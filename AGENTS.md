@@ -103,6 +103,8 @@ AppAudioRouter/
 │   │   ├── ui/                     # Ring（同心圆，全项目一枚）/ ProcessIcon / Switch / UnderlineTabs /
 │   │                               #   SegmentedControl / Select（自研下拉，带 data-owns-escape）/ ScrubReadout /
 │   │                               #   StepButton / Tooltip / ConfirmButton / DelayStepper / Spinner
+│   │   ├── settings/               # 设置页的六个分区、Rail、Row/Block/DelayRow/RememberedChip 与 hooks/
+│   │   ├── calibration/            # 校准向导的两屏、useCalibrationRun、useDialogKeys 与常量
 │   ├── hooks/                # useTheme / useLanguage / useDelayValue / useLiveness（声流闸门）/ useBackendEvent /
 │   │                         #   useProgramRoutes（把程序的账摊到它名下所有进程）/ useElementHeight（井的唯一高度）
 │   ├── stores/               # Zustand store：routerStore.ts 只剩 create 与两个订阅 + router/：
@@ -272,7 +274,7 @@ pnpm test:e2e
 
 # 重拍 README 的两张截图（按需要手动跑，平时会被 skip）
 # 输出 docs/images/app-audio-router-{light,dark}.png，900×680 @2x
-# 画面由 e2e/tauri/bridge.ts 的脚本化音频图驱动，所以换机器也一致
+# 画面由 e2e/tauri/graph.ts 的脚本化音频图驱动，所以换机器也一致
 CAPTURE_SCREENSHOTS=1 pnpm exec playwright test e2e/screenshots.spec.ts
 
 # Rust 检查

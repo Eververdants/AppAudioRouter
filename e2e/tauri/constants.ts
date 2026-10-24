@@ -23,8 +23,9 @@
  */
 export function bridgeConstants(): void {
   // The tone player's numbers, copied from `src-tauri/src/audio/calibration/`
-  // with the same names: `TONE_BURST_MS`, `TONE_REPS_*`, `LEAD_MS_*` and
-  // `TAIL_MS_*` on the module's own root file, the gap drawn before every burst
+  // with the same names: `TONE_BURST_MS`, `TONE_REPS_*` and the two `*_DEFAULT`
+  // bounds on the module's own root file, `LEAD_MS_*`/`TAIL_MS_*`'s min/max and the gap
+  // drawn before every burst
   // in `schedule.rs`, and the pump's backstop in `pump.rs`.
   /** `TONE_BURST_MS`: how long one burst sounds. */
   const TONE_BURST_MS = 800;

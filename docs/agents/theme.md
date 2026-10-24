@@ -23,7 +23,7 @@
   实底面板这个语义只留给正在生效的东西。曾经的那套液态玻璃（`--glass*` 令牌、`.glass*` 类、`.aurora`、`.grain`、
   `useGlassSpecular` 指针高光、glass-lite 低配档）已于今天整体退役，**别再搬回来**：
   它最吃执行，差一点就从「透镜」滑向「塑料贴纸」，而 `backdrop-filter` 的重采样成本还永远挂在 GPU 上。
-- **角色色令牌是 `--type-*` 四枚，画出来的只有三枚**（`primary` 主输出 / `mirror` 副本 / `feed` 送入程序的输入，琥珀）：`NodeStage` 的 `ROLE_TEXT_CLASS` 就这三个键，
+- **角色色令牌是 `--type-*` 四枚，画出来的只有三枚**（`primary` 主输出 / `mirror` 副本 / `feed` 送入程序的输入，琥珀）：`nodeStage/shared.ts` 的 `ROLE_TEXT_CLASS` 就这三个键，
   **同一个颜色画两处**（卡上的角色词与它的编号角标），所以它们没有 `-hover` 之类的变体，也不许拿去给别的东西上色。
   ⚠️ `--type-idle` 只剩令牌与 `tailwind.config.ts` 里的映射，**没有任何组件消费它**：`idle` 如今只是 `ui/Ring.tsx` 的 `RingTone`
   （`main` / `copy` / `idle`），而那枚空环**故意不上色**（`.con-ring-idle` 的内芯是 transparent——每台设备都戴颜色的话，颜色就什么都不是了），

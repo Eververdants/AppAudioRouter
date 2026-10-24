@@ -24,7 +24,7 @@
 | ④ 节点画布（自由布局） | `RouteCanvas` / `EdgeLayer` / `SourceNode` / `DeviceNode` / `RouteConfirmCapsule` / `lib/canvas.ts` / `--canvas-grid*` | 已删，**不要以"自由画布"的形式复活**：可拖摆的画布 = 可以被摆乱，还要平移缩放、ResizeObserver 与"动画期间钉住被测那一帧" |
 | ⑤ 同心圆舞台（圆环 + 圆盘 + 辐条） | `ConcentricStage.tsx` | **2.3.0 已删**：一个程序的去向只有一列时环形毫无用处，而"程序 → 程序"进来之后路由不再是一颗星，环形撑不住 |
 | ⑥ 节点看板（当前） | `NodeStage.tsx` + `lib/stage.ts` | 是**固定布局**的节点图：位置由路由顺序算出来，没有拖动、没有平移缩放、没有画布管理——节点是系统的（程序、设备、程序输入都是枚举出来的），用户永远不需要"创建"任何东西 |
-| ⑦ 去向分两块虚线面板（2026-10-10） | `Panel`（`NodeStage.tsx`）、`GROUP_X/GROUP_W/PANEL_BORDER`、`panelColumn` | 在 ⑥ 之上只做了一件事：把右侧一列**按角色装进两个虚线圆角矩形**——主设备一块、复制设备与送入一块；装了卡片的矩形不能画成卡片，所以用虚线。两块面板合成**一列、在 hub 上居中**，所以线从 hub 出脚同时向上（主设备）和向下（其余）伸 |
+| ⑦ 去向分两块虚线面板（2026-10-10） | `Panel`（`nodeStage/Panel.tsx`）、`GROUP_X/GROUP_W/PANEL_BORDER`、`panelColumn` | 在 ⑥ 之上只做了一件事：把右侧一列**按角色装进两个虚线圆角矩形**——主设备一块、复制设备与送入一块；装了卡片的矩形不能画成卡片，所以用虚线。两块面板合成**一列、在 hub 上居中**，所以线从 hub 出脚同时向上（主设备）和向下（其余）伸 |
 | ⑨ 一句菜单问两件事、角色词回归标签、调音条换成 scrub（2026-10-24） | `stage.pickSwitch` / `stage.pickCopy`、`DeviceRow` 的 ⇄、`StripValue`（`ScrubReadout`）、`stage.singleNote` | 「＋」菜单分两段——**改到这台播放**（`setPrimaryDevice`）与**同时输出到这台**（`appendDeviceTarget`）：同一个设备出现在两段里，所以每段有 `data-picker-section` 钩子；副本身份词回到纯标签，换主位是它旁边那枚 ⇄；去向行的名字打开这一行（主设备行开选择器、副本行开调音条），✕ 才是移出方案；调音条的三个数字是 `ScrubReadout`（拖 / 滚轮 / 方向键 / 键入），不再是 ± 两枚 16px 按钮；单设备路由在调音条那条带子上说明音量归 Windows——**角标仍然是 `span`**，这条规则没动 |
 | ⑧ 主设备可换、复制面板半行收尾、调音条按需、现状成页（2026-10-11） | `setPrimaryDevice` / `appendDeviceTarget`、`peekBodyHeight`、`Inspector` 的按需挂载、`BriefingPage` | 主设备行不再是死标签（点它弹出换主设备选择器）；「＋ 添加去向」**只追加副本**（不再替换预填的猜测）；复制面板装不下时**以半行收尾**并加一层背景渐隐；调音条只在点了某一行编号时存在（底部不再常驻 status bar）；「直说」从浮层变成**路由与活动记录之间的「现状」页** |
 
@@ -104,7 +104,7 @@
   ✕ 把行撤出计划，由 hub 落地断开（没有当场断，也没有 Toast 撤销）。
   「＋ 添加去向」是下块标题行里的一枚小虚线圆钮（`stage.addTarget` 仍是它的无障碍名），选择器挂在它下面；
   它从原来那张虚线卡片搬到这里，是为了**无论行有多少都够得着**。
-  ⚠️ **两把选择器（添加去向、换主输出）打开时把焦点放进菜单第一行，关闭时还给打开它的那枚按钮**（`NodeStage` 的
+  ⚠️ **两把选择器（添加去向、换主输出）打开时把焦点放进菜单第一行，关闭时还给打开它的那枚按钮**（`nodeStage/hooks/usePickers.ts` 的
   `closePicker(toTrigger)` + 一个跟可见性走的 focus effect）。方向键 walker 挂在菜单自己的 `onKeyDown` 上，
   焦点不进菜单它就一次都不开火；而菜单在 DOM 里排在整块面板**之后**，Tab 得走完所有设备行才够到第一行。
   `Escape` 归还焦点，**外部按下不还**——那一下点在哪里，焦点就该去哪里。这套与 `Select` 的 combobox（焦点留在触发器、
@@ -135,7 +135,7 @@
 - ⚠️ **调音条按需出现，底部没有常驻 status bar**（2026-10-11）：`Inspector` 只在 `inspectorKey !== null` 时**挂载**
   （外层 `AnimatePresence` + `height: auto` 让它自占地、离开时把空间还回去）。曾经它常驻在底部、没选中时显示一句提示语——
   那是一条谁都不会读的状态栏。被检查的那台设备**离开计划**（被移除，或计划降到一台、不再有引擎）时，
-  `NodeStage` 里的 effect 会把 `inspectorKey` 清空，所以 `Inspector` 可以假定自己指的那一行一定在计划里；
+  `nodeStage/hooks/useBoardTransients.ts` 里的 effect 会把 `inspectorKey` 清空，所以 `Inspector` 可以假定自己指的那一行一定在计划里；
   它也因此**不再有 hub 摘要分支**（'hub' 这个 key 已随常驻形态一起删掉，别再搬回来）。
   ⚠️ 条子自己的 ✕ **把焦点还给打开它的那枚编号**（`inspectorReturnRef`，`nodeStage/hooks/useBoardTransients.ts` 持有、`nodeStage/DestinationPanels.tsx` 交给编号、`nodeStage/Inspector.tsx` 关掉时用它）：它整个子树正在卸载，
   焦点留在死掉的子树里等于把 Tab 走回窗口顶部。换程序、被检查的设备离开计划这两条关法**不还**——那两下本来就把键盘带走了。

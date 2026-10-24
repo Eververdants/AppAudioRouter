@@ -44,7 +44,7 @@
   - 回调对象里必须**在注册时**存下 pid（`SessionEvents.pid`，读不出来存 0 并丢弃该 pid 的状态事件）——状态回调本身不带身份。`Expired` 的语义与路径不变。
   - 前端 `soundingPids` 是**纯显示状态**（线上流动、脉冲环、标题栏计数），路由逻辑一个字都不读它；每次 `refreshSessions` 按会话列表的 `playing` 标志**重建**（列表是权威），事件在两次刷新之间补瞬时的转换。`AudioSession.playing`（枚举时是否有任一会话 Active，按 pid 跨设备取 OR）是它的种子。
 - 线程启动时必须先 `sync()` 一次：两种回调都只报「变化」，不给已存在的设备/会话预先挂钩子，启动前就在放音的程序永远不会被通知到。
-- ⚠️ **一轮 `sync()` 走不完时，"这轮没点到名"不等于"设备没了"**（`notifications.rs` 的 `AbsenceLedger`）：被跳过的端点和被拔掉的端点在"没出现在这一轮的列表里"这件事上长得一模一样，照后者处理就会注销掉还在出声的会话管理器与它全部会话 watcher——而重新挂回去的只有**走得完的那一轮**，一台永久读不到的设备于是把注册、watcher 和存活账本（`sounding`）里的槽位一起留到进程结束。规则：**缺席要问音频服务本人**（`endpoint_probe` 按精确 id 查；只有 `AUDCLNT_E_DEVICE_INVALIDATED` 算"没了"，RPC 断开 / AudioSrv 忙这类"问不通"**不算**证据），问不通的才按**有界**推迟（`MAX_DEFERRED_ABSENCE_PASSES` = 5 轮，**或** `DEFERRED_ABSENCE_GRACE_MS` = 60 s，谁先到；重新被点名即清零）。读不到会话列表的端点也照这一套：逐个 `GetState` 问它自己（`session_self_reports_gone`），读不出来两边都不算证据、留着的正是它该留的。
+- ⚠️ **一轮 `sync()` 走不完时，"这轮没点到名"不等于"设备没了"**（`notifications/absence.rs` 的 `AbsenceLedger`）：被跳过的端点和被拔掉的端点在"没出现在这一轮的列表里"这件事上长得一模一样，照后者处理就会注销掉还在出声的会话管理器与它全部会话 watcher——而重新挂回去的只有**走得完的那一轮**，一台永久读不到的设备于是把注册、watcher 和存活账本（`sounding`）里的槽位一起留到进程结束。规则：**缺席要问音频服务本人**（`endpoint_probe` 按精确 id 查；只有 `AUDCLNT_E_DEVICE_INVALIDATED` 算"没了"，RPC 断开 / AudioSrv 忙这类"问不通"**不算**证据），问不通的才按**有界**推迟（`MAX_DEFERRED_ABSENCE_PASSES` = 5 轮，**或** `DEFERRED_ABSENCE_GRACE_MS` = 60 s，谁先到；重新被点名即清零）。读不到会话列表的端点也照这一套：逐个 `GetState` 问它自己（`session_self_reports_gone`），读不出来两边都不算证据、留着的正是它该留的。
 - 一次热插拔会连着发好几个回调（added → default → state → property）。合并在两处做：**后端** drain `rx.try_recv()` 成一批，**前端** 用 `AUDIO_SYNC_DEBOUNCE_MS = 400` 合并 flags（用 `||` 累积，别覆盖，否则会丢掉前一次的一半）。
 - 通知触发的刷新是 `refreshDevices(true)` / `refreshSessions(true)`：**只有列表内容真的变了才写日志**（`devicesChanged` / `sessionsChanged`），手动的照旧固定写一行。注意 `refreshSessions` 的可选参数——点击处理器必须 `() => void refreshSessions()`，直接把函数交给 `onClick` 会把 MouseEvent 当成 `true` 传进去。`devices` 分支还会跟一次 `loadCaptureDevices()`：载体选择器列的是捕获侧，回环驱动装上后必须不重启就出现在列表里。通知处理（`syncFromNotification`）末尾还会跟一次 `reconcileActiveDuplications()`：引擎的报数（延迟读数、逐设备角色）没有自己的事件，靠这一次和下面列出的其余各处才不至于永远停在旧值。
 - **第四个引擎事件 `duplication-ready`**（pid / generation）：最后一个镜像初始化完成时由 `mirror_ready` 发一次，因为镜像的 `GetStreamLatency` 是在**渲染线程**里、在一次异步设备激活**之后**才拿到的，而 `apply_route` 早就返回了——前端若只在收到路由回执时读一次，读到的必然是空值，而且**再也不会重读**。
@@ -87,7 +87,7 @@
 
 ## 启动提示（`install.rs`；2.3.0 起并入全屏向导）
 
-**第一次跑 2.3.x 的机器一律进全屏向导**（`StartupWizard`）：全新安装是四步导览（欢迎 → 看板怎么读 → 送入载体 → 后台习惯；载体一步复用 `lib/carrierDetect.ts` 的探测，完成/跳过/`Escape` 都走同一条 ack）；从任何旧版本升上来，向导开头**多一屏「是否继承以前版本的设置」**——「重新开始」走 store 的 `startClean`（停掉刚恢复的路由与送入，再清空记住的路由/送入、延迟补偿、设备份额、程序电平，见 `commands.rs` 的 `forget_previous_settings`），「继承」什么都不动。**没有升级弹窗**：旧的 `StartupNoticeDialog` 已删，它的内容并入向导的一屏。
+**第一次跑 2.3.x 的机器一律进全屏向导**（`StartupWizard`）：全新安装是四步导览（欢迎 → 看板怎么读 → 送入载体 → 后台习惯；载体一步复用 `lib/carrierDetect.ts` 的探测，完成/跳过/`Escape` 都走同一条 ack）；从任何旧版本升上来，向导开头**多一屏「是否继承以前版本的设置」**——「重新开始」走 store 的 `startClean`（停掉刚恢复的路由与送入，再清空记住的路由/送入、延迟补偿、设备份额、程序电平，见 `commands/memory.rs` 的 `forget_previous_settings`），「继承」什么都不动。**没有升级弹窗**：旧的 `StartupNoticeDialog` 已删，它的内容并入向导的一屏。
 
 2.1.0 是唯一会把固定端点留在 Windows 里的版本（它就是引入这条 per-app 记录的版本，更早的版本压根没有它可留；见上一节与 `install.rs` 的 `LEFTOVER_VERSION`），所以「重置每应用音频输出」那一屏只对它、以及版本不可考的机器出现（`StartupNotice.leftover_endpoints`）；2.1.1 起四条归还路径闭环，从那以后升上来的机器无事可清、那一屏不出现。而应用分不出「2.1.0 留下的」和「用户在音量合成器里手设的」——所以既不静默清理，也不装作没事，而是问一次。
 

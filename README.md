@@ -239,6 +239,13 @@ AppAudioRouter/
             └── notifications.rs  # endpoint + session change callbacks
 ```
 
+Every module above that outgrew one screen is a file of its own name plus a folder of the same
+name — `commands.rs` + `commands/`, `config.rs` + `config/`, `audio/routing.rs` +
+`audio/routing/`, `audio/duplication.rs` + `audio/duplication/`, and on the frontend
+`stores/routerStore.ts` + `stores/router/`, `components/NodeStage.tsx` +
+`components/nodeStage/`, plus the same for the settings page and the calibration
+wizard. The folder contents are listed in AGENTS.md.
+
 ## Build from source
 
 ```bash

@@ -239,6 +239,12 @@ AppAudioRouter/
             └── notifications.rs  # 设备与会话变更回调
 ```
 
+上面每个长过一屏的模块都是一个同名文件加一个同名目录——
+`commands.rs` + `commands/`、`config.rs` + `config/`、`audio/routing.rs` + `audio/routing/`、
+`audio/duplication.rs` + `audio/duplication/`；前端是 `stores/routerStore.ts` + `stores/router/`、
+`components/NodeStage.tsx` + `components/nodeStage/`，设置页与校准向导同理。
+目录里的文件清单在 AGENTS.md。
+
 ## 从源码构建
 
 ```bash

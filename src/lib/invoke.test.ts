@@ -8,7 +8,7 @@ import * as api from './invoke';
  * The command layer is the whole contract between the frontend and Rust, so
  * these tests assert the one thing a typo here would break silently: that each
  * wrapper asks for the command the backend actually registered, with arguments
- * under the names `commands.rs` reads. The backend itself is replaced by
+ * under the names `src-tauri/src/commands/` reads. The backend itself is replaced by
  * `mockIPC`, so the run never touches Core Audio.
  */
 describe('invoke wrappers', () => {
@@ -155,7 +155,7 @@ describe('invoke wrappers', () => {
   });
 
   it('hands on a rejection that is a bare string, because Rust answers Err(String)', async () => {
-    // The shape the product actually produces: every command in `commands.rs`
+    // The shape the product actually produces: every command in `src-tauri/src/commands/`
     // is `Result<T, String>`, and Tauri rejects with the serialized Err value —
     // a string, not an `Error`. `invoke` does not wrap it, so the only way a
     // caller can report "device not found" is to stringify what it got; reading
