@@ -101,6 +101,8 @@ const TRIM_SLACK_MS: usize = 20;
 /// rounds up, eats into whatever slack the ring has. One base pipeline's worth
 /// is the margin the engine has always carried; changing it changes only how
 /// much memory an idling engine holds.
+const RING_HEADROOM_MS: usize = 100;
+
 /// Upper bound for waiting on the synchronized start. A silent app never fills
 /// the pre-roll, and starting un-synced while silence plays is harmless.
 const PRE_ROLL_TIMEOUT: Duration = Duration::from_secs(4);

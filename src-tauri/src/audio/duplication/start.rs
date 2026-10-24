@@ -29,7 +29,7 @@ use super::manager::UnregisterOutcome;
 use super::mirror::MirrorChannel;
 use super::shared::{retire_engine, EngineShared};
 use super::DuplicationManager;
-use super::{LATENCY_TARGET_MS, TRIM_SLACK_MS};
+use super::{LATENCY_TARGET_MS, RING_HEADROOM_MS, TRIM_SLACK_MS};
 use crate::audio::process_creation_time;
 
 /// Generations handed out to engines so a stale thread can never unregister a
