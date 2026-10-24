@@ -289,6 +289,8 @@ impl AudioPolicyConfig {
         data_flow: i32,
         role: i32,
     ) -> windows::core::HRESULT {
+        // SAFETY: slot 25 signature documented at module level; all arguments
+        // outlive the call. Same transmute as set_persisted_default.
         let f: SetPersistedDefaultAudioEndpointFn = unsafe {
             core::mem::transmute(*((self.vtable + SLOT_SET_PERSISTED_DEFAULT * 8) as *const usize))
         };
