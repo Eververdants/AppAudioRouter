@@ -226,8 +226,10 @@ AppAudioRouter/
   `tsc --noEmit` 类型检查；prettier 的 glob 同样含 `e2e/**/*.ts` 与 `playwright.config.ts`，所以那里也要过 `fmt:check`。
   假桥必须复刻真后端的拒绝与事件顺序——桥放宽了，绿的测的就不是这个产品。
 - **发布（`release.yml`）：只在 tag `v*` 上跑**，先 `cargo audit`（ubuntu，钉版本），audit 过了才由 `tauri-action` 在
-  windows-latest 上 `pnpm tauri build` 出安装包（**MSI 与 NSIS 两种**），并建 **draft** release（`releaseDraft: true`，
-  所以要人工去 Release 页面确认发布），release 正文是写死在 workflow 里的，改了功能口径记得同步它。
+  windows-latest 上 `pnpm tauri build` 出安装包（**MSI 与 NSIS 两种**）并建 **draft** release（`releaseDraft: true`）；
+  最后一个 `publish` 作业带 `environment: release` 审批门——确认动作在 **Actions 页**（Review deployments → 批准），
+  批准后草稿原地转正式，不用去 Release 页面手动发布（environment 与 required reviewer 是仓库设置，换账号/换仓库要重新配）。
+  release 正文是写死在 workflow 里的，改了功能口径记得同步它。
 - **版本号有三处字面量**：`package.json`、`tauri.conf.json`、`src-tauri/Cargo.toml`（锁文件跟着走）。UI 显示的版本来自 `vite.config.ts` 注入的 `__APP_VERSION__`——取自 `package.json`，所以前端没有第二处要改；两份 README 里的版本徽章/速查表也算，发版时一起看。
 
 ---
