@@ -705,6 +705,11 @@ test('a spoke flows only while its programme is sounding', async ({ page }) => {
   // what the stylesheet matches — so the token has to arrive separated. A
   // template that loses the space reads `nwire stage-flowlit`: the flow still
   // runs, the hover does nothing, and every other assertion here still passes.
+  // The pointer has been sitting on the hub since the click that landed the
+  // route, so leave first and make the hover below a real re-entry: a pointer
+  // that never moved re-fires no mouseenter, and a hover state lost in between
+  // could never come back.
+  await page.mouse.move(10, 10);
   await hub(page).hover();
   await expect(wire).toHaveClass(/(?:^|\s)lit(?:\s|$)/);
   await expect(page.locator('main svg path.nwire.lit')).toHaveCount(1);
