@@ -32,7 +32,18 @@ export function registerTuningCommands(): void {
     return null;
   });
   handlers.set('get_device_volumes', () => state.volumes);
-  handlers.set('set_device_volume', () => null);
+  handlers.set('set_device_volume', (payload) => {
+    const deviceId = String(payload.deviceId);
+    const percent = Number(payload.percent);
+    // `set_device_volume`: a share outside 0-100 is refused rather than
+    // clamped, and the neutral 100 clears the entry — the same rule
+    // `set_primary_volume` follows, so a later boot reads back exactly what
+    // the sliders left behind.
+    if (percent > 100) throw new Error('volume out of range 0-100');
+    const rest = state.volumes.filter(([id]: [string, number]) => id !== deviceId);
+    state.volumes = percent === 100 ? rest : [...rest, [deviceId, percent]];
+    return null;
+  });
   handlers.set('get_primary_volumes', () => state.primaryVolumes);
   handlers.set('set_primary_volume', (payload) => {
     const exeName = String(payload.exeName);

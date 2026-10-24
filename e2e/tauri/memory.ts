@@ -16,4 +16,16 @@ export function registerMemoryCommands(): void {
     );
     return null;
   });
+  handlers.set('forget_previous_settings', () => {
+    // `commands/memory.rs`: five files, and deliberately nothing else — the
+    // per-app endpoint assignments belong to the release reset (it reaches
+    // what the user set by hand), the primary volumes are the program's own
+    // session volume, and close-to-tray with the startup entry are habits.
+    state.remembered = [];
+    state.feeds = [];
+    state.delays = [];
+    state.volumes = [];
+    state.sourceVolumes = [];
+    return null;
+  });
 }
