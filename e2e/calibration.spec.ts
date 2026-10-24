@@ -42,7 +42,7 @@ const FAST = 'speakers';
 const SLOW = 'tv';
 /** `TONE_BURST_MS` in `calibration.rs`: what the two markers bracket. */
 const TONE_BURST_MS = 800;
-/** `MIN_VALID` in `DelayCalibration.tsx`: readings a device has to collect. */
+/** `MIN_VALID` in `src/components/calibration/constants.ts`: readings a device has to collect. */
 const READINGS = 3;
 /** `MIN_ROUNDS`: every chosen device plays this many rounds before extensions. */
 const MIN_ROUNDS = 3;

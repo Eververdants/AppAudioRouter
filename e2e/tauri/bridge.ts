@@ -197,8 +197,9 @@ function tauriBridge(initial: BridgeState): void {
    *  token, a number that may repeat, because it names nothing to match. */
   const NO_RUN_TOKEN = 0;
   /** `Refusal::Cancelled::message()` and `Refusal::Busy::message()`, word for
-   *  word: `DelayCalibration`'s `isStaleRunMessage` sorts one from the other by
-   *  these strings, so a paraphrase here would test a wizard that never fires. */
+   *  word: `isStaleRunMessage` in `src/components/calibration/measure.ts` sorts
+   *  one from the other by these strings, so a paraphrase here would test a
+   *  wizard that never fires. */
   const SUPERSEDED_MESSAGE = 'calibration superseded (this run was cancelled before it started)';
   const BUSY_MESSAGE = 'a calibration run is already in progress';
   /** `commands::calibration_start` validates the id before it admits anything. */
