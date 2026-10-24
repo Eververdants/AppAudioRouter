@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
@@ -207,20 +207,26 @@ describe('invoke wrappers', () => {
 
   it('asks for nothing the backend has not registered', () => {
     // The half of the wire contract `mockIPC` cannot see: the mock answers *any*
-    // name, so a command renamed or deleted in `commands.rs` passes every test
+    // name, so a command renamed or deleted on the backend passes every test
     // above and fails only in the user's face. And `tsc` cannot see it either —
-    // a command name is a string, not a type. So read the Rust file and require
+    // a command name is a string, not a type. So read the Rust sources and require
     // every name this module asks for to be a registered command.
+    //
+    // Scanned recursively because `#[tauri::command]`s are not confined to one
+    // file: the module may be split, and a scanner pinned to a single path would
+    // then read an empty set and call every command unregistered.
     //
     // The other direction — a registered command nobody asks for — is a dead
     // command rather than a crash, and is reported by review, not pinned here:
     // the list moves while the backend is being cleaned.
-    const root = process.cwd().replace(/\\/g, '/');
-    const rust = readFileSync(`${root}/src-tauri/src/commands.rs`, 'utf8');
     const registered = new Set(
-      [
-        ...rust.matchAll(/#\[tauri::command\][\s\S]{0,220}?pub\s+(?:async\s+)?fn\s+([a-z_0-9]+)/g),
-      ].map((found) => found[1] as string),
+      rustSourcesUnder('src-tauri/src').flatMap((relative) =>
+        [
+          ...readFileSync(`${process.cwd().replace(/\\/g, '/')}/${relative}`, 'utf8').matchAll(
+            /#\[tauri::command\][\s\S]{0,220}?pub\s+(?:async\s+)?fn\s+([a-z_0-9]+)/g,
+          ),
+        ].map((found) => found[1] as string),
+      ),
     );
     expect(registered.size).toBeGreaterThan(30);
 
@@ -240,4 +246,18 @@ function commandsAskedFor(): string[] {
   return [...source.matchAll(/invoke(?:<[^>]*>)?\(\s*'([a-z_0-9]+)'/g)].map(
     (found) => found[1] as string,
   );
+}
+
+/** Every `.rs` file under `dir`, as repo-relative paths. */
+function rustSourcesUnder(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const relative = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      out.push(...rustSourcesUnder(relative));
+    } else if (entry.name.endsWith('.rs')) {
+      out.push(relative);
+    }
+  }
+  return out;
 }
