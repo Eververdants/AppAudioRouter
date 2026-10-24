@@ -43,12 +43,23 @@ export function createApplySlice(set: SetRouterState, get: GetRouterState): Rout
       // route nobody staged — an unrouted program pressed for a feed alone stays
       // unrouted, the same courtesy `alreadyApplied` grants a plan that only
       // names what the program already plays.
+      //
+      // The device half reads the same fold the board's pressability does: a
+      // sibling selected under a routed owner is answered by the owner's route.
+      // Comparing the raw pid list instead would call the press dirty and
+      // re-route a program with the devices it already plays through — tearing
+      // its engine down and back up for a press the board treats as a no-op.
+      const routedNow = get().routedPids;
+      const targets = oneProcessPerExe(sessions, selectedPids).map((target) => {
+        const owner = programEntryOf(sessions, routedNow, target.pid);
+        return owner === undefined || owner === target.pid ? target : { ...target, pid: owner };
+      });
       const devicesDirty =
         selectedDeviceIds.length > 0 &&
         !alreadyApplied(
           selectedDeviceIds,
-          selectedPids,
-          get().routedPids,
+          targets.map((target) => target.pid),
+          routedNow,
           effectiveFallback(get().defaultDeviceId, get().devices),
         );
       const hubPid = selectedPids[0];
@@ -69,11 +80,6 @@ export function createApplySlice(set: SetRouterState, get: GetRouterState): Rout
       // would leave the owner's engine running next to the new one, and two
       // engines capturing one process tree is the comb filter `oneProcessPerExe`
       // exists to prevent. The undo snapshot reads the owner's route with it.
-      const routedNow = get().routedPids;
-      const targets = oneProcessPerExe(sessions, selectedPids).map((target) => {
-        const owner = programEntryOf(sessions, routedNow, target.pid);
-        return owner === undefined || owner === target.pid ? target : { ...target, pid: owner };
-      });
       if (targets.length === 0) {
         set({ applying: false });
         get().raiseError(i18next.t('log.processGone'));
