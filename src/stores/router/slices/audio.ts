@@ -46,14 +46,10 @@ export function createAudioSlice(set: SetRouterState, get: GetRouterState): Audi
         // Released directly rather than through the stop action, so the unplug
         // does not erase the memory a returning device should restore from.
         const enginelessEnded: number[] = [];
-        if (devices.length > 0) {
-          const generations = get().engineGenerations;
-          for (const [pid, ids] of Object.entries(get().routedPids)) {
-            if (ids.every((id) => !liveIds.has(id)) && (generations[Number(pid)] ?? 0) === 0) {
-              enginelessEnded.push(Number(pid));
-            }
-          }
-        }
+        // One snapshot, one decision: the sweep and the commit read the same
+        // state. Nothing awaits between the list arriving and this `set`, so the
+        // two could not actually diverge today — but reading `s` twice would let
+        // a future await slip in and decide about a picture that is already gone.
         set((s) => {
           const selectedDeviceIds = s.selectedDeviceIds.filter((id) => liveIds.has(id));
           const routedPids: Record<number, string[]> = {};
@@ -62,7 +58,22 @@ export function createAudioSlice(set: SetRouterState, get: GetRouterState): Audi
             const numericPid = Number(pid);
             const remaining = ids.filter((id) => liveIds.has(id));
             if (remaining.length > 0) routedPids[numericPid] = remaining;
-            else delete engineGenerations[numericPid];
+            else {
+              delete engineGenerations[numericPid];
+              // A route whose *every* target vanished also ends here. A
+              // multi-device route's engine notices and stops itself through
+              // `reconcile`; a single-device route has no engine, so nothing
+              // else would release its per-app assignment — one left booked as
+              // a live route is skipped by the settings reset, skipped by the
+              // stale sweep while the program lives, and keeps outranking the
+              // system default with nothing on the board to stop. Released
+              // directly rather than through the stop action, so the unplug
+              // does not erase the memory a returning device should restore
+              // from. The release itself happens after the commit below.
+              if (devices.length > 0 && (s.engineGenerations[numericPid] ?? 0) === 0) {
+                enginelessEnded.push(numericPid);
+              }
+            }
           }
           return { devices, selectedDeviceIds, routedPids, engineGenerations, devicesError: null };
         });
