@@ -22,6 +22,12 @@ export function createIconsSlice(set: SetRouterState, get: GetRouterState): Icon
       // Exes no longer on either list are not our business: a retry timer aimed
       // at a departed process would only fire into an empty pass, and its spent
       // budget would follow the process around if it ever came back.
+      //
+      // Every book here is keyed by the raw `exe_name`, and the live set is raw
+      // too — deliberately not lowercased. One file cannot appear under two
+      // cases in the same pass (every process of it reports the same path), so
+      // a case change can only arrive as a departure: the old key misses the
+      // live set and is pruned with its budget, the new one starts fresh.
       const live = new Set<string>();
       for (const session of get().sessions) live.add(session.exe_name);
       for (const app of get().windowApps) live.add(app.exe_name);
