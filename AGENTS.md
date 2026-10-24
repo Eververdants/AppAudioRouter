@@ -144,8 +144,8 @@ AppAudioRouter/
 
 **身份与归属**（[state.md](docs/agents/state.md)）
 - 所有键按 **exe**：路由、记忆、源电平、端点、图标。显示名只是显示层——不进任何键、不进 `sessionSignature`，`exe_path` 永不出 Rust。
-- 一个 exe 只路由一个进程（取最小 pid）。**渲染与捕获是两个数据流**：`PinnedRoutes` 两本账，`stop_route` 只清渲染侧（并把挂起的送入就地钉回载体）；只有「重置每应用音频输出」与退出会两流一起清。
-- 送入与设备路由是两类：记忆两份互不依赖；送入选中即生效（两端钉死，没有两段式计划）。
+- 一个 exe 只路由一个进程（取最小 pid）。**渲染与捕获是两个数据流**：`PinnedRoutes` 两本账，`stop_route` 只清渲染侧（再由 `resume_feed_taps` 给送入单独起一条 tap-only 引擎）；只有「重置每应用音频输出」与退出会两流一起清。
+- 送入与设备路由是两类：记忆两份互不依赖；送入是**附加的一路**（引擎把同一份音频写进载体，源程序的设备输出不动，代价是送入侧多约 100–140 ms），选中即生效（没有两段式计划）。
 - 上报类结构（`ActiveRoute.device_ids` / `latency_ms`）一律平行数组、等长同序。
 
 **端点分配**（[background.md](docs/agents/background.md)）

@@ -125,7 +125,7 @@ Prefer building it yourself? See [Build from source](#build-from-source).
 3. **Add the devices it should play through.** The device already at the head of the plan is the one Windows itself drives, and every one you add after it receives a copy carrying its own delay and share. Tapping a copy's role word hands it that seat; the main row's own picker can take it further. The last one cannot be removed: a programme with nowhere to play is not a state this app offers.
 4. **Click the programme's card.** While a change is waiting, the hub wears a "click to apply" badge, and its accessible name says exactly what the click will do. Once the route is live, the wires to those destinations stay on the board, and they flow while the programme is sounding.
 5. **Tune a copy if you need to** — its number badge opens its delay and share in the strip along the bottom.
-6. **Or feed another programme's input** — the same "add destination" card lists every programme that can take sound in; picking one connects it there and then (no hub press needed), and the toast offers the way back.
+6. **Or feed another programme's input** — the same "add destination" card lists every programme that can take sound in; picking one connects it there and then (no hub press needed), and the toast offers the way back. The feed is **one more destination, not a move**: the engine writes a second copy of the programme's audio into the carrier, so the programme keeps playing on its own device and a device route is not disturbed.
 6. **Turn on Auto-remember** in the settings so the route is restored the next time that program plays.
 
 ## Delay compensation explained
@@ -360,6 +360,7 @@ No. The routing mechanism is built on Windows Core Audio, so the app is Windows-
 - Calibration times your own presses against the tones each device plays, so it measures the room you are actually listening in and is only as good as your timing. A delay is held inside ±10 s: a value beyond that is refused rather than silently clamped, because that width is what the engine's buffers are sized for.
 - Volume can only attenuate, so the loudest copy in the group is the reference and cannot be pushed below the level the application produced on it.
 - Delay and volume act on mirrored copies only, so neither does anything in a single-device route; the values are kept for when you add a second device.
+- A feed is a second copy (one tap inside the engine), so the target hears the programme about 100–140 ms later than the programme's own output does. The programme's own path carries none of that.
 - Routes for system-critical processes are refused rather than half-applied.
 - A routed program carries a **fixed output device** while its route is live, and Windows keeps that device stored per executable — even after the program exits. It is given back when the route stops, when the app quits, when the program is next seen playing after having exited while routed, or by **Settings → Reset per-app output**. A program that an earlier version left fixed keeps ignoring the system default until one of those happens (the volume mixer's own **Reset** for that app works too).
 - Releasing a fixed output device needs the program to be running, because the audio service is addressed by process; a program that is closed keeps its device until it plays again.
