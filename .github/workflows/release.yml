@@ -98,21 +98,3 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-
-  publish:
-    name: Confirm and publish
-    needs: build
-    runs-on: ubuntu-latest
-    # The confirmation gate: the `release` environment carries a required
-    # reviewer, so the run pauses here until it is approved in the Actions tab
-    # ("Review deployments"). Approving turns the draft the build job made
-    # into the live release — no visit to the Releases page, no manual
-    # publishing, and nothing goes out without that one press.
-    environment: release
-    steps:
-      - name: Publish the draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >
-          gh release edit "${{ github.ref_name }}" --draft=false --latest
-          --repo "${{ github.repository }}"

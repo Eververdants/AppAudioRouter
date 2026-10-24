@@ -1,0 +1,51 @@
+name: Publish release
+
+# The confirmation step of the release process. A tag push builds the
+# installers into a DRAFT release (see release.yml); this workflow is what
+# turns that draft into the live release, and it only ever runs when a human
+# presses "Run workflow" here in the Actions tab — that press is the
+# confirmation, and nothing goes out without it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag to publish (for example v2.3.0)'
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: '20'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Confirm and publish ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm the tag exists and its release is a draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" --json isDraft,name \
+            --jq '{name: .name, isDraft: .isDraft}'
+          if [ "$(gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "::error::${{ inputs.tag }} is not a draft release — nothing to publish."
+            exit 1
+          fi
+
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release edit "${{ inputs.tag }}" --draft=false --latest
+          --repo "${{ github.repository }}"
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}"
+          --json url --jq .url
