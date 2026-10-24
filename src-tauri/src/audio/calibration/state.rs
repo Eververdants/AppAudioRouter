@@ -121,6 +121,20 @@ impl CalibrationState {
         if self.stale_generation.swap(NO_RUN_TOKEN, Ordering::SeqCst) != NO_RUN_TOKEN {
             return Err(Refusal::Cancelled);
         }
+        // A fresh run must not inherit the previous run's cancel request. The
+        // flag is never cleared on the way out, so without this every run after
+        // the first cancel would fail at once — and the wizard reads
+        // "calibration cancelled" as its own doing, leaving the measure screen
+        // standing with neither a burst nor an error to explain it.
+        //
+        // The clear happens *before* the slot is taken, and the stale mark is
+        // re-checked after it: a cancel landing between the two finds nothing
+        // playing and answers a start still in flight, which it records as a
+        // stale mark — exactly the race the check above closes. Clearing after
+        // the CAS instead would wipe that cancel out: the run would play to
+        // completion while the user waits on a dialog they already closed, and
+        // the gate would stay busy for the whole schedule.
+        self.cancel.store(false, Ordering::SeqCst);
         if self
             .busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -128,12 +142,12 @@ impl CalibrationState {
         {
             return Err(Refusal::Busy);
         }
-        // A fresh run must not inherit the previous run's cancel request. The
-        // flag is never cleared on the way out, so without this every run after
-        // the first cancel would fail at once — and the wizard reads
-        // "calibration cancelled" as its own doing, leaving the measure screen
-        // standing with neither a burst nor an error to explain it.
-        self.cancel.store(false, Ordering::SeqCst);
+        if self.stale_generation.swap(NO_RUN_TOKEN, Ordering::SeqCst) != NO_RUN_TOKEN {
+            // The slot was taken to reach this check, so it goes back before
+            // refusing: nothing will run to hand it over.
+            self.busy.store(false, Ordering::SeqCst);
+            return Err(Refusal::Cancelled);
+        }
         Ok(())
     }
 
