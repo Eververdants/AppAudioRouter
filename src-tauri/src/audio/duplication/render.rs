@@ -202,6 +202,14 @@ pub(super) fn join_render_threads(
                 app,
                 AudioError::Api(format!("render thread panicked: {detail}")),
             );
+            // A thread that unwound before its mirror_ready call leaves the
+            // ready count short, and the event that makes the frontend ask for
+            // the latency readings never fires — the readings stay missing
+            // until some unrelated action reconciles. The panic is reported
+            // only here, at teardown, so this is the last chance to count the
+            // mirror in; firing it after a failure is harmless, the event
+            // carries no numbers of its own.
+            mirror_ready(shared, app);
         }
     }
 }
