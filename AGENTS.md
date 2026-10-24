@@ -180,7 +180,7 @@ AppAudioRouter/
 - 清除只走槽 25 的 null HSTRING（按 pid 一条一条清，才能读回校验）；槽 27 `ClearAll...` **禁止使用**——它不经 pid、清完也逐条核对不了。
   ⚠️ 但**别把它写成"只有 ClearAll 会碰到用户手设的分配"**：本应用的「重置每应用音频输出」同样分不出谁写的——它把每个挂着音频会话、又没有被本应用路由的程序（含同 exe 的兄弟）渲染与捕获两条流一起放开，里面**包含用户在音量合成器里手设的那些**。文案与验收条目都必须按这个口径说，不许暗示它是外科手术（见 [background.md](docs/agents/background.md)）。
 - 清除后必须读回校验，Windows 拒绝时要报出仍固定在哪台设备，不许假装成功。
-- 系统关键进程只在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的入口）被拦住，别开第二条 COM 写入路径。
+- 系统关键进程只在 `audio::routing` 的 `set_process_default_endpoint_flow`（`routing/endpoints.rs`，渲染与捕获两条写入流共用的入口，只有两个包装器能调它）被拦住，别开第二条 COM 写入路径。
 
 **刷新与引擎**（[background.md](docs/agents/background.md)）
 - **全项目没有轮询定时器**：列表靠 `audio-changed`（COM 回调）；对齐是一次性动作；延迟读数靠 `reconcileActiveDuplications()` 在事件点重建——**每一条改动引擎生死的路径都要跟一次**，包括"以为会起、结果一台都没落地"那条（完整调用点清单见 [background.md](docs/agents/background.md)）。
@@ -239,7 +239,7 @@ AppAudioRouter/
 - 禁止在前端拼接 shell 命令
 - Rust 端 COM 调用必须校验输入（device_id 格式、pid 范围）
 - 每应用端点分配的清除只走槽 25 的 null HSTRING（按 pid，一条一条，能读回校验）；槽 27 的 `ClearAll...` 不经 pid、清完无从逐条核对，禁止使用。**但"禁 ClearAll"不等于"本应用只清自己写的"**：Windows 那侧的记录没有作者字段，`PinnedRoutes` 只是本轮进程的内存账，所以 `reset_pinned_endpoints` 放开的是**每个挂着音频会话、又没有被本应用路由**的程序（渲染与捕获两条流一起）——里面必然包含用户在音量合成器里手设的那些。任何文案、注释与验收条目都不许把它说成"只清旧版本留下的记录"
-- 系统关键进程的路由必须在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；槽 25 的 `set_persisted_default` 只是裸调用，从它旁边另起一路就等于绕过这道拒绝；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
+- 系统关键进程的路由必须在 `audio::routing` 的 `set_process_default_endpoint_flow`（`routing/endpoints.rs`，渲染与捕获两条写入流共用的那个入口，只有两个包装器能调它）被 `routing_refusal` 拒掉，别在别处另开写入路径；槽 25 的 `set_persisted_default` 只是裸调用，从它旁边另起一路就等于绕过这道拒绝；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
 - 前端永不传 URL：`open_carrier_download` 只收驱动 key（映射在 `commands/shell.rs` 的 `CARRIER_PAGES`），`open_help_page` 只收文档 key（映射在 `HELP_PAGES`），页面都经 `ShellExecuteW` 的 open 动词交给浏览器关联

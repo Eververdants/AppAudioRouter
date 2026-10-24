@@ -6,12 +6,13 @@
 //! stop, on exit, on the stale sweep and on the settings reset. This module is
 //! the memory of who was pointed where.
 //!
-//! The books are three, not one, and they never merge: the route book (keyed by
-//! pid, with a [`PinKind`] saying whether a live route, a handed-back program or
-//! nothing at all owns the entry) and one feed book per half of a feed — the
-//! source's render side and the target's capture side. A program can be routed
-//! to a device *and* receive or carry a feed at the same time, so an entry lost
-//! from one book is an assignment nothing can reach again.
+//! The books follow the two data flows — render and capture — and they never
+//! merge: the route book (keyed by pid, with a [`PinKind`] saying whether a live
+//! route, a handed-back program or nothing at all owns the entry) and one feed
+//! book per half of a feed — the source's render side and the target's capture
+//! side. A program can be routed to a device *and* receive or carry a feed at
+//! the same time, so an entry lost from one book is an assignment nothing can
+//! reach again.
 
 use super::guard::entry_process_is_ours;
 

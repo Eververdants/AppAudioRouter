@@ -92,8 +92,13 @@ pub use self::pins::{PinnedRoutes, ReleaseOutcome};
 // use the two wrappers), and a binary crate reports a `pub use` nothing
 // references as `unused_imports` — which would turn a pure split into a broken
 // build and a narrower public surface at once.
+//
+// `set_process_default_endpoint_flow` is deliberately *not* on this list: it was
+// private in the single-file layout, and only the two wrappers may call it —
+// they are what pins `data_flow` to a real flow. Reaching it past them would be
+// a second door the wrappers' refusal of an unnamed flow never sees.
 #[allow(unused_imports)]
-pub use self::endpoints::set_process_default_endpoint_flow;
+pub use self::endpoints::release_default_endpoints;
 #[allow(unused_imports)]
 pub use self::guard::routing_refusal;
 #[allow(unused_imports)]

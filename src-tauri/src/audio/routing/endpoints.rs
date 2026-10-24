@@ -313,7 +313,11 @@ pub async fn set_process_default_capture_device(
 /// decides *whether* a write still may happen, by the per-program claim order
 /// documented in the write-order section above. Nothing here is a second channel:
 /// the gate performs no slot call, it only refuses this one before it starts.
-pub async fn set_process_default_endpoint_flow(
+/// Private on purpose: only the two wrappers below may call it, because they are
+/// what pins `data_flow` to a real flow — a caller choosing the integer itself
+/// would be a second door with the guard on it but no wrapper to say which flow
+/// it is writing.
+async fn set_process_default_endpoint_flow(
     device_id: &str,
     pid: u32,
     role: Role,
