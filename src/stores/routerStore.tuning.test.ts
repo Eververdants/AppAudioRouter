@@ -9,7 +9,7 @@ import {
   lastLog,
   reset,
   state,
-} from './router/harness';
+} from '@/test/routerHarness';
 
 describe('settings and log', () => {
   it('caps the log so a chatty session cannot grow it without bound', () => {

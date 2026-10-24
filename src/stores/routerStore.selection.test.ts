@@ -10,7 +10,7 @@ import {
   lastLog,
   reset,
   state,
-} from './router/harness';
+} from '@/test/routerHarness';
 
 describe('process and device selection', () => {
   it('prefills the devices a process is already routed to', () => {

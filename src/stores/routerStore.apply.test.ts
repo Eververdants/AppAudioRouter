@@ -3,7 +3,16 @@ import i18next from 'i18next';
 
 import type { AudioSession } from '@/lib/types';
 
-import { SPEAKERS, TV, MUSIC, GAME, installBackend, lastLog, reset, state } from './router/harness';
+import {
+  SPEAKERS,
+  TV,
+  MUSIC,
+  GAME,
+  installBackend,
+  lastLog,
+  reset,
+  state,
+} from '@/test/routerHarness';
 
 describe('applyRoute', () => {
   it('routes in the plan order, remembers it, and offers the way back', async () => {

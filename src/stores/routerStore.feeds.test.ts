@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import type { AudioSession } from '@/lib/types';
 
-import { SPEAKERS, TV, MUSIC, GAME, installBackend, lastLog, reset, state } from './router/harness';
+import {
+  SPEAKERS,
+  TV,
+  MUSIC,
+  GAME,
+  installBackend,
+  lastLog,
+  reset,
+  state,
+} from '@/test/routerHarness';
 
 import { feedLiveness } from './routerStore';
 

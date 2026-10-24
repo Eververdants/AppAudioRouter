@@ -12,7 +12,7 @@ import {
   lastLog,
   reset,
   state,
-} from './router/harness';
+} from '@/test/routerHarness';
 
 describe('session activity', () => {
   it('folds who is sounding into the programs the lists read', async () => {

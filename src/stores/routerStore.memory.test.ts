@@ -11,7 +11,7 @@ import {
   installBackend,
   reset,
   state,
-} from './router/harness';
+} from '@/test/routerHarness';
 
 describe('remembered routes', () => {
   it('restores one route per program — the lowest pid of each', async () => {

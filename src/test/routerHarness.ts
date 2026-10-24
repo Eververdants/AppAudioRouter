@@ -7,7 +7,7 @@ import type {
   ResetOutcome,
   StopOutcome,
 } from '@/lib/types';
-import { useRouterStore } from '../routerStore';
+import { useRouterStore } from '@/stores/routerStore';
 
 /**
  * The store is where every UI decision about audio is made, so this is the

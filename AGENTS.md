@@ -109,8 +109,8 @@ AppAudioRouter/
 │   │                         #   useProgramRoutes（把程序的账摊到它名下所有进程）/ useElementHeight（井的唯一高度）
 │   ├── stores/               # Zustand store：routerStore.ts 只剩 create 与两个订阅 + router/：
 │   │                         #   types/（按域的 State+Actions 切片）/ pure/（无状态助手）/ slices/（动作工厂）/
-│   │                         #   gates.ts（模块级并发闸门，每个只声明一次）/ initial.ts / liveness.ts / harness.ts
-│   │                         #   （store 的测试按域分成 routerStore.<域>.test.ts）
+│   │                         #   gates.ts（模块级并发闸门，每个只声明一次）/ initial.ts / liveness.ts
+│   │                         #   （store 的测试按域分成 routerStore.<域>.test.ts，共用 src/test/routerHarness.ts）
 │   ├── i18n/                 # en.json + zh-CN.json（键集合有对称测试保护）
 │   ├── lib/                  # invoke / delay / routes（程序级归属查询）/ stage（看板几何）/ motion（共享动效曲线）/
 │   │                         #   icons / carrierDetect（回环驱动探测）/ productionGuards / types / window
