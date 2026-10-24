@@ -7,7 +7,7 @@ import {
   queueAssignmentWork,
 } from '../gates';
 import { foldSounding } from '../pure/processes';
-import { deviceName } from '../pure/targets';
+import { deviceName, feedTargetsOf } from '../pure/targets';
 import type { EngineActions, GetRouterState, SetRouterState } from '../types';
 
 /** The backend's own events folded in, and the one pass that re-reads which
@@ -36,8 +36,16 @@ export function createEngineSlice(set: SetRouterState, get: GetRouterState): Eng
       // An engine that exists only for a feed tap — a programme being fed but not
       // routed — carries no generation on the board, so the guard below would
       // swallow its death and leave a wire that moves nothing. That failure is the
-      // feed's to report, and it is reported on the feed's channel.
-      if (reason === 'error' && get().engineGenerations[pid] === undefined) {
+      // feed's to report, and it is reported on the feed's channel. The gate is
+      // the programme's own feed plan: without it, the death of any engine whose
+      // generation the board has already retired — a stop's second retirement, a
+      // reconciliation that landed first — would read as a dead wire for a
+      // programme that feeds nothing.
+      if (
+        reason === 'error' &&
+        get().engineGenerations[pid] === undefined &&
+        feedTargetsOf(get(), pid).length > 0
+      ) {
         get().handleFeedTapFailed({ pid, generation, error: error ?? '' });
         return;
       }

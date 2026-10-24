@@ -147,13 +147,27 @@ pub async fn set_feed_target(
                 tgt.eq_ignore_ascii_case(&target_exe) && !src.eq_ignore_ascii_case(&source_exe)
             });
             if !target_still_needed && pins.feed_capture_of(target_pid).is_some() {
-                let _ = audio::routing::release_process_default_devices_flow(
-                    vec![target_pid],
-                    audio::Role::All,
-                    true,
-                )
-                .await;
-                pins.forget_feed_capture(target_pid);
+                // The wire did not land, so the target's capture side goes back —
+                // but only a *clean* release may drop the book entry. Windows
+                // refusing to hand the endpoint back would leave the program fixed
+                // to the carrier with the board already gone: the same half-worked
+                // state a removal reports by name, and it is said here the same
+                // way rather than forgotten into silence. This command already
+                // fails with the landing's own error, so the log is the honest
+                // channel for the residue.
+                if released_cleanly(
+                    audio::routing::release_process_default_devices_flow(
+                        vec![target_pid],
+                        audio::Role::All,
+                        true,
+                    )
+                    .await,
+                    "feed target",
+                ) {
+                    pins.forget_feed_capture(target_pid);
+                } else if let Some(exe) = pins.feed_capture_exe_of(target_pid) {
+                    warn!("the capture endpoint of {exe} stayed fixed to the carrier after a failed feed");
+                }
             }
             pins.forget_feed_source(source_pid);
             if let Err(recover) = feeds.remove(&source_exe, &target_exe) {

@@ -349,6 +349,34 @@ describe('engine events', () => {
     expect(lastLog()?.level).toBe('error');
   });
 
+  it('does not dress the late death of a generationless engine up as a dead feed wire', () => {
+    // "No generation on the board" is also what a *routed* engine looks like
+    // once its generation has been retired — a stop's second retirement, or a
+    // reconciliation that landed first. For a programme that feeds nothing,
+    // reading that as a tap-only engine's death raised the feed's card for a
+    // wire that does not exist; without a feed plan the event is simply stale,
+    // and the stop that retired the generation has already told its story.
+    const PLAYER: AudioSession = { pid: 9101, exe_name: 'quiet-end.exe' };
+    installBackend();
+    reset({
+      devices: [SPEAKERS, TV],
+      sessions: [PLAYER],
+      routedPids: {},
+      engineGenerations: {},
+    });
+
+    state().handleDuplicationStopped({
+      pid: PLAYER.pid,
+      generation: 4,
+      reason: 'error',
+      error: 'the device left',
+    });
+
+    expect(state().feedTapFailures).toEqual({});
+    expect(state().errorNotice).toBeNull();
+    expect(lastLog()).toBeUndefined();
+  });
+
   it('does not let a reconciliation asked before the engine died put the route back', async () => {
     // Same shape as a stop, and the reason it cannot be left to "the next pass":
     // the process exited, so the session refresh that would prune the badge has
