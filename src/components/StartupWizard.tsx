@@ -43,7 +43,7 @@ function BlurText({
   className?: string;
 }) {
   return (
-    <span aria-label={text} className={className}>
+    <span role="text" aria-label={text} className={className}>
       {Array.from(text).map((ch, i) => (
         <motion.span
           key={i}
@@ -93,6 +93,7 @@ export function StartupWizard() {
   const toggleAutostart = useRouterStore((s) => s.toggleAutostart);
   const closeToTray = useRouterStore((s) => s.closeToTray);
   const toggleCloseToTray = useRouterStore((s) => s.toggleCloseToTray);
+  const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
   /** The inherit question's answer: keeping is the default, and the words
    *  under the choice change with it so neither answer is a blind press. */
   const [keepSettings, setKeepSettings] = useState(true);
@@ -104,6 +105,16 @@ export function StartupWizard() {
   /** Guards the wipe against a second door reaching it while the first is still
    *  running: Skip and Escape are not buttons the `cleaning` flag can disable. */
   const settling = useRef(false);
+  /** The wipe already succeeded once. Back can return to the inherit screen,
+   *  and a second pass through it must not run the wipe again — nor report a
+   *  failure for a wipe that landed. */
+  const wiped = useRef(false);
+  /** The legacy-endpoints reset's flight and outcome live here, not in the
+   *  step: a step unmounts when the footer moves on, and state kept inside it
+   *  would let a second press race the first reset for the same processes —
+   *  the reason the settings page lifts its own copy of this action. */
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetOutcome, setResetOutcome] = useState<ResetOutcome | null>(null);
 
   // A machine walking in from an older version answers for its predecessor's
   // settings before anything else — that screen is the reason an upgrade gets
@@ -149,6 +160,11 @@ export function StartupWizard() {
    *  behind it, so a refusal holds the step instead of advancing over it. */
   async function settleInherit(): Promise<boolean> {
     if (current !== 'inherit' || keepSettings) return true;
+    // The wipe already landed once: a second pass through this screen — Back
+    // can return to it — must not run the wipe again, and choosing 「保留」
+    // afterwards cannot mean anything (what would be kept is already gone), so
+    // the tour simply moves on.
+    if (wiped.current) return true;
     // A second pass must not start a second wipe: the first is still in flight,
     // and its own success or failure is the answer this one would give anyway.
     if (settling.current) return false;
@@ -156,6 +172,7 @@ export function StartupWizard() {
     setCleaning(true);
     try {
       await startClean();
+      wiped.current = true;
       setCleanError(null);
       return true;
     } catch (e) {
@@ -210,7 +227,19 @@ export function StartupWizard() {
               />
             )}
             {current === 'legacy-endpoints' && (
-              <LegacyEndpointsStep previousVersion={notice?.previous_version ?? null} />
+              <LegacyEndpointsStep
+                previousVersion={notice?.previous_version ?? null}
+                busy={resetBusy}
+                outcome={resetOutcome}
+                onReset={() => {
+                  setResetBusy(true);
+                  void resetPinnedEndpoints()
+                    .then((outcome) => {
+                      if (outcome !== null) setResetOutcome(outcome);
+                    })
+                    .finally(() => setResetBusy(false));
+                }}
+              />
             )}
             {current === 'welcome' && <WelcomeStep />}
             {current === 'board' && <BoardStep />}
@@ -248,7 +277,7 @@ export function StartupWizard() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={cleaning}
+              disabled={cleaning || resetBusy}
               onClick={() => void leave()}
               className="pressable rounded-ctl px-2.5 py-1 text-[11px] font-medium text-text-muted outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
             >
@@ -257,8 +286,9 @@ export function StartupWizard() {
             {step > 0 && (
               <button
                 type="button"
+                disabled={resetBusy}
                 onClick={() => setStep(step - 1)}
-                className="pressable rounded-ctl border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
+                className="pressable rounded-ctl border border-line px-3 py-1.5 text-[11px] font-medium text-text-secondary outline-none hover:border-accent/50 hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
               >
                 {t('wizard.back')}
               </button>
@@ -266,7 +296,7 @@ export function StartupWizard() {
             <button
               type="button"
               autoFocus
-              disabled={cleaning}
+              disabled={cleaning || resetBusy}
               onClick={() => (last ? void leave() : void advance())}
               className="pressable rounded-ctl bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
             >
@@ -407,14 +437,22 @@ function InheritStep({
  * step — and it stands apart from the inherit question on purpose: that one
  * forgets what this app remembers, this one hands Windows back what it holds.
  */
-function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | null }) {
+function LegacyEndpointsStep({
+  previousVersion,
+  busy,
+  outcome,
+  onReset,
+}: {
+  previousVersion: string | null;
+  /** The reset's flight and its outcome are the wizard's, not this step's: a
+   *  step unmounts when the footer moves on, and state kept inside it would
+   *  let a second press race the first reset for the same processes. */
+  busy: boolean;
+  outcome: ResetOutcome | null;
+  onReset: () => void;
+}) {
   const { t } = useTranslation();
-  const resetPinnedEndpoints = useRouterStore((s) => s.resetPinnedEndpoints);
-  // What the press cleared. A refusal is the store's to report — it reaches the
-  // toast everywhere — so this screen keeps only the outcome it can spell out
-  // per program: which ones are still fixed somewhere.
-  const [result, setResult] = useState<ResetOutcome | null>(null);
-  const [busy, setBusy] = useState(false);
+  const result = outcome;
 
   return (
     <StepText title={t('startup.upgradeTitle')}>
@@ -440,14 +478,7 @@ function LegacyEndpointsStep({ previousVersion }: { previousVersion: string | nu
         )}
         <button
           type="button"
-          onClick={() => {
-            setBusy(true);
-            void resetPinnedEndpoints()
-              .then((outcome) => {
-                if (outcome !== null) setResult(outcome);
-              })
-              .finally(() => setBusy(false));
-          }}
+          onClick={onReset}
           disabled={busy}
           className="pressable mt-4 flex items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-ink outline-none hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
         >
