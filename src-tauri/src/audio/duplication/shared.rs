@@ -72,7 +72,7 @@ pub(super) struct EngineShared {
     /// Executable this engine duplicates. The per-program level is keyed by it
     /// rather than by `pid`, because one program can hold several sessions.
     /// Must be the verbatim `AudioSession.exe_name` spelling — the `==`
-    /// matches here and the exact map keys in `config.rs` depend on it.
+    /// matches here and the exact map keys in the `config/` stores depend on it.
     pub(super) exe_name: String,
     pub(super) generation: u64,
     /// Process creation time as a FILETIME (u64), used to detect PID reuse.

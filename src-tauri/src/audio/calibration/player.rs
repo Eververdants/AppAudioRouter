@@ -115,7 +115,7 @@ fn mix_layout(format: &[u8]) -> (usize, bool) {
 /// The stream flags to try, in order, for one calibration burst.
 ///
 /// The engine's render clients retry without `AUTOCONVERTPCM` when an endpoint
-/// refuses the conversion path (`duplication.rs`, `open_render_session`), and
+/// refuses the conversion path (`duplication/render.rs`, `open_render_session`), and
 /// this player has to as well: a device that says no to the flag is a wizard
 /// that reports a failure where it could have reported a measurement.
 ///
