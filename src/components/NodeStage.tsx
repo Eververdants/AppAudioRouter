@@ -222,9 +222,19 @@ export function NodeStage() {
   // carries the swap in: ghost and arrivals play on the fresh mount exactly
   // as they would in place.
   const hubName = clampHubName(name ?? '');
+  /** The programme the two swap states below were last adjusted for. Switching
+   *  between siblings of one executable — same words, same tile, another pid —
+   *  remounts the card without changing either. Left alone, the stale `prev`
+   *  of the last real swap replays on the fresh mount: the previous
+   *  programme's name and icon flash back for one beat before the (unchanged)
+   *  answer settles. A remount that changes nothing resets both to render in
+   *  place, so only a real swap ever speaks. */
+  const swapPidRef = useRef(pid);
   const [nameSwap, setNameSwap] = useState({ text: hubName, prev: null as string | null, key: 0 });
   if (hubName !== nameSwap.text) {
     setNameSwap({ text: hubName, prev: nameSwap.text, key: nameSwap.key + 1 });
+  } else if (pid !== swapPidRef.current && (nameSwap.prev !== null || nameSwap.key !== 0)) {
+    setNameSwap({ text: hubName, prev: null, key: 0 });
   }
   // The tile swaps on the executable, not the name — a display_name can change
   // under a running programme without the programme changing. The ghost tile's
@@ -251,7 +261,12 @@ export function NodeStage() {
       prev: iconSwap.exe ? { exeName: iconSwap.exe, name: nameSwap.text || iconSwap.exe } : null,
       key: iconSwap.key + 1,
     });
+  } else if (pid !== swapPidRef.current && (iconSwap.prev !== null || iconSwap.key !== 0)) {
+    // The sibling switch: the tile is already the right one, so the last swap's
+    // ghost must not replay on the remounted card.
+    setIconSwap({ exe, prev: null, key: 0 });
   }
+  swapPidRef.current = pid;
   // The plan draws in its own order: the first device the user staged is the
   // primary, and the apply lands exactly this order — preview and fact are the
   // same sequence, so a delay value can never push another device onto the
