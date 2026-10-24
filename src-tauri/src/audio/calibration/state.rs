@@ -168,9 +168,15 @@ impl CalibrationState {
     ///
     /// The epoch moves whichever way: a cancel must always reach the burst that is
     /// sounding right now, and the marks only decide what may still *begin*.
+    ///
+    /// The mark lands **before** the epoch moves. Under the sequentially
+    /// consistent total order, any `begin` whose epoch capture already saw this
+    /// cancel's bump must also see this cancel's mark — the reverse order would
+    /// leave a window where a start is admitted at the standing (bumped) epoch
+    /// while the mark naming it is still in flight, and the burst plays into a
+    /// dialog the user already closed.
     pub fn cancel(&self, run: u64) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.cancel_epoch.fetch_add(1, Ordering::SeqCst);
         if run == NO_RUN_TOKEN {
             // No run named, so the ordering has to be inferred from what was
             // sounding: nothing was, which means the start this cancel answers has
@@ -181,6 +187,7 @@ impl CalibrationState {
         } else {
             self.cancelled_run.store(run, Ordering::SeqCst);
         }
+        self.cancel_epoch.fetch_add(1, Ordering::SeqCst);
         if run == NO_RUN_TOKEN {
             debug!("calibration cancelled at generation {generation}");
         } else {
