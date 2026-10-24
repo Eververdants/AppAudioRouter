@@ -36,11 +36,27 @@ pub fn forget_previous_settings(
     sources: State<'_, Arc<SourceVolumeConfig>>,
 ) -> Result<(), String> {
     info!("cmd: forget_previous_settings");
-    routes.clear()?;
-    feeds.clear()?;
-    delays.clear()?;
-    volumes.clear()?;
-    sources.clear()
+    // Every store gets its chance even when an earlier one fails: a `?` chain
+    // would stop at the first refusal, leaving the later stores holding rules
+    // the user was told are gone. What was not cleared is named.
+    let failures: Vec<String> = [
+        ("remembered routes", routes.clear().err()),
+        ("feed rules", feeds.clear().err()),
+        ("device delays", delays.clear().err()),
+        ("device shares", volumes.clear().err()),
+        ("program levels", sources.clear().err()),
+    ]
+    .into_iter()
+    .filter_map(|(name, err)| err.map(|e| format!("{name}: {e}")))
+    .collect();
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "some settings could not be cleared — {}",
+            failures.join("; ")
+        ))
+    }
 }
 
 /// Get all remembered routes as `(exe_name, device_ids)` pairs.
