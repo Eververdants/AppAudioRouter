@@ -147,7 +147,11 @@ export function Toast() {
     // The layer spans the bottom of the window but takes no pointer events: only
     // the cards themselves are clickable, so whatever is behind it stays usable.
     // Two offers can stand at once (a route and a feed); they stack.
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col items-center justify-center gap-2 p-4">
+    // Anchored above the standing chrome rather than under it: the tuning
+    // strip takes the bottom band, the routed capsule sits 56px up, and a
+    // toast at the very bottom covered whichever of them was on screen. A
+    // stack of three rises away from the board instead of over it.
+    <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex flex-col items-center justify-center gap-2 px-4">
       <AnimatePresence>
         {errorNotice !== null && (
           <motion.div

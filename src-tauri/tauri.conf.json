@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "App Audio Router",
-        "width": 900,
-        "height": 680,
-        "minWidth": 720,
-        "minHeight": 520,
+        "width": 980,
+        "height": 720,
+        "minWidth": 900,
+        "minHeight": 560,
         "resizable": true,
         "decorations": false,
         "shadow": true,
