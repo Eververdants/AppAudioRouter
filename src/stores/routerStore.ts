@@ -74,6 +74,9 @@ interface RouterState {
    * would otherwise open by claiming no app is playing sound.
    */
   sessionsLoaded: boolean;
+  /** Whether an enumeration is in flight right now. The rail's Refresh button
+   *  says so: a slow Core Audio answer used to look like a press that missed. */
+  sessionsRefreshing: boolean;
   /**
    * Why the last enumeration of each list failed, in the backend's own words.
    * An empty list is a claim about the machine; a failed read is a claim about
@@ -206,6 +209,10 @@ interface RouterState {
    * word about the assignments an earlier version may have left behind. Null
    * once acknowledged. */
   startupNotice: StartupNotice | null;
+  /** Whether the install's own notice has been read yet. The work area waits
+   *  for it: showing the board first and swapping to the tour a beat later is
+   *  a first impression of two half-screens. */
+  startupNoticeLoaded: boolean;
   logs: LogEntry[];
   /**
    * A failure the user has to see without opening the activity tab, while the
@@ -969,6 +976,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   devices: [],
   sessions: [],
   sessionsLoaded: false,
+  sessionsRefreshing: false,
   selectedPids: [],
   selectedDeviceIds: [],
   deviceSelectionPrefilled: false,
@@ -993,6 +1001,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   closeToTray: false,
   autostart: false,
   startupNotice: null,
+  startupNoticeLoaded: false,
   logs: [],
   errorNotice: null,
   applying: false,
@@ -1096,6 +1105,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       return;
     }
     sessionRefreshGate.inFlight = true;
+    set({ sessionsRefreshing: true });
     // Whether a list is already on screen: the same seam the device refresh reads.
     const listWasUp = get().sessionsLoaded;
     try {
@@ -1202,7 +1212,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       // Raised whether the enumeration answered or refused: after a failure the
       // rail would otherwise sit on "reading" forever, which is a different
       // lie and a worse one — nothing is coming to change it.
-      set({ sessionsLoaded: true });
+      set({ sessionsLoaded: true, sessionsRefreshing: false });
       sessionRefreshGate.inFlight = false;
       runQueuedRefresh(sessionRefreshGate, (rerunViaNotification) => {
         void get().refreshSessions(rerunViaNotification);
@@ -1833,8 +1843,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // first launch of a fresh install, or an earlier version ran here and may
     // have left per-app endpoint assignments behind (see `install.rs`).
     try {
-      set({ startupNotice: await api.getStartupNotice() });
+      set({ startupNotice: await api.getStartupNotice(), startupNoticeLoaded: true });
     } catch (e) {
+      // A read that failed still has to let the work area through: a blank
+      // window is worse than a tour nobody was owed.
+      set({ startupNoticeLoaded: true });
       get().addLog(i18next.t('log.startupNoticeFailed', { error: String(e) }), 'error');
     }
   },

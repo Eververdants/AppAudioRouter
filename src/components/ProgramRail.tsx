@@ -44,6 +44,7 @@ export function ProgramRail() {
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   const stopAllRoutes = useRouterStore((s) => s.stopAllRoutes);
   const refreshSessions = useRouterStore((s) => s.refreshSessions);
+  const refreshing = useRouterStore((s) => s.sessionsRefreshing);
 
   // The one loop this list is allowed to run — a ring pulsing because a
   // programme is making sound — waits on somebody being able to see it. A
@@ -160,11 +161,16 @@ export function ProgramRail() {
             // optional "this came from a notification" flag, and the click event
             // would arrive as a truthy one if the handler were passed directly.
             onClick={() => void refreshSessions()}
-            whileTap={{ scale: 0.96 }}
+            // A slow Core Audio walk used to look like a press that missed, and
+            // the second press only queued behind the first.
+            disabled={refreshing}
+            aria-busy={refreshing}
+            whileTap={refreshing ? undefined : { scale: 0.96 }}
             transformTemplate={MAIN_THREAD_TRANSFORM}
             transition={SPRING_TAP}
-            className="rounded-seg px-2 py-1 text-[11px] text-text-muted outline-none transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="flex items-center gap-1 rounded-seg px-2 py-1 text-[11px] text-text-muted outline-none transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-text-muted"
           >
+            {refreshing && <Spinner size={10} />}
             {t('rail.refresh')}
           </motion.button>
         </div>
@@ -391,14 +397,19 @@ const RailRow = memo(function RailRow({
   // often a sibling of the one this row shows. `useLiveness` is the loop's
   // only other gate.
   const sounding = useRouterStore((s) => s.soundingExes[exeKey] === true) && liveness;
-  // The window names the program something a person can read; the exe
-  // is the identity this app remembers and routes by, so it stays on
-  // the record line whenever the display name differs from it.
+  // The window names the program something a person can read; the exe is the
+  // identity this app remembers and routes by, so it stays on the record line
+  // whenever it says something the name does not. "Music" over
+  // "music.exe" is not two facts — it is one fact spelled twice, and it used to
+  // spend the whole line doing it, pushing the PID (the one thing that tells two
+  // windows of the same program apart) off the end.
   const name = session.display_name ?? session.exe_name;
+  const exeStem = session.exe_name.replace(/\.exe$/i, '');
   const exeDiffers =
     session.display_name !== undefined &&
     session.display_name !== null &&
-    session.display_name.toLowerCase() !== session.exe_name.toLowerCase();
+    session.display_name.toLowerCase() !== session.exe_name.toLowerCase() &&
+    session.display_name.toLowerCase() !== exeStem.toLowerCase();
 
   return (
     <motion.div

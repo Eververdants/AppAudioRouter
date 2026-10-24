@@ -69,12 +69,13 @@ export default function App() {
   const tab = useRouterStore((s) => s.tab);
   const setTab = useRouterStore((s) => s.setTab);
   const unreadErrors = useRouterStore((s) => s.unreadErrors);
+  const startupNoticeLoaded = useRouterStore((s) => s.startupNoticeLoaded);
   // The launch owns the work area until it is acknowledged: the first run of
   // this version line — a fresh install, or a machine walking in from anything
   // older — walks the user in, and the upgrade's tour carries the one screen
   // about the predecessor's settings. What that predecessor left pinned is one
   // more stop of the same tour, never a layer of its own.
-  const wizardActive = startupNotice !== null;
+  const wizardActive = startupNoticeLoaded && startupNotice !== null;
 
   useEffect(() => {
     // The window is created hidden so nobody sees the unstyled shell. This runs
@@ -96,6 +97,15 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    // Read before the first frame rather than with the deferred pass: the work
+    // area does not draw until it knows whether this launch owes the user a
+    // tour, and a read that waits for the idle callback leaves the window
+    // showing a blank plane for a beat too long. It is a small file read on
+    // the Rust side and touches no audio.
+    void loadStartupNotice();
+  }, [loadStartupNotice]);
 
   useEffect(() => {
     void loadDelaySettings();
@@ -164,9 +174,6 @@ export default function App() {
       // The tray preference and the startup registry entry are only read by the
       // settings page, so they wait for the first paint like the rest.
       void loadShellSettings();
-      // Whether this install is fresh or an update, and what to say about the
-      // assignments an earlier version may have left behind.
-      void loadStartupNotice();
     });
   }, [
     refreshDevices,
@@ -178,7 +185,6 @@ export default function App() {
     loadFeedCarrier,
     loadCaptureDevices,
     loadShellSettings,
-    loadStartupNotice,
   ]);
 
   // Duplication engines report their end (user stop, process exit, error) through
@@ -267,7 +273,13 @@ export default function App() {
           AnimatePresence): the outgoing view unmounts immediately, which keeps
           the swap stuck-free. */}
       <div className="flex min-h-0 flex-1">
-        {wizardActive ? (
+        {!startupNoticeLoaded ? (
+          // The work area holds its breath for the one read that decides what
+          // belongs in it. It is a file read on the Rust side, so this is a
+          // frame or two — and a frame or two of nothing beats a flash of the
+          // board that is about to be replaced by the tour.
+          <div key="boot" className="min-h-0 flex-1" aria-busy="true" />
+        ) : wizardActive ? (
           <motion.div
             key="wizard"
             initial={{ opacity: 0 }}
