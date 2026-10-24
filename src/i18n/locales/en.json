@@ -105,12 +105,12 @@
     "pickNone": "Nothing left to add",
     "pickNoDevices": "Windows reports no output device",
     "feedRole": "Send in",
-    "feedHeld": "Held",
+    "feedHeld": "Broken",
     "feedNoCarrier": "No carrier",
     "feedInputSuffix": "input",
     "feedCount": "feeding {{n}}",
-    "feedTitleLive": "This program's audio feeds {{name}}'s input",
-    "feedTitleSuspended": "Not moving: {{source}}'s route holds the output slot; stop it and the feed resumes",
+    "feedTitleLive": "This program's audio feeds {{name}}'s input while it keeps playing on its own devices",
+    "feedTitleSuspended": "Paused: the stream into the carrier stopped; set the feed again to put it back",
     "feedTitleNoCarrier": "Not moving: no carrier set — pick a loopback pair in Settings → Feed carrier",
     "removeFeed": "Stop feeding {{name}}",
     "feederTitle": "Open this program's board",
@@ -122,7 +122,8 @@
     "stripDelay": "Delay",
     "stripShare": "Share",
     "singleNote": "One destination: the system plays it directly, so there is no delay to compensate",
-    "singleNoteTitle": "This path's volume is the program's own session volume, adjusted in the Windows volume mixer; to attenuate a copy on its own, add a second destination"
+    "singleNoteTitle": "This path's volume is the program's own session volume, adjusted in the Windows volume mixer; to attenuate a copy on its own, add a second destination",
+    "feedCarrierDesc": "A feed goes through a loopback pair: the engine writes the source's audio into the pair's playback side and the target records from its recording side — the source itself keeps playing on its own devices. Pick a pair from a loopback driver (such as VB-Cable); without one, feeds are remembered but stay silent."
   },
   "routed": {
     "capsule": "{{n}} routed",
@@ -278,7 +279,7 @@
     "rolePrimary": "Main",
     "roleCopy": "Copy",
     "roleFeed": "Input",
-    "roleFeedHeld": "Held",
+    "roleFeedHeld": "Broken",
     "roleFeedNoCarrier": "No carrier",
     "quiet": "Silent",
     "staged": "The board still has changes waiting — go back to Routing and press the program card to make them real."
@@ -384,12 +385,12 @@
     "feedCarrierSetFailed": "Failed to save the feed carrier: {{error}}",
     "captureDevicesFailed": "Failed to list recording devices: {{error}}",
     "feedSet": "Feeding {{source}} into {{target}}'s input",
-    "feedSuspended": "Feed rule {{source}} → {{target}} recorded, held while {{source}} is routed to a device",
     "feedNoCarrier": "Feed rule {{source}} → {{target}} recorded, but no carrier is configured — feeds stay silent until one is picked in settings",
     "feedSetFailed": "Failed to record the feed: {{error}}",
     "feedRemoved": "Stopped feeding {{source}} into {{target}}'s input",
     "feedRemoveFailed": "Failed to remove the feed: {{error}}",
     "feedRemovedStuck": "Removed the feed, but Windows still has {{processes}} fixed to the carrier — reset per-app audio output in the settings to hand it back",
-    "feedRestored": "Restored the remembered feed: {{source}} → {{target}}'s input"
+    "feedRestored": "Restored the remembered feed: {{source}} → {{target}}'s input",
+    "feedTapFailed": "The feed from {{source}} stopped: its audio is no longer reaching the carrier"
   }
 }

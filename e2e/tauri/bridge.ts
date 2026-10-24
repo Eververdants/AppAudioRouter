@@ -534,16 +534,8 @@ function tauriBridge(initial: BridgeState): void {
         }
         const configured = state.feedCarrier.render !== null && state.feedCarrier.capture !== null;
         if (!configured) return { delivered: false, reason: 'no_carrier' };
-        // A device route owns the source's one per-app render slot, and the
-        // audio service stores that assignment per executable — so a sibling's
-        // route holds it too. The rule is recorded either way, but it carries
-        // no sound until that route stops: `PinnedRoutes` answers the same way.
-        const heldByARoute = state.sessions.some(
-          (s: BridgeSession) =>
-            s.exe_name.toLowerCase() === sourceExe.toLowerCase() &&
-            (state.routes[String(s.pid)] ?? []).length > 0,
-        );
-        if (heldByARoute) return { delivered: false, reason: 'source_routed' };
+        // A feed is the engine's tap into the carrier, so a device route
+        // alongside it changes nothing: only a missing carrier blocks delivery.
         return { delivered: true, reason: null };
       }
       case 'remove_feed_target': {

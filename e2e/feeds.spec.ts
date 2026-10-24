@@ -125,39 +125,29 @@ test('a device route and a feed sit on the same board', async ({ page }) => {
   await expect(feedRow(page, 1002)).toBeVisible();
 });
 
-test('a feed from a routed programme is held, and carries sound again when the route stops', async ({
+test('a feed moves sound beside a device route, and the route stops without it', async ({
   page,
 }) => {
   await openApp(page);
   await appRow(page, 'music.exe').click();
-  // Routing is the change that fills the program's render slot: without it the
-  // plan would be only the device it already plays through, and there would be
-  // nothing for the hub to land.
+  // Routing is the change the hub lands; it must not take the feed below with it.
   await changePrimary(page, 'Speakers', 'TV');
   await hub(page).click();
 
   await addFeedTarget(page, 'game.exe');
 
-  // The rule is recorded all the same, but the program's one render slot already
-  // plays a device, so nothing moves into the target's input — and the card says
-  // which of the two silences this is rather than drawing a wire that carries none.
-  await expect(feedRow(page, 1002)).toContainText('Held');
+  // A feed is a second destination now: the programme keeps playing on the TV
+  // while the engine writes the same audio into the carrier, so the card reads
+  // as moving — the state a route used to make impossible.
+  await expect(feedRow(page, 1002)).toContainText('Send in');
   expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
 
-  await page.getByRole('tab', { name: 'Activity' }).click();
-  await expect(
-    page.getByText('recorded, held while music.exe is routed to a device'),
-  ).toBeVisible();
-  await page.getByRole('tab', { name: 'Routing' }).click();
-
-  // Freeing the slot re-opens the rule that was never un-made: the device route
-  // and the feed are two separate books, and stopping one leaves the other alone.
-  // Stopping takes the programme off the stage with it (the selection belongs to
-  // the route), so the row is read from the board it lands back on.
-  await stopAllRail(page).click();
+  // And stopping the route leaves the wire alone: the backend puts the tap back
+  // on an engine of its own, so the board has nothing to change.
   await stopAllRail(page).click();
   await appRow(page, 'music.exe').click();
   await expect(feedRow(page, 1002)).toContainText('Send in');
+  expect(await callsFor(page, 'remove_feed_target')).toHaveLength(0);
 });
 
 /** The carrier's playback side as the machine names it. */

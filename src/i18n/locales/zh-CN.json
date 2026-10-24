@@ -105,12 +105,12 @@
     "pickNone": "没有可添加的了",
     "pickNoDevices": "Windows 没有报告任何输出设备",
     "feedRole": "送入",
-    "feedHeld": "挂起",
+    "feedHeld": "已断开",
     "feedNoCarrier": "未接通",
     "feedInputSuffix": "的输入",
     "feedCount": "送入 {{n}} 个",
-    "feedTitleLive": "正把本程序的声音送进 {{name}} 的输入",
-    "feedTitleSuspended": "暂未生效：{{source}} 正输出到设备、占用了输出槽；停掉该路由即恢复",
+    "feedTitleLive": "正把本程序的声音送进 {{name}} 的输入（本机设备照常出声）",
+    "feedTitleSuspended": "暂停中：写入载体的那一路断了，重新选一次送入即可恢复",
     "feedTitleNoCarrier": "暂未生效：未配置载体，请到「设置 → 送入载体」选择端点对",
     "removeFeed": "停止送入 {{name}}",
     "feederTitle": "打开它的路由看板",
@@ -122,7 +122,8 @@
     "stripDelay": "延迟",
     "stripShare": "份额",
     "singleNote": "只有一台去向：由系统直接播放，没有可补偿的延迟",
-    "singleNoteTitle": "这一路的音量属于程序自己的会话音量，在 Windows 音量合成器里调；想让副本单独衰减，把这个程序再加一台去向"
+    "singleNoteTitle": "这一路的音量属于程序自己的会话音量，在 Windows 音量合成器里调；想让副本单独衰减，把这个程序再加一台去向",
+    "feedCarrierDesc": "送入经过一对回环端点：引擎把源程序的音频写进播放侧，目标从录音侧收音——源程序自己仍然在原设备上出声。选回环驱动的端点对（如 VB-Cable）；未配置则照记但静默。"
   },
   "routed": {
     "capsule": "已路由 {{n}}",
@@ -278,7 +279,7 @@
     "rolePrimary": "主输出",
     "roleCopy": "副本",
     "roleFeed": "输入",
-    "roleFeedHeld": "挂起",
+    "roleFeedHeld": "已断开",
     "roleFeedNoCarrier": "未接通",
     "quiet": "未在播放",
     "staged": "看板上还有没生效的改动——回到「路由」按下程序卡即可生效。"
@@ -384,12 +385,12 @@
     "feedCarrierSetFailed": "保存送入载体失败：{{error}}",
     "captureDevicesFailed": "枚举录音设备失败：{{error}}",
     "feedSet": "正在把「{{source}}」的声音送进「{{target}}」的输入",
-    "feedSuspended": "送入规则「{{source}} → {{target}}」已记录；{{source}} 正输出到设备，恢复会在其停止后自动进行",
     "feedNoCarrier": "送入规则「{{source}} → {{target}}」已记录，但尚未配置载体——在设置中选择前送入保持静默",
     "feedSetFailed": "记录送入规则失败：{{error}}",
     "feedRemoved": "已停止把「{{source}}」送进「{{target}}」的输入",
     "feedRemoveFailed": "撤下送入规则失败：{{error}}",
     "feedRemovedStuck": "送入已撤下，但 Windows 仍把 {{processes}} 固定在载体上——需在设置里重置每应用音频输出才能还回来",
-    "feedRestored": "已按记忆恢复送入：「{{source}}」→「{{target}}」的输入"
+    "feedRestored": "已按记忆恢复送入：「{{source}}」→「{{target}}」的输入",
+    "feedTapFailed": "「{{source}}」的送入断了：音频没能继续写进载体"
   }
 }

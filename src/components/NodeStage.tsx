@@ -147,7 +147,6 @@ export function NodeStage() {
   const sessions = useRouterStore((s) => s.sessions);
   const selectedPids = useRouterStore((s) => s.selectedPids);
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
-  const routedPids = useRouterStore((s) => s.routedPids);
   const defaultDeviceId = useRouterStore((s) => s.defaultDeviceId);
   // The route read by the process being drawn: a sibling process of a routed
   // program carries the same route as the one holding it, so selecting one
@@ -157,6 +156,7 @@ export function NodeStage() {
   const deviceLatencyMs = useRouterStore((s) => s.deviceLatencyMs);
   const feeds = useRouterStore((s) => s.feeds);
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
+  const feedTapFailures = useRouterStore((s) => s.feedTapFailures);
   const applying = useRouterStore((s) => s.applying);
   const toggleDeviceSelection = useRouterStore((s) => s.toggleDeviceSelection);
   const appendDeviceTarget = useRouterStore((s) => s.appendDeviceTarget);
@@ -350,7 +350,7 @@ export function NodeStage() {
   const height = measured > 0 ? Math.floor(measured) : BOARD_H;
   const feedTargetStates = feedTargets.map((targetSession) => ({
     session: targetSession,
-    state: feedLiveness(pid ?? -1, feedCarrier, routedPids, sessions),
+    state: feedLiveness(exe, feedCarrier, feedTapFailures),
   }));
   /** What the add menu can offer as a programme input: neither the programme
    *  being drawn nor one of its own siblings (a feed into itself), and nothing
@@ -546,7 +546,10 @@ export function NodeStage() {
     wires.push({
       key: `feed:${targetSession.pid}`,
       d: nodePath(from.x, from.y, to.x, to.y),
-      live: flowing && state === 'live',
+      // A feed connects the moment it is picked, so this wire reports the feed
+      // itself — not the state of the device plan beside it. A programme whose
+      // device rows are still waiting for the hub can be feeding perfectly well.
+      live: sounding && liveness && state === 'live',
     });
   });
   // Feeders → hub. The column is centred on the hub and compresses only to the
@@ -573,7 +576,7 @@ export function NodeStage() {
       live:
         soundingFeeders.has(feeder.exe_name.toLowerCase()) &&
         liveness &&
-        feedLiveness(feeder.pid, feedCarrier, routedPids, sessions) === 'live',
+        feedLiveness(feeder.exe_name, feedCarrier, feedTapFailures) === 'live',
     });
   });
 

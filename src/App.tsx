@@ -17,6 +17,7 @@ import type {
   AudioChangedEvent,
   DuplicationReadyEvent,
   DuplicationStoppedEvent,
+  FeedTapFailedEvent,
   MirrorFailedEvent,
   SessionActivityEvent,
   TrayMenuEvent,
@@ -197,6 +198,13 @@ export default function App() {
   // running, so it is reported apart from the engine-level stop above.
   useBackendEvent<MirrorFailedEvent>('duplication-mirror-failed', (payload) => {
     useRouterStore.getState().handleMirrorFailed(payload);
+  });
+
+  // The tap that carries a feed into the carrier died. The programme's devices
+  // are untouched — this is the other end of the wire — so it gets its own card
+  // instead of the route's.
+  useBackendEvent<FeedTapFailedEvent>('feed-tap-failed', (payload) => {
+    useRouterStore.getState().handleFeedTapFailed(payload);
   });
 
   // An engine opens its mirror devices behind an asynchronous activation, so

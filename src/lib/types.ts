@@ -137,7 +137,7 @@ export interface FeedCarrier {
  * rides along suspended until the device route stops). */
 export interface FeedOutcome {
   delivered: boolean;
-  reason: 'no_carrier' | 'source_routed' | null;
+  reason: 'no_carrier' | null;
 }
 
 /** What the window should say about this install on launch. */
@@ -283,6 +283,16 @@ export interface MirrorFailedEvent {
   pid: number;
   generation: number;
   deviceId: string;
+  error: string;
+}
+
+/** The engine could not keep a feed's tap open: the wire into the carrier is
+ *  gone, so the target is no longer recording anything. Reported on its own
+ *  channel because the route's devices are unaffected — this is not a mirror
+ *  of the route, and it must not take one of them off the board. */
+export interface FeedTapFailedEvent {
+  pid: number;
+  generation: number;
   error: string;
 }
 

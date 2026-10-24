@@ -122,6 +122,7 @@ export function BriefingPage() {
   const selectedDeviceIds = useRouterStore((s) => s.selectedDeviceIds);
   const feeds = useRouterStore((s) => s.feeds);
   const feedCarrier = useRouterStore((s) => s.feedCarrier);
+  const feedTapFailures = useRouterStore((s) => s.feedTapFailures);
 
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -166,9 +167,9 @@ export function BriefingPage() {
           key: `feed:${targetPid}`,
           name: target.display_name ?? target.exe_name,
           role: 'feed',
-          // The same reading the board's feed cards use: a device route takes
-          // the source's render slot, so the feed is held rather than moving.
-          feedState: feedLiveness(session.pid, feedCarrier, routedPids, sessions),
+          // The same reading the board's feed cards use: a feed is a second
+          // destination, so it reads as moving sound unless its tap died.
+          feedState: feedLiveness(session.exe_name, feedCarrier, feedTapFailures),
         });
       }
       cards.push({
@@ -180,7 +181,7 @@ export function BriefingPage() {
     }
     const allExes = new Set(sessions.map((session) => session.exe_name.toLowerCase()));
     return { cards, following: allExes.size - redirectedExes.size };
-  }, [sessions, routedPids, feeds, nameById, feedCarrier, t]);
+  }, [sessions, routedPids, feeds, nameById, feedCarrier, feedTapFailures, t]);
 
   // Changes staged on the board that have not landed: the one thing this page
   // cannot show, because the page reports what is happening and those are not.

@@ -8,6 +8,7 @@ import type {
   DuplicationStoppedEvent,
   ErrorNotice,
   FeedCarrier,
+  FeedTapFailedEvent,
   LogEntry,
   MirrorFailedEvent,
   RememberedRouteEntry,
@@ -41,26 +42,23 @@ export interface FeedUndoOffer {
 
 /** Where a feed rule stands right now.
  *
- * `live`: the carrier is configured and the source's render slot is free, so
- * sound is actually moving into the target. `suspended`: the source's render
- * slot is taken — the per-app endpoint the audio service keeps is one per
- * *executable*, so a device route held by a sibling process of the same
- * program occupies it all the same — and the feed comes back the moment that
- * route stops. `no-carrier`: no endpoint pair is configured, so the rule is
- * recorded but nothing can move. */
+ * `live`: the carrier is configured and the engine is playing the programme's
+ * audio into its playback side, so the target records the programme while the
+ * programme itself keeps playing wherever it plays — a feed is a second
+ * destination, never a move. `no-carrier`: no endpoint pair is configured, so
+ * the rule is recorded but nothing can move. `suspended`: the carrier is
+ * configured, but the tap that carries the audio is not running any more (the
+ * endpoint went away, or the engine refused to open it); setting the feed again
+ * is what puts the wire back. */
 export type FeedLiveness = 'live' | 'suspended' | 'no-carrier';
 
 export function feedLiveness(
-  sourcePid: number,
+  sourceExe: string,
   carrier: FeedCarrier,
-  routedPids: Record<number, string[]>,
-  sessions: AudioSession[],
+  tapFailures: Record<string, string>,
 ): FeedLiveness {
   if (carrier.render === null || carrier.capture === null) return 'no-carrier';
-  // The render slot a live feed needs is one per *executable*, so a device
-  // route held by a sibling process of the source takes it all the same — and
-  // so does the source's own, which `programEntryOf` answers with `pid` itself.
-  if (programEntryOf(sessions, routedPids, sourcePid) !== undefined) return 'suspended';
+  if (sourceExe !== '' && tapFailures[sourceExe.toLowerCase()] !== undefined) return 'suspended';
   return 'live';
 }
 
@@ -187,7 +185,7 @@ interface RouterState {
   /**
    * Live feed targets keyed by source PID, in the order they were added.
    * Rebuilt from the memory and the live session list on every session refresh:
-   * a feed pins endpoints on both ends, so a process leaving the list takes its
+   * a feed needs both processes present, so a process leaving the list takes its
    * half of the wire with it.
    */
   feeds: Record<number, number[]>;
@@ -197,6 +195,14 @@ interface RouterState {
    * but nothing can move.
    */
   feedCarrier: FeedCarrier;
+  /**
+   * Programs whose feed tap died after it was set, keyed by executable name
+   * (lower case) with the backend's own words as the value. A tap is a stream of
+   * ours into the carrier, so it can fail like any other stream — and unlike a
+   * route's device it has no row of its own to go quiet. Cleared for a program
+   * the next time one of its feeds is delivered again.
+   */
+  feedTapFailures: Record<string, string>;
   /** Recording endpoints, for the carrier picker in settings. */
   captureDevices: AudioDevice[];
   /** The last feed change that can still be undone, while the offer stands. */
@@ -390,6 +396,10 @@ interface RouterState {
   /** One mirror of a live route went quiet. The rest of the route keeps playing,
    * so only that device leaves the badge set — and the log says which one and why. */
   handleMirrorFailed: (event: MirrorFailedEvent) => void;
+  /** The tap carrying a program's feed stopped working. The program's own
+   *  devices are unaffected, so nothing leaves a route; the program's feed rows
+   *  turn from 送入 into 挂起 and the failure is said out loud. */
+  handleFeedTapFailed: (event: FeedTapFailedEvent) => void;
   /** Ask the backend which PIDs it is still duplicating — routes survive a
    *  restart — and reconcile the badges and the per-device latency readings with
    *  it. Runs at boot, and once whenever a route appears, so a fresh route needs
@@ -996,6 +1006,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   rememberedFeeds: [],
   feeds: {},
   feedCarrier: { render: null, capture: null },
+  feedTapFailures: {},
   captureDevices: [],
   feedUndo: null,
   closeToTray: false,
@@ -1521,7 +1532,11 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     try {
       await api.setFeedCarrier(render, capture);
       get().addLog(i18next.t('log.feedCarrierSet'), 'success');
-      // Same as the load path: a carrier moving re-opens every suspended rule.
+      // A carrier moving means a new pair for every feed's tap and for every
+      // target's capture pin — the whole rule has to be laid down again, not
+      // only the ones that were waiting. The claim is what would otherwise skip
+      // every pair that has already delivered once.
+      feedRestoreDecided.clear();
       queueAssignmentWork(() => get().restoreRememberedFeeds());
     } catch (e) {
       set((s) => {
@@ -1587,7 +1602,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // came back suspended would never be tried again once its reason clears.
     const decidedKey = `${canonicalSource}|${target.exe_name.toLowerCase()}`;
     const deliverable =
-      feedLiveness(canonicalSource, get().feedCarrier, get().routedPids, get().sessions) === 'live';
+      feedLiveness(source.exe_name, get().feedCarrier, get().feedTapFailures) === 'live';
     if (deliverable) feedRestoreDecided.add(decidedKey);
     try {
       const outcome = await api.setFeedTarget(
@@ -1597,20 +1612,20 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         target.exe_name,
       );
       // Not delivered after all: hand the pair back to the restore pass, which
-      // runs the moment the reason stops holding (the carrier gets configured,
-      // or the source's device route stops). Only a claim this add made.
+      // runs the moment the reason stops holding (the carrier gets configured).
+      // Only a claim this add made.
       if (deliverable && !outcome.delivered) feedRestoreDecided.delete(decidedKey);
       if (outcome.delivered) {
+        // The tap was rebuilt, so whatever killed the last one no longer stands.
+        set((s) => {
+          if (s.feedTapFailures[source.exe_name.toLowerCase()] === undefined) return {};
+          const feedTapFailures = { ...s.feedTapFailures };
+          delete feedTapFailures[source.exe_name.toLowerCase()];
+          return { feedTapFailures };
+        });
         get().addLog(
           i18next.t('log.feedSet', { source: source.exe_name, target: target.exe_name }),
           'success',
-        );
-      } else if (outcome.reason === 'source_routed') {
-        // Recorded, suspended: the board keeps the node and says why nothing
-        // moves until the source's device route stops.
-        get().addLog(
-          i18next.t('log.feedSuspended', { source: source.exe_name, target: target.exe_name }),
-          'info',
         );
       } else {
         get().addLog(
@@ -1737,7 +1752,7 @@ export const useRouterStore = create<RouterState>((set, get) => ({
   },
 
   restoreRememberedFeeds: async () => {
-    const { rememberedFeeds, sessions, feedCarrier, routedPids } = get();
+    const { rememberedFeeds, sessions, feedCarrier } = get();
     if (rememberedFeeds.length === 0) return;
     if (feedCarrier.render === null || feedCarrier.capture === null) return;
     const pidByExe = lowestPidByExe(sessions);
@@ -1751,12 +1766,6 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     for (const entry of rememberedFeeds) {
       const sourcePid = pidByExe.get(entry.sourceExe.toLowerCase());
       if (sourcePid === undefined) continue;
-      // A source routed to a device has its one per-app render slot taken; the
-      // backend would only record the rule as suspended, and the board already
-      // shows that. Stopping the route resumes the feed on the backend side.
-      // The slot is the executable's, so a route held by any sibling process
-      // of the source takes it just the same.
-      if (programEntryOf(sessions, routedPids, sourcePid) !== undefined) continue;
       for (const targetExe of entry.targetExe) {
         const targetPid = pidByExe.get(targetExe.toLowerCase());
         if (targetPid === undefined || targetPid === sourcePid) continue;
@@ -1782,19 +1791,21 @@ export const useRouterStore = create<RouterState>((set, get) => ({
       ),
     );
     const restored: Record<number, number[]> = {};
+    const recovered = new Set<string>();
     results.forEach((result, index) => {
       const pair = pairs[index];
       if (pair === undefined) return;
       if (result.status === 'fulfilled' && result.value.delivered) {
         restored[pair.sourcePid] = [...(restored[pair.sourcePid] ?? []), pair.targetPid];
+        recovered.add(pair.sourceExe.toLowerCase());
         get().addLog(
           i18next.t('log.feedRestored', { source: pair.sourceExe, target: pair.targetExe }),
           'info',
         );
       }
-      // A suspension or a missing carrier stays silent in a restore pass: the
-      // board shows both states, and a boot sweep has no business scolding the
-      // user for a configuration it can see.
+      // A missing carrier stays silent in a restore pass: the board shows that
+      // state, and a boot sweep has no business scolding the user for a
+      // configuration it can see.
     });
     if (Object.keys(restored).length === 0) return;
     set((s) => {
@@ -1804,7 +1815,15 @@ export const useRouterStore = create<RouterState>((set, get) => ({
         const existing = nextFeeds[sourcePid] ?? [];
         nextFeeds[sourcePid] = [...existing, ...targetPids.filter((t) => !existing.includes(t))];
       }
-      return { feeds: nextFeeds };
+      // A tap that just delivered is alive again, so the failure that marked
+      // this programme's rows as broken no longer stands.
+      let feedTapFailures = s.feedTapFailures;
+      for (const exe of recovered) {
+        if (feedTapFailures[exe] === undefined) continue;
+        if (feedTapFailures === s.feedTapFailures) feedTapFailures = { ...feedTapFailures };
+        delete feedTapFailures[exe];
+      }
+      return { feeds: nextFeeds, feedTapFailures };
     });
   },
 
@@ -2825,6 +2844,14 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     // already updated routedPids synchronously — the event may arrive after a
     // newer route was applied, so it must not clear state here.
     if (reason === 'stopped') return;
+    // An engine that exists only for a feed tap — a programme being fed but not
+    // routed — carries no generation on the board, so the guard below would
+    // swallow its death and leave a wire that moves nothing. That failure is the
+    // feed's to report, and it is reported on the feed's channel.
+    if (reason === 'error' && get().engineGenerations[pid] === undefined) {
+      get().handleFeedTapFailed({ pid, generation, error: error ?? '' });
+      return;
+    }
     // Reject stale events before logging too: an old engine must not produce a
     // misleading failure line for a route that has already been replaced.
     if (generation !== (get().engineGenerations[pid] ?? 0)) return;
@@ -2941,6 +2968,24 @@ export const useRouterStore = create<RouterState>((set, get) => ({
     get().raiseError(
       i18next.t('log.mirrorFailed', { device: deviceName(deviceId, get().devices), error }),
     );
+  },
+
+  handleFeedTapFailed: (event) => {
+    const { pid, generation, error } = event;
+    // The same staleness rule the other engine events follow, with one hole
+    // that has to stay open: an engine that exists only for a feed tap has no
+    // route badge and therefore no generation in this store (0). Its own
+    // failures must still land, or a tap that dies is silent — the state these
+    // rows exist to show.
+    const known = get().engineGenerations[pid];
+    if (known !== undefined && known !== generation) return;
+    const session = get().sessions.find((s) => s.pid === pid);
+    if (session === undefined) return;
+    const exeKey = session.exe_name.toLowerCase();
+    set((s) => ({ feedTapFailures: { ...s.feedTapFailures, [exeKey]: error } }));
+    get().raiseError(i18next.t('log.feedTapFailed', { source: session.exe_name }), {
+      detail: error,
+    });
   },
 
   reconcileActiveDuplications: async () => {

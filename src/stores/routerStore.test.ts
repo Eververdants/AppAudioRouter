@@ -196,30 +196,18 @@ function installBackend(overrides: Partial<Backend> = {}): Backend {
       case 'list_feeds':
         return backend.feeds;
       case 'set_feed_target': {
-        // Decided when the service answers, not when the ask arrived: the render
-        // slot is one per *executable*, so a device route that lands while the
-        // write is in flight makes the same rule come back suspended, and the
-        // memory of it is written with the pin attempt.
+        // A feed is delivered by the engine's tap into the carrier, so a device
+        // route alongside it changes nothing: the only thing that can stop a
+        // delivery is a carrier that is not configured.
         const answer = (): FeedOutcome => {
           const sourceExe = args.sourceExe as string;
           const targetExe = args.targetExe as string;
           if (!backend.feeds.some(([s2, t]) => s2 === sourceExe && t === targetExe)) {
             backend.feeds = [...backend.feeds, [sourceExe, targetExe]];
           }
-          const sourcePid = args.sourcePid as number;
-          const sourceName = (
-            backend.sessions.find((s2) => s2.pid === sourcePid)?.exe_name ?? sourceExe
-          ).toLowerCase();
-          const slotTaken = Object.keys(backend.routes).some(
-            (key) =>
-              backend.sessions.find((s2) => s2.pid === Number(key))?.exe_name.toLowerCase() ===
-              sourceName,
-          );
           return backend.carrier.render === null || backend.carrier.capture === null
             ? { delivered: false, reason: 'no_carrier' }
-            : slotTaken
-              ? { delivered: false, reason: 'source_routed' }
-              : { delivered: true, reason: null };
+            : { delivered: true, reason: null };
         };
         return backend.holdFeed === null ? answer() : backend.holdFeed.then(answer);
       }
@@ -1342,6 +1330,33 @@ describe('engine events', () => {
     state().handleMirrorFailed({ pid: 1001, generation: 1, deviceId: 'tv', error: 'busy' });
 
     expect(state().routedPids[1001]).toEqual(['tv', 'speakers']);
+  });
+
+  it('reports a dead feed tap on the feed’s channel, not as a route that never existed', () => {
+    // A programme that only feeds runs an engine with no device of the board and
+    // therefore no generation here, so the route guard would swallow its death.
+    // What it is, is the wire into the carrier going quiet: the rows have to say
+    // so, and nothing may be retired as a route.
+    const SOURCE: AudioSession = { pid: 9001, exe_name: 'sender.exe' };
+    installBackend();
+    reset({
+      devices: [SPEAKERS],
+      sessions: [SOURCE],
+      feeds: { [SOURCE.pid]: [9002] },
+      feedCarrier: { render: 'cable-in', capture: 'cable-out' },
+    });
+
+    state().handleDuplicationStopped({
+      pid: SOURCE.pid,
+      generation: 7,
+      reason: 'error',
+      error: 'the carrier left',
+    });
+
+    expect(state().feedTapFailures['sender.exe']).toBe('the carrier left');
+    expect(state().routedPids[SOURCE.pid]).toBeUndefined();
+    expect(state().errorNotice?.message).toContain('sender.exe');
+    expect(lastLog()?.level).toBe('error');
   });
 
   it('does not let a reconciliation asked before the engine died put the route back', async () => {
@@ -2527,37 +2542,19 @@ describe('feeds', () => {
     expect(state().feeds[SENDER.pid]).toEqual([ONE.pid, TWO.pid, THREE.pid]);
   });
 
-  it('reads a sibling session’s route as holding the render slot', () => {
-    // The per-app endpoint the audio service keeps is one per executable: a
-    // route held by one process of the program occupies the slot for every
-    // session of it, so a feed from a sibling is suspended, not live.
-    const BROWSER_TAB: AudioSession = { pid: 6201, exe_name: 'browser.exe' };
-    const BROWSER_HELPER: AudioSession = { pid: 6202, exe_name: 'browser.exe' };
-    const OTHER: AudioSession = { pid: 6203, exe_name: 'other.exe' };
+  it('reads a feed as moving sound beside a route, and only a broken tap as held', () => {
+    // A feed used to cost the programme its output: the per-app render slot is
+    // one per executable, so a device route and a feed could not coexist. The
+    // wire is now a tap inside the engine instead, and what makes a feed read as
+    // held is the tap failing — not a route existing.
     const carrier = { render: 'cable-in', capture: 'cable-out' };
 
-    expect(
-      feedLiveness(BROWSER_HELPER.pid, carrier, { [BROWSER_TAB.pid]: ['speakers'] }, [
-        BROWSER_TAB,
-        BROWSER_HELPER,
-        OTHER,
-      ]),
-    ).toBe('suspended');
-    // A route of a different program holds nobody else's slot.
-    expect(
-      feedLiveness(BROWSER_HELPER.pid, carrier, { [OTHER.pid]: ['speakers'] }, [
-        BROWSER_TAB,
-        BROWSER_HELPER,
-        OTHER,
-      ]),
-    ).toBe('live');
-    // The program's own route still reads as suspended, as always.
-    expect(
-      feedLiveness(BROWSER_TAB.pid, carrier, { [BROWSER_TAB.pid]: ['speakers'] }, [
-        BROWSER_TAB,
-        BROWSER_HELPER,
-      ]),
-    ).toBe('suspended');
+    expect(feedLiveness('browser.exe', carrier, {})).toBe('live');
+    expect(feedLiveness('Browser.exe', carrier, {})).toBe('live');
+    expect(feedLiveness('browser.exe', { render: null, capture: null }, {})).toBe('no-carrier');
+    expect(feedLiveness('Browser.exe', carrier, { 'browser.exe': 'the endpoint left' })).toBe(
+      'suspended',
+    );
   });
 
   it('claims a feed the moment it asks, so the refresh its pinning causes cannot pin it twice', async () => {
@@ -2639,12 +2636,11 @@ describe('feeds', () => {
     expect(state().errorNotice?.message).toContain('set_feed_carrier');
   });
 
-  it('hands a suspended feed back onto the carrier when the route that held it stops', async () => {
-    // Red line, from the store's side: `stop_route` clears only the render book
-    // and pins a suspended feed of that program back onto the carrier itself. The
-    // stop therefore has to leave the wire and its rule standing — a board that
-    // lost the card with the route would hide the one feed that just started
-    // moving — and the pass the stop provokes must find the slot free and deliver.
+  it('leaves a feed standing when the route it was added beside stops', async () => {
+    // A feed is the engine's tap into the carrier, and the backend puts that tap
+    // back on an engine of its own when the route's engine goes down. The store
+    // must therefore neither drop the wire nor ask for it again: re-delivering
+    // here would restart the engine that just stopped.
     const SOURCE: AudioSession = { pid: 8601, exe_name: 'held-slot-source.exe' };
     const TARGET: AudioSession = { pid: 8602, exe_name: 'held-slot-target.exe' };
     const backend = installBackend({
@@ -2666,32 +2662,34 @@ describe('feeds', () => {
       autoRemember: true,
     });
 
+    // A board that is already carrying this wire has claimed the pair, so the
+    // stop below is the only thing that could ask for it again.
+    await state().restoreRememberedFeeds();
+    const asksBeforeStop = backend.calls.filter((c) => c.cmd === 'set_feed_target').length;
+    expect(asksBeforeStop).toBe(1);
+
     await state().stopRoute(SOURCE.pid);
 
     expect(state().routedPids[SOURCE.pid]).toBeUndefined();
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
     expect(backend.calls.some((c) => c.cmd === 'remove_feed_target')).toBe(false);
     expect(backend.feeds).toEqual([['held-slot-source.exe', 'held-slot-target.exe']]);
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(asksBeforeStop);
 
     // The route the user just stopped must not come back and take the slot again,
-    // and with the slot free the feed is deliverable once more.
+    // and the pass a refresh provokes has nothing left to deliver.
     await state().restoreRememberedRoutes();
     expect(backend.calls.filter((c) => c.cmd === 'apply_route')).toHaveLength(0);
-    expect(
-      feedLiveness(SOURCE.pid, state().feedCarrier, state().routedPids, state().sessions),
-    ).toBe('live');
 
     await state().restoreRememberedFeeds();
-    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(1);
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(asksBeforeStop);
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
   });
 
-  it('hands the claim back when a route lands while the feed add is in flight', async () => {
-    // The add claims the pair because the source's slot looks free at the ask. A
-    // device route that lands inside that window makes the same rule come back
-    // `source_routed`, so the claim has to go back with the delivery: kept, no
-    // pass would ever try the pair again once the route stops, and the wire would
-    // sit on the board silent for the rest of the run.
+  it('delivers a feed added while a route is landing, and keeps it afterwards', async () => {
+    // The add's ask and the route's engine start overlap. A feed no longer waits
+    // on the programme's output slot, so the answer is a delivery either way —
+    // and the route stopping later must not turn it into a second ask.
     let releaseFeed: () => void = () => {};
     const feedGate = new Promise<void>((resolve) => {
       releaseFeed = resolve;
@@ -2717,16 +2715,17 @@ describe('feeds', () => {
     releaseFeed();
     await adding;
 
-    // Recorded, suspended: the rule stands and says why nothing moves.
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
     expect(backend.feeds).toEqual([['midflight-source.exe', 'midflight-target.exe']]);
+    expect(feedLiveness('midflight-source.exe', state().feedCarrier, state().feedTapFailures)).toBe(
+      'live',
+    );
 
-    // The route stops: a claim handed back is the only thing that lets this pass
-    // deliver the pair at all.
+    // The route stops: the feed is the backend's to keep, and nothing here asks
+    // for it a second time.
     await state().stopRoute(SOURCE.pid);
     await state().restoreRememberedFeeds();
-
-    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(2);
+    expect(backend.calls.filter((c) => c.cmd === 'set_feed_target')).toHaveLength(1);
     expect(state().feeds[SOURCE.pid]).toEqual([TARGET.pid]);
   });
 
