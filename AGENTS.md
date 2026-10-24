@@ -49,12 +49,17 @@ AppAudioRouter/
 │   ├── tauri.conf.json       # Tauri 配置 + capabilities（能力文件只有 main.json 一份）
 │   └── src/
 │       ├── main.rs             # 入口：注册命令 + 关闭拦截（托盘常驻）+ 显示看门狗 + 退出前交还端点分配与主输出音量
-│       ├── commands.rs         # Tauri 命令（invoke handler）
+│       ├── commands.rs         # Tauri 命令（invoke handler）的模块根 + commands/ 子模块：
+│       │                       #   discovery / routes / release / feeds / tuning / taps / calibration /
+│       │                       #   memory / identity / outcomes / shell（main.rs 的 generate_handler! 按这个路径写）
 │       ├── tray.rs             # 托盘图标 + 菜单（菜单标签由前端下发以跟随语言）
 │       ├── autostart.rs        # 开机自启：HKCU\...\Run，启动带 --hidden
 │       ├── install.rs          # 启动提示判定（建窗口之前）+ install-state.json
 │       ├── single_instance.rs  # 单实例：命名互斥 + 命名事件（第二次启动唤出已有窗口）
-│       ├── config.rs           # 配置持久化（app_data_dir 下各 json）：
+│       ├── config.rs           # 配置持久化（app_data_dir 下各 json）的模块根 + config/ 子模块：
+│       │                       #   file_io / route_memory / delays / device_volumes / source_volumes /
+│       │                       #   primary_volumes / feed_memory / feed_carrier / app_settings
+│       │                       #   （与 TS 配对的四枚常量仍**声明在根文件**，types.test.ts 按这个路径读它）：
 │       │                       #   route-memory（exe→设备列表）/ device-delays / device-volumes（设备份额）/
 │       │                       #   primary-volumes（主输出音量）/ source-volumes（源电平）/ feed-memory / feed-carrier /
 │       │                       #   app-settings（close_to_tray 等 Rust 侧设置）
@@ -62,21 +67,36 @@ AppAudioRouter/
 │           ├── devices.rs       # 设备枚举（渲染 + 捕获两个数据流共用走法）
 │           ├── sessions.rs      # 会话枚举 + 显示名装配（窗口标题 → FileDescription）
 │           ├── process_meta.rs  # 窗口标题 / FileDescription / 图标提取（按路径缓存命中，miss 不缓存）
-│           ├── routing.rs       # 每应用端点槽 25/26 读写 + PinnedRoutes（渲染/捕获两本账）
-│           ├── duplication.rs   # 进程回环 → 多设备复制引擎（源静默后停放）+ 每源电平估计与增益
-│           ├── calibration.rs   # 校准向导的短音播放器（一次一声、按设备混音格式出包 → calibration-tone 事件）
+│           ├── routing.rs       # 每应用端点槽 25/26 读写 + PinnedRoutes（渲染/捕获两本账）的模块根 + routing/：
+│           │                    #   policy（AudioPolicyConfig vtable 与设备 id 包装）/ guard（谁不许被路由）/
+│           │                    #   slots（按程序的认领顺序）/ pins（两本账）/ endpoints（那扇门与归还走法）
+│           ├── duplication.rs   # 进程回环 → 多设备复制引擎（源静默后停放）+ 每源电平估计与增益的模块根 + duplication/：
+│           │                    #   format / metering / mirror / shared / registry / manager / start / capture /
+│           │                    #   render / pump / mix / activation / liveness / inventory / primary_volume + tests/
+│           │                    #   （LATENCY_TARGET_MS 仍**声明在根文件**）
+│           ├── calibration.rs   # 校准向导的短音播放器（一次一声、按设备混音格式出包 → calibration-tone 事件）+ calibration/：
+│           │                    #   state（单跑闸门与世代计数）/ schedule / player / pump
 │           ├── levels.rs        # 每源电平表（只回 1 秒内的读数）
-│           └── notifications.rs # COM 通知线程 → audio-changed / session-activity 事件
+│           └── notifications.rs # COM 通知线程 → audio-changed / session-activity 事件的模块根 + notifications/：
+│                                #   callbacks（三个 COM 回调）/ absence（缺席台账）/ walk（枚举走法）/ engine（sync）/ thread
 ├── src/                      # React 19 前端
 │   ├── components/
 │   │   ├── NodeStage.tsx           # 节点看板：路由唯一被表达的地方（hub/去向/来源三类卡 + Inspector 调音条）
+│   │   │                           #   + nodeStage/：HubCard / DestinationPanels / Panel / DeviceRow / FeedRow /
+│   │   │                           #   FeederColumn / BoardBackdrop（线）/ BoardFooter / Inspector / PickerMenu /
+│   │   │                           #   StripValue / CharSwapText / shared.ts / pickerKeys.ts + hooks/（几何、
+│   │   │                           #   选择器焦点、瞬态、线、hub 身份、送入计划）
 │   │   ├── ProgramRail.tsx         # 左栏程序列表（行末圆形开关取代 Ctrl+点击）
 │   │   ├── RoutedCapsule.tsx       # 「已路由 n」胶囊：所有路由的管理面（只有停止，没有开始）
 │   │   ├── BriefingPage.tsx        # 「现状」页（路由与活动记录之间）：每个程序一行 chip 的去向图
 │   │   ├── SourceLevelDial.tsx     # hub 卡下的每程序电平环（仅多设备路由挂载）
 │   │   ├── DelayCalibration.tsx    # 延迟校准向导（设置页「延迟补偿」区进入：轮流出声、听到就点一下、结果屏可改基准）
+│   │   │                           #   + calibration/：hooks/useCalibrationRun（轮次、runId/runToken 守卫、计窗、
+│   │   │                           #   中位数、基准、落地）/ useDialogKeys / MeasureScreen / ResultScreen /
+│   │   │                           #   SelectDevices / PickRow / constants / types / measure / runToken
 │   │   ├── Toast.tsx               # 瞬态提示：路由与送入的撤销入口，加上「你刚要做的事没做成」（全项目唯一）
-│   │   ├── SettingsPage.tsx        # 设置独立页面（左分区导航 + 右内容）
+│   │   ├── SettingsPage.tsx        # 设置独立页面（左分区导航 + 右内容）+ settings/：Rail / 六个分区 /
+│   │   │                           #   Row / Block / DelayRow / RememberedChip / duplicatedExecutables / icons
 │   │   ├── LogPanel.tsx            # 活动记录（下划线标签页第三页）
 │   │   ├── TitleBar.tsx            # 自定义标题栏（透明；「已路由 · 播放中」计数 + 设置入口）
 │   │   ├── StartupWizard.tsx       # 启动全屏向导：全新安装四步；升级进 2.3.x 先问「是否继承设置」，旧版可能留下固定端点时再加一屏就地重置
@@ -85,14 +105,19 @@ AppAudioRouter/
 │   │                               #   StepButton / Tooltip / ConfirmButton / DelayStepper / Spinner
 │   ├── hooks/                # useTheme / useLanguage / useDelayValue / useLiveness（声流闸门）/ useBackendEvent /
 │   │                         #   useProgramRoutes（把程序的账摊到它名下所有进程）/ useElementHeight（井的唯一高度）
-│   ├── stores/routerStore.ts # Zustand store
+│   ├── stores/               # Zustand store：routerStore.ts 只剩 create 与两个订阅 + router/：
+│   │                         #   types/（按域的 State+Actions 切片）/ pure/（无状态助手）/ slices/（动作工厂）/
+│   │                         #   gates.ts（模块级并发闸门，每个只声明一次）/ initial.ts / liveness.ts / harness.ts
+│   │                         #   （store 的测试按域分成 routerStore.<域>.test.ts）
 │   ├── i18n/                 # en.json + zh-CN.json（键集合有对称测试保护）
 │   ├── lib/                  # invoke / delay / routes（程序级归属查询）/ stage（看板几何）/ motion（共享动效曲线）/
 │   │                         #   icons / carrierDetect（回环驱动探测）/ productionGuards / types / window
 │   └── styles/index.css      # Tailwind 入口 + CSS variables（色板唯一事实来源）
 ├── docs/agents/              # 专题规范（state / background / theme / board-ui / acceptance，按需读）
 ├── docs/images/              # README 截图
-├── e2e/                      # Playwright E2E（假 Tauri IPC 桥 + README 截图脚本）
+├── e2e/                      # Playwright E2E（假 Tauri IPC 桥 + README 截图脚本）：spec 按问题分文件
+│                              #   （routing / inspector / capsule / failures / keyboard / liveness / programme …），
+│                              #   tauri/ 桥按 src-tauri/src/commands/ 的家门分模块，bridge.ts 仍是唯一入口
 └── AGENTS.md                 # 本文件
 ```
 
@@ -215,7 +240,7 @@ AppAudioRouter/
 - 系统关键进程的路由必须在 `audio::routing::set_process_default_endpoint_flow`（渲染与捕获两条写入流共用的那个入口）被 `routing_refusal` 拒掉，别在别处另开写入路径；槽 25 的 `set_persisted_default` 只是裸调用，从它旁边另起一路就等于绕过这道拒绝；**读不出进程名也一并拒绝**——受保护的那些进程恰恰是普通权限打不开的
 - 配置文件写入路径限定在 `app_data_dir`，禁止写任意路径
 - 开机自启是本项目唯一写注册表的地方，且只写 `HKCU`（当前用户）的 `Run` 值、只改自己的 `AppAudioRouter` 条目：不碰 `HKLM`，不需要管理员权限
-- 前端永不传 URL：`open_carrier_download` 只收驱动 key（映射在 `commands.rs` 的 `CARRIER_PAGES`），`open_help_page` 只收文档 key（映射在 `HELP_PAGES`），页面都经 `ShellExecuteW` 的 open 动词交给浏览器关联
+- 前端永不传 URL：`open_carrier_download` 只收驱动 key（映射在 `commands/shell.rs` 的 `CARRIER_PAGES`），`open_help_page` 只收文档 key（映射在 `HELP_PAGES`），页面都经 `ShellExecuteW` 的 open 动词交给浏览器关联
 
 ---
 

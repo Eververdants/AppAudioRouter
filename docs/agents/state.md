@@ -52,7 +52,7 @@
   所以相对差一定被精确还原、绝对值会被归一化到最早的那台（软件延迟只能加不能减）。组内最小值同时包含主设备的值（`primary_delay_ms`）。
 - 应用路由时**按计划顺序落地**（`selectedDeviceIds` 原序，首位即主输出）；没有用户可配的范围设置——延迟只有一道**硬上限**（`DELAY_MAX_MS`：TS 声明在 `lib/types.ts`，`lib/delay.ts` 只转发，Rust 那一半是 `config::DELAY_MAX_MS`，两处由 `lib/types.test.ts` 钉在一起，引擎环形缓冲按它定容），步进默认 10 ms（`aar-delay-step`），越过硬上限时前后端同时钳制。
 - **延迟校准向导**（`DelayCalibration`，设置页「延迟补偿」区进入）：选中的设备**一轮一轮轮流**出短音——前端逐声调 `calibration_start`（`reps`/`lead_ms`/`tail_ms` 参数化，lead 每声随机抽），每轮次序重新洗牌：练习/疲劳漂移落在每台设备头上，而不是系统性偏向先测的那台；每台攒满 3 个有效读数即停（最多 6 轮，不足的设备补测）。用户每听到一声**点一下**按钮实测「听到」的时刻（`calibration-tone` 的 `start` 标记为起点，落在 −150 ms～+900 ms 窗口里的按下才算、点空不消耗那一声，屏上有计数；人手反应在差值中相消。2026-10-18 起由「按住括住整段音」改为单击——括住音长是灵巧度测试，第二个时间点不携带新信息，判定也从 ±250 ms 放宽成窗口制）。**基准自动取测得最慢的一台**（写 0，恒为组内最小，延迟序不可能把别的设备推上主位——界面永不换主设备）；结果屏**点行可改选基准**（offsets 两两可比，改基准是纯算术、不重测）；其余设备写 `max(0, 与基准的测得差 − LATENCY_TARGET_MS)`，差距不足基准管线（或更慢）时写 0 并在结果屏说明残余差（仍会晚约多少 ms）——选页默认勾选当前活跃路由里的设备。**应用只写值、绝不重排活跃路由**（重放会背着用户把主输出换掉，读作程序出毛病）。`LATENCY_TARGET_MS` 的 TS 声明在 `lib/types.ts`（`lib/delay.ts` 只转发），与 `duplication.rs` 的同名常量由 `lib/types.test.ts` 读 Rust 源码逐条钉住——漂移是一条测试红，不是靠人来对两种语言。
-  - ⚠️ **一次只容一个 run**：`audio/calibration.rs` 的 `CalibrationState::begin` 以 `busy` 拒第二个（两台设备同时出短音就互相听不准）。
+  - ⚠️ **一次只容一个 run**：`audio/calibration/state.rs` 的 `CalibrationState::begin` 以 `busy` 拒第二个（两台设备同时出短音就互相听不准）。
     取消按 `generation`（取消次数）计数，`cancelled_run` **只拒它点名的那一次 start**——用户在一条还在飞的 `calibration_start` 抵达后端之前
     就按了 `Escape`，那一次必须被拒而不是播进一个已经不存在的对话框。**前端目前不传 run token**（走 `NO_RUN_TOKEN` 的粗规则 + 循环自己的
     `runId` 守卫，并补一次 `calibration_cancel` 追上后端还没来得及开始的这一声），要把这条竞态做精确就得两端一起改：

@@ -67,8 +67,8 @@
 ⚠️ **半行收尾 + 背景渐隐是整块板的规矩，不是复制面板一家的**：来源卡那一列没有可滚的容器（井不滚、列自己也不滚），
 装不下时**裁两端**——`feedersFitting(height)` 说这块井在最紧间距（`FEEDER_MIN_PITCH` = 一张卡 + 6px）下**坐得下几张卡**，
 `feederColumn(count, height)` 说**哪几张**坐得下：`{ first, seated, cutAbove, cutBelow }`，`seated` 自 `first` 起算、永不超过前者，
-判据 `feederSeated` 量的是卡的**中心**还在板内（`lib/stage.ts:273-382`；间距先由 `feederPitch` 压，压到底才裁）。
-卡、线、两端渐隐都由这**同一个连续窗**决定（`NodeStage.tsx:535-537`），画法与禁令见「三类卡」的来源卡。
+判据 `feederSeated` 量的是卡的**中心**还在板内（`lib/stage.ts` 的 `feederSeated`～`feederColumn` 一段；间距先由 `feederPitch` 压，压到底才裁）。
+卡、线、两端渐隐都由这**同一个连续窗**决定（`nodeStage/hooks/useBoardWires.ts` 算一次，`nodeStage/FeederColumn.tsx` 用同一份），画法与禁令见「三类卡」的来源卡。
 **别在别处另算一遍来源卡的可见性**：卡与线一旦分两头算，就有一头指着一张不在板上的卡——只裁卡不裁线，「这里还有」会读成「这里断了」。
 ⚠️ 面板那 1px 描边也算进几何（`PANEL_BORDER`）：行是在**边框之内**再加内边距的，
 少算这一像素，每根线都会停在它那一行的左边一像素（这条踩过，`rowPortY` / `ROW_X` 里都写死着它）。
@@ -137,7 +137,7 @@
   那是一条谁都不会读的状态栏。被检查的那台设备**离开计划**（被移除，或计划降到一台、不再有引擎）时，
   `NodeStage` 里的 effect 会把 `inspectorKey` 清空，所以 `Inspector` 可以假定自己指的那一行一定在计划里；
   它也因此**不再有 hub 摘要分支**（'hub' 这个 key 已随常驻形态一起删掉，别再搬回来）。
-  ⚠️ 条子自己的 ✕ **把焦点还给打开它的那枚编号**（`inspectorReturnRef`，`NodeStage.tsx:189-191`、`485-494`）：它整个子树正在卸载，
+  ⚠️ 条子自己的 ✕ **把焦点还给打开它的那枚编号**（`inspectorReturnRef`，`nodeStage/hooks/useBoardTransients.ts` 持有、`nodeStage/DestinationPanels.tsx` 交给编号、`nodeStage/Inspector.tsx` 关掉时用它）：它整个子树正在卸载，
   焦点留在死掉的子树里等于把 Tab 走回窗口顶部。换程序、被检查的设备离开计划这两条关法**不还**——那两下本来就把键盘带走了。
 - 调音条里**没有**开始/停止路由的按钮：开始只属于 hub（点按生效），停止属于左栏行内 ✕ 与底部中央的已路由胶囊
   （见「已路由胶囊」）。别把动作塞回调音条——它是调音的地方，不是运输控制的地方。
@@ -168,7 +168,7 @@
 - **设置页会点名探测常见回环驱动**（`lib/carrierDetect.ts`：VB-Cable、VoiceMeeter；按友好名的子串匹配、
   不区分大小写，VoiceMeeter 的标记故意不命中 Aux 对——「… Aux Input」截断了子串，Banana/Potato 系统配的是 VAIO 对）。
   检测到就给「一键配对」（走现成的 `setFeedCarrier`）；没检测到**且载体未配置**时给 VB-Cable 下载指引——
-  `open_carrier_download` 的 URL 映射固定在 Rust 侧（`commands.rs` 的 `CARRIER_PAGES`），前端只传驱动 key、永不传 URL，
+  `open_carrier_download` 的 URL 映射固定在 Rust 侧（`commands/shell.rs` 的 `CARRIER_PAGES`），前端只传驱动 key、永不传 URL，
   页面经 `ShellExecuteW` 的 open 动词交给浏览器关联。探测只是认名字，**不是携带**：应用仍然不自带、不安装任何驱动；
   已配置载体但不是已知驱动时保持安静（用户自己配的，别念叨）。
 - ⚠️ **载体不进看板的候选设备**（2026-10-17）：`feedCarrier.render` 有值之后，那台虚拟声卡不再出现在看板的两个候选列表里
@@ -201,7 +201,7 @@
   那是一个状态，不是一个瞬间，八秒后消失只会留下没声音、也没解释。撤销卡仍是 8 秒 + 悬停停住 + `Escape`。
   ⚠️ toast 层现在锚在 `bottom-24`，不是贴底：底部那一条带子属于调音条与已路由胶囊，
   贴着底放会压在用户正要用的控件上。失败卡**一次用户动作只有一张**：批量动作里多处失败由 store 合流成一张
-  （`beginErrorBatch` / `endErrorBatch`，`src/stores/routerStore.ts:396-409`），每条失败仍各自即时写进日志；
+  （`beginErrorBatch` / `endErrorBatch`，`src/stores/router/gates.ts`），每条失败仍各自即时写进日志；
   `errorNotice` 按计数器换，同一句话第二次失败也算新的一次。哪些失败举牌、哪些只写日志见 [state.md](./state.md)；
   **别**为了少写一个组件把错误塞进撤销卡，也**别**在 Toast 里把一次动作的失败叠成一排——一排里只有最后一张站得住，其余的闪一下就没了。
 - **空态的两句话不许混用**：`stage.pickNone`（「没有可添加的了」）只说计划已经装满；`devices.length === 0` 时两个设备选择器改说
@@ -209,7 +209,7 @@
   左栏同理：第一次枚举返回之前画占位（`rail.reading` + Spinner），不是"没有程序在放音"——见 [state.md](./state.md) 的 `sessionsLoaded`。
 - **键盘要走到每一处入口**：两把看板选择器与已路由胶囊的浮层**打开时把焦点放进第一行、`Escape` 时还给打开它的按钮**
   （外部按下不还，那一下点在哪儿焦点就在哪儿）；`ScrubReadout` 的键入框自己卸载，`Enter` / `Escape` 后必须 `hostRef.current?.focus()`，
-  挂在 hub 下的 `SourceLevelDial` 是同一件事的另一半——计划降回一台设备时它整个没了，焦点交回 hub 卡（`NodeStage.tsx:873-887` + `SourceLevelDial.tsx:96-100`）；
+  挂在 hub 下的 `SourceLevelDial` 是同一件事的另一半——计划降回一台设备时它整个没了，焦点交回 hub 卡（`nodeStage/HubCard.tsx` + `SourceLevelDial.tsx:96-100`）；
   **设置页的延迟输入框是另一套**：`Enter` 写完光标留在原地（blur 会把 Tab 的起点丢回窗口顶部），`Escape` 弃稿后把焦点交给本行的宿主 `div`
   （`tabIndex={-1}`，`ui/DelayStepper.tsx:52-75`），两种写法别互相搬；调音条 ✕ 还焦点给编号，见「编号与调音条」；
   活动记录区挂 `tabIndex={0}`（它是页面里唯一只有滚动条能到的区域），但**不加** `role="log"` / `aria-live`——日志逐条播报等于在界面之上再叠一张嘴。
@@ -218,9 +218,9 @@
   触屏与笔没有 hover，而"把五个程序并成一次改动"不该是事后才发现的能力。副本与主设备的角色词本来就带**点状下划线**（那是它的可见线索），
   hover 只是把词换成动作。
 - **查不到设备名就说"一台已经离开的设备"**，不写 GUID：那串没人读得懂，而这是两次刷新之间的瞬时不一致。
-  每处按自己那枚 `deviceGone` 说：看板与调音条 `stage.deviceGone`（`NodeStage.tsx:579`、`1860`，撤销卡上的设备名同一条，`routerStore.ts:843`）、
+  每处按自己那枚 `deviceGone` 说：看板与调音条 `stage.deviceGone`（`NodeStage.tsx` 的 `deviceNameOf` 与 `nodeStage/Inspector.tsx`，撤销卡上的设备名同一条，`src/stores/router/pure/targets.ts` 的 `deviceName`）、
   现状页 `briefingPage.deviceGone`（`BriefingPage.tsx:137`、`159`）、胶囊 `routed.deviceGone`（`RoutedCapsule.tsx:113`）、
-  设置页 `settings.deviceGone`（记忆 chip 与载体下拉，`SettingsPage.tsx:123`、`611`）、校准向导 `calibration.deviceGone`（`DelayCalibration.tsx:240`）；
+  设置页 `settings.deviceGone`（记忆 chip 与载体下拉，`settings/RememberedChip.tsx`、`settings/RoutingSection.tsx`）、校准向导 `calibration.deviceGone`（`DelayCalibration.tsx` 的 `deviceName`）；
   左栏的做法是不说（`playsThrough` 返回 null，`ProgramRail.tsx:102-106`）。
 - **i18n**：文案分组是 `rail` / `stage` / `briefing` / `settings` / `toast` / `log`，
   两组 locale 的键集合、占位符与非空由 `src/i18n/locales.test.ts` 的对称测试保护。

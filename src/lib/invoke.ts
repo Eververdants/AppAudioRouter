@@ -112,7 +112,7 @@ export async function setDeviceDelay(deviceId: string, delayMs: number): Promise
  * arrives *after* that run's `calibrationCancel` be refused instead of sounding
  * into a dialog the user already left. Omitted, the backend falls back to its
  * coarser rule (a cancel that finds no burst playing refuses whatever start
- * arrives next). Rejects with `calibration.rs`'s own words either way. */
+ * arrives next). Rejects with `audio/calibration/state.rs`'s own words either way. */
 export async function calibrationStart(
   deviceId: string,
   opts?: { reps?: number; leadMs?: number; tailMs?: number; run?: number },

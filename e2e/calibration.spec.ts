@@ -16,7 +16,7 @@ import type { BridgeCalibrationRefusal } from './tauri/bridge';
  *
  * So the fake models the player's own rules rather than a friendlier stand-in:
  * one burst per call, the caller's lead and tail clamped to the bounds
- * `calibration.rs` clamps to, a gap drawn from the same span before every burst,
+ * `calibration/schedule.rs` clamps to, a gap drawn from the same span before every burst,
  * a marker pair bracketing exactly `TONE_BURST_MS`, a busy flag that admits one
  * run, and a cancel that makes the in-flight run reject with the player's own
  * words. It also models `CalibrationState::begin`'s two staleness marks — a

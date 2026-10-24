@@ -50,7 +50,7 @@ test('the screen, the tray menu and the documentation key all follow the chosen 
   });
 
   // And the one place where the language decides what the backend is told. The
-  // frontend names a key and nothing else; the URLs live in `commands.rs`.
+  // frontend names a key and nothing else; the URLs live in `commands/shell.rs`.
   await page.getByRole('button', { name: '设置' }).click();
   await page.getByRole('button', { name: '关于', exact: true }).click();
   await page.getByRole('button', { name: '打开说明文档' }).click();

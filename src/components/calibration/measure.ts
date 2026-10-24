@@ -15,7 +15,7 @@ export function median(values: number[]): number {
  * before it. So a message landing here while the loop is still the current one
  * is a run nobody in the wizard meant to end: it is not a measurement worth a
  * failure panel, but the dialog must not freeze on the measure screen either.
- * The two strings are the backend's own (`calibration.rs` answers a burst it
+ * The two strings are the backend's own (`audio/calibration/state.rs` answers a burst it
  * stopped mid-run with `"calibration cancelled"`, and `Refusal::Cancelled` — a
  * start whose run the user had already called off — with
  * `"calibration superseded (…)"`).
