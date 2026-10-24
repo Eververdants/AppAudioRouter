@@ -145,6 +145,20 @@ impl FeedConfig {
         inner.persist()
     }
 
+    /// Whether the rule `source_exe -> target_exe` is already on file.
+    ///
+    /// A rollback that only undoes what this call added needs this answer
+    /// before the rule is written: re-establishing a feed after its target
+    /// relaunched re-records an existing rule, and if the landing then fails,
+    /// erasing the rule would take back a feed the user set earlier.
+    pub fn contains(&self, source_exe: &str, target_exe: &str) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.map.feeds.iter().any(|(source, targets)| {
+            source.eq_ignore_ascii_case(source_exe)
+                && targets.iter().any(|t| t.eq_ignore_ascii_case(target_exe))
+        })
+    }
+
     /// Drop one target from a source's rule; an empty rule removes the entry.
     pub fn remove(&self, source_exe: &str, target_exe: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;

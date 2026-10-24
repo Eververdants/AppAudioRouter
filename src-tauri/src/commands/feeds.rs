@@ -48,6 +48,14 @@ pub fn set_feed_carrier(
     if let Some(id) = capture.as_deref() {
         audio::routing::validate_device_id(id).map_err(|e| e.to_string())?;
     }
+    // A loopback pair is two different endpoints by definition: pointing both
+    // halves at one endpoint makes a carrier that can be configured but can
+    // never carry a feed anywhere.
+    if let (Some(render), Some(capture)) = (render.as_deref(), capture.as_deref()) {
+        if render.eq_ignore_ascii_case(capture) {
+            return Err("the two halves of a loopback pair are different endpoints".to_string());
+        }
+    }
     carrier.set(render, capture)
 }
 
@@ -100,8 +108,16 @@ pub async fn set_feed_target(
     require_exe_name("the receiving program of a feed", &target_exe)?;
     // The rule is recorded first: an undeliverable feed is still the user's
     // decision, and the board shows it with the reason it is quiet. Recording
-    // is cheap and idempotent.
+    // is cheap and idempotent — but a failure rollback may only undo what this
+    // call added, so whether the rule pre-existed is snapshotted first: this
+    // can be a re-establishment after the target relaunched, and erasing a
+    // rule that was already on file would take back a feed the user set
+    // earlier.
+    let rule_pre_existed = feeds.contains(&source_exe, &target_exe);
     feeds.add(&source_exe, &target_exe)?;
+    // The same snapshot for the source pin: another feed from this program may
+    // already stand, and its pin is what resumes that feed's tap later.
+    let source_pin_pre_existed = pins.feed_source_of(source_pid).is_some();
 
     let pair = carrier.get();
     let (Some(_), Some(capture)) = (pair.render.clone(), pair.capture.clone()) else {
@@ -117,13 +133,17 @@ pub async fn set_feed_target(
         audio::routing::set_process_default_capture_device(&capture, target_pid, audio::Role::All)
             .await
     {
-        // The frontend rolls its optimistic write back on an error, so the
-        // rule this call recorded must go too, or the next launch would
-        // resurrect a feed the UI does not show. A removal that itself fails
-        // has to be said out loud: the resurrecting rule is the one failure
-        // nothing else here reports.
-        if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
-            warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
+        // The frontend rolls its optimistic write back on an error, so a rule
+        // this call recorded must go too, or the next launch would resurrect a
+        // feed the UI does not show. A rule that pre-existed this call is left
+        // alone: it was the user's before, and it survives a failed landing the
+        // same way it survived the program's own restart. A removal that
+        // itself fails has to be said out loud: the resurrecting rule is the
+        // one failure nothing else here reports.
+        if !rule_pre_existed {
+            if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
+                warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
+            }
         }
         return Err(e.to_string());
     }
@@ -169,9 +189,19 @@ pub async fn set_feed_target(
                     warn!("the capture endpoint of {exe} stayed fixed to the carrier after a failed feed");
                 }
             }
-            pins.forget_feed_source(source_pid);
-            if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
-                warn!("the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}");
+            // The pin and the rule go only if this call created them: a source
+            // that already fed another program keeps its pin (that feed's tap
+            // is resumed through it), and a pre-existing rule survives like it
+            // survives the target's own restart.
+            if !source_pin_pre_existed {
+                pins.forget_feed_source(source_pid);
+            }
+            if !rule_pre_existed {
+                if let Err(recover) = feeds.remove(&source_exe, &target_exe) {
+                    warn!(
+                        "the feed rule of {source_exe} -> {target_exe} stayed on file: {recover}"
+                    );
+                }
             }
             // The engine restart that failed may have taken the route's own
             // engine down with it: put it back without the tap so the devices
