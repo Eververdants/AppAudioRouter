@@ -51,6 +51,17 @@ export function createAudioSlice(set: SetRouterState, get: GetRouterState): Audi
         // two could not actually diverge today — but reading `s` twice would let
         // a future await slip in and decide about a picture that is already gone.
         set((s) => {
+          // An empty enumeration is "the list has not arrived", not "every
+          // device is gone" — the release decision in the loop below already
+          // refuses to act on one, and the commit answers the same way: with no
+          // device live, every route's `remaining` would be empty and this pass
+          // would tear every badge off the board over what an audio-service
+          // restart can produce as a transient read. The routes, their
+          // generations and the selection survive untouched; the next non-empty
+          // read sweeps what genuinely left.
+          if (devices.length === 0) {
+            return { devices, devicesError: null };
+          }
           const selectedDeviceIds = s.selectedDeviceIds.filter((id) => liveIds.has(id));
           const routedPids: Record<number, string[]> = {};
           const engineGenerations = { ...s.engineGenerations };
