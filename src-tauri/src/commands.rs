@@ -660,7 +660,6 @@ async fn sync_feed_tap(
     if targets.is_some() && duplications.feed_tap_of(pid) == tap {
         return Ok(0);
     }
-    drop(duplications);
     let exe = exe.to_string();
     let app = app.clone();
     tokio::task::spawn_blocking(move || {
