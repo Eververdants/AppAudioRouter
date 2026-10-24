@@ -577,7 +577,7 @@ function MiniToggle({
       whileHover={{ scale: 1.12 }}
       transformTemplate={MAIN_THREAD_TRANSFORM}
       transition={SPRING_TAP}
-      className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+      className={`hit flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
         pressed
           ? 'border-accent bg-accent text-accent-ink'
           : // Present, not conjured: a control that only exists under a pointer

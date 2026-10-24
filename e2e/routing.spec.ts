@@ -18,6 +18,7 @@ import {
   setSessions,
   setWindowFocused,
   stopAllRail,
+  stripValue,
   tuneButton,
   tunerStrip,
 } from './fixtures';
@@ -196,10 +197,15 @@ test('a second device makes a copy, and the copy is the one with its own delay',
   await expect(tunerStrip(page).getByText('Delay')).toHaveCount(0);
 
   await tuneButton(page, 'Speakers').click();
-  await tunerStrip(page).getByRole('button', { name: /later/ }).click();
+  // The figure is the shared scrub control: the arrows step it, and one
+  // gesture is one write.
+  await stripValue(page, 'delay').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(stripValue(page, 'delay')).toHaveAttribute('aria-valuenow', '10');
+  // The step run commits once the keys go quiet, so the write is waited for.
+  await expect.poll(async () => (await callsFor(page, 'set_device_delay')).length).toBe(1);
   const delayed = await callsFor(page, 'set_device_delay');
-  expect(delayed).toHaveLength(1);
-  expect(delayed[0]?.args.deviceId).toBe('speakers');
+  expect(delayed[0]?.args).toMatchObject({ deviceId: 'speakers', delayMs: 10 });
 });
 
 test('the primary tunes the volume of the programme; the copy keeps its own two', async ({
@@ -231,25 +237,26 @@ test('the primary tunes the volume of the programme; the copy keeps its own two'
   // Stepping the primary's volume talks to the backend per *programme* —
   // music.exe, not per device — because it is the session volume that moves.
   await tuneButton(page, 'TV').click();
-  await tunerStrip(page)
-    .getByRole('button', { name: /quieter/ })
-    .click();
+  await stripValue(page, 'primary').focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await callsFor(page, 'set_primary_volume')).length).toBe(1);
   const applied = await callsFor(page, 'set_primary_volume');
-  expect(applied).toHaveLength(1);
   expect(applied[0]?.args).toMatchObject({ exeName: 'music.exe', percent: 95 });
   await expect(tunerStrip(page).getByText('95%')).toBeVisible();
 
   // The floor: 5, because a session volume of 0 is true silence and no gain
-  // could give the copies their loudness back.
-  const quieter = tunerStrip(page).getByRole('button', { name: /quieter/ });
+  // could give the copies their loudness back. Eighteen more presses reach it,
+  // and the slider stops there rather than stepping past.
+  await stripValue(page, 'primary').focus();
   for (let step = 0; step < 18; step += 1) {
-    await quieter.click();
+    await page.keyboard.press('ArrowLeft');
   }
-  await expect(quieter).toBeDisabled();
-  // Asserted on the last call rather than on the value's text: the rolling
-  // readout keeps its exiting values around, and "95%" contains "5%".
-  const walked = await callsFor(page, 'set_primary_volume');
-  expect(walked[walked.length - 1]?.args.percent).toBe(5);
+  await expect(stripValue(page, 'primary')).toHaveAttribute('aria-valuenow', '5');
+  // One run of steps is one write: the value commits when the keys go quiet, so
+  // the call is waited for rather than read the instant the last press lands.
+  await expect
+    .poll(async () => (await callsFor(page, 'set_primary_volume')).at(-1)?.args.percent)
+    .toBe(5);
 });
 
 test('a copy can be promoted to what the system plays directly', async ({ page }) => {
@@ -293,7 +300,12 @@ test("stepping a copy's delay never moves the primary seat", async ({ page }) =>
   // earlier than the primary holds the sound back, and the seat stays where
   // the user put it. The strip stays on the copy — the role did not change.
   await tuneButton(page, 'Speakers').click();
-  await tunerStrip(page).getByRole('button', { name: '10 ms earlier' }).click();
+  await stripValue(page, 'delay').focus();
+  await page.keyboard.press('ArrowLeft');
+  // `aria-valuenow` is the figure as the control reports it: the label on
+  // screen uses a typographic minus, and a test that matched that character
+  // would be testing the font, not the value.
+  await expect(stripValue(page, 'delay')).toHaveAttribute('aria-valuenow', '-10');
   await expect(deviceRowShell(page, 'TV')).toContainText('Main');
   await expect(deviceRowShell(page, 'Speakers')).toContainText('Copy');
 });

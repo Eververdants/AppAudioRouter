@@ -138,6 +138,19 @@
 }
 
 @layer components {
+  /* A control drawn smaller than the 24×24 a pointer needs (WCAG 2.5.8): the
+     target is the visible box plus a transparent margin, so nothing about the
+     drawing changes and the row around it does not move. `::after` is part of
+     the button, so a press that lands in the margin still lands on it. */
+  .hit {
+    position: relative;
+  }
+  .hit::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+  }
+
   /* The one press micro-interaction every plain (non-Motion) button shares:
      the whole control shrinks a breath under the pointer and eases back on
      release. Colour changes stay the hover's job; this is the touch, and one

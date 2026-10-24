@@ -4,6 +4,7 @@ import type { Variants } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { SourceLevelDial } from '@/components/SourceLevelDial';
 import { ProcessIcon } from '@/components/ui/ProcessIcon';
+import { ScrubReadout } from '@/components/ui/ScrubReadout';
 import { Ring } from '@/components/ui/Ring';
 import { Spinner } from '@/components/ui/Spinner';
 import { useElementHeight } from '@/hooks/useElementHeight';
@@ -986,7 +987,7 @@ export function NodeStage() {
                   setPrimaryPickerOpen(false);
                   setPickerOpen((value) => !value);
                 }}
-                className="pressable flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] leading-none text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none"
+                className="pressable hit flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full border border-dashed border-line-strong text-[11px] leading-none text-text-muted hover:border-accent/60 hover:text-accent focus-visible:border-accent focus-visible:outline-none"
               >
                 ＋
               </button>
@@ -1441,7 +1442,7 @@ function DeviceRow({
       {badgeIsButton ? (
         <button
           type="button"
-          className="no pressable cursor-pointer hover:border-accent hover:text-accent"
+          className="no pressable hit cursor-pointer hover:border-accent hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/60"
           onClick={(event) => onInspect(event.currentTarget)}
           aria-label={t('stage.inspectAria', { name: deviceName })}
           title={t('stage.inspectTitle', { name: deviceName })}
@@ -1475,7 +1476,7 @@ function DeviceRow({
               : t('stage.changePrimaryTitle')
           }
           onClick={onPrimaryPick ?? ((event) => onInspect(event.currentTarget))}
-          className="pressable flex items-center gap-1 truncate text-left text-[12px] font-bold text-text-primary outline-none focus-visible:text-accent"
+          className="pressable flex items-center gap-1 truncate rounded-seg text-left text-[12px] font-bold text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >
           <span className="truncate">{deviceName}</span>
           {/* The chevron is the one mark that says this name opens something:
@@ -1505,7 +1506,7 @@ function DeviceRow({
               aria-label={t('stage.promote')}
               title={t('stage.promoteTitle')}
               onClick={onPromote}
-              className="pressable relative flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full text-text-muted opacity-60 outline-none hover:bg-accent-muted hover:text-accent hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="pressable hit relative flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full text-text-muted opacity-60 outline-none hover:bg-accent-muted hover:text-accent hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               <span aria-hidden="true" className="text-[11px] leading-none">
                 ⇄
@@ -1531,7 +1532,7 @@ function DeviceRow({
           // multiplication sign, so the action has to be said.
           aria-label={t('stage.removeTarget', { name: deviceName })}
           onClick={onRemove}
-          className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error focus-visible:border-error focus-visible:text-error"
+          className="pressable hit flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error focus-visible:border-error focus-visible:text-error"
         >
           ✕
         </button>
@@ -1731,7 +1732,7 @@ function FeedRow({
         title={t('stage.removeFeed', { name: targetName })}
         aria-label={t('stage.removeFeed', { name: targetName })}
         onClick={onRemove}
-        className="pressable flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error focus-visible:border-error focus-visible:text-error"
+        className="pressable hit flex h-4 w-4 flex-none items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-text-muted hover:border-error hover:text-error focus-visible:border-error focus-visible:text-error"
       >
         ✕
       </button>
@@ -1790,67 +1791,59 @@ function PickerEmpty({ text }: { text: string }) {
   return <div className="px-2.5 py-1.5 text-[11px] text-text-muted">{text}</div>;
 }
 
-/** A − value + row in the strip: one control, said once. The ± buttons carry
- *  the same wording the stage's tuner rows always did, so the vocabulary (and
- *  the tests that look for it) survive the move. */
-function StripRow({
+/**
+ * One figure in the strip, as the shared scrub control.
+ *
+ * The same number the settings page and the level ring read with: drag it,
+ * wheel it, arrow-key it, or click it and type. The strip used to offer two
+ * 16px ± buttons and nothing else — twenty clicks to take a copy from 100% to
+ * silence, and a different vocabulary from every other figure in the app.
+ */
+function StripValue({
+  kind,
   label,
   title,
   value,
-  onDown,
-  onUp,
-  canDown,
-  canUp,
-  downLabel,
-  upLabel,
+  min,
+  max,
+  step,
+  format,
+  unit,
+  neutral,
+  ariaLabel,
+  stepLabels,
+  onCommit,
 }: {
+  /** Which lever this is — the hook the specs address it by. */
+  kind: 'primary' | 'delay' | 'share';
   label: string;
   title?: string;
-  value: string;
-  onDown: () => void;
-  onUp: () => void;
-  canDown: boolean;
-  canUp: boolean;
-  downLabel: string;
-  upLabel: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (value: number) => string;
+  unit: string;
+  neutral: boolean;
+  ariaLabel: string;
+  stepLabels: { up: string; down: string };
+  onCommit: (value: number) => void;
 }) {
   return (
-    <div className="rounded-seg" title={title}>
+    <div data-strip-value={kind} className="flex items-center gap-2.5" title={title}>
       <span className="text-xs text-text-secondary">{label}</span>
-      <span className="flex items-center gap-1 rounded-seg border border-line-strong px-1 py-0.5">
-        <button
-          type="button"
-          aria-label={downLabel}
-          onClick={onDown}
-          disabled={!canDown}
-          className="pressable flex h-4 w-4 items-center justify-center rounded-full text-[11px] leading-none text-text-muted hover:bg-accent-muted hover:text-accent disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          −
-        </button>
-        {/* The readout rolls a beat on every step: the old number is gone the
-            instant the new one lands, and the arrival itself is the only
-            animation — a key swap, no cross-fade, so rapid presses read as a
-            counting roll rather than as a blur. */}
-        <motion.span
-          key={value}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={FADE}
-          transformTemplate={MAIN_THREAD_TRANSFORM}
-          className="min-w-[44px] text-center font-mono text-xs tabular-nums text-text-secondary"
-        >
-          {value}
-        </motion.span>
-        <button
-          type="button"
-          aria-label={upLabel}
-          onClick={onUp}
-          disabled={!canUp}
-          className="pressable flex h-4 w-4 items-center justify-center rounded-full text-[11px] leading-none text-text-muted hover:bg-accent-muted hover:text-accent disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          ＋
-        </button>
-      </span>
+      <ScrubReadout
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        format={format}
+        unit={unit}
+        label={ariaLabel}
+        hint={stepLabels.up}
+        neutral={neutral}
+        onCommit={onCommit}
+      />
     </div>
   );
 }
@@ -1913,16 +1906,23 @@ function Inspector({
             <span className="text-xs text-text-muted">{t('stage.main')}</span>
           </span>
         </div>
-        <StripRow
+        <StripValue
+          kind="primary"
           label={t('stage.stripPrimaryVolume')}
           title={t('primaryVolume.hint')}
-          value={`${volume}%`}
-          onDown={() => stepPrimary(Math.max(PRIMARY_VOLUME_MIN, volume - 5))}
-          onUp={() => stepPrimary(Math.min(PRIMARY_VOLUME_MAX, volume + 5))}
-          canDown={volume > PRIMARY_VOLUME_MIN}
-          canUp={volume < PRIMARY_VOLUME_MAX}
-          downLabel={t('primaryVolume.stepDown', { step: '5%' })}
-          upLabel={t('primaryVolume.stepUp', { step: '5%' })}
+          value={volume}
+          min={PRIMARY_VOLUME_MIN}
+          max={PRIMARY_VOLUME_MAX}
+          step={5}
+          format={(v) => `${v}%`}
+          unit=""
+          neutral={volume === 100}
+          ariaLabel={t('primaryVolume.hint')}
+          stepLabels={{
+            up: t('primaryVolume.stepUp', { step: '5%' }),
+            down: t('primaryVolume.stepDown', { step: '5%' }),
+          }}
+          onCommit={(next) => stepPrimary(next)}
         />
         <span className="text-xs text-text-muted">{t('stage.stripPrimaryNote')}</span>
       </>
@@ -1940,31 +1940,45 @@ function Inspector({
             <span className="text-xs text-text-muted">{t('stage.copy')}</span>
           </span>
         </div>
-        <StripRow
+        <StripValue
+          kind="delay"
           label={t('stage.stripDelay')}
           title={
             latency !== undefined
               ? t('deviceLatency.reading', { ms: latency })
               : t('deviceDelay.valueLabel', { device: deviceLabel })
           }
-          value={`${formatDelaySigned(delay)} ms`}
-          onDown={() => void setDeviceDelayValue(deviceId, clampDelay(delay - delayStepMs))}
-          onUp={() => void setDeviceDelayValue(deviceId, clampDelay(delay + delayStepMs))}
-          canDown={delay > -DELAY_MAX_MS}
-          canUp={delay < DELAY_MAX_MS}
-          downLabel={t('deviceDelay.stepDown', { step: formatStep(delayStepMs) })}
-          upLabel={t('deviceDelay.stepUp', { step: formatStep(delayStepMs) })}
+          value={delay}
+          min={-DELAY_MAX_MS}
+          max={DELAY_MAX_MS}
+          step={delayStepMs}
+          format={(v) => formatDelaySigned(v)}
+          unit="ms"
+          neutral={delay === 0}
+          ariaLabel={t('deviceDelay.valueLabel', { device: deviceLabel })}
+          stepLabels={{
+            up: t('deviceDelay.stepUp', { step: formatStep(delayStepMs) }),
+            down: t('deviceDelay.stepDown', { step: formatStep(delayStepMs) }),
+          }}
+          onCommit={(next) => void setDeviceDelayValue(deviceId, clampDelay(next))}
         />
-        <StripRow
+        <StripValue
+          kind="share"
           label={t('stage.stripShare')}
           title={t('deviceVolume.valueLabel', { device: deviceLabel })}
-          value={`${share}%`}
-          onDown={() => void setDeviceVolume(deviceId, Math.max(0, share - 5))}
-          onUp={() => void setDeviceVolume(deviceId, Math.min(100, share + 5))}
-          canDown={share > 0}
-          canUp={share < 100}
-          downLabel={t('deviceVolume.stepDown', { step: '5%' })}
-          upLabel={t('deviceVolume.stepUp', { step: '5%' })}
+          value={share}
+          min={0}
+          max={100}
+          step={5}
+          format={(v) => `${v}%`}
+          unit=""
+          neutral={share === 100}
+          ariaLabel={t('deviceVolume.valueLabel', { device: deviceLabel })}
+          stepLabels={{
+            up: t('deviceVolume.stepUp', { step: '5%' }),
+            down: t('deviceVolume.stepDown', { step: '5%' }),
+          }}
+          onCommit={(next) => void setDeviceVolume(deviceId, next)}
         />
       </>
     );
@@ -1978,7 +1992,7 @@ function Inspector({
       <button
         type="button"
         onClick={onClear}
-        className="pressable flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
+        className="pressable hit flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:bg-surface-hover focus-visible:text-text-primary"
         title={t('stage.inspectClear')}
         aria-label={t('stage.inspectClear')}
       >

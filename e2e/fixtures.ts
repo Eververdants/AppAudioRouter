@@ -164,6 +164,18 @@ export function tunerStrip(page: Page) {
 }
 
 /**
+ * One figure inside the tuning strip, as the slider it is.
+ *
+ * Addressed by which lever it is rather than by its accessible name: two of the
+ * three name the same device ("Speakers' delay", "Speakers' share"), and a
+ * name that matches both is a locator that resolves to neither. Walked with the
+ * arrows rather than clicked at a ± button — that is the control now.
+ */
+export function stripValue(page: Page, kind: 'primary' | 'delay' | 'share') {
+  return tunerStrip(page).locator(`[data-strip-value="${kind}"] [role="slider"]`);
+}
+
+/**
  * The floating capsule that counts the routed programmes and opens their list:
  * the one place to see every live route and stop one, wherever it sits on the
  * board. Matched by its own hook.
