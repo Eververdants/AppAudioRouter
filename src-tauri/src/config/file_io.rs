@@ -51,10 +51,25 @@ where
         Ok(content) => parse_or_default(path, &content),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => T::default(),
         Err(e) => {
-            warn!(
-                "config {} could not be read ({e}); falling back to defaults",
-                path.display()
-            );
+            // The session now runs on defaults, and the first user change would
+            // publish them over this file — silent, total loss of what is on
+            // disk. When the rename lands (it needs no read access, only the
+            // directory entry), the original survives beside the path under a
+            // name that says why it moved; when even that is refused the write
+            // over a locked target will most likely be refused too, and the
+            // warning is the honest channel either way.
+            let preserved = path.with_extension("unreadable");
+            match fs::rename(path, &preserved) {
+                Ok(()) => warn!(
+                    "config {} could not be read ({e}); the file is kept as {} and this session starts from defaults",
+                    path.display(),
+                    preserved.display()
+                ),
+                Err(_) => warn!(
+                    "config {} could not be read ({e}); falling back to defaults",
+                    path.display()
+                ),
+            }
             T::default()
         }
     }
