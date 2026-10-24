@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { initialState } from './router/initial';
 import { feedTargetsOf, selectionTargets } from './router/pure/targets';
+import { findInPool } from './router/pure/processes';
 import { createApplySlice } from './router/slices/apply';
 import { createAudioSlice } from './router/slices/audio';
 import { createEngineSlice } from './router/slices/engine';
@@ -116,4 +117,31 @@ useRouterStore.subscribe((state, previous) => {
     return;
   }
   useRouterStore.setState({ selectedFeedPids: desired });
+});
+
+/**
+ * A plan target that has left both pools is not a proposal any more — it is a
+ * ghost: no row and no wire on the board (the plan filter drops it), yet it
+ * keeps the hub lit and every press answers `processGone`, with nothing on
+ * screen to remove it by. The freeze the staging rule grants a plan under the
+ * cursor protects what the cursor can see and edit; a pid the sessions and the
+ * windowed pool have both dropped is not that, so it is pruned the moment the
+ * lists say so. A feed that *landed* loses its target the same way — the live
+ * map drops it and this prunes the plan to match — which is what keeps an
+ * exited target from re-lighting the hub after the feed is up.
+ */
+useRouterStore.subscribe((state, previous) => {
+  if (state.selectedFeedPids.length === 0) return;
+  if (
+    state.sessions === previous.sessions &&
+    state.windowApps === previous.windowApps &&
+    state.selectedFeedPids === previous.selectedFeedPids
+  ) {
+    return;
+  }
+  const alive = state.selectedFeedPids.filter(
+    (target) => findInPool(state.sessions, state.windowApps, target) !== undefined,
+  );
+  if (alive.length === state.selectedFeedPids.length) return;
+  useRouterStore.setState({ selectedFeedPids: alive });
 });
