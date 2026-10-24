@@ -95,3 +95,15 @@ pub(super) fn engine_with_volumes(mirror_percents: &[u32], session_percent: u32)
         .store(session_percent, Ordering::Relaxed);
     shared
 }
+
+/// An engine that exists only to carry a feed tap into the carrier: no device
+/// of the board is served by it, so no route answers for it.
+pub(super) fn tap_engine() -> EngineShared {
+    let mut shared = engine(&[], 0, true);
+    shared.mirrors.push(Arc::new(MirrorChannel {
+        device_id: "cable-in".to_string(),
+        feed_tap: true,
+        ..channel(1_000_000)
+    }));
+    shared
+}

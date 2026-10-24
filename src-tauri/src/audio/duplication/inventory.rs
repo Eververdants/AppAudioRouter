@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use super::mirror::MirrorChannel;
 use super::mix::total_latency_ms;
-use super::shared::ActiveRoute;
+use super::shared::{ActiveRoute, EngineShared};
 use super::DuplicationManager;
 
 impl DuplicationManager {
@@ -113,45 +113,56 @@ impl DuplicationManager {
     /// badge on a programme the user never routed — or, worse, would make the
     /// board believe a single-device route is engine-backed and retire its badge
     /// the moment the feed comes off.
+    ///
+    /// An engine whose every *copy* has failed is still a route, on the primary
+    /// device alone: it holds precisely so that a stopped-looking route does not
+    /// take the still-playing primary off the board (see the module docs of
+    /// [`super`]), the per-app assignment is still ours to stop, and a
+    /// reconciliation that found nothing here would take the badge away and
+    /// leave that assignment unreachable — the dead end the whole release
+    /// lifecycle exists to close. The failed copies themselves are not named:
+    /// reporting one puts its badge, its success dot and its pulse ring back on
+    /// the stage for a device that is producing nothing, and hides the one
+    /// report the user got about it.
     pub fn active_routes(&self) -> Vec<ActiveRoute> {
         let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
         let mut routes: Vec<ActiveRoute> = engines
             .values()
-            .filter_map(|engine| {
-                // Only the mirrors that are still in service. A mirror that
-                // failed to open, or that errored later, is not a route target:
-                // reporting it as one puts its badge, its success dot and its
-                // pulse ring back on the stage for a device that is producing
-                // nothing, and hides the one report the user got about it. The
-                // frontend cannot recover this on its own — the failure arrives
-                // as an event, and it is this list that would overwrite it.
-                //
-                // The feed tap is not a device of this route at all: it is the
-                // wire into another programme (see `MirrorChannel::feed_tap`),
-                // and it never appears in a device list.
-                let mirrors: Vec<&Arc<MirrorChannel>> = engine
-                    .mirrors
-                    .iter()
-                    .filter(|m| !m.feed_tap && m.enabled.load(Ordering::Relaxed))
-                    .collect();
-                if mirrors.is_empty() {
-                    return None;
-                }
-                Some(ActiveRoute {
-                    pid: engine.pid,
-                    generation: engine.generation,
-                    device_ids: std::iter::once(engine.primary_device_id.clone())
-                        .chain(mirrors.iter().map(|m| m.device_id.clone()))
-                        .collect(),
-                    // Same order, same length: the primary heads the list and is
-                    // the one entry this engine cannot answer for.
-                    latency_ms: std::iter::once(None)
-                        .chain(mirrors.iter().map(|m| total_latency_ms(engine, m)))
-                        .collect(),
-                })
-            })
+            .filter_map(|engine| route_of(engine))
             .collect();
         routes.sort_by_key(|route| route.pid);
         routes
     }
+}
+
+/// The route one engine is serving right now, if it is serving one.
+pub(super) fn route_of(engine: &EngineShared) -> Option<ActiveRoute> {
+    // The feed tap is not a device of this route at all: it is the wire into
+    // another programme (see `MirrorChannel::feed_tap`), and it never appears
+    // in a device list.
+    let device_mirrors: Vec<&Arc<MirrorChannel>> =
+        engine.mirrors.iter().filter(|m| !m.feed_tap).collect();
+    if device_mirrors.is_empty() {
+        return None;
+    }
+    // Only the mirrors that are still in service. A mirror that failed to
+    // open, or that errored later, is not a route target — but an engine with
+    // none left is the held engine above, and it is reported on the primary
+    // alone rather than vanishing from the list.
+    let mirrors: Vec<&Arc<MirrorChannel>> = device_mirrors
+        .into_iter()
+        .filter(|m| m.enabled.load(Ordering::Relaxed))
+        .collect();
+    Some(ActiveRoute {
+        pid: engine.pid,
+        generation: engine.generation,
+        device_ids: std::iter::once(engine.primary_device_id.clone())
+            .chain(mirrors.iter().map(|m| m.device_id.clone()))
+            .collect(),
+        // Same order, same length: the primary heads the list and is
+        // the one entry this engine cannot answer for.
+        latency_ms: std::iter::once(None)
+            .chain(mirrors.iter().map(|m| total_latency_ms(engine, m)))
+            .collect(),
+    })
 }

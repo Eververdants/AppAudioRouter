@@ -96,7 +96,7 @@ impl DuplicationManager {
         // latest device, which two opposite extremes of the hard bound can
         // produce.
         let ring_capacity = sample_rate as usize
-            * (LATENCY_TARGET_MS + 2 * DELAY_MAX_MS as usize + TRIM_SLACK_MS + 100)
+            * (LATENCY_TARGET_MS + 2 * DELAY_MAX_MS as usize + TRIM_SLACK_MS + RING_HEADROOM_MS)
             / 1000
             * block_align;
         // A feed tap rides the same ring, wake and park machinery as a device

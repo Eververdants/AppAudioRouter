@@ -14,6 +14,7 @@ mod latency;
 mod measurement;
 mod mirror_buffer;
 mod parking;
+mod report;
 mod sample_format;
 mod start_stop;
 mod volumes;

@@ -94,6 +94,13 @@ const LATENCY_TARGET_MS: usize = 100;
 /// thread trims the oldest frames by the excess. Clock crystals differ by tens
 /// of ppm, so this fires rarely and each trim is a few milliseconds of audio.
 const TRIM_SLACK_MS: usize = 20;
+
+/// Extra room in an engine's ring beyond the arithmetic worst case. The three
+/// terms above are exact on paper; the devices do not know about them — an
+/// endpoint whose own pipeline reads long, or a format whose block alignment
+/// rounds up, eats into whatever slack the ring has. One base pipeline's worth
+/// is the margin the engine has always carried; changing it changes only how
+/// much memory an idling engine holds.
 /// Upper bound for waiting on the synchronized start. A silent app never fills
 /// the pre-roll, and starting un-synced while silence plays is harmless.
 const PRE_ROLL_TIMEOUT: Duration = Duration::from_secs(4);

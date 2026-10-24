@@ -48,6 +48,11 @@ export function registerDiscoveryCommands(): void {
     // so its entry is `null` — the same "not measured" the real backend
     // sends for it, and for the copies too until the engine whose
     // generation reported `duplication-ready` is still the live one.
+    //
+    // The one state this graph cannot reach is the held engine — every copy
+    // failed, the engine stays registered and reports the primary alone —
+    // because a fake mirror never fails. The rule it would exercise lives in
+    // `duplication/inventory.rs` and is pinned by the engine's own tests.
     return Object.entries(state.routes)
       .filter(([, deviceIds]) => deviceIds.length > 1)
       .map(([pid, deviceIds]) => ({
