@@ -153,18 +153,26 @@ pub(super) fn hold_after_lost_copies(shared: &EngineShared) -> ExitReason {
         "duplication for PID {} lost every copy: the route plays on the primary alone",
         shared.pid
     );
-    loop {
+    let reason = loop {
         if shared.shutdown.load(Ordering::Relaxed) {
-            return ExitReason::Stopped;
+            break ExitReason::Stopped;
         }
         if !process_is_running(shared.pid, shared.creation_time) {
-            return ExitReason::ProcessExited;
+            break ExitReason::ProcessExited;
         }
         // The park is armed before the next pass of the checks, so a stop that
         // lands between a check and the park leaves its token here and the
         // park returns at once.
         std::thread::park_timeout(Duration::from_millis(CAPTURE_WAIT_MS as u64));
-    }
+    };
+    // The handle names this thread only while it waits: leaving a parked-no-more
+    // (soon exited) thread published would hand out a token nothing good comes
+    // from unparking.
+    *shared
+        .capture_worker
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = None;
+    reason
 }
 
 /// Join every mirror's render thread, reporting the ones that died in a panic.
