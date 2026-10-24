@@ -132,6 +132,15 @@ export function Toast() {
             transformTemplate={MAIN_THREAD_TRANSFORM}
             onPointerEnter={() => setHeld('error')}
             onPointerLeave={() => setHeld((current) => (current === 'error' ? null : current))}
+            onFocus={() => setHeld('error')}
+            onBlur={(event) => {
+              // The keyboard twin of the pointer hold: tabbing toward the card's
+              // own two buttons must not race an expiring card the way the undo
+              // card already accounts for.
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setHeld((current) => (current === 'error' ? null : current));
+              }
+            }}
             className="pointer-events-auto flex max-w-[440px] items-start gap-2.5 rounded-card border border-error/50 bg-surface py-2 pl-4 pr-1.5"
           >
             {/* A dot in the failure's own colour leads the sentence: the undo
