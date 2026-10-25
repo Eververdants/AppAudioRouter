@@ -4,6 +4,7 @@
 export const FAQ_KEYS = [
   'free',
   'driver',
+  'feed',
   'running',
   'reset',
   'missing',

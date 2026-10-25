@@ -1,6 +1,6 @@
 # App Audio Router
 
-> Free, open-source per-app audio routing for Windows 10 / 11 (64-bit): send one program's audio to several playback devices at once, each with its own signed-millisecond delay compensation and its own 0–100 % volume balance. Built as a single native binary on the Windows Core Audio API — no virtual audio driver, no helper executable, nothing left behind on uninstall. MIT licensed, version %APP_VERSION%, interface in English and Simplified Chinese.
+> Free, open-source per-app audio routing for Windows 10 / 11 (64-bit): send one program's audio to several playback devices at once — each with its own signed-millisecond delay compensation and its own 0–100 % volume balance — or into another program's input. Each routed program also carries its own 0–400 % level for one-click alignment. Built as a single native binary on the Windows Core Audio API — no virtual audio driver for routing, no helper executable, nothing left behind on uninstall. MIT licensed, version %APP_VERSION%, interface in English and Simplified Chinese.
 
 Key facts, all from the project documentation. Each line stands on its own:
 
@@ -16,6 +16,10 @@ Key facts, all from the project documentation. Each line stands on its own:
 - The app never polls and runs no service: it registers for the audio engine's own change notifications, so the device and process lists stay current by themselves.
 - It is tray-resident, with optional close-to-tray and optional start-with-Windows (a single `HKCU\...\Run` value for the current user; no administrator rights, nothing written to `HKLM`).
 - Routes for system-critical processes are refused rather than half-applied.
+- One application → another application's input (new in 2.3.0). The same destination picker lists every program that can take sound in. It is an added route, not a move — the source keeps playing where it did — and it runs through a loopback endpoint pair the user installs and selects in Settings; until configured, the rule is remembered and the board says so.
+- Per-program level alignment: each routed program carries its own 0–400 % level; one click brings every playing program to the loudest one's level.
+- Delay compensation can be measured automatically (Settings → Delay compensation → Calibrate): each device plays short tones in turn, the user taps when they hear one, and the offsets are written as the compensation.
+- If one device of a route cannot be opened, the rest keep playing and the log names the one that went silent.
 - Windows-only (Windows 10 / 11, 64-bit). Not available on macOS or Linux.
 
 ## What it cannot do
@@ -24,6 +28,7 @@ Key facts, all from the project documentation. Each line stands on its own:
 - It cannot route programs that use ASIO or WASAPI exclusive mode: those never create a session with the system audio engine, so they are invisible to any per-app router.
 - It cannot speed a device up (delay only adds) or make a device louder than the application's own level (volume only attenuates).
 - It cannot release the fixed output device of a program that is not running; a closed program keeps its device until it plays again.
+- It cannot feed one program into another without a loopback endpoint pair the user installs and selects in Settings (Windows provides none); routing to playback devices needs no such pair.
 - It runs on Windows only — the routing mechanism is the Windows Core Audio API.
 
 ## Quick answers
@@ -34,11 +39,13 @@ Key facts, all from the project documentation. Each line stands on its own:
 
 **Can it change the output of a program that is already running?** Yes. Routing applies to the live audio session, so the program does not need to be restarted.
 
-**After stopping a route, does the program follow the system default device again?** Yes — that is the point of version 2.1.1. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device, or ignore the system's device switches, until the reset was done.
+**After stopping a route, does the program follow the system default device again?** Yes — that is what version 2.1.1 fixed. Versions before 2.1.1 left the device fixed after a stop, which is why a program could keep playing to the old device, or ignore the system's device switches, until the reset was done.
 
 **Why is a program missing from the list?** It has no active audio session (start playback, or press Refresh), it uses ASIO / WASAPI exclusive mode, or it is a system-critical process, which is deliberately excluded.
 
 **Can it fix the desync between a Bluetooth headset and wired speakers?** Yes, that is what delay compensation is for: give the faster device the Bluetooth device's lag as a positive delay, for example +180 ms.
+
+**Can it send one program's audio into another program?** Yes, that is the 2.3.0 addition. The same destination picker lists every program that can take sound in; pick one and it connects, the source keeps playing, and the target receives its audio as if from a microphone input. Feeds run through a loopback endpoint pair the user installs and selects in Settings — Windows provides none by default and the app installs no virtual driver for it; until configured, the rule is remembered and the board explains why.
 
 **Is macOS or Linux supported?** No. Windows 10 and 11, 64-bit only.
 
@@ -50,7 +57,7 @@ Key facts, all from the project documentation. Each line stands on its own:
 | Version | %APP_VERSION% |
 | Platform | Windows 10 / Windows 11, 64-bit |
 | Runtime requirement | WebView2 Runtime — bundled with Windows 11, present on any Windows 10 with Microsoft Edge |
-| External dependencies | None: no virtual audio driver, no service, no third-party executable |
+| External dependencies | None for routing: no virtual audio driver, no service, no third-party executable. Feeding another program needs a loopback endpoint pair the user installs and selects in Settings. |
 | Installer | MSI or NSIS setup from GitHub Releases |
 | Licence | MIT |
 | Interface languages | English, Simplified Chinese |

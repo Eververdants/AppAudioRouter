@@ -3,52 +3,70 @@ import { motion, useAnimation } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 
 /** Interactive re-draw of the app's concentric router, used as the hero
- *  visual. Same composition as `ConcentricRouter.tsx` in the app — the routed
- *  process in the centre, playback devices as capsules on an orbit ring,
- *  curved route lines with a perpendicular bow — and the same core gesture:
- *  click devices to pick targets, click the centre to apply or stop the route.
- *  Route lines draw in with a pathLength tween when applied; live devices
- *  carry the ripple pulse. Drawn once at a fixed design size; the SVG scales
- *  to its container, so no fit-scale logic is needed here. */
+ *  visual. Same composition as `NodeStage.tsx` in the app — the routed
+ *  process in the centre, destinations (playback devices and, since 2.3.0,
+ *  other programs) as capsules on an orbit ring, curved route lines with a
+ *  perpendicular bow — and the same core gesture: click destinations to pick
+ *  targets, click the centre to apply or stop the route. Route lines draw in
+ *  with a pathLength tween when applied; live destinations carry the ripple
+ *  pulse. Drawn once at a fixed design size; the SVG scales to its container,
+ *  so no fit-scale logic is needed here. */
 
 const STAGE_SIZE = 460;
 const CENTER = STAGE_SIZE / 2;
 const ORBIT_RADIUS = 150;
 const CURVE_BOW = 30;
 
-interface DeviceSpec {
-  nameKey: string;
+interface DestinationSpec {
+  /** i18n key for the name, or a literal app name for a program destination. */
+  name: string;
   /** Signed delay in ms and volume in percent, mirroring the values under a
    *  device node in the app. The Bluetooth figure is the README's own example
-   *  for headset/speaker alignment. */
+   *  for headset/speaker alignment. Programs (feeds) use `feedLabel` instead. */
   delay: string;
   volume: string;
   /** Stable id; selection order (not this field) decides the route order. */
   id: number;
   angle: number;
+  /** A program destination receives audio into its input (a feed), not a
+   *  playback device — it shows "送入"/"feed" instead of delay·volume. */
+  kind: 'device' | 'program';
 }
 
-const DEVICES: DeviceSpec[] = [
+const DESTINATIONS: DestinationSpec[] = [
   {
-    nameKey: 'hero.illustration.devices.hdmi',
+    name: 'hero.illustration.devices.hdmi',
     delay: '0 ms',
     volume: '100 %',
     id: 1,
     angle: -90,
+    kind: 'device',
   },
   {
-    nameKey: 'hero.illustration.devices.usb',
+    name: 'hero.illustration.devices.usb',
     delay: '+60 ms',
     volume: '85 %',
     id: 2,
-    angle: 30,
+    angle: 0,
+    kind: 'device',
   },
   {
-    nameKey: 'hero.illustration.devices.bluetooth',
+    name: 'hero.illustration.devices.bluetooth',
     delay: '+180 ms',
     volume: '70 %',
     id: 3,
-    angle: 150,
+    angle: 90,
+    kind: 'device',
+  },
+  {
+    // A program destination: Discord receives Music.exe's audio as if from a
+    // microphone. Literal brand name, no translation; "送入" marks the route.
+    name: 'Discord',
+    delay: '',
+    volume: '',
+    id: 4,
+    angle: 180,
+    kind: 'program',
   },
 ];
 
@@ -57,8 +75,8 @@ function devicePoint(angle: number): { x: number; y: number } {
   return { x: CENTER + Math.cos(rad) * ORBIT_RADIUS, y: CENTER + Math.sin(rad) * ORBIT_RADIUS };
 }
 
-/** Quadratic curve from the centre to a device point, bowed the same way for
- *  every route so the group reads as one flow around the hub. */
+/** Quadratic curve from the centre to a destination point, bowed the same way
+ *  for every route so the group reads as one flow around the hub. */
 function routePath(target: { x: number; y: number }): string {
   const dx = target.x - CENTER;
   const dy = target.y - CENTER;
@@ -80,18 +98,18 @@ function activationKey(event: React.KeyboardEvent, action: () => void) {
 
 export function RouterIllustration() {
   const { t } = useTranslation();
-  // Start fully routed so the first paint shows the live three-device route
-  // from the README screenshot; everything is clickable from there.
-  const [selected, setSelected] = useState<number[]>([1, 2, 3]);
+  // Start fully routed so the first paint shows the live route from the README
+  // screenshot — devices plus the Discord feed; everything is clickable from there.
+  const [selected, setSelected] = useState<number[]>([1, 2, 3, 4]);
   const [routing, setRouting] = useState(true);
   const centerControls = useAnimation();
 
-  // Stopping is implicit: dropping the last selected device ends the route.
+  // Stopping is implicit: dropping the last selected destination ends the route.
   useEffect(() => {
     if (routing && selected.length === 0) setRouting(false);
   }, [routing, selected.length]);
 
-  const toggleDevice = (id: number) =>
+  const toggleDestination = (id: number) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
 
   const applyRoute = () => {
@@ -139,15 +157,15 @@ export function RouterIllustration() {
           transition={{ duration: 0.8 }}
         />
 
-        {/* Route lines, one per device in three visual states: a faint base
+        {/* Route lines, one per destination in three visual states: a faint base
             always, a dashed preview once selected, and a drawn + flowing line
             while the route is live. */}
-        {DEVICES.map((device) => {
-          const point = devicePoint(device.angle);
-          const isSelected = selected.includes(device.id);
+        {DESTINATIONS.map((node) => {
+          const point = devicePoint(node.angle);
+          const isSelected = selected.includes(node.id);
           const isRouted = routing && isSelected;
           return (
-            <g key={device.id}>
+            <g key={node.id}>
               <path
                 d={routePath(point)}
                 fill="none"
@@ -247,15 +265,20 @@ export function RouterIllustration() {
           </motion.g>
         </motion.g>
 
-        {/* Devices on the outer ring. Clicking toggles the target. */}
-        {DEVICES.map((device, index) => {
-          const point = devicePoint(device.angle);
-          const isSelected = selected.includes(device.id);
+        {/* Destinations on the outer ring. Clicking toggles the target. */}
+        {DESTINATIONS.map((node, index) => {
+          const point = devicePoint(node.angle);
+          const isSelected = selected.includes(node.id);
           const isRouted = routing && isSelected;
-          const rank = isSelected ? selected.indexOf(device.id) : -1;
+          const rank = isSelected ? selected.indexOf(node.id) : -1;
+          const label = node.kind === 'program' ? node.name : t(node.name);
+          const sublabel =
+            node.kind === 'program'
+              ? t('hero.illustration.feedLabel')
+              : `${node.delay} · ${node.volume}`;
           return (
             <motion.g
-              key={device.id}
+              key={node.id}
               initial={{ opacity: 0, scale: 0.6 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ ...spring, delay: 0.15 + index * 0.12 }}
@@ -275,12 +298,12 @@ export function RouterIllustration() {
                 />
               )}
               <motion.g
-                onClick={() => toggleDevice(device.id)}
-                onKeyDown={(event) => activationKey(event, () => toggleDevice(device.id))}
+                onClick={() => toggleDestination(node.id)}
+                onKeyDown={(event) => activationKey(event, () => toggleDestination(node.id))}
                 role="button"
                 tabIndex={0}
                 aria-pressed={isSelected}
-                aria-label={`${t(device.nameKey)} — ${device.delay} · ${device.volume}`}
+                aria-label={`${label} — ${sublabel}`}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.97 }}
                 animate={{ opacity: isSelected ? 1 : 0.72 }}
@@ -308,15 +331,19 @@ export function RouterIllustration() {
                     isSelected ? 'fill-text-primary' : 'fill-text-secondary'
                   }`}
                 >
-                  {t(device.nameKey)}
+                  {label}
                 </text>
                 <text
                   x={point.x}
                   y={point.y + 15}
                   textAnchor="middle"
-                  className="fill-text-muted font-mono text-[10.5px]"
+                  className={
+                    node.kind === 'program'
+                      ? 'fill-accent font-mono text-[10.5px] font-semibold'
+                      : 'fill-text-muted font-mono text-[10.5px]'
+                  }
                 >
-                  {device.delay} · {device.volume}
+                  {sublabel}
                 </text>
               </motion.g>
               {/* Order badge: shown while selected, filled for the primary.

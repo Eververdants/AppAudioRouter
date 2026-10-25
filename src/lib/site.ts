@@ -1,12 +1,12 @@
 /** Central place for the facts the page states about the project.
  *
- *  Every value here is taken from the main repository's README (v2.1.1).
+ *  Every value here is taken from the main repository's README (v2.3.0).
  *  When the app ships a new version, bump `VERSION` and nothing else: the
  *  build injects it into `index.html`, `sitemap.xml`, `llms.txt` and the
  *  web manifest (see `scripts/site-meta.ts`), and every component reads it
  *  from here. `package.json` mirrors it for npm tooling.
  */
-export const VERSION = '2.1.1';
+export const VERSION = '2.3.0';
 
 export const SITE_NAME = 'App Audio Router';
 export const ORG_NAME = 'Eververdants';

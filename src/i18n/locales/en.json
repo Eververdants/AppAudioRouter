@@ -1,8 +1,8 @@
 {
   "meta": {
-    "title": "App Audio Router — Per-app audio routing for Windows: one app, many devices",
-    "description": "Free, open-source per-app audio routing for Windows 10 / 11: one app to many playback devices at once, each with its own delay compensation and volume. No virtual audio driver.",
-    "ogDescription": "Free, open-source per-app audio routing for Windows 10 / 11: one application → many devices, with per-device delay compensation and volume balance. No virtual audio driver required.",
+    "title": "App Audio Router — Per-app audio routing for Windows: one app to many devices, or into another app",
+    "description": "Free, open-source per-app audio routing for Windows 10 / 11: send one program's audio to several playback devices at once — or into another program's input — each with its own delay compensation and volume balance. No virtual audio driver.",
+    "ogDescription": "Free, open-source per-app audio routing for Windows 10 / 11: one application → many devices, or into another app, with per-device delay compensation and volume balance. No virtual audio driver required.",
     "imageAlt": "App Audio Router routing Music.exe to a Bluetooth headset, an HDMI output and USB headphones at the same time, with its own delay and volume shown under each device"
   },
   "nav": {
@@ -16,21 +16,22 @@
   },
   "hero": {
     "badge": "v{{version}} · MIT licensed · Windows 10 / 11",
-    "title": "One program's sound, headed for many devices at once",
-    "tagline": "Per-app audio routing for Windows: send one program's sound to several playback devices at once, each with its own delay compensation and its own volume.",
-    "description": "Free and open source. The whole app is a single native binary calling the Windows Core Audio API directly — there is no virtual audio driver to install and no helper executable. Routing applies to running programs immediately, no restart needed.",
+    "title": "One program's sound, to many devices at once — or into another app",
+    "tagline": "Per-app audio routing for Windows: send one program's sound to several playback devices at once — each with its own delay compensation and volume — or into another program's input.",
+    "description": "Free and open source. The whole app is a single native binary calling the Windows Core Audio API directly — routing installs no driver and no helper executable; feeding another program runs through a loopback endpoint pair you pick in Settings. Routing applies to running programs immediately, no restart needed.",
     "ctaDownload": "Download for Windows",
     "ctaSource": "View source",
     "note": "MSI / NSIS installer · Free, no ads · English / 简体中文 interface",
     "illustration": {
-      "label": "UI sketch: the process sits in the centre, playback devices on the outer ring (interactive — try clicking)",
+      "label": "UI sketch: the process sits in the centre, playback devices and another program on the outer ring (interactive — try clicking)",
       "process": "Music.exe",
       "apply": "Apply or stop the route",
       "status": {
-        "idle": "Not routing · click a device to pick targets",
+        "idle": "Not routing · click a node to pick targets",
         "selecting": "{{count}} selected · click the centre to apply",
-        "routing": "Routing to {{count}} devices"
+        "routing": "Routing to {{count}} destinations"
       },
+      "feedLabel": "feed",
       "devices": {
         "bluetooth": "Bluetooth",
         "hdmi": "HDMI out",
@@ -40,28 +41,32 @@
   },
   "features": {
     "eyebrow": "What it does",
-    "title": "Route, align, balance",
-    "description": "No mixer graph, no virtual cable: pick a program, pick devices, click once. Every capability comes from the Windows Core Audio API — nothing is installed into the audio stack.",
+    "title": "Route, align, balance, feed",
+    "description": "No mixer graph, no virtual cable: pick a program, pick destinations — playback devices, or another program that can take input — click once. Every capability comes from the Windows Core Audio API — nothing is installed into the audio stack.",
     "items": {
       "routing": {
         "title": "One app → many devices",
         "description": "Select one or more processes and one or more playback devices; the audio is mirrored to all of them live. A running program never needs a restart, and stopping sends it back to the system default."
       },
+      "feed": {
+        "title": "One app → another app's input",
+        "description": "The same destination picker lists every program that can take sound in. It is one more destination, not a move — the source keeps playing where it did — so Discord hears Spotify the way a microphone would. Feeds run through the loopback endpoint pair you pick in Settings; until then the rule is kept and the board says so."
+      },
       "delay": {
         "title": "Per-device delay compensation",
-        "description": "A signed millisecond value per device: positive holds a fast device back, negative marks the earliest one. Wired speakers and a Bluetooth headset sound at the same moment, with configurable range and step."
+        "description": "A signed millisecond value per device: positive holds a fast device back, negative marks the earliest one. Wired speakers and a Bluetooth headset sound at the same moment, with configurable range and step. Settings → Delay compensation → Calibrate measures it for you: each device plays short tones in turn, you tap when you hear one, and the differences are written as the compensation."
       },
       "volume": {
         "title": "Per-device volume balance",
         "description": "A 0–100 % value per device, attenuating it relative to the loudest one in the route. Changes are pushed to running routes and are audible immediately."
       },
-      "native": {
-        "title": "No driver · no dependencies",
-        "description": "Routing, duplication, delay and gain are all done by the app itself — no virtual audio driver, no third-party executable, and nothing left behind on uninstall."
+      "level": {
+        "title": "Per-program level alignment",
+        "description": "Every routed program carries its own 0–400 % level; one click brings all playing programs to the loudest one's level, no manual per-app tweaking."
       },
       "memory": {
-        "title": "Auto-remember · tray resident",
-        "description": "Routing rules are stored per executable name and restored when the program plays again. The tray icon keeps it out of the way, with optional close-to-tray and start-with-Windows; device and process lists follow the audio engine on their own."
+        "title": "Auto-remember · live lists · fails loudly",
+        "description": "Routing rules are stored per executable name and restored when the program plays again. The device and process lists follow Core Audio's own change notifications on their own — no polling. If one device of a route cannot be opened, the rest keep playing and the log names the one that went silent."
       }
     }
   },
@@ -90,10 +95,10 @@
         "title": "Headset too quiet, speakers too loud",
         "description": "A percentage volume per device, attenuated relative to the loudest one. The first device is driven natively by Windows; every mirrored path is tuned separately."
       },
-      "remember": {
-        "tag": "Auto-remember · live lists",
-        "title": "Plug, unplug, restart — the route keeps up",
-        "description": "Device and process lists follow the audio engine on their own, no refresh button; routes remembered per program are restored the next time that program plays."
+      "feed": {
+        "tag": "One app → another app's input",
+        "title": "Let your voice chat hear your music",
+        "description": "Discord hears Spotify the way a microphone would: pick a program that can take input from the same picker, it connects on the spot, with undo in the toast — routed through the loopback endpoint pair you named in Settings."
       }
     }
   },
@@ -146,6 +151,10 @@
         "question": "Does it need a virtual audio driver such as VB-CABLE?",
         "answer": "No. Routing, duplication, delay and gain are all done by the app itself, calling the Windows Core Audio API directly. Nothing is installed into the audio stack and uninstalling leaves nothing behind."
       },
+      "feed": {
+        "question": "Can it send one program's audio into another program — like letting a voice app hear my music?",
+        "answer": "Yes — that is the 2.3.0 addition. The same destination picker lists every program that can take sound in: pick one and it connects, the source keeps playing, and the target receives its audio as if from a microphone input. Feeds run through a loopback endpoint pair you install and select in Settings — Windows provides none by default, and this app installs no virtual driver for you; until configured, the rule is remembered and the board explains why."
+      },
       "running": {
         "question": "Can it change the output of a program that is already running?",
         "answer": "Yes. Routing applies to the live audio session, so the program does not need to be restarted — a game or a browser tab keeps playing while it moves to the new device."
@@ -169,7 +178,7 @@
     }
   },
   "footer": {
-    "tagline": "Per-app audio routing for Windows: one app → many devices, with per-device delay compensation and volume balance.",
+    "tagline": "Per-app audio routing for Windows: one app → many devices, or into another app, with per-device delay compensation and volume balance.",
     "project": {
       "title": "Project",
       "repo": "GitHub repository",

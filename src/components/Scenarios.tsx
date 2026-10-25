@@ -2,15 +2,15 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Section } from '@/components/Section';
 import { SpotlightCard } from '@/components/SpotlightCard';
-import { ListenTogetherIcon, RefreshIcon, SlidersIcon, DelayIcon } from '@/components/icons';
+import { ListenTogetherIcon, FeedIcon, SlidersIcon, DelayIcon } from '@/components/icons';
 
-const SCENARIO_KEYS = ['sibling', 'sync', 'balance', 'remember'] as const;
+const SCENARIO_KEYS = ['sibling', 'sync', 'balance', 'feed'] as const;
 
 const SCENARIO_ICONS: Record<(typeof SCENARIO_KEYS)[number], typeof DelayIcon> = {
   sibling: ListenTogetherIcon,
   sync: DelayIcon,
   balance: SlidersIcon,
-  remember: RefreshIcon,
+  feed: FeedIcon,
 };
 
 /** Real usage patterns, one per card, each tagged with the capability that

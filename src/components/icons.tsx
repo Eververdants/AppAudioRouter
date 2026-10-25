@@ -115,6 +115,30 @@ export function RefreshIcon(props: IconProps) {
   );
 }
 
+/** One app feeding another app's input — the 2.3.0 "send into a program" route. */
+export function FeedIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3.5" y="4" width="7.5" height="7.5" rx="2" />
+      <rect x="13" y="12.5" width="7.5" height="7.5" rx="2" />
+      <path d="M11 9.5c2 0 3.6 1.8 3.4 4.4" />
+      <path d="M14.7 12.5l.1 1.6 1.5-.5" />
+    </Icon>
+  );
+}
+
+/** Ascending bars — per-program level alignment (0–400 %). */
+export function LevelIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 20h16" />
+      <path d="M7 20v-5" />
+      <path d="M12 20v-9" />
+      <path d="M17 20v-12" />
+    </Icon>
+  );
+}
+
 export function GitHubIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
